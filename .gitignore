@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+
+# RStudio / R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
