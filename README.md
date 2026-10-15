@@ -1,8 +1,6 @@
 # LithicAnalyst
 
-开源的石器三维标注平台。当前版本用于在三维模型上标注**片疤方向**并导出坐标数据。
-An open-source 3D annotation platform for lithic artefacts. The current version records
-flake scar directions as arrows on a mesh and exports their coordinates.
+开源石器三维分析交互平台。当前版本用于在三维模型上标注**片疤方向**并导出坐标数据。
 
 ![LithicAnalyst](docs/screenshot.png)
 
@@ -35,24 +33,6 @@ CSV（每条箭头一行，坐标为模型文件原始坐标）：
 ```
 specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,certainty,note,unit
 ```
-
-项目文件格式见 [docs/project-format.md](docs/project-format.md)。
-
-## 开发 / Development
-
-需要 Node.js 20 以上。Requires Node 20+.
-
-```bash
-npm install
-npm run dev      # 本地开发服务器，改代码即时刷新
-npm test         # 单元测试
-npm run build    # 类型检查并生成 dist/index.html（单文件）
-```
-
-- 代码结构与扩展方式：[docs/architecture.md](docs/architecture.md)
-- 日常开发、提交与发布流程（含 RStudio / Positron）：[docs/developing.md](docs/developing.md)
-
-推送到 `main` 分支后，GitHub Actions 会自动测试，并把网页发布到 GitHub Pages（需在仓库设置中启用一次）。
 
 ## License
 
