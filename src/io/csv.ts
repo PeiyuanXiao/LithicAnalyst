@@ -1,6 +1,8 @@
-import { SCAR_FIELDS } from '../core/fields';
+import { curveLength } from '../core/curveGeometry';
+import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { arrowLength } from '../core/store';
 import type { ProjectState } from '../core/types';
+import { distance } from '../core/vec';
 
 export interface CsvOptions {
   /** Prefix a UTF-8 byte-order mark so Excel shows non-ASCII notes correctly. */
@@ -54,4 +56,54 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions): 
   );
   const body = [header.join(','), ...rows].join('\n') + '\n';
   return (opts.excelBom ? '﻿' : '') + body;
+}
+
+/**
+ * One row per curve point, in order along each curve (long format).
+ * `arc_length` is the distance along the curve from its first point; `anchor`
+ * marks points placed by the user; a closed curve's last point connects back
+ * to its first, and `length` (the whole curve) includes that closing segment.
+ */
+export function curveCsv(state: Readonly<ProjectState>, opts: CsvOptions): string {
+  const header = [
+    'specimen_id',
+    'curve_id',
+    'point_index',
+    'x',
+    'y',
+    'z',
+    'arc_length',
+    'anchor',
+    'closed',
+    'length',
+    ...CURVE_FIELDS.map((f) => f.key),
+    'unit',
+  ];
+  const rows: string[] = [];
+  for (const c of state.curves) {
+    const anchors = new Set(c.anchorIndex);
+    const total = fmt(curveLength(c));
+    const tail = [...CURVE_FIELDS.map((f) => csvCell(c.attributes[f.key])), csvCell(state.specimen.unit)].join(',');
+    let arc = 0;
+    c.points.forEach((p, i) => {
+      if (i > 0) arc += distance(c.points[i - 1], p);
+      rows.push(
+        [
+          csvCell(state.specimen.id),
+          csvCell(c.label),
+          String(i),
+          fmt(p[0]),
+          fmt(p[1]),
+          fmt(p[2]),
+          fmt(arc),
+          anchors.has(i) ? 'true' : 'false',
+          c.closed ? 'true' : 'false',
+          total,
+          tail,
+        ].join(','),
+      );
+    });
+  }
+  const body = [header.join(','), ...rows].join('\n') + '\n';
+  return (opts.excelBom ? '\uFEFF' : '') + body;
 }

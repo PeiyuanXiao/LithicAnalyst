@@ -5,10 +5,10 @@ self-contained HTML file. All processing happens in the browser; nothing is uplo
 
 ```
 ui/       header, toolbar, sidebar, dialogs, shortcuts, two languages    (depends on everything below)
-tools/    interaction tools: select, draw arrow (one module each)
-render/   three.js viewer, raking light, mesh shading, arrow layer
+tools/    interaction tools: select, draw arrow, draw curve (one module each); surface snapping
+render/   three.js viewer, raking light, mesh shading, arrow and curve layers
 core/     data model, fields, commands + undo history, project format   (no DOM, no three.js)
-compute/  pure geometry on typed arrays: curvature, vertex welding, hashing
+compute/  pure geometry on typed arrays: curvature, surface paths, vertex welding, hashing
 io/       PLY / STL / OBJ import, CSV and project export, autosave, file saving
 ──────────────────────────── project file (docs/project-format.md) ────────────────────────
 analysis  outside this repository (R, Python, …) reads the CSV or the project file
@@ -32,7 +32,22 @@ analysis  outside this repository (R, Python, …) reads the CSV or the project 
 6. **Interface text lives in `ui/strings.ts`** with Chinese and English for every key. Keep
    the interface lean: labels and controls, no explanatory paragraphs.
 
+## Curves and snapping
+
+* `compute/surfacePath.ts` (pure): feature strength per vertex from signed mean curvature
+  (ridge = convex, valley = concave), a lazily expanded Dijkstra search over mesh edges whose
+  weights drop on features (`PathSearch`, live-wire style: the frontier is kept, so following
+  the cursor is cheap), snapping a picked vertex onto a nearby crest, and `relaxPath`, which
+  pulls a traced chain taut along the surface while holding feature points.
+* `tools/surfaceSnap.ts` ties these to one loaded mesh: adjacency and curvature come from the
+  `CurvatureService` at the shading scale (what you see is what snaps), closest points from the BVH.
+* `tools/drawCurveTool.ts` places points and shows the live stretch; `tools/selectTool.ts`
+  drags curve points and retraces the two neighbouring stretches.
+* `render/curveLayer.ts` draws curves as screen-space lines (`Line2`) with a dark halo.
+
 ## Adding a new annotation layer (e.g. landmarks)
+
+Curves were added this way; use them as the worked example.
 
 1. `core/types.ts`: add the item type (e.g. `Landmark { id, label, point, normal, attributes }`)
    and a list under `ProjectState`.

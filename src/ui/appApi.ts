@@ -1,3 +1,4 @@
+import type { SnapMode } from '../compute/surfacePath';
 import type { ProjectStore } from '../core/store';
 import type { ArrowDisplay } from '../render/arrowLayer';
 import type { LightSettings } from '../render/lighting';
@@ -16,11 +17,14 @@ export interface DisplaySettings {
   curvScale: number;
   curvContrast: number;
   background: ViewportBackground;
+  /** Arrow display; `labels` and `showHidden` apply to curves too. */
   arrows: ArrowDisplay;
+  /** What traced curves are drawn toward. */
+  curveSnap: SnapMode;
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'background' | 'arrows' | 'other';
+export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'background' | 'arrows' | 'snap' | 'other';
 
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
@@ -33,7 +37,9 @@ export interface AppApi {
   hasScanColors(): boolean;
   curvatureBusy(): boolean;
   focusArrow(id: string): void;
+  focusCurve(id: string): void;
   exportCsv(): void;
+  exportCurvesCsv(): void;
   saveProject(): void;
   openProject(): void;
 }

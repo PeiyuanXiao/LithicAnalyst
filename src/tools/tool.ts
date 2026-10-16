@@ -1,13 +1,21 @@
+import type { SnapMode } from '../compute/surfacePath';
 import type { ProjectStore } from '../core/store';
 import type { ArrowLayer } from '../render/arrowLayer';
+import type { CurveLayer } from '../render/curveLayer';
 import type { SurfaceHit, Viewer } from '../render/viewer';
 import type { Selection } from './selection';
+import type { SurfaceSnap } from './surfaceSnap';
 
 export interface ToolContext {
   viewer: Viewer;
   store: ProjectStore;
   arrows: ArrowLayer;
+  curves: CurveLayer;
   selection: Selection;
+  /** Path search and snapping on the current mesh (null before a mesh is loaded). */
+  snap: () => SurfaceSnap | null;
+  /** What curves are drawn toward (ridges, valleys, or nothing). */
+  snapMode: () => SnapMode;
   /** Show a short message (i18n key). */
   notify: (key: string, tone?: 'info' | 'warn') => void;
   /** Tool state changed (status hint, cursor). */
@@ -32,6 +40,12 @@ export interface Tool {
   doubleClick?(e: MouseEvent, hit: HitProvider): void;
   /** Esc. Return true if something was cancelled. */
   cancel(): boolean;
+  /** Backspace / Ctrl+Z while the tool has unfinished work: undo its last step. True if handled. */
+  undoStep?(): boolean;
+  /** Enter: finish the tool's current work. True if handled. */
+  commit?(): boolean;
+  /** A modifier key changed (e.g. Shift): re-evaluate what is under the cursor. */
+  modifiersChanged?(e: KeyboardEvent): void;
   /** i18n key of the hint for the status bar in the current state. */
   hintKey(): string;
   /** CSS cursor for the viewport. */

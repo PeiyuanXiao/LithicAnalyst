@@ -99,7 +99,7 @@ export class DrawArrowTool implements Tool {
       this.ctx.changed();
       return;
     }
-    if (this.state === 'dragging' || this.state === 'secondPress') this.commit();
+    if (this.state === 'dragging' || this.state === 'secondPress') this.finish();
   }
 
   private showPreview(): void {
@@ -107,7 +107,7 @@ export class DrawArrowTool implements Tool {
     else this.ctx.arrows.clearPreview();
   }
 
-  private commit(): void {
+  private finish(): void {
     const s = this.start;
     const t = this.end;
     this.reset();

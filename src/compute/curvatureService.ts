@@ -54,6 +54,12 @@ export class CurvatureService {
     for (const old of this.recent.splice(RECENT_LEVELS)) this.levels.delete(old);
   }
 
+  /** One-ring vertex adjacency of the mesh (built together with the raw curvature). */
+  async adjacency(): Promise<Adjacency | null> {
+    await this.ensureRaw();
+    return this.disposed ? null : this.adj;
+  }
+
   /** Curvature smoothed by `passes` one-ring averaging passes. */
   async field(passes: number): Promise<{ field: Float32Array; range: number } | null> {
     await this.ensureRaw();

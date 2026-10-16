@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addCurve,
   addScarVector,
+  deleteCurve,
   deleteScarVector,
   moveEndpoint,
+  setCurveAttribute,
+  setCurveLabel,
+  setCurveShape,
   setScarAttribute,
   setScarLabel,
   updateSpecimen,
 } from '../src/core/actions';
-import { defaultAttributes, numberKeyField, SCAR_FIELDS } from '../src/core/fields';
+import { assembleCurve, curveLength, curveSegments, isValidShape, midPointIndex } from '../src/core/curveGeometry';
+import { CURVE_FIELDS, defaultAttributes, defaultCurveAttributes, numberKeyField, SCAR_FIELDS } from '../src/core/fields';
 import { parseProjectFile, ProjectFileError, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import type { Vec3 } from '../src/core/types';
-import { scarVectorCsv } from '../src/io/csv';
+import { curveCsv, scarVectorCsv } from '../src/io/csv';
 
 const N: Vec3 = [0, 0, 1];
 const add = (s: ProjectStore, a: Vec3, b: Vec3) => addScarVector(s, { start: a, end: b, startNormal: N, endNormal: N });
@@ -153,5 +159,130 @@ describe('CSV export', () => {
     expect(csv).toContain(',bulb_truncated,certain,,mm');
     expect(csv.charCodeAt(0)).not.toBe(0xfeff);
     expect(scarVectorCsv(s.state, { excelBom: true }).charCodeAt(0)).toBe(0xfeff);
+  });
+});
+
+// ---------------------------------------------------------------- curves
+
+/** An open curve along the x axis with anchors at x = 0, 2, 5 (unit steps). */
+function lineShape() {
+  const seg = (a: number, b: number): Vec3[] => Array.from({ length: b - a + 1 }, (_, i) => [a + i, 0, 0] as Vec3);
+  const segments = [seg(0, 2), seg(2, 5)];
+  const { points, anchorIndex } = assembleCurve(segments, false);
+  return { anchors: [[0, 0, 0], [2, 0, 0], [5, 0, 0]] as Vec3[], points, anchorIndex, closed: false };
+}
+
+/** A closed square loop 0→1→2→3 (side 2), anchors at three corners. */
+function loopShape() {
+  const A: Vec3 = [0, 0, 0], B: Vec3 = [2, 0, 0], C: Vec3 = [2, 2, 0], D: Vec3 = [0, 2, 0];
+  const segments: Vec3[][] = [[A, [1, 0, 0], B], [B, C], [C, D, A]];
+  const { points, anchorIndex } = assembleCurve(segments, true);
+  return { anchors: [A, B, C], points, anchorIndex, closed: true };
+}
+
+describe('curve geometry', () => {
+  it('assembles segments and splits them back', () => {
+    const open = lineShape();
+    expect(open.points.map((p) => p[0])).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(open.anchorIndex).toEqual([0, 2, 5]);
+    expect(curveSegments(open).map((s) => s.map((p) => p[0]))).toEqual([[0, 1, 2], [2, 3, 4, 5]]);
+    expect(curveLength(open)).toBe(5);
+    expect(midPointIndex(open.points)).toBe(3);
+    expect(isValidShape(open)).toBe(true);
+
+    const loop = loopShape();
+    expect(loop.points.length).toBe(5); // first point not repeated
+    expect(loop.anchorIndex).toEqual([0, 2, 3]);
+    const segs = curveSegments(loop);
+    expect(segs.length).toBe(3);
+    expect(segs[2][segs[2].length - 1]).toEqual([0, 0, 0]);
+    expect(assembleCurve(segs, true)).toEqual({ points: loop.points, anchorIndex: loop.anchorIndex });
+    expect(curveLength(loop)).toBe(8);
+    expect(isValidShape(loop)).toBe(true);
+    expect(isValidShape({ ...loop, anchors: loop.anchors.slice(0, 2), anchorIndex: [0, 2] })).toBe(false);
+  });
+});
+
+describe('curves in the project', () => {
+  it('labels, edits and undoes curves', () => {
+    const s = new ProjectStore();
+    const kinds: string[] = [];
+    s.subscribe((c) => kinds.push(c.kind));
+    const c1 = addCurve(s, lineShape());
+    const c2 = addCurve(s, loopShape());
+    expect(s.state.curves.map((c) => c.label)).toEqual(['C1', 'C2']);
+    expect(c1.attributes).toEqual(defaultCurveAttributes());
+    expect(kinds).toEqual(['curves', 'curves']);
+    // arrows keep their own numbering
+    add(s, [0, 0, 0], [1, 0, 0]);
+    expect(s.state.scarVectors[0].label).toBe('S1');
+
+    setCurveAttribute(s, c1.id, 'type', 'edge');
+    setCurveAttribute(s, c1.id, 'note', 'r');
+    setCurveAttribute(s, c1.id, 'note', 'ret');
+    setCurveLabel(s, c1.id, 'E1');
+    expect(s.curve(c1.id)!.attributes).toEqual({ type: 'edge', note: 'ret' });
+    s.history.undo(); // label
+    s.history.undo(); // note (merged)
+    expect(s.curve(c1.id)!.attributes.note).toBe('');
+    expect(s.curve(c1.id)!.label).toBe('C1');
+
+    const moved = lineShape();
+    moved.anchors[1] = [2, 1, 0];
+    moved.points[2] = [2, 1, 0];
+    setCurveShape(s, c1.id, moved);
+    expect(s.curve(c1.id)!.points[2]).toEqual([2, 1, 0]);
+    s.history.undo();
+    expect(s.curve(c1.id)!.points[2]).toEqual([2, 0, 0]);
+
+    deleteCurve(s, c1.id);
+    expect(s.state.curves.map((c) => c.label)).toEqual(['C2']);
+    s.history.undo();
+    expect(s.state.curves.map((c) => c.id)).toEqual([c1.id, c2.id]);
+    expect(numberKeyField(CURVE_FIELDS)!.options!.map((o) => o.value)).toEqual(['edge', 'ridge', 'scar_boundary', 'other']);
+  });
+
+  it('round-trips curves through the project file and reads files without them', () => {
+    const s = sampleStore();
+    const c = addCurve(s, loopShape());
+    setCurveAttribute(s, c.id, 'type', 'scar_boundary');
+    const json = JSON.parse(JSON.stringify(serializeProject(s.state, '0.2.0')));
+    const back = parseProjectFile(json);
+    expect(back.curves).toEqual(s.state.curves);
+    expect(back.nextCurveNumber).toBe(2);
+    expect(back.scarVectors).toEqual(s.state.scarVectors);
+
+    delete json.annotations.curves;
+    delete json.nextCurveNumber;
+    const old = parseProjectFile(json);
+    expect(old.curves).toEqual([]);
+    expect(old.nextCurveNumber).toBe(1);
+  });
+
+  it('keeps a curve whose anchors are damaged, and rejects one without points', () => {
+    const s = sampleStore();
+    addCurve(s, lineShape());
+    const file = JSON.parse(JSON.stringify(serializeProject(s.state, '0.2.0')));
+    file.annotations.curves[0].anchorIndex = [0, 99];
+    const back = parseProjectFile(file).curves[0];
+    expect(back.anchorIndex).toEqual([0, 5]);
+    expect(back.anchors).toEqual([[0, 0, 0], [5, 0, 0]]);
+    file.annotations.curves[0].points = [[0, 0, 0]];
+    expect(() => parseProjectFile(file)).toThrow(/Curve 1/);
+  });
+
+  it('exports one CSV row per curve point', () => {
+    const s = sampleStore();
+    const open = addCurve(s, lineShape());
+    setCurveAttribute(s, open.id, 'type', 'ridge');
+    addCurve(s, loopShape());
+    const lines = curveCsv(s.state, { excelBom: false }).trimEnd().split('\n');
+    expect(lines[0]).toBe('specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note,unit');
+    expect(lines.length).toBe(1 + 6 + 5);
+    expect(lines[1]).toBe('LB-1023,C1,0,0,0,0,0,true,false,5,ridge,,mm');
+    expect(lines[2]).toBe('LB-1023,C1,1,1,0,0,1,false,false,5,ridge,,mm');
+    expect(lines[6]).toBe('LB-1023,C1,5,5,0,0,5,true,false,5,ridge,,mm');
+    expect(lines[7]).toBe('LB-1023,C2,0,0,0,0,0,true,true,8,other,,mm');
+    expect(curveCsv(s.state, { excelBom: true }).charCodeAt(0)).toBe(0xfeff);
   });
 });

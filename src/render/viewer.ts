@@ -224,6 +224,14 @@ export class Viewer {
     return hits.length > 0 && hits[0].distance < dist - tolerance;
   }
 
+  /** World-space size of one screen pixel at the depth of `p`. */
+  worldPerPixel(p: THREE.Vector3): number {
+    const h = this.container.clientHeight || 1;
+    const dir = this.camera.getWorldDirection(new THREE.Vector3());
+    const depth = Math.max(this.camera.near, p.clone().sub(this.camera.position).dot(dir));
+    return (2 * depth * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / h;
+  }
+
   /** Project a world point to client coordinates. */
   project(p: THREE.Vector3): { x: number; y: number; visible: boolean } {
     const rect = this.renderer.domElement.getBoundingClientRect();

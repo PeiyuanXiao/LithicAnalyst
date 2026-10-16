@@ -1,16 +1,26 @@
-import { deleteScarVector, setScarAttribute, setScarLabel, updateSpecimen } from '../core/actions';
-import { SCAR_FIELDS, type FieldDef } from '../core/fields';
+import {
+  deleteCurve,
+  deleteScarVector,
+  setCurveAttribute,
+  setCurveLabel,
+  setScarAttribute,
+  setScarLabel,
+  updateSpecimen,
+} from '../core/actions';
+import { curveLength } from '../core/curveGeometry';
+import { CURVE_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
 import { arrowLength } from '../core/store';
-import type { ScarVector } from '../core/types';
+import type { AttributeValue, Curve, ScarVector } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
+import { CURVE_COLORS, curveColor } from '../render/curveLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'selection' | 'specimen' | 'display' | 'mesh';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'selection' | 'specimen' | 'display' | 'mesh';
 
 interface Section {
   el: HTMLElement;
@@ -76,11 +86,11 @@ function specimenSection(api: AppApi): Section {
 
 // ---------------------------------------------------------------- arrows
 
-function listSummary(a: ScarVector): string {
+function listSummary(attributes: Record<string, AttributeValue>, fields: FieldDef[] = SCAR_FIELDS): string {
   const parts: string[] = [];
-  for (const f of SCAR_FIELDS) {
+  for (const f of fields) {
     if (f.type !== 'enum' || !f.listSummary) continue;
-    const opt = f.options?.find((o) => o.value === a.attributes[f.key]);
+    const opt = f.options?.find((o) => o.value === attributes[f.key]);
     if (!opt) continue;
     if (f.listSummary === 'nonDefault' && opt.value === f.default) continue;
     parts.push(tl(opt.short ?? opt.label));
@@ -120,7 +130,7 @@ function arrowsSection(api: AppApi): Section {
         },
         h('span', { class: 'chip', style: `--chip:${color}` }),
         h('span', { class: 'arrow-id mono' }, a.label),
-        h('span', { class: 'arrow-meta' }, listSummary(a)),
+        h('span', { class: 'arrow-meta' }, listSummary(a.attributes)),
         h('span', { class: 'arrow-len mono' }, `${fmtNum(arrowLength(a), 1)}${unit ? ` ${unit}` : ''}`),
       );
       list.append(li);
@@ -202,7 +212,129 @@ function arrowsSection(api: AppApi): Section {
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (kind === 'mesh') return;
+    if (kind === 'mesh' || kind === 'curves') return;
+    renderList();
+    if (kind !== 'display') renderInspector(kind === 'all');
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+// ---------------------------------------------------------------- curves
+
+function curvesSection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('curves', t('sec.curves'), badge);
+  const list = h('ol', { class: 'arrow-list', id: 'curve-list', role: 'listbox', 'aria-label': t('sec.curves') });
+  const inspector = h('div', { class: 'inspector', id: 'curve-inspector' });
+  body.append(list, inspector);
+
+  let builtFor: string | null = null;
+  let refs: { label: HTMLInputElement; setters: Array<(c: Curve) => void>; meta: HTMLElement } | null = null;
+
+  const renderList = () => {
+    const st = api.store.state;
+    badge.textContent = String(st.curves.length);
+    list.hidden = st.curves.length === 0;
+    clear(list);
+    const sel = api.selection.id;
+    const unit = st.specimen.unit;
+    for (const c of st.curves) {
+      const isSel = c.id === sel;
+      const color = isSel ? CURVE_COLORS.selected : curveColor(c);
+      const li = h(
+        'li',
+        {
+          class: 'arrow-row curve-row',
+          role: 'option',
+          'aria-selected': String(isSel),
+          'data-id': c.id,
+          onclick: () => api.selection.set(c.id),
+          ondblclick: () => api.focusCurve(c.id),
+        },
+        h('span', { class: 'chip chip-line', style: `--chip:${color}` }),
+        h('span', { class: 'arrow-id mono' }, c.label),
+        h('span', { class: 'arrow-meta' }, listSummary(c.attributes, CURVE_FIELDS)),
+        h('span', { class: 'arrow-len mono' }, `${fmtNum(curveLength(c), 1)}${unit ? ` ${unit}` : ''}`),
+      );
+      list.append(li);
+      if (isSel) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest' }));
+    }
+  };
+
+  const buildField = (f: FieldDef, c: Curve): { el: HTMLElement; set: (c: Curve) => void } => {
+    const id = `curve-field-${f.key}`;
+    const current = c.attributes[f.key];
+    const onPick = (v: string) => {
+      if (api.selection.id) setCurveAttribute(api.store, api.selection.id, f.key, v);
+    };
+    if (f.type === 'enum' && f.options) {
+      const ctl = f.numberKeys
+        ? optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: i < 9 ? String(i + 1) : undefined })), String(current), onPick)
+        : segmented(id, tl(f.label), f.options.map((o) => ({ value: o.value, label: tl(o.label) })), String(current), onPick);
+      return { el: h('div', { class: 'field' }, ctl.el), set: (x) => ctl.set(String(x.attributes[f.key])) };
+    }
+    const row = textRow(id, tl(f.label), current === null || current === undefined ? '' : String(current), (v) => {
+      if (api.selection.id) setCurveAttribute(api.store, api.selection.id, f.key, v);
+    }, { multiline: true });
+    return {
+      el: h('div', { class: 'field' }, row.el),
+      set: (x) => {
+        const v = x.attributes[f.key];
+        softSet(row.input, v === null || v === undefined ? '' : String(v));
+      },
+    };
+  };
+
+  const renderInspector = (force: boolean) => {
+    const st = api.store.state;
+    const id = api.selection.id;
+    const c = id ? api.store.curve(id) : undefined;
+    if (!c) {
+      clear(inspector);
+      builtFor = null;
+      refs = null;
+      return;
+    }
+    if (force || builtFor !== c.id || !refs) {
+      clear(inspector);
+      const label = h('input', {
+        id: 'curve-insp-label',
+        class: 'ctl-text mono insp-label',
+        type: 'text',
+        'aria-label': t('arrows.label'),
+        autocomplete: 'off',
+        spellcheck: 'false',
+      }) as HTMLInputElement;
+      label.value = c.label;
+      label.addEventListener('input', () => {
+        if (api.selection.id) setCurveLabel(api.store, api.selection.id, label.value);
+      });
+      const head = h(
+        'div',
+        { class: 'insp-head' },
+        label,
+        h('button', { type: 'button', class: 'icon-btn', id: 'curve-insp-focus', title: t('arrows.focus'), 'aria-label': t('arrows.focus'), onclick: () => api.selection.id && api.focusCurve(api.selection.id) }, icon(ICONS.target)),
+        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'curve-insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteCurve(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
+      );
+      const fields = CURVE_FIELDS.map((f) => buildField(f, c));
+      const meta = h('dl', { class: 'meta coords' });
+      inspector.append(head, ...fields.map((f) => f.el), meta);
+      refs = { label, setters: fields.map((f) => f.set), meta };
+      builtFor = c.id;
+    }
+    softSet(refs.label, c.label);
+    for (const set of refs.setters) set(c);
+    clear(refs.meta);
+    const u = st.specimen.unit;
+    refs.meta.append(
+      ...metaRow(t('arrows.length'), h('span', { class: 'mono' }, `${fmtNum(curveLength(c))}${u ? ` ${u}` : ''}`)),
+      ...metaRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')),
+    );
+  };
+
+  const refresh = (kind: RefreshKind) => {
+    if (kind === 'mesh' || kind === 'arrows') return;
     renderList();
     if (kind !== 'display') renderInspector(kind === 'all');
   };
@@ -296,14 +428,16 @@ function displaySection(api: AppApi): Section {
 function exportSection(api: AppApi): Section {
   const { el, body } = section('export', t('sec.export'));
   const csvBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-csv', onclick: () => api.exportCsv() }, t('export.csv')) as HTMLButtonElement;
+  const curveBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-curves-csv', onclick: () => api.exportCurvesCsv() }, t('export.curvesCsv')) as HTMLButtonElement;
   const bom = checkbox('export-bom', t('export.bom'), api.display.excelBom, (v) => api.setDisplay((x) => (x.excelBom = v), 'other'));
   const saveBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-project', onclick: () => api.saveProject() }, icon(ICONS.save), t('export.project')) as HTMLButtonElement;
   const openBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-open-project', onclick: () => api.openProject() }, icon(ICONS.open), t('header.openProject'));
-  body.append(h('div', { class: 'btn-row' }, csvBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
+  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
 
   const refresh = (kind: RefreshKind) => {
-    if (kind !== 'all' && kind !== 'mesh') return;
+    if (kind !== 'all' && kind !== 'mesh' && kind !== 'curves') return;
     csvBtn.disabled = !api.hasMesh();
+    curveBtn.disabled = !api.hasMesh() || api.store.state.curves.length === 0;
     saveBtn.disabled = !api.hasMesh();
   };
   refresh('all');
@@ -317,7 +451,7 @@ export interface Sidebar {
 
 export function buildSidebar(api: AppApi): Sidebar {
   const el = h('aside', { class: 'sidebar', id: 'sidebar' });
-  const sections = [specimenSection(api), arrowsSection(api), displaySection(api), exportSection(api)];
+  const sections = [specimenSection(api), arrowsSection(api), curvesSection(api), displaySection(api), exportSection(api)];
   el.append(...sections.map((s) => s.el));
   return {
     el,

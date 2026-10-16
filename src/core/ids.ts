@@ -14,3 +14,5 @@ export function uuid(): string {
 export const nowIso = (): string => new Date().toISOString();
 
 export const labelForNumber = (n: number): string => `S${n}`;
+
+export const curveLabelForNumber = (n: number): string => `C${n}`;

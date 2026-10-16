@@ -341,6 +341,11 @@ export class ArrowLayer {
 
   /** Arrow under the cursor, in screen space (forgiving for thin shafts). */
   pickAt(clientX: number, clientY: number, maxPx = 9): string | null {
+    return this.pickNearest(clientX, clientY, maxPx)?.id ?? null;
+  }
+
+  /** Arrow under the cursor with its distance in pixels. */
+  pickNearest(clientX: number, clientY: number, maxPx = 9): { id: string; dist: number } | null {
     let best: string | null = null;
     let bestD = maxPx;
     for (const [id, v] of this.visuals) {
@@ -355,7 +360,7 @@ export class ArrowLayer {
       best = id;
       bestD = dist;
     }
-    return best;
+    return best ? { id: best, dist: bestD } : null;
   }
 
   /** Endpoint handle of the selected arrow under the cursor. */

@@ -1,4 +1,4 @@
-import type { ScarVector, SpecimenInfo } from './types';
+import type { Curve, ScarVector, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -144,6 +144,69 @@ export class UpdateArrowCommand implements Command {
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = cloneArrow(next.after);
+    return true;
+  }
+}
+
+const cloneCurve = (c: Curve): Curve => structuredClone(c);
+
+export class AddCurveCommand implements Command {
+  readonly labelKey = 'cmd.addCurve';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly curve: Curve, private readonly labelNumber: number | null) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextCurveNumber;
+    store._insertCurve(cloneCurve(this.curve));
+    if (this.labelNumber !== null) store._setNextCurveNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'curves', ids: [this.curve.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removeCurve(this.curve.id);
+    store._setNextCurveNumber(this.prevNext);
+    store.notify({ kind: 'curves', ids: [this.curve.id] });
+  }
+}
+
+export class DeleteCurveCommand implements Command {
+  readonly labelKey = 'cmd.deleteCurve';
+  readonly createdAt = Date.now();
+  private removed: { curve: Curve; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removeCurve(this.id);
+    store.notify({ kind: 'curves', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertCurve(cloneCurve(this.removed.curve), this.removed.index);
+    store.notify({ kind: 'curves', ids: [this.id] });
+  }
+}
+
+export class UpdateCurveCommand implements Command {
+  readonly createdAt = Date.now();
+  private after: Curve;
+  constructor(
+    readonly labelKey: string,
+    private readonly before: Curve,
+    after: Curve,
+    private readonly mergeKey: string | null = null,
+  ) {
+    this.after = cloneCurve(after);
+  }
+  apply(store: ProjectStore): void {
+    store._putCurve(cloneCurve(this.after));
+    store.notify({ kind: 'curves', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putCurve(cloneCurve(this.before));
+    store.notify({ kind: 'curves', ids: [this.before.id] });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof UpdateCurveCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = cloneCurve(next.after);
     return true;
   }
 }

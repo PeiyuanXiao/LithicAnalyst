@@ -484,6 +484,27 @@ kbd {
   box-shadow: none;
 }
 
+/* snapping choice, shown while drawing curves */
+.tb-snap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 7px;
+  border-left: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.tb-snap .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.tb-snap .seg-btn {
+  min-height: 28px;
+  padding-inline: 9px;
+}
+
 /* ------------------------------------------------------------ 3D labels */
 
 .arrow-label {
@@ -507,6 +528,12 @@ kbd {
 
 .arrow-label.is-occluded {
   opacity: 0.28;
+}
+
+/* curve labels are pills, arrow labels are tags */
+.curve-label {
+  border-radius: 999px;
+  padding-inline: 7px;
 }
 
 
@@ -854,6 +881,12 @@ textarea.ctl-text {
   border-radius: 3px;
   background: var(--chip);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.chip-line {
+  width: 12px;
+  height: 4px;
+  border-radius: 2px;
 }
 
 .arrow-id {

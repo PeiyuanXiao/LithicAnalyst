@@ -1,21 +1,25 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
-import { deleteScarVector, setScarAttribute } from '../core/actions';
-import { numberKeyField } from '../core/fields';
+import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
+import { deleteCurve, deleteScarVector, setCurveAttribute, setScarAttribute } from '../core/actions';
+import { CURVE_FIELDS, numberKeyField, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import type { ProjectState, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { scarVectorCsv } from '../io/csv';
+import { curveCsv, scarVectorCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { fileStem, initHostDownloads, saveTextFile } from '../io/saveFile';
 import { ArrowLayer, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
+import { CurveLayer } from '../render/curveLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
 import { MeshView } from '../render/meshView';
 import { Viewer, type SurfaceHit } from '../render/viewer';
 import { DrawArrowTool } from '../tools/drawArrowTool';
+import { DrawCurveTool } from '../tools/drawCurveTool';
 import { SelectTool } from '../tools/selectTool';
 import { Selection } from '../tools/selection';
+import { SurfaceSnap } from '../tools/surfaceSnap';
 import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
 import type { AppApi, DisplayAspect, DisplaySettings } from './appApi';
@@ -35,6 +39,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   curvContrast: 1,
   background: 'light',
   arrows: { ...DEFAULT_ARROW_DISPLAY },
+  curveSnap: 'ridge',
   excelBom: false,
 };
 
@@ -48,7 +53,29 @@ function loadDisplay(): DisplaySettings {
     curvScale: Math.max(0, Math.min(100, Math.round(saved.curvScale ?? DEFAULT_DISPLAY.curvScale))),
     light: { ...DEFAULT_LIGHT, ...(saved.light ?? {}) },
     arrows: { ...DEFAULT_ARROW_DISPLAY, ...(saved.arrows ?? {}) },
+    curveSnap: SNAP_MODES.includes(saved.curveSnap as SnapMode) ? (saved.curveSnap as SnapMode) : DEFAULT_DISPLAY.curveSnap,
   };
+}
+
+/** "3 arrows · 2 curves" for toasts and dialogs. */
+function countsText(arrows: number, curves: number): string {
+  const parts: string[] = [];
+  if (arrows > 0 || curves === 0) parts.push(t('count.arrows', { n: arrows }));
+  if (curves > 0) parts.push(t('count.curves', { n: curves }));
+  return parts.join(' · ');
+}
+
+/** Newell normal of a closed polyline (zero for a degenerate one). */
+function loopNormal(points: Vec3[]): Vec3 {
+  let x = 0, y = 0, z = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    x += (a[1] - b[1]) * (a[2] + b[2]);
+    y += (a[2] - b[2]) * (a[0] + b[0]);
+    z += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  return [x, y, z];
 }
 
 const isTyping = (el: EventTarget | null): boolean => {
@@ -72,12 +99,14 @@ export class App implements AppApi {
   private viewer: Viewer | null = null;
   private lights: LightRig | null = null;
   private arrows: ArrowLayer | null = null;
+  private curves: CurveLayer | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
   private loaded: LoadedMesh | null = null;
   private meshView: MeshView | null = null;
   private curvature: CurvatureService | null = null;
+  private surfaceSnap: SurfaceSnap | null = null;
   private curvToken = 0;
   private curvTimer = 0;
   private curvBusy = false;
@@ -85,6 +114,7 @@ export class App implements AppApi {
   private lastHover: SurfaceHit | null = null;
   private autosaveTimer = 0;
   private readonly autosaveOk = autosaveAvailable();
+  private autosaveWarned = false;
   private occlusionDirty = true;
   private lastOcclusion = 0;
   private coordsQueued = false;
@@ -101,6 +131,8 @@ export class App implements AppApi {
   private redoBtn!: HTMLButtonElement;
   private saveBtn!: HTMLButtonElement;
   private modeSeg: ReturnType<typeof segmented> | null = null;
+  private snapSeg: ReturnType<typeof segmented> | null = null;
+  private snapEl: HTMLElement | null = null;
   private readonly meshInput: HTMLInputElement;
   private readonly projectInput: HTMLInputElement;
 
@@ -140,6 +172,8 @@ export class App implements AppApi {
     this.lights.set(this.display.light);
     this.arrows = new ArrowLayer(viewer);
     this.arrows.onLabelClick = (id) => this.selection.set(id);
+    this.curves = new CurveLayer(viewer);
+    this.curves.onLabelClick = (id) => this.selection.set(id);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -147,6 +181,7 @@ export class App implements AppApi {
         this.occlusionDirty = false;
         this.lastOcclusion = performance.now();
         this.arrows?.updateOcclusion();
+        this.curves?.updateOcclusion();
       }
     });
     viewer.onCameraChange(() => {
@@ -157,13 +192,17 @@ export class App implements AppApi {
       viewer,
       store: this.store,
       arrows: this.arrows,
+      curves: this.curves,
       selection: this.selection,
+      snap: () => this.surfaceSnap,
+      snapMode: () => this.display.curveSnap,
       notify: (key, tone) => this.feedback.toast(t(key), tone === 'warn' ? 'warn' : 'info'),
       changed: () => this.updateCursor(),
     };
     this.tools = new ToolController(ctx, this.viewportEl);
     this.tools.register(new SelectTool(ctx));
     this.tools.register(new DrawArrowTool(ctx));
+    this.tools.register(new DrawCurveTool(ctx));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -183,7 +222,7 @@ export class App implements AppApi {
     this.store.subscribe((c) => this.onStoreChange(c));
     this.store.history.onChange(() => this.updateUndoButtons());
     this.selection.onChange(() => {
-      this.syncArrows();
+      this.syncAnnotations();
       this.sidebar.refresh('selection');
       this.updateCursor();
     });
@@ -233,10 +272,17 @@ export class App implements AppApi {
     this.modeSeg = segmented('mode', null, [
       { value: 'select', label: `${t('mode.select')}  V` },
       { value: 'draw', label: `${t('mode.draw')}  A` },
+      { value: 'curve', label: `${t('mode.curve')}  P` },
     ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
     this.modeSeg.el.classList.add('seg-mode');
+    this.snapSeg = segmented('snap', null, SNAP_MODES.map((m) => ({ value: m, label: t(`snap.${m}`) })), this.display.curveSnap, (v) =>
+      this.setDisplay((d) => (d.curveSnap = v as SnapMode), 'snap'),
+    );
+    this.snapSeg.el.setAttribute('aria-label', t('snap.label'));
+    this.snapEl = h('div', { class: 'tb-snap', id: 'snap-control', title: `${t('snap.label')} (S)` }, icon(ICONS.magnet), this.snapSeg.el);
+    this.snapEl.hidden = this.tools?.activeId !== 'curve';
     const fit = h('button', { type: 'button', class: 'icon-btn tb-btn', id: 'btn-fit', title: `${t('view.fit')} (H)`, 'aria-label': t('view.fit'), onclick: () => this.viewer?.fitView() }, icon(ICONS.fit));
-    this.toolbarEl.append(this.modeSeg.el, fit);
+    this.toolbarEl.append(this.modeSeg.el, this.snapEl, fit);
   }
 
   private buildEmptyState(): void {
@@ -287,6 +333,7 @@ export class App implements AppApi {
     if (tools.adjustingLight) cursor = 'crosshair';
     this.viewportEl.style.cursor = cursor;
     this.modeSeg?.set(tools.activeId ?? 'select');
+    if (this.snapEl) this.snapEl.hidden = tools.activeId !== 'curve';
   }
 
   private queueCoords(): void {
@@ -316,24 +363,36 @@ export class App implements AppApi {
   // ------------------------------------------------------------ state → view
 
   private onStoreChange(c: Change): void {
-    if (this.selection.id && !this.store.arrow(this.selection.id)) this.selection.set(null);
-    this.syncArrows();
-    const map: Record<Change['kind'], RefreshKind> = { arrows: 'arrows', specimen: 'specimen', reset: 'all' };
+    const sel = this.selection.id;
+    if (sel && !this.store.arrow(sel) && !this.store.curve(sel)) this.selection.set(null);
+    this.syncAnnotations();
+    const map: Record<Change['kind'], RefreshKind> = { arrows: 'arrows', curves: 'curves', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
-    if (c.kind === 'specimen') this.sidebar.refresh('arrows');
+    if (c.kind === 'specimen') {
+      this.sidebar.refresh('arrows');
+      this.sidebar.refresh('curves');
+    }
     if (c.kind !== 'reset') this.scheduleAutosave();
     this.queueCoords();
   }
 
-  private syncArrows(): void {
-    this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, this.tools?.activeId === 'select');
+  private syncAnnotations(): void {
+    const handles = this.tools?.activeId === 'select';
+    this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
+    this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.occlusionDirty = true;
   }
 
   setTool(id: string): void {
     this.tools?.setActive(id);
-    this.syncArrows();
+    this.syncAnnotations();
     this.updateCursor();
+  }
+
+  /** The curve tool re-evaluates what is under the cursor (snap mode or curvature scale changed). */
+  private refreshCurveTool(): void {
+    const tool = this.tools?.activeTool;
+    if (tool instanceof DrawCurveTool) tool.refresh();
   }
 
   // ------------------------------------------------------------ AppApi
@@ -356,6 +415,8 @@ export class App implements AppApi {
         clearTimeout(this.curvTimer);
         this.curvTimer = window.setTimeout(() => {
           if (this.display.shading === 'curvature') void this.updateCurvatureColors();
+          // curves snap at the shading scale
+          this.refreshCurveTool();
         }, 120);
         break;
       case 'background':
@@ -363,13 +424,24 @@ export class App implements AppApi {
         this.sidebar.refresh('display');
         break;
       case 'arrows':
-        this.syncArrows();
+        this.syncAnnotations();
         this.sidebar.refresh('display');
         this.sidebar.refresh('arrows');
+        this.sidebar.refresh('curves');
+        break;
+      case 'snap':
+        this.snapSeg?.set(this.display.curveSnap);
+        this.refreshCurveTool();
         break;
       default:
         break;
     }
+  }
+
+  private cycleSnap(): void {
+    const i = SNAP_MODES.indexOf(this.display.curveSnap);
+    const next = SNAP_MODES[(i + 1) % SNAP_MODES.length];
+    this.setDisplay((d) => (d.curveSnap = next), 'snap');
   }
 
   hasMesh(): boolean {
@@ -397,6 +469,39 @@ export class App implements AppApi {
     v.viewFrom(toward, v.cameraUp(), mid, Math.max(len * 3.2, v.diagonal * 0.4));
   }
 
+  focusCurve(id: string): void {
+    const c = this.store.curve(id);
+    const v = this.viewer;
+    if (!c || !v || c.points.length < 2) return;
+    this.selection.set(id);
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    for (const p of c.points)
+      for (let k = 0; k < 3; k++) {
+        if (p[k] < min[k]) min[k] = p[k];
+        if (p[k] > max[k]) max[k] = p[k];
+      }
+    const center: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+    const size = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+    // a loop is seen best square-on; an open curve from the side its surface faces
+    let dir: Vec3 = [0, 0, 0];
+    if (c.closed) dir = loopNormal(c.points);
+    const snap = this.surfaceSnap;
+    if (snap && Math.hypot(...dir) < 1e-9) {
+      const step = Math.max(1, Math.floor(c.points.length / 40));
+      for (let i = 0; i < c.points.length; i += step) {
+        const n = snap.normal(snap.nearestVertex(c.points[i]));
+        dir = [dir[0] + n[0], dir[1] + n[1], dir[2] + n[2]];
+      }
+      if (Math.hypot(...dir) < 0.3 * Math.ceil(c.points.length / step)) dir = [0, 0, 0];
+    }
+    const cur = v.towardViewer();
+    const len = Math.hypot(...dir);
+    let toward: Vec3 = len > 1e-9 ? [dir[0] / len, dir[1] / len, dir[2] / len] : cur;
+    if (c.closed && toward[0] * cur[0] + toward[1] * cur[1] + toward[2] * cur[2] < 0) toward = [-toward[0], -toward[1], -toward[2]];
+    v.viewFrom(toward, v.cameraUp(), center, Math.max(size * 2.2, v.diagonal * 0.35));
+  }
+
   private stem(): string {
     const st = this.store.state;
     return fileStem(st.specimen.id || (st.mesh ? st.mesh.fileName.replace(/\.[^.]+$/, '') : ''), 'specimen');
@@ -406,6 +511,12 @@ export class App implements AppApi {
     if (!this.hasMesh()) return;
     const csv = scarVectorCsv(this.store.state, { excelBom: this.display.excelBom });
     void this.save(`${this.stem()}_scar_vectors.csv`, csv, 'text/csv');
+  }
+
+  exportCurvesCsv(): void {
+    if (!this.hasMesh() || !this.store.state.curves.length) return;
+    const csv = curveCsv(this.store.state, { excelBom: this.display.excelBom });
+    void this.save(`${this.stem()}_curves.csv`, csv, 'text/csv');
   }
 
   saveProject(): void {
@@ -424,6 +535,14 @@ export class App implements AppApi {
     else if (outcome === 'declined') this.feedback.toast(t('toast.declined'));
     else if (outcome === 'busy') this.feedback.toast(t('toast.busy'), 'warn');
     else this.feedback.showCopy(name, text);
+  }
+
+  private deleteSelection(e: KeyboardEvent): void {
+    const sel = this.selection.id;
+    if (!sel) return;
+    e.preventDefault();
+    if (this.store.curve(sel)) deleteCurve(this.store, sel);
+    else deleteScarVector(this.store, sel);
   }
 
   undo(): void {
@@ -467,10 +586,14 @@ export class App implements AppApi {
   private installMesh(loaded: LoadedMesh): void {
     const v = this.viewer;
     if (!v) return;
+    // an unfinished curve is kept with the previous model, then saved
+    this.tools?.cancel();
     this.flushAutosave();
+    this.surfaceSnap?.dispose();
     this.curvature?.dispose();
     this.meshView?.dispose();
     this.arrows?.clearAll();
+    this.curves?.clearAll();
     this.loaded = loaded;
     this.meshView = new MeshView(loaded);
     this.meshView.setRoughness(0.95 - 0.7 * this.display.gloss);
@@ -481,6 +604,8 @@ export class App implements AppApi {
       g.index!.array as Uint32Array,
       loaded.orientationSign,
     );
+    this.surfaceSnap = new SurfaceSnap(loaded, this.curvature, () => this.display.curvScale);
+    this.curves?.setOrigin(loaded.offset);
     this.curvBusy = false;
     v.setMesh(this.meshView.mesh, loaded.offset, loaded.diagonal);
 
@@ -502,9 +627,10 @@ export class App implements AppApi {
 
   private applyProject(state: ProjectState, toastKey: string | null = 'toast.projectLoaded'): void {
     state.mesh = this.store.state.mesh;
+    this.tools?.cancel();
     this.selection.set(null);
     this.store.reset(state);
-    if (toastKey) this.feedback.toast(t(toastKey, { n: state.scarVectors.length }));
+    if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state.scarVectors.length, state.curves.length) }));
   }
 
   private async openMeshFile(file: File): Promise<void> {
@@ -542,18 +668,21 @@ export class App implements AppApi {
       return;
     }
     const entry = readAutosave(loaded.info.sha256);
-    if (!entry || !entry.file.annotations?.scarVectors?.length) return;
+    const nArrows = entry?.file.annotations?.scarVectors?.length ?? 0;
+    const nCurves = entry?.file.annotations?.curves?.length ?? 0;
+    if (!entry || (!nArrows && !nCurves)) return;
     const when = new Date(entry.savedAt).toLocaleString(getLang() === 'zh' ? 'zh-CN' : 'en-GB');
+    const what = countsText(nArrows, nCurves);
     const ok = await this.feedback.confirm(
       t('dlg.restore.title'),
-      t('dlg.restore.body', { n: entry.file.annotations.scarVectors.length, time: when }),
+      t('dlg.restore.body', { what, time: when }),
       t('dlg.restore.yes'),
       t('dlg.restore.no'),
     );
     if (!ok) return;
     try {
       this.applyProject(parseProjectFile(entry.file), null);
-      this.feedback.toast(t('toast.restored', { n: entry.file.annotations.scarVectors.length }));
+      this.feedback.toast(t('toast.restored', { what }));
     } catch (e) {
       this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
     }
@@ -612,7 +741,12 @@ export class App implements AppApi {
     this.autosaveTimer = 0;
     const st = this.store.state;
     if (!st.mesh) return;
-    writeAutosave(st.mesh.sha256, serializeProject(st, __APP_VERSION__));
+    const ok = writeAutosave(st.mesh.sha256, serializeProject(st, __APP_VERSION__));
+    // the browser's storage is small; say so once instead of failing silently
+    if (!ok && !this.autosaveWarned) {
+      this.autosaveWarned = true;
+      this.feedback.toast(t('toast.autosaveFull'), 'warn', 6000);
+    }
   }
 
   // ------------------------------------------------------------ wiring
@@ -668,10 +802,12 @@ export class App implements AppApi {
         if (e.key === 'Escape') (e.target as HTMLElement).blur();
         return;
       }
+      const tool = this.tools?.activeTool ?? null;
+      if (e.key === 'Shift') tool?.modifiersChanged?.(e);
       if (mod && key === 'z') {
         e.preventDefault();
         if (e.shiftKey) this.redo();
-        else this.undo();
+        else if (!tool?.undoStep?.()) this.undo();
         return;
       }
       if (mod && key === 'y') {
@@ -691,23 +827,37 @@ export class App implements AppApi {
         if (!e.repeat) this.tools?.setLightHeld(true);
         return;
       }
-      if (e.repeat && !['BracketLeft', 'BracketRight'].includes(e.code)) return;
+      if (e.repeat && !['BracketLeft', 'BracketRight', 'Backspace'].includes(e.code)) return;
       switch (e.code) {
         case 'KeyA':
           if (this.hasMesh()) this.setTool('draw');
           return;
+        case 'KeyP':
+          if (this.hasMesh()) this.setTool('curve');
+          return;
         case 'KeyV':
           this.setTool('select');
+          return;
+        case 'KeyS':
+          if (this.tools?.activeId === 'curve') this.cycleSnap();
+          return;
+        case 'Enter':
+        case 'NumpadEnter':
+          if (tool?.commit?.()) e.preventDefault();
           return;
         case 'Escape':
           if (!this.tools?.cancel()) this.selection.set(null);
           return;
-        case 'Delete':
         case 'Backspace':
-          if (sel) {
+          if (tool?.undoStep?.()) {
             e.preventDefault();
-            deleteScarVector(this.store, sel);
+            return;
           }
+          if (e.repeat) return;
+          this.deleteSelection(e);
+          return;
+        case 'Delete':
+          this.deleteSelection(e);
           return;
         case 'KeyH':
           this.viewer?.fitView();
@@ -720,12 +870,13 @@ export class App implements AppApi {
           return;
         case 'BracketRight':
         case 'BracketLeft': {
-          const list = this.store.state.scarVectors;
-          if (!list.length) return;
-          const i = sel ? list.findIndex((a) => a.id === sel) : -1;
+          // step through the kind of item that is selected (arrows first when nothing is)
+          const st = this.store.state;
+          const ids = (sel && this.store.curve(sel)) || (!sel && !st.scarVectors.length) ? st.curves.map((c) => c.id) : st.scarVectors.map((a) => a.id);
+          if (!ids.length) return;
+          const i = sel ? ids.indexOf(sel) : -1;
           const step = e.code === 'BracketRight' ? 1 : -1;
-          const next = list[(i + step + list.length) % list.length] ?? list[0];
-          this.selection.set(next.id);
+          this.selection.set(ids[(i + step + ids.length) % ids.length] ?? ids[0]);
           return;
         }
         default:
@@ -737,14 +888,18 @@ export class App implements AppApi {
       }
       const digit = /^Digit([1-9])$/.exec(e.code) ?? /^Numpad([1-9])$/.exec(e.code);
       if (digit && sel) {
-        const f = numberKeyField();
+        const isCurve = !!this.store.curve(sel);
+        const f = numberKeyField(isCurve ? CURVE_FIELDS : SCAR_FIELDS);
         const opt = f?.options?.[Number(digit[1]) - 1];
-        if (f && opt) setScarAttribute(this.store, sel, f.key, opt.value);
+        if (!f || !opt) return;
+        if (isCurve) setCurveAttribute(this.store, sel, f.key, opt.value);
+        else setScarAttribute(this.store, sel, f.key, opt.value);
       }
     });
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') this.tools?.setSpaceHeld(false);
       if (e.code === 'KeyL') this.tools?.setLightHeld(false);
+      if (e.key === 'Shift' && !isTyping(e.target)) this.tools?.activeTool?.modifiersChanged?.(e);
     });
     window.addEventListener('blur', () => {
       this.tools?.setSpaceHeld(false);
@@ -753,10 +908,15 @@ export class App implements AppApi {
   }
 
   private showHelp(): void {
-    const count = numberKeyField()?.options?.length ?? 5;
+    const count = Math.max(numberKeyField(SCAR_FIELDS)?.options?.length ?? 0, numberKeyField(CURVE_FIELDS)?.options?.length ?? 0) || 5;
     const rows: Array<[string, string]> = [
       ['A', t('help.k.draw')],
+      ['P', t('help.k.curve')],
       ['V', t('help.k.select')],
+      ['S', t('help.k.snap')],
+      ['Shift', t('help.k.shift')],
+      ['Enter', t('help.k.finish')],
+      ['Backspace', t('help.k.back')],
       [`1 – ${count}`, t('help.k.complete')],
       ['Delete', t('help.k.delete')],
       ['] / [', t('help.k.next')],
@@ -773,6 +933,7 @@ export class App implements AppApi {
       [t('help.m.pan'), t('help.m.panKeys')],
       [t('help.m.zoom'), t('help.m.zoomKeys')],
       [t('help.m.centre'), t('help.m.centreKeys')],
+      [t('help.m.close'), t('help.m.closeKeys')],
     ];
     const body = h(
       'div',
@@ -791,10 +952,27 @@ export class App implements AppApi {
       state: () => this.store.state,
       selection: () => this.selection.id,
       project: (p: Vec3) => this.viewer?.project(new THREE.Vector3(p[0], p[1], p[2])),
+      /** Surface point under a client position, or null. */
+      pick: (x: number, y: number): Vec3 | null => {
+        const hit = this.viewer?.pickSurface(x, y);
+        return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+      },
       view: (toward: Vec3, up: Vec3) => this.viewer?.viewFrom(toward, up),
       setTool: (id: string) => this.setTool(id),
       exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }),
+      exportCurvesCsvText: () => curveCsv(this.store.state, { excelBom: false }),
+      /** Points of the curve being drawn (null when the curve tool is not active). */
+      curveDraft: (): Vec3[] | null => {
+        const tool = this.tools?.activeTool;
+        return tool instanceof DrawCurveTool ? tool.draftPoints() : null;
+      },
       projectJson: () => serializeProject(this.store.state, __APP_VERSION__),
+      /** Snapping on the current mesh: readiness and per-vertex feature strength (for tests). */
+      snap: {
+        prepare: (mode: SnapMode) => this.surfaceSnap?.prepare(mode) ?? Promise.resolve(false),
+        strongest: (mode: SnapMode, count: number) => this.surfaceSnap?.strongest(mode, count) ?? [],
+        strengthAt: (mode: SnapMode, p: Vec3) => this.surfaceSnap?.strengthAt(mode, p) ?? null,
+      },
     };
     (window as unknown as { lithicanalyst: typeof api }).lithicanalyst = api;
   }

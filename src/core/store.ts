@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { MeshInfo, ProjectState, ScarVector, SpecimenInfo } from './types';
+import type { Curve, MeshInfo, ProjectState, ScarVector, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'arrows' | 'specimen' | 'reset';
+export type ChangeKind = 'arrows' | 'curves' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -16,7 +16,9 @@ export function emptyProject(): ProjectState {
     specimen: { id: '', annotator: '', unit: 'mm', notes: '' },
     mesh: null,
     scarVectors: [],
+    curves: [],
     nextLabelNumber: 1,
+    nextCurveNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
@@ -57,6 +59,10 @@ export class ProjectStore {
     return this._state.scarVectors.find((a) => a.id === id);
   }
 
+  curve(id: string): Curve | undefined {
+    return this._state.curves.find((c) => c.id === id);
+  }
+
   /** Replace the whole project (new mesh, loaded project file). Clears history. */
   reset(state: ProjectState): void {
     this._state = state;
@@ -90,11 +96,35 @@ export class ProjectStore {
     if (index >= 0) list[index] = a;
   }
 
+  _insertCurve(c: Curve, index?: number): void {
+    const list = this._state.curves;
+    if (index === undefined || index < 0 || index > list.length) list.push(c);
+    else list.splice(index, 0, c);
+  }
+
+  _removeCurve(id: string): { curve: Curve; index: number } | null {
+    const list = this._state.curves;
+    const index = list.findIndex((c) => c.id === id);
+    if (index < 0) return null;
+    const [curve] = list.splice(index, 1);
+    return { curve, index };
+  }
+
+  _putCurve(c: Curve): void {
+    const list = this._state.curves;
+    const index = list.findIndex((x) => x.id === c.id);
+    if (index >= 0) list[index] = c;
+  }
+
   _setSpecimen(s: SpecimenInfo): void {
     this._state.specimen = s;
   }
 
   _setNextLabelNumber(n: number): void {
     this._state.nextLabelNumber = n;
+  }
+
+  _setNextCurveNumber(n: number): void {
+    this._state.nextCurveNumber = n;
   }
 }

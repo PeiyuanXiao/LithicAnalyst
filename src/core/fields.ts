@@ -84,13 +84,44 @@ export const SCAR_FIELDS: FieldDef[] = [
   },
 ];
 
-export function defaultAttributes(): Record<string, AttributeValue> {
+/** Fields recorded for every traced curve; same rules as SCAR_FIELDS. */
+export const CURVE_FIELDS: FieldDef[] = [
+  {
+    key: 'type',
+    label: { zh: '类型', en: 'Type' },
+    type: 'enum',
+    default: 'other',
+    numberKeys: true,
+    listSummary: 'nonDefault',
+    options: [
+      { value: 'edge', label: { zh: '刃缘', en: 'Edge' } },
+      { value: 'ridge', label: { zh: '棱脊', en: 'Ridge' } },
+      { value: 'scar_boundary', label: { zh: '片疤边界', en: 'Scar boundary' } },
+      { value: 'other', label: { zh: '其他', en: 'Other' } },
+    ],
+  },
+  {
+    key: 'note',
+    label: { zh: '备注', en: 'Note' },
+    type: 'text',
+    default: '',
+  },
+];
+
+function defaultsOf(fields: FieldDef[]): Record<string, AttributeValue> {
   const out: Record<string, AttributeValue> = {};
-  for (const f of SCAR_FIELDS) out[f.key] = f.default;
+  for (const f of fields) out[f.key] = f.default;
   return out;
 }
 
+export const defaultAttributes = (): Record<string, AttributeValue> => defaultsOf(SCAR_FIELDS);
+
+export const defaultCurveAttributes = (): Record<string, AttributeValue> => defaultsOf(CURVE_FIELDS);
+
 export const fieldByKey = (key: string): FieldDef | undefined => SCAR_FIELDS.find((f) => f.key === key);
 
-export const numberKeyField = (): FieldDef | undefined =>
-  SCAR_FIELDS.find((f) => f.numberKeys && f.type === 'enum' && f.options?.length);
+export const curveFieldByKey = (key: string): FieldDef | undefined => CURVE_FIELDS.find((f) => f.key === key);
+
+/** The enum field that number keys 1…n set on the selected item. */
+export const numberKeyField = (fields: FieldDef[] = SCAR_FIELDS): FieldDef | undefined =>
+  fields.find((f) => f.numberKeys && f.type === 'enum' && f.options?.length);

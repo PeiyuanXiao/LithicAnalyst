@@ -25,6 +25,7 @@ export class ToolController {
     container.addEventListener('pointerleave', () => {
       this.onHover(null);
       if (!this.activePointer) this.ctx.arrows.setHover(null);
+      this.ctx.curves.setLive(null);
     });
   }
 
