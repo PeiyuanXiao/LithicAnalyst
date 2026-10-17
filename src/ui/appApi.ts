@@ -1,5 +1,7 @@
 import type { SnapMode } from '../compute/surfacePath';
+import type { AutoMeasurements } from '../core/derived';
 import type { ProjectStore } from '../core/store';
+import type { Measurement } from '../core/types';
 import type { ArrowDisplay } from '../render/arrowLayer';
 import type { LightSettings } from '../render/lighting';
 import type { ShadingMode } from '../render/meshView';
@@ -45,6 +47,12 @@ export interface AppApi {
   focusCurve(id: string): void;
   exportCsv(): void;
   exportCurvesCsv(): void;
+  exportMeasurementsCsv(): void;
+  exportManualMeasurementsCsv(): void;
+  /** Null while the mesh is being measured (or without a mesh). */
+  autoMeasurements(): AutoMeasurements | null;
+  measuringBusy(): boolean;
+  formatMeasurement(m: Measurement): string;
   saveProject(): void;
   openProject(): void;
 }

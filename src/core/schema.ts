@@ -1,8 +1,9 @@
 import { isValidShape } from './curveGeometry';
-import { computeDerived, type DerivedResults } from './derived';
+import { computeDerived, type AutoMeasurements, type DerivedResults } from './derived';
 import { defaultAttributes, defaultCurveAttributes } from './fields';
+import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, Curve, MeshInfo, ProjectState, Scar, ScarVector, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, MeshInfo, ProjectState, Scar, ScarVector, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -21,16 +22,18 @@ export interface ProjectFile {
   savedAt: string;
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
-  annotations: { scars: Scar[]; curves: Curve[] };
+  annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[] };
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
   nextCurveNumber: number;
+  nextMeasureNumber: number;
   createdAt: string;
   modifiedAt: string;
 }
 
-export function serializeProject(state: Readonly<ProjectState>, appVersion: string): ProjectFile {
+/** `auto`: the latest automatic measurements of the mesh, if any (stored under `derived`). */
+export function serializeProject(state: Readonly<ProjectState>, appVersion: string, auto: AutoMeasurements | null = null): ProjectFile {
   return {
     format: PROJECT_FORMAT,
     formatVersion: PROJECT_FORMAT_VERSION,
@@ -38,10 +41,11 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     savedAt: nowIso(),
     specimen: structuredClone(state.specimen),
     mesh: state.mesh ? structuredClone(state.mesh) : null,
-    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves) },
-    derived: computeDerived(state),
+    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements) },
+    derived: computeDerived(state, auto),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
+    nextMeasureNumber: state.nextMeasureNumber,
     createdAt: state.createdAt,
     modifiedAt: state.modifiedAt,
   };
@@ -153,6 +157,27 @@ function parseCurve(raw: unknown, i: number): Curve {
   };
 }
 
+function parseMeasurement(raw: unknown, i: number): Measurement {
+  if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Measurement ${i + 1} is not an object.`);
+  const r = raw as Record<string, unknown>;
+  const type = r.type as MeasureType;
+  if (!(typeof type === 'string' && type in MEASURE_POINTS)) throw new ProjectFileError(`Measurement ${i + 1}: unknown type "${String(r.type)}".`);
+  const points = Array.isArray(r.points) ? r.points : [];
+  if (points.length !== MEASURE_POINTS[type] || !points.every(isFiniteVec))
+    throw new ProjectFileError(`Measurement ${i + 1} needs ${MEASURE_POINTS[type]} numeric "points" [x, y, z].`);
+  const path = type === 'geodesic' && Array.isArray(r.path) && r.path.length >= 2 && r.path.every(isFiniteVec) ? (r.path as Vec3[]) : null;
+  const t = nowIso();
+  return {
+    id: str(r.id) || uuid(),
+    label: str(r.label, `M${i + 1}`),
+    type,
+    points: (points as Vec3[]).map((p) => [p[0], p[1], p[2]] as Vec3),
+    path: path ? path.map((p) => [p[0], p[1], p[2]] as Vec3) : null,
+    createdAt: str(r.createdAt, t),
+    modifiedAt: str(r.modifiedAt, t),
+  };
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -172,6 +197,8 @@ export function parseProjectFile(input: unknown): ProjectState {
   const scars = list.map((v, i) => parseScar(v, i));
   const curveList = Array.isArray(ann?.curves) ? (ann!.curves as unknown[]) : [];
   const curves = curveList.map((c, i) => parseCurve(c, i));
+  const measureList = Array.isArray(ann?.measurements) ? (ann!.measurements as unknown[]) : [];
+  const measurements = measureList.map((m, i) => parseMeasurement(m, i));
   const sp = (raw.specimen ?? {}) as Record<string, unknown>;
   const specimen: SpecimenInfo = {
     id: str(sp.id),
@@ -185,8 +212,10 @@ export function parseProjectFile(input: unknown): ProjectState {
     mesh: (raw.mesh as MeshInfo | null) ?? null,
     scars,
     curves,
+    measurements,
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
+    nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),
     createdAt: str(raw.createdAt, nowIso()),
     modifiedAt: str(raw.modifiedAt, nowIso()),
   };

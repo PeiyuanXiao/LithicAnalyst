@@ -1,5 +1,7 @@
 import { curveLength } from '../core/curveGeometry';
+import type { AutoMeasurements } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
+import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
 import { hasVector, type ProjectState } from '../core/types';
 import { distance } from '../core/vec';
@@ -107,4 +109,56 @@ export function curveCsv(state: Readonly<ProjectState>, opts: CsvOptions): strin
   }
   const body = [header.join(','), ...rows].join('\n') + '\n';
   return (opts.excelBom ? '\uFEFF' : '') + body;
+}
+
+const cell = (n: number | null): string => (n === null ? '' : fmt(n));
+
+/**
+ * One row per specimen: the automatic measurements. Lengths are in the
+ * specimen unit, the area in unit², the volume in unit³; volume-based values
+ * are empty when the mesh is not closed (or not yet measured).
+ */
+export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasurements | null, opts: CsvOptions): string {
+  const header = [
+    'specimen_id',
+    'unit',
+    'frame',
+    'length',
+    'width',
+    'thickness',
+    'surface_area',
+    'volume',
+    'surface_to_volume_ratio',
+    'wadell_sphericity',
+    'closed',
+  ];
+  const row = [
+    csvCell(state.specimen.id),
+    csvCell(state.specimen.unit),
+    auto?.frame ?? '',
+    cell(auto?.length ?? null),
+    cell(auto?.width ?? null),
+    cell(auto?.thickness ?? null),
+    cell(auto?.surfaceArea ?? null),
+    cell(auto?.volume ?? null),
+    cell(auto?.surfaceToVolumeRatio ?? null),
+    cell(auto?.wadellSphericity ?? null),
+    auto ? String(auto.closed) : '',
+  ];
+  return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
+}
+
+/** One row per manual measurement; points it does not use are left empty; angles are in degrees. */
+export function manualMeasurementsCsv(state: Readonly<ProjectState>, opts: CsvOptions): string {
+  const header = ['specimen_id', 'measure_id', 'type', 'value', 'unit'];
+  for (let i = 1; i <= 3; i++) header.push(`p${i}_x`, `p${i}_y`, `p${i}_z`);
+  const rows = state.measurements.map((m) => {
+    const pts: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const p = m.points[i];
+      pts.push(...(p ? [fmt(p[0]), fmt(p[1]), fmt(p[2])] : ['', '', '']));
+    }
+    return [csvCell(state.specimen.id), csvCell(m.label), m.type, fmt(measurementValue(m)), csvCell(measurementUnit(m, state.specimen.unit)), ...pts].join(',');
+  });
+  return (opts.excelBom ? '﻿' : '') + [header.join(','), ...rows].join('\n') + '\n';
 }

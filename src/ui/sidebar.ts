@@ -1,5 +1,6 @@
 import {
   deleteCurve,
+  deleteMeasurement,
   deleteScar,
   setCurveAttribute,
   setCurveLabel,
@@ -14,13 +15,14 @@ import type { AttributeValue, Curve, Scar } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
+import { MEASURE_COLORS } from '../render/measureLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -425,6 +427,90 @@ function displaySection(api: AppApi): Section {
   return { el, refresh };
 }
 
+// ---------------------------------------------------------------- measure mode
+
+/** "12.345 mm²" (the unit is left out when it is not stated). */
+const withUnit = (v: number, digits: number, unit: string, power = 1): string =>
+  `${fmtNum(v, digits)}${unit ? ` ${unit}${power === 2 ? '²' : power === 3 ? '³' : ''}` : ''}`;
+
+function measureAutoSection(api: AppApi): Section {
+  const { el, body } = section('measure-auto', t('sec.measureAuto'));
+  const meta = h('dl', { class: 'meta measure-auto', id: 'measure-auto' });
+  body.append(meta);
+  const row = (id: string, term: string, value: string) => [h('dt', {}, term), h('dd', { id: `auto-${id}`, class: 'mono' }, value)];
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'measure', 'specimen'].includes(kind)) return;
+    clear(meta);
+    const m = api.autoMeasurements();
+    if (!m) {
+      if (api.measuringBusy()) meta.append(h('dt', {}, t('measure.busy')), h('dd', {}));
+      return;
+    }
+    const u = api.store.state.specimen.unit;
+    const open = t('measure.notClosed');
+    meta.append(
+      ...row('length', t('measure.length'), withUnit(m.length, 3, u)),
+      ...row('width', t('measure.width'), withUnit(m.width, 3, u)),
+      ...row('thickness', t('measure.thickness'), withUnit(m.thickness, 3, u)),
+      ...row('frame', t('measure.axes'), t(`measure.axes.${m.frame}`)),
+      ...row('area', t('measure.area'), withUnit(m.surfaceArea, 2, u, 2)),
+      ...row('volume', t('measure.volume'), m.volume === null ? open : withUnit(m.volume, 2, u, 3)),
+      ...row('svr', t('measure.svr'), m.surfaceToVolumeRatio === null ? '–' : fmtNum(m.surfaceToVolumeRatio, 3)),
+      ...row('sphericity', t('measure.sphericity'), m.wadellSphericity === null ? '–' : fmtNum(m.wadellSphericity, 3)),
+    );
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+function measureManualSection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('measure-manual', t('sec.measureManual'), badge);
+  const list = h('ol', { class: 'arrow-list', id: 'measure-list', role: 'listbox', 'aria-label': t('sec.measureManual') });
+  const del = h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'measure-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteMeasurement(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')) as HTMLButtonElement;
+  const actions = h('div', { class: 'btn-row' }, del);
+  body.append(list, actions);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'measurements', 'selection', 'specimen'].includes(kind)) return;
+    const st = api.store.state;
+    badge.textContent = String(st.measurements.length);
+    list.hidden = st.measurements.length === 0;
+    clear(list);
+    const sel = api.selection.id;
+    for (const m of st.measurements) {
+      const isSel = m.id === sel;
+      list.append(
+        h(
+          'li',
+          { class: 'arrow-row measure-row', role: 'option', 'aria-selected': String(isSel), 'data-id': m.id, onclick: () => api.selection.set(m.id) },
+          h('span', { class: 'chip chip-line', style: `--chip:${isSel ? MEASURE_COLORS.selected : MEASURE_COLORS.line}` }),
+          h('span', { class: 'arrow-id mono' }, m.label),
+          h('span', { class: 'arrow-meta' }, t(`measure.type.${m.type}`)),
+          h('span', { class: 'arrow-len mono' }, api.formatMeasurement(m)),
+        ),
+      );
+    }
+    const selected = !!(sel && api.store.measurement(sel));
+    actions.hidden = !selected;
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+function measureExportSection(api: AppApi): Section {
+  const { el, body } = section('measure-export', t('sec.export'));
+  const autoBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-measurements-csv', onclick: () => api.exportMeasurementsCsv() }, t('export.measurements')) as HTMLButtonElement;
+  const manualBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-manual-csv', onclick: () => api.exportManualMeasurementsCsv() }, t('export.manualMeasurements')) as HTMLButtonElement;
+  body.append(h('div', { class: 'btn-row' }, autoBtn, manualBtn));
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'measure', 'measurements'].includes(kind)) return;
+    autoBtn.disabled = !api.autoMeasurements();
+    manualBtn.disabled = !api.hasMesh() || api.store.state.measurements.length === 0;
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
 // ---------------------------------------------------------------- export
 
 function exportSection(api: AppApi): Section {
@@ -453,8 +539,11 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [specimenSection, ALL_MODES],
   [arrowsSection, ['annotate']],
   [curvesSection, ['annotate']],
+  [measureAutoSection, ['measure']],
+  [measureManualSection, ['measure']],
   [displaySection, ALL_MODES],
   [exportSection, ['annotate']],
+  [measureExportSection, ['measure']],
 ];
 
 export interface Sidebar {

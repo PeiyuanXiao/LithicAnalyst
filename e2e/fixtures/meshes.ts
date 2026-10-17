@@ -121,3 +121,44 @@ export interface MeshFile {
 export const roofPly = (): MeshFile => ({ name: 'roof.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(roofMesh()) });
 export const roofStl = (): MeshFile => ({ name: 'roof.stl', mimeType: 'application/octet-stream', buffer: toBinaryStl(roofMesh()) });
 export const roofObj = (): MeshFile => ({ name: 'roof.obj', mimeType: 'text/plain', buffer: toObj(roofMesh()) });
+
+/** A closed box 40 × 20 × 10 (each face an 8 × 8 grid), centred away from the origin. */
+export const BOX = { center: [500, 200, -50] as Vec3, size: [40, 20, 10] as Vec3, n: 8 };
+
+/** Point given relative to the box centre, in original (file) coordinates. */
+export const boxPoint = (x: number, y: number, z: number): Vec3 => [BOX.center[0] + x, BOX.center[1] + y, BOX.center[2] + z];
+
+export function boxMesh(): Mesh {
+  const [hx, hy, hz] = BOX.size.map((s) => s / 2);
+  const n = BOX.n;
+  // origin corner and two edge vectors per face, u × v pointing outward
+  const faces: Array<[Vec3, Vec3, Vec3]> = [
+    [[hx, -hy, -hz], [0, 2 * hy, 0], [0, 0, 2 * hz]],
+    [[-hx, -hy, -hz], [0, 0, 2 * hz], [0, 2 * hy, 0]],
+    [[-hx, hy, -hz], [0, 0, 2 * hz], [2 * hx, 0, 0]],
+    [[-hx, -hy, -hz], [2 * hx, 0, 0], [0, 0, 2 * hz]],
+    [[-hx, -hy, hz], [2 * hx, 0, 0], [0, 2 * hy, 0]],
+    [[-hx, -hy, -hz], [0, 2 * hy, 0], [2 * hx, 0, 0]],
+  ];
+  const ids = new Map<string, number>();
+  const pos: number[] = [];
+  const vertex = (p: number[]): number => {
+    const key = p.join(',');
+    let i = ids.get(key);
+    if (i === undefined) {
+      i = pos.length / 3;
+      ids.set(key, i);
+      pos.push(...boxPoint(p[0], p[1], p[2]));
+    }
+    return i;
+  };
+  const index: number[] = [];
+  for (const [o, u, v] of faces) {
+    const at = (i: number, j: number) => vertex([0, 1, 2].map((k) => o[k] + (i / n) * u[k] + (j / n) * v[k]));
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) index.push(at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1));
+  }
+  return { positions: new Float32Array(pos), index: new Uint32Array(index) };
+}
+
+export const boxPly = (): MeshFile => ({ name: 'box.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(boxMesh()) });

@@ -110,15 +110,35 @@ export interface Curve {
   modifiedAt: string;
 }
 
+export type MeasureType = 'distance' | 'geodesic' | 'angle';
+
+/** A manual measurement: a straight distance, a distance along the surface, or an angle. */
+export interface Measurement {
+  /** Stable unique id (UUID). Never reused. */
+  id: string;
+  /** Human-readable label such as "M1". */
+  label: string;
+  type: MeasureType;
+  /** Picked surface points: two (distance, geodesic) or three (angle; the vertex is the middle one). */
+  points: Vec3[];
+  /** Geodesic only: the traced path from the first point to the second, on the surface. */
+  path: Vec3[] | null;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
   scars: Scar[];
   curves: Curve[];
+  measurements: Measurement[];
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */
   nextCurveNumber: number;
+  /** Next number used for measurement labels (M1, M2, …). */
+  nextMeasureNumber: number;
   createdAt: string;
   modifiedAt: string;
 }

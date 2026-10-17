@@ -1,7 +1,9 @@
 import {
   AddCurveCommand,
+  AddMeasurementCommand,
   AddScarCommand,
   DeleteCurveCommand,
+  DeleteMeasurementCommand,
   DeleteScarCommand,
   SetSpecimenCommand,
   UpdateCurveCommand,
@@ -11,7 +13,7 @@ import type { CurveShape } from './curveGeometry';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import type { ProjectStore } from './store';
-import type { AttributeValue, Curve, Scar, ScarWithVector, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, Scar, ScarWithVector, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -175,6 +177,35 @@ export function setCurveLabel(store: ProjectStore, id: string, label: string): v
   updateCurve(store, id, 'cmd.renameCurve', (x) => {
     x.label = label;
   }, `curve-label:${id}`);
+}
+
+// ---------------------------------------------------------------- measurements
+
+export interface NewMeasurementInput {
+  type: MeasureType;
+  points: Vec3[];
+  path?: Vec3[] | null;
+}
+
+export function addMeasurement(store: ProjectStore, input: NewMeasurementInput): Measurement {
+  const n = store.state.nextMeasureNumber;
+  const t = nowIso();
+  const m: Measurement = {
+    id: uuid(),
+    label: `M${n}`,
+    type: input.type,
+    points: input.points.map(copy),
+    path: input.type === 'geodesic' && input.path ? input.path.map(copy) : null,
+    createdAt: t,
+    modifiedAt: t,
+  };
+  store.history.execute(new AddMeasurementCommand(m, n));
+  return m;
+}
+
+export function deleteMeasurement(store: ProjectStore, id: string): void {
+  if (!store.measurement(id)) return;
+  store.history.execute(new DeleteMeasurementCommand(id));
 }
 
 // ---------------------------------------------------------------- specimen

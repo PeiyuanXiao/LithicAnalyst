@@ -1,4 +1,4 @@
-import type { Curve, Scar, SpecimenInfo } from './types';
+import type { Curve, Measurement, Scar, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -208,6 +208,39 @@ export class UpdateCurveCommand implements Command {
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = cloneCurve(next.after);
     return true;
+  }
+}
+
+export class AddMeasurementCommand implements Command {
+  readonly labelKey = 'cmd.addMeasurement';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly measurement: Measurement, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextMeasureNumber;
+    store._insertMeasurement(structuredClone(this.measurement));
+    store._setNextMeasureNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'measurements', ids: [this.measurement.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removeMeasurement(this.measurement.id);
+    store._setNextMeasureNumber(this.prevNext);
+    store.notify({ kind: 'measurements', ids: [this.measurement.id] });
+  }
+}
+
+export class DeleteMeasurementCommand implements Command {
+  readonly labelKey = 'cmd.deleteMeasurement';
+  readonly createdAt = Date.now();
+  private removed: { measurement: Measurement; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removeMeasurement(this.id);
+    store.notify({ kind: 'measurements', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertMeasurement(structuredClone(this.removed.measurement), this.removed.index);
+    store.notify({ kind: 'measurements', ids: [this.id] });
   }
 }
 

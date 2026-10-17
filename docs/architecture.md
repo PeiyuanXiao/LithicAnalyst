@@ -88,6 +88,20 @@ lists which modes show each section. Outside the annotate mode the select tool o
 (`ToolContext.editable()`), and keys that change annotations are ignored. Switching modes
 keeps the selection and the undo history.
 
+## Measurements
+
+* `compute/measure.ts` measures a mesh once after loading (`surfaceMeasuresSteps`: area, volume,
+  closedness, area-weighted principal axes) and derives length, width and thickness from the
+  specimen frame or the principal axes (`autoMeasurementsSteps`). The app keeps the result and
+  recomputes the dimensions when `specimen.frame` changes; `serializeProject` stores it under
+  `derived.measurements`.
+* Long computations are generators (`compute/steps.ts`): `runSync` runs them at once (tests),
+  `runSliced` in slices of ~12 ms between frames, so a large scan never freezes the interface.
+* Manual measurements are annotations (`ProjectState.measurements`, commands like the others).
+  `tools/measureTool.ts` takes the points (three registered tools: distance, geodesic, angle);
+  a geodesic is a `PathSearch` over mesh edges, pulled taut with `relaxPath` and kept on the
+  surface (`SurfaceSnap.hug`). `render/measureLayer.ts` draws them (only in the measure mode).
+
 ## Data model
 
 * **Scars are objects of their own** (`ProjectState.scars`). The direction arrow is optional

@@ -14,6 +14,11 @@
 - Work modes in the top bar: Annotate, Measure, Present (M cycles through them). Each mode shows
   only its own tools and sidebar sections; the existing tools are under Annotate. Switching keeps
   the selection and the undo history, and the last mode is remembered.
+- Measure mode. Automatic measurements when a model opens: length, width and thickness (along the
+  specimen frame, or the principal axes of the surface), surface area, volume (closed meshes only;
+  no hole filling), Surface-to-Volume Ratio and Wadell sphericity. Manual measurements (D / G / N):
+  straight distance, distance along the surface and angle, labelled M1, M2 …, undoable and saved in
+  the project file. Exports: `<specimen>_measurements.csv` and `<specimen>_manual_measurements.csv`.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

@@ -29,9 +29,11 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `mesh` | object or `null` | `fileName`, `format`, `fileSize`, `sha256`, `vertexCount`, `triangleCount`, `bboxMin`, `bboxMax` |
 | `annotations.scars` | array | in creation order |
 | `annotations.curves` | array | in creation order |
+| `annotations.measurements` | array | manual measurements, in creation order |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
+| `nextMeasureNumber` | integer | next measurement label (`M{n}`) |
 
 Readers should ignore keys they do not know. Future annotation layers (landmarks, surface
 regions, relations) will be added next to `scars` and `curves` inside `annotations`.
@@ -58,10 +60,56 @@ regions, relations) will be added next to `scars` and `curves` inside `annotatio
 
 ## Derived results
 
-`derived` holds the latest results computed from the annotations (fitted planes, measurements,
-fitted spheres, volumes …, added by later versions), so that R or Python can read them without
-recomputing. They are recomputed whenever their inputs change; when a file is opened, the app
-ignores the stored values and computes them again from the inputs. Version 0.2 writes `{}`.
+`derived` holds the latest results computed from the mesh and the annotations, so that R or
+Python can read them without recomputing. They are recomputed whenever their inputs change; when
+a file is opened, the app ignores the stored values and computes them again. Later versions add
+fitted planes, fitted spheres, volumes ….
+
+```json
+{
+  "measurements": {
+    "frame": "principal",
+    "length": 61.204, "width": 38.551, "thickness": 14.093,
+    "surfaceArea": 4410.25, "volume": 19873.6,
+    "surfaceToVolumeRatio": 6.006, "wadellSphericity": 0.806,
+    "closed": true
+  },
+  "manualMeasurements": [
+    { "id": "…", "label": "M1", "type": "distance", "value": 23.412, "unit": "mm" }
+  ]
+}
+```
+
+* `measurements` (null until the mesh has been measured): length, width and thickness are the
+  ranges of the model along three axes, the specimen frame's Y, X and Z when `specimen.frame` is
+  set (`frame: "specimen"`), else the first, second and third principal axes of the surface
+  (area-weighted PCA; `frame: "principal"`). `surfaceArea` is in unit², `volume` in unit³ and
+  only computed when the mesh is closed (otherwise null, as are the two indices; holes are not
+  filled). `surfaceToVolumeRatio` = A / V^(2/3) (dimensionless); `wadellSphericity` =
+  π^(1/3) (6V)^(2/3) / A.
+* `manualMeasurements`: the value of each manual measurement (length in the specimen unit, or
+  degrees for angles).
+
+## Manual measurement
+
+```json
+{
+  "id": "5d2f…",
+  "label": "M2",
+  "type": "geodesic",
+  "points": [[10.5, -4.2, 8.9], [22.1, 3.0, 7.6]],
+  "path": [[10.5, -4.2, 8.9], [11.9, -3.4, 9.0], "…", [22.1, 3.0, 7.6]],
+  "createdAt": "2026-10-17T20:41:12.502Z",
+  "modifiedAt": "2026-10-17T20:41:12.502Z"
+}
+```
+
+* `type`: `distance` (straight line between two points), `geodesic` (along the surface between
+  two points) or `angle` (three points; the angle is at the middle one, in degrees).
+* `points` are surface points in original coordinates; for `geodesic` they are mesh vertices.
+* `path` (geodesic only, else null): the line along the surface, found as the shortest path over
+  mesh edges, pulled taut along the surface (relaxPath) and kept on the surface where it crosses
+  edges. The value is its length.
 
 ## Scar
 
@@ -155,6 +203,19 @@ specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note
 points placed by the annotator, and `length` is the whole curve (for a closed curve including
 the segment back to the first point).
 
+Automatic measurements (`<specimen>_measurements.csv`, one row):
+
+```
+specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed
+```
+
+Manual measurements (`<specimen>_manual_measurements.csv`, one row each; unused points empty,
+angles with unit `deg`):
+
+```
+specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p3_z
+```
+
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.
 The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
@@ -168,7 +229,8 @@ when reading, and saving writes format 2.
 |---|---|
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
-| no `derived` | `derived` (computed results; `{}` for now) |
+| no `derived` | `derived` (computed results) |
+| — | `annotations.measurements`, `nextMeasureNumber` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.

@@ -1,22 +1,28 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
+import { autoMeasurements, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
+import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { deleteCurve, deleteScar, setCurveAttribute, setScarAttribute } from '../core/actions';
+import { deleteCurve, deleteMeasurement, deleteScar, setCurveAttribute, setScarAttribute } from '../core/actions';
+import type { AutoMeasurements } from '../core/derived';
+import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, numberKeyField, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import type { ProjectState, Vec3 } from '../core/types';
+import type { Measurement, ProjectState, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { curveCsv, scarVectorCsv } from '../io/csv';
+import { curveCsv, manualMeasurementsCsv, measurementsCsv, scarVectorCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { fileStem, initHostDownloads, saveTextFile } from '../io/saveFile';
 import { ArrowLayer, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
+import { MeasureLayer } from '../render/measureLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
 import { MeshView } from '../render/meshView';
 import { Viewer, type SurfaceHit } from '../render/viewer';
 import { DrawArrowTool } from '../tools/drawArrowTool';
 import { DrawCurveTool } from '../tools/drawCurveTool';
+import { MeasureTool } from '../tools/measureTool';
 import { SelectTool } from '../tools/selectTool';
 import { Selection } from '../tools/selection';
 import { SurfaceSnap } from '../tools/surfaceSnap';
@@ -63,12 +69,20 @@ function loadMode(): AppMode {
 }
 
 /** "3 arrows · 2 curves" for toasts and dialogs. */
-function countsText(arrows: number, curves: number): string {
+function countsText(state: Readonly<ProjectState>): string {
+  const arrows = state.scars.length, curves = state.curves.length, measures = state.measurements.length;
   const parts: string[] = [];
-  if (arrows > 0 || curves === 0) parts.push(t('count.arrows', { n: arrows }));
+  if (arrows > 0 || (curves === 0 && measures === 0)) parts.push(t('count.arrows', { n: arrows }));
   if (curves > 0) parts.push(t('count.curves', { n: curves }));
+  if (measures > 0) parts.push(t('count.measurements', { n: measures }));
   return parts.join(' · ');
 }
+
+const MEASURE_TOOLS: Array<[string, string, string]> = [
+  ['measure-distance', 'tool.distance', 'D'],
+  ['measure-geodesic', 'tool.geodesic', 'G'],
+  ['measure-angle', 'tool.angle', 'N'],
+];
 
 /** Newell normal of a closed polyline (zero for a degenerate one). */
 function loopNormal(points: Vec3[]): Vec3 {
@@ -106,6 +120,7 @@ export class App implements AppApi {
   private lights: LightRig | null = null;
   private arrows: ArrowLayer | null = null;
   private curves: CurveLayer | null = null;
+  private measures: MeasureLayer | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
@@ -140,6 +155,11 @@ export class App implements AppApi {
   private modeSeg: ReturnType<typeof segmented> | null = null;
   private snapSeg: ReturnType<typeof segmented> | null = null;
   private snapEl: HTMLElement | null = null;
+  private measureSeg: ReturnType<typeof segmented> | null = null;
+  private measureBase: SurfaceMeasures | null = null;
+  private auto: AutoMeasurements | null = null;
+  private autoFrameKey = '';
+  private measureToken = 0;
   private readonly meshInput: HTMLInputElement;
   private readonly projectInput: HTMLInputElement;
 
@@ -181,6 +201,8 @@ export class App implements AppApi {
     this.arrows.onLabelClick = (id) => this.selection.set(id);
     this.curves = new CurveLayer(viewer);
     this.curves.onLabelClick = (id) => this.selection.set(id);
+    this.measures = new MeasureLayer(viewer);
+    this.measures.onLabelClick = (id) => this.selection.set(id);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -189,6 +211,7 @@ export class App implements AppApi {
         this.lastOcclusion = performance.now();
         this.arrows?.updateOcclusion();
         this.curves?.updateOcclusion();
+        this.measures?.updateOcclusion();
       }
     });
     viewer.onCameraChange(() => {
@@ -200,6 +223,7 @@ export class App implements AppApi {
       store: this.store,
       arrows: this.arrows,
       curves: this.curves,
+      measures: this.measures,
       selection: this.selection,
       snap: () => this.surfaceSnap,
       snapMode: () => this.display.curveSnap,
@@ -211,6 +235,7 @@ export class App implements AppApi {
     this.tools.register(new SelectTool(ctx));
     this.tools.register(new DrawArrowTool(ctx));
     this.tools.register(new DrawCurveTool(ctx));
+    for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -294,8 +319,13 @@ export class App implements AppApi {
     );
     this.snapSeg.el.setAttribute('aria-label', t('snap.label'));
     this.snapEl = h('div', { class: 'tb-snap', id: 'snap-control', title: `${t('snap.label')} (S)` }, icon(ICONS.magnet), this.snapSeg.el);
+    this.measureSeg = segmented('measure-tool', null, [
+      { value: 'select', label: `${t('mode.select')}  V` },
+      ...MEASURE_TOOLS.map(([id, key, k]) => ({ value: id, label: `${t(key)}  ${k}` })),
+    ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
+    this.measureSeg.el.classList.add('seg-mode');
     const fit = h('button', { type: 'button', class: 'icon-btn tb-btn', id: 'btn-fit', title: `${t('view.fit')} (H)`, 'aria-label': t('view.fit'), onclick: () => this.viewer?.fitView() }, icon(ICONS.fit));
-    this.toolbarEl.append(this.modeSeg.el, this.snapEl, fit);
+    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.snapEl, fit);
     this.updateToolbar();
   }
 
@@ -303,6 +333,7 @@ export class App implements AppApi {
   private updateToolbar(): void {
     const annotate = this.mode === 'annotate';
     if (this.modeSeg) this.modeSeg.el.hidden = !annotate;
+    if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
     if (this.snapEl) this.snapEl.hidden = !annotate || this.tools?.activeId !== 'curve';
   }
 
@@ -354,6 +385,7 @@ export class App implements AppApi {
     if (tools.adjustingLight) cursor = 'crosshair';
     this.viewportEl.style.cursor = cursor;
     this.modeSeg?.set(tools.activeId ?? 'select');
+    this.measureSeg?.set(tools.activeId ?? 'select');
     this.updateToolbar();
   }
 
@@ -385,14 +417,16 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.scar(sel) && !this.store.curve(sel)) this.selection.set(null);
+    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel)) this.selection.set(null);
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
       this.sidebar.refresh('curves');
+      this.sidebar.refresh('measurements');
     }
+    if (c.kind === 'specimen' || c.kind === 'reset') this.updateAuto();
     if (c.kind !== 'reset') this.scheduleAutosave();
     this.queueCoords();
   }
@@ -401,6 +435,7 @@ export class App implements AppApi {
     const handles = this.tools?.activeId === 'select' && this.mode === 'annotate';
     this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
+    this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
     this.occlusionDirty = true;
   }
 
@@ -414,7 +449,7 @@ export class App implements AppApi {
   setMode(mode: AppMode): void {
     if (mode === this.mode) return;
     // tools belong to their mode; an unfinished curve is kept (as on Esc)
-    if (mode !== 'annotate') this.setTool('select');
+    this.setTool('select');
     this.mode = mode;
     writePref('mode', mode);
     this.viewportEl.dataset.mode = mode;
@@ -558,9 +593,64 @@ export class App implements AppApi {
     void this.save(`${this.stem()}_curves.csv`, csv, 'text/csv');
   }
 
+  /** "12.345 mm" or "37.2°". */
+  formatMeasurement(m: Measurement): string {
+    const v = measurementValue(m);
+    if (m.type === 'angle') return `${fmtNum(v, 1)}°`;
+    const u = measurementUnit(m, this.store.state.specimen.unit);
+    return `${fmtNum(v, 3)}${u ? ` ${u}` : ''}`;
+  }
+
+  autoMeasurements(): AutoMeasurements | null {
+    return this.auto;
+  }
+
+  measuringBusy(): boolean {
+    return this.hasMesh() && !this.measureBase;
+  }
+
+  exportMeasurementsCsv(): void {
+    if (!this.hasMesh() || !this.auto) return;
+    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom });
+    void this.save(`${this.stem()}_measurements.csv`, csv, 'text/csv');
+  }
+
+  exportManualMeasurementsCsv(): void {
+    if (!this.hasMesh() || !this.store.state.measurements.length) return;
+    const csv = manualMeasurementsCsv(this.store.state, { excelBom: this.display.excelBom });
+    void this.save(`${this.stem()}_manual_measurements.csv`, csv, 'text/csv');
+  }
+
+  /** Measure the mesh in slices after it is shown (area, volume, closedness, principal axes). */
+  private startMeasuring(loaded: LoadedMesh): void {
+    const token = ++this.measureToken;
+    this.measureBase = null;
+    this.auto = null;
+    this.autoFrameKey = '';
+    const g = loaded.geometry;
+    void runSliced(surfaceMeasuresSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array)).then((base) => {
+      if (token !== this.measureToken) return;
+      this.measureBase = base;
+      this.updateAuto();
+    });
+  }
+
+  /** Length, width and thickness follow the specimen frame: recompute when it changes. */
+  private updateAuto(): void {
+    const base = this.measureBase;
+    const loaded = this.loaded;
+    if (!base || !loaded) return;
+    const frame = this.store.state.specimen.frame;
+    const key = JSON.stringify(frame);
+    if (this.auto && key === this.autoFrameKey) return;
+    this.autoFrameKey = key;
+    this.auto = autoMeasurements(loaded.geometry.getAttribute('position').array as Float32Array, base, frame);
+    this.sidebar.refresh('measure');
+  }
+
   saveProject(): void {
     if (!this.hasMesh()) return;
-    const file = serializeProject(this.store.state, __APP_VERSION__);
+    const file = serializeProject(this.store.state, __APP_VERSION__, this.auto);
     void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json');
   }
 
@@ -580,8 +670,12 @@ export class App implements AppApi {
     const sel = this.selection.id;
     if (!sel) return;
     e.preventDefault();
+    if (this.mode === 'measure') {
+      if (this.store.measurement(sel)) deleteMeasurement(this.store, sel);
+      return;
+    }
     if (this.store.curve(sel)) deleteCurve(this.store, sel);
-    else deleteScar(this.store, sel);
+    else if (this.store.scar(sel)) deleteScar(this.store, sel);
   }
 
   undo(): void {
@@ -633,6 +727,7 @@ export class App implements AppApi {
     this.meshView?.dispose();
     this.arrows?.clearAll();
     this.curves?.clearAll();
+    this.measures?.clearAll();
     this.loaded = loaded;
     this.meshView = new MeshView(loaded);
     this.meshView.setRoughness(0.95 - 0.7 * this.display.gloss);
@@ -645,6 +740,7 @@ export class App implements AppApi {
     );
     this.surfaceSnap = new SurfaceSnap(loaded, this.curvature, () => this.display.curvScale);
     this.curves?.setOrigin(loaded.offset);
+    this.measures?.setOrigin(loaded.offset);
     this.curvBusy = false;
     v.setMesh(this.meshView.mesh, loaded.offset, loaded.diagonal);
 
@@ -660,6 +756,7 @@ export class App implements AppApi {
     };
     this.selection.set(null);
     this.store.reset(fresh);
+    this.startMeasuring(loaded);
     this.applyShading();
     this.updateMeshDependentUi();
     this.sidebar.refresh('all');
@@ -670,7 +767,7 @@ export class App implements AppApi {
     this.tools?.cancel();
     this.selection.set(null);
     this.store.reset(state);
-    if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state.scars.length, state.curves.length) }));
+    if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state) }));
   }
 
   private async openMeshFile(file: File): Promise<void> {
@@ -716,9 +813,9 @@ export class App implements AppApi {
       this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
       return;
     }
-    if (!saved.scars.length && !saved.curves.length) return;
+    if (!saved.scars.length && !saved.curves.length && !saved.measurements.length) return;
     const when = new Date(entry.savedAt).toLocaleString(getLang() === 'zh' ? 'zh-CN' : 'en-GB');
-    const what = countsText(saved.scars.length, saved.curves.length);
+    const what = countsText(saved);
     const ok = await this.feedback.confirm(
       t('dlg.restore.title'),
       t('dlg.restore.body', { what, time: when }),
@@ -783,7 +880,7 @@ export class App implements AppApi {
     this.autosaveTimer = 0;
     const st = this.store.state;
     if (!st.mesh) return;
-    const ok = writeAutosave(st.mesh.sha256, serializeProject(st, __APP_VERSION__));
+    const ok = writeAutosave(st.mesh.sha256, serializeProject(st, __APP_VERSION__, this.auto));
     // the browser's storage is small; say so once instead of failing silently
     if (!ok && !this.autosaveWarned) {
       this.autosaveWarned = true;
@@ -880,6 +977,13 @@ export class App implements AppApi {
         case 'KeyP':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('curve');
           return;
+        case 'KeyD':
+        case 'KeyG':
+        case 'KeyN': {
+          const tool = MEASURE_TOOLS.find(([, , k]) => `Key${k}` === e.code);
+          if (tool && this.hasMesh() && this.mode === 'measure') this.setTool(tool[0]);
+          return;
+        }
         case 'KeyV':
           this.setTool('select');
           return;
@@ -898,11 +1002,11 @@ export class App implements AppApi {
             e.preventDefault();
             return;
           }
-          if (e.repeat || this.mode !== 'annotate') return;
+          if (e.repeat || this.mode === 'present') return;
           this.deleteSelection(e);
           return;
         case 'Delete':
-          if (this.mode === 'annotate') this.deleteSelection(e);
+          if (this.mode !== 'present') this.deleteSelection(e);
           return;
         case 'KeyH':
           this.viewer?.fitView();
@@ -958,6 +1062,7 @@ export class App implements AppApi {
     const rows: Array<[string, string]> = [
       ['M', t('help.k.mode')],
       ['A', t('help.k.draw')],
+      ['D / G / N', t('help.k.measure')],
       ['P', t('help.k.curve')],
       ['V', t('help.k.select')],
       ['S', t('help.k.snap')],
@@ -1010,12 +1115,20 @@ export class App implements AppApi {
       setMode: (m: AppMode) => this.setMode(m),
       exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }),
       exportCurvesCsvText: () => curveCsv(this.store.state, { excelBom: false }),
+      autoMeasurements: () => this.auto,
+      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }),
+      exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
+      /** Points of the measurement being taken (null when no measuring tool is active). */
+      measureDraft: (): Vec3[] | null => {
+        const tool = this.tools?.activeTool;
+        return tool instanceof MeasureTool ? tool.draftPoints() : null;
+      },
       /** Points of the curve being drawn (null when the curve tool is not active). */
       curveDraft: (): Vec3[] | null => {
         const tool = this.tools?.activeTool;
         return tool instanceof DrawCurveTool ? tool.draftPoints() : null;
       },
-      projectJson: () => serializeProject(this.store.state, __APP_VERSION__),
+      projectJson: () => serializeProject(this.store.state, __APP_VERSION__, this.auto),
       /** Snapping on the current mesh: readiness and per-vertex feature strength (for tests). */
       snap: {
         prepare: (mode: SnapMode) => this.surfaceSnap?.prepare(mode) ?? Promise.resolve(false),

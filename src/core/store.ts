@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, MeshInfo, ProjectState, Scar, ScarVector, SpecimenInfo } from './types';
+import type { Curve, Measurement, MeshInfo, ProjectState, Scar, ScarVector, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -17,8 +17,10 @@ export function emptyProject(): ProjectState {
     mesh: null,
     scars: [],
     curves: [],
+    measurements: [],
     nextLabelNumber: 1,
     nextCurveNumber: 1,
+    nextMeasureNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
@@ -61,6 +63,10 @@ export class ProjectStore {
 
   curve(id: string): Curve | undefined {
     return this._state.curves.find((c) => c.id === id);
+  }
+
+  measurement(id: string): Measurement | undefined {
+    return this._state.measurements.find((m) => m.id === id);
   }
 
   /** Replace the whole project (new mesh, loaded project file). Clears history. */
@@ -114,6 +120,24 @@ export class ProjectStore {
     const list = this._state.curves;
     const index = list.findIndex((x) => x.id === c.id);
     if (index >= 0) list[index] = c;
+  }
+
+  _insertMeasurement(m: Measurement, index?: number): void {
+    const list = this._state.measurements;
+    if (index === undefined || index < 0 || index > list.length) list.push(m);
+    else list.splice(index, 0, m);
+  }
+
+  _removeMeasurement(id: string): { measurement: Measurement; index: number } | null {
+    const list = this._state.measurements;
+    const index = list.findIndex((m) => m.id === id);
+    if (index < 0) return null;
+    const [measurement] = list.splice(index, 1);
+    return { measurement, index };
+  }
+
+  _setNextMeasureNumber(n: number): void {
+    this._state.nextMeasureNumber = n;
   }
 
   _setSpecimen(s: SpecimenInfo): void {

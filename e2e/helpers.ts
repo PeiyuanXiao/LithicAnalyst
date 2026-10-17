@@ -16,6 +16,12 @@ export interface LithicApi {
   exportCsvText(): string;
   exportCurvesCsvText(): string;
   curveDraft(): Vec3[] | null;
+  measureDraft(): Vec3[] | null;
+  autoMeasurements(): import('../src/core/derived').AutoMeasurements | null;
+  exportMeasurementsCsvText(): string;
+  exportManualMeasurementsCsvText(): string;
+  mode(): string;
+  setMode(m: 'annotate' | 'measure' | 'present'): void;
   projectJson(): ProjectFile;
   snap: {
     prepare(mode: 'ridge' | 'valley' | 'off'): Promise<boolean>;
@@ -177,3 +183,6 @@ export function parseCsv(text: string): Array<Record<string, string>> {
 }
 
 export const dist = (a: Vec3, b: Vec3): number => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+/** Points of the measurement being taken. */
+export const measureDraftLength = (page: Page): Promise<number> => page.evaluate(() => window.lithicanalyst.measureDraft()?.length ?? 0);

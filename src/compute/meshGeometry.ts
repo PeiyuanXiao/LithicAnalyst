@@ -1,6 +1,7 @@
 import type { Vec3 } from '../core/types';
 import { signedVolume } from './curvature';
 import { symmetricEigen3 } from './linalg';
+import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /**
  * Whole-mesh geometry on typed arrays (positions xyz…, triangle index abc…):
@@ -38,12 +39,17 @@ export interface EdgeTable {
 }
 
 export function buildEdges(index: ArrayLike<number>, vertexCount: number): EdgeTable {
+  return runSync(buildEdgesSteps(index, vertexCount));
+}
+
+export function* buildEdgesSteps(index: ArrayLike<number>, vertexCount: number): Steps<EdgeTable> {
   const sides = index.length - (index.length % 3);
   // bucket every triangle side under its smaller vertex
   const offsets = new Uint32Array(vertexCount + 1);
   for (let s = 0; s < sides; s++) {
     const a = index[s], b = index[s % 3 === 2 ? s - 2 : s + 1];
     offsets[Math.min(a, b) + 1]++;
+    if (s % YIELD_EVERY === 0) yield;
   }
   for (let v = 0; v < vertexCount; v++) offsets[v + 1] += offsets[v];
   const fill = offsets.slice(0, vertexCount);
@@ -55,6 +61,7 @@ export function buildEdges(index: ArrayLike<number>, vertexCount: number): EdgeT
     const i = fill[lo]++;
     other[i] = Math.max(a, b);
     sideOf[i] = s;
+    if (s % YIELD_EVERY === 0) yield;
   }
   // merge equal (v0, v1) pairs within each bucket into one edge
   const v0: number[] = [];
@@ -76,6 +83,7 @@ export function buildEdges(index: ArrayLike<number>, vertexCount: number): EdgeT
       faces[e]++;
       ofSide[sideOf[i]] = e;
     }
+    if (v % YIELD_EVERY === 0) yield;
   }
   firstEdge[vertexCount] = v0.length;
   return { v0: Uint32Array.from(v0), v1: Uint32Array.from(v1), faces: Uint32Array.from(faces), ofSide, firstEdge };
@@ -190,30 +198,63 @@ export function vertexPca(positions: ArrayLike<number>): PrincipalAxes {
   return axesFromMoments(Math.max(n, 1), sum, m, ref);
 }
 
+/** Area, signed volume and area-weighted moments of the surface, in one pass. */
+export interface SurfaceIntegrals {
+  area: number;
+  /** Signed volume (divergence theorem); meaningful for closed meshes, negative if triangles face inward. */
+  volume: number;
+  /** Moments relative to `ref` (the first vertex), for precision far from the origin. */
+  ref: Vec3;
+  sum: number[];
+  m: number[];
+}
+
 /**
- * PCA of the surface itself (every point of every triangle, i.e. vertices
- * weighted by the area around them): independent of how densely the scanner
- * sampled each part. Uses the exact second moment of a uniform triangle,
+ * Uses the exact second moment of a uniform triangle,
  * E[x xᵀ] = (a aᵀ + b bᵀ + c cᵀ + s sᵀ) / 12 with s = a + b + c.
  */
-export function areaWeightedPca(positions: ArrayLike<number>, index: ArrayLike<number>): PrincipalAxes {
+export function* surfaceIntegralsSteps(positions: ArrayLike<number>, index: ArrayLike<number>): Steps<SurfaceIntegrals> {
   const ref: Vec3 = positions.length >= 3 ? [positions[0], positions[1], positions[2]] : [0, 0, 0];
   const sum = [0, 0, 0];
   const m = new Array<number>(9).fill(0);
-  let total = 0;
-  const at = (v: number): number[] => [positions[3 * v] - ref[0], positions[3 * v + 1] - ref[1], positions[3 * v + 2] - ref[2]];
+  let area = 0;
+  let volume = 0;
+  const a = [0, 0, 0], b = [0, 0, 0], c = [0, 0, 0], s = [0, 0, 0];
+  const load = (out: number[], v: number) => {
+    out[0] = positions[3 * v] - ref[0];
+    out[1] = positions[3 * v + 1] - ref[1];
+    out[2] = positions[3 * v + 2] - ref[2];
+  };
   for (let t = 0; t + 2 < index.length; t += 3) {
-    const area = triangleArea(positions, index[t], index[t + 1], index[t + 2]);
-    if (area === 0) continue;
-    const a = at(index[t]), b = at(index[t + 1]), c = at(index[t + 2]);
-    const s = [a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]];
-    total += area;
+    if (t % YIELD_EVERY === 0) yield;
+    load(a, index[t]);
+    load(b, index[t + 1]);
+    load(c, index[t + 2]);
+    volume += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const ar = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    if (ar === 0) continue;
+    area += ar;
+    for (let i = 0; i < 3; i++) s[i] = a[i] + b[i] + c[i];
     for (let i = 0; i < 3; i++) {
-      sum[i] += (area * s[i]) / 3;
-      for (let j = 0; j < 3; j++) m[3 * i + j] += (area * (a[i] * a[j] + b[i] * b[j] + c[i] * c[j] + s[i] * s[j])) / 12;
+      sum[i] += (ar * s[i]) / 3;
+      for (let j = 0; j < 3; j++) m[3 * i + j] += (ar * (a[i] * a[j] + b[i] * b[j] + c[i] * c[j] + s[i] * s[j])) / 12;
     }
   }
-  return axesFromMoments(total || 1, sum, m, ref);
+  return { area, volume, ref, sum, m };
+}
+
+/** Principal axes of the surface from its integrals. */
+export const surfacePca = (s: SurfaceIntegrals): PrincipalAxes => axesFromMoments(s.area || 1, s.sum, s.m, s.ref);
+
+/**
+ * PCA of the surface itself (every point of every triangle, i.e. vertices
+ * weighted by the area around them): independent of how densely the scanner
+ * sampled each part.
+ */
+export function areaWeightedPca(positions: ArrayLike<number>, index: ArrayLike<number>): PrincipalAxes {
+  return surfacePca(runSync(surfaceIntegralsSteps(positions, index)));
 }
 
 // ---------------------------------------------------------------- planes

@@ -163,7 +163,7 @@ export class SurfaceSnap {
    * zig-zag along mesh edges goes, points on the ridge or valley that `mode`
    * traced stay on it, and the two ends stay where they are. Original coordinates.
    */
-  refine(chain: ArrayLike<number>, mode: SnapMode): Vec3[] {
+  refine(chain: ArrayLike<number>, mode: SnapMode, iterations?: number): Vec3[] {
     const n = chain.length;
     if (n < 3) return this.points(chain);
     const pts = new Float64Array(3 * n);
@@ -179,10 +179,41 @@ export class SurfaceSnap {
       if (i > 0) step = Math.max(step, Math.hypot(pts[3 * i] - pts[3 * i - 3], pts[3 * i + 1] - pts[3 * i - 2], pts[3 * i + 2] - pts[3 * i - 1]));
     }
     const strength = mode === 'off' ? null : (this.fields.get(mode)?.strength ?? null);
-    relaxPath(pts, nor, pathMobility(chain, strength), this.projector(2 * step));
+    relaxPath(pts, nor, pathMobility(chain, strength), this.projector(2 * step), iterations);
     const out: Vec3[] = new Array(n);
     for (let i = 0; i < n; i++) out[i] = [r6(pts[3 * i] + this.offset[0]), r6(pts[3 * i + 1] + this.offset[1]), r6(pts[3 * i + 2] + this.offset[2])];
     return out;
+  }
+
+  /**
+   * Make a polyline lie on the surface: where the midpoint of a segment is off
+   * the surface (a chord across a convex edge cuts through the solid), the
+   * closest surface point is inserted, up to `depth` times per segment.
+   * Original coordinates in and out.
+   */
+  hug(points: Vec3[], depth = 8): Vec3[] {
+    if (points.length < 2) return points;
+    const o = this.offset;
+    const tol = this.loaded.diagonal * 1e-5;
+    const q = new Float64Array(3);
+    const out = new Float64Array(3);
+    const nrm = new Float64Array(3);
+    const result: Vec3[] = [points[0]];
+    const split = (a: Vec3, b: Vec3, level: number) => {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      if (level > 0 && len > tol) {
+        for (let k = 0; k < 3; k++) q[k] = 0.5 * (a[k] + b[k]) - o[k];
+        if (this.projector(len).closest(q, out, nrm) && Math.hypot(out[0] - q[0], out[1] - q[1], out[2] - q[2]) > tol) {
+          const m: Vec3 = [r6(out[0] + o[0]), r6(out[1] + o[1]), r6(out[2] + o[2])];
+          split(a, m, level - 1);
+          split(m, b, level - 1);
+          return;
+        }
+      }
+      result.push(b);
+    };
+    for (let i = 1; i < points.length; i++) split(points[i - 1], points[i], depth);
+    return result;
   }
 
   /** Closest surface point (local coordinates) within `reach`, with the outward normal of its triangle. */
