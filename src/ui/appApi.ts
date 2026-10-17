@@ -8,6 +8,10 @@ import type { Feedback } from './feedback';
 
 export type ViewportBackground = 'light' | 'dark';
 
+/** Work modes; each shows only its own tools and sidebar sections ("compare" joins in 5.1). */
+export const APP_MODES = ['annotate', 'measure', 'present'] as const;
+export type AppMode = (typeof APP_MODES)[number];
+
 export interface DisplaySettings {
   shading: ShadingMode;
   light: LightSettings;
@@ -32,6 +36,7 @@ export interface AppApi {
   readonly selection: Selection;
   readonly display: DisplaySettings;
   readonly feedback: Feedback;
+  readonly mode: AppMode;
   setDisplay(change: (d: DisplaySettings) => void, aspect: DisplayAspect): void;
   hasMesh(): boolean;
   hasScanColors(): boolean;

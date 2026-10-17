@@ -8,6 +8,10 @@ export const STRINGS = {
   'header.help': { zh: '快捷键', en: 'Shortcuts' },
   'header.otherLang': { zh: 'English', en: '中文' },
 
+  'appMode.label': { zh: '模式', en: 'Mode' },
+  'appMode.annotate': { zh: '标注', en: 'Annotate' },
+  'appMode.measure': { zh: '测量', en: 'Measure' },
+  'appMode.present': { zh: '展示', en: 'Present' },
   'mode.select': { zh: '选择', en: 'Select' },
   'mode.draw': { zh: '画箭头', en: 'Draw arrow' },
   'mode.curve': { zh: '画曲线', en: 'Draw curve' },
@@ -113,6 +117,7 @@ export const STRINGS = {
   'dlg.copy.done': { zh: '已复制', en: 'Copied' },
 
   'help.title': { zh: '快捷键', en: 'Shortcuts' },
+  'help.k.mode': { zh: '切换模式：标注 / 测量 / 展示', en: 'Switch mode: annotate / measure / present' },
   'help.k.draw': { zh: '画箭头', en: 'Draw arrow' },
   'help.k.curve': { zh: '画曲线', en: 'Draw curve' },
   'help.k.select': { zh: '选择', en: 'Select' },

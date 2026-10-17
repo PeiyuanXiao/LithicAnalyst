@@ -15,12 +15,12 @@ import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
 import type { ShadingMode } from '../render/meshView';
-import type { AppApi, ViewportBackground } from './appApi';
+import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'selection' | 'specimen' | 'display' | 'mesh';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -446,6 +446,17 @@ function exportSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present'];
+
+/** The sidebar sections, in order, and the work modes that show them. */
+const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
+  [specimenSection, ALL_MODES],
+  [arrowsSection, ['annotate']],
+  [curvesSection, ['annotate']],
+  [displaySection, ALL_MODES],
+  [exportSection, ['annotate']],
+];
+
 export interface Sidebar {
   el: HTMLElement;
   refresh: (kind: RefreshKind) => void;
@@ -453,11 +464,17 @@ export interface Sidebar {
 
 export function buildSidebar(api: AppApi): Sidebar {
   const el = h('aside', { class: 'sidebar', id: 'sidebar' });
-  const sections = [specimenSection(api), arrowsSection(api), curvesSection(api), displaySection(api), exportSection(api)];
+  const sections = SECTIONS.map(([make, modes]) => ({ ...make(api), modes }));
   el.append(...sections.map((s) => s.el));
+  const showMode = () => {
+    for (const s of sections) s.el.hidden = !s.modes.includes(api.mode);
+  };
+  showMode();
   return {
     el,
     refresh: (kind) => {
+      if (kind === 'mode' || kind === 'all') showMode();
+      if (kind === 'mode') return;
       for (const s of sections) s.refresh(kind);
     },
   };

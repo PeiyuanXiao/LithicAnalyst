@@ -56,6 +56,10 @@ export class SelectTool implements Tool {
 
   pointerDown(e: PointerEvent): boolean {
     if (e.button !== 0) return false;
+    if (!this.ctx.editable()) {
+      this.down = { x: e.clientX, y: e.clientY };
+      return false;
+    }
     const id = this.ctx.selection.id;
     const curve = id ? this.ctx.store.curve(id) : undefined;
     if (curve) {

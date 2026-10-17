@@ -20,6 +20,8 @@ export interface ToolContext {
   notify: (key: string, tone?: 'info' | 'warn') => void;
   /** Tool state changed (status hint, cursor). */
   changed: () => void;
+  /** Annotations may be edited (false outside the annotate mode). */
+  editable: () => boolean;
 }
 
 /** Lazily computed surface hit for the current pointer event (one ray cast at most). */

@@ -60,6 +60,15 @@ Curves were added this way; use them as the worked example.
 6. `ui/sidebar.ts`: a section listing the items; `io/csv.ts`: an exporter.
 7. Tests for the commands, the format round trip and the exporter.
 
+## Work modes
+
+The top bar switches between work modes (`AppMode` in `ui/appApi.ts`: annotate, measure,
+present; compare comes with roadmap 5.1). A mode owns its tools and sidebar sections:
+`App.updateToolbar` shows the toolbar of the current mode, and `SECTIONS` in `ui/sidebar.ts`
+lists which modes show each section. Outside the annotate mode the select tool only navigates
+(`ToolContext.editable()`), and keys that change annotations are ignored. Switching modes
+keeps the selection and the undo history.
+
 ## Data model
 
 * **Scars are objects of their own** (`ProjectState.scars`). The direction arrow is optional

@@ -11,6 +11,9 @@
 - Curve CSV (one row per point, with arc length) and `annotations.curves` in the project file
   (format version 1; older files open unchanged).
 - A warning when the browser's autosave space is full.
+- Work modes in the top bar: Annotate, Measure, Present (M cycles through them). Each mode shows
+  only its own tools and sidebar sections; the existing tools are under Annotate. Switching keeps
+  the selection and the undo history, and the last mode is remembered.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

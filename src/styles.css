@@ -484,6 +484,18 @@ kbd {
   box-shadow: none;
 }
 
+/* work modes, in the top bar */
+.seg-app-mode .seg-btn {
+  min-height: 30px;
+  padding-inline: 14px;
+}
+
+.seg-app-mode .seg-btn[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+
 /* snapping choice, shown while drawing curves */
 .tb-snap {
   display: flex;
@@ -1208,7 +1220,8 @@ textarea.ctl-text {
   .hdr-btn {
     padding-inline: 8px;
   }
-  .seg-mode .seg-btn {
+  .seg-mode .seg-btn,
+  .seg-app-mode .seg-btn {
     padding-inline: 8px;
   }
   .brand-ver {

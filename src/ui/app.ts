@@ -22,7 +22,7 @@ import { Selection } from '../tools/selection';
 import { SurfaceSnap } from '../tools/surfaceSnap';
 import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
-import type { AppApi, DisplayAspect, DisplaySettings } from './appApi';
+import { APP_MODES, type AppApi, type AppMode, type DisplayAspect, type DisplaySettings } from './appApi';
 import { segmented } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { Feedback } from './feedback';
@@ -55,6 +55,11 @@ function loadDisplay(): DisplaySettings {
     arrows: { ...DEFAULT_ARROW_DISPLAY, ...(saved.arrows ?? {}) },
     curveSnap: SNAP_MODES.includes(saved.curveSnap as SnapMode) ? (saved.curveSnap as SnapMode) : DEFAULT_DISPLAY.curveSnap,
   };
+}
+
+function loadMode(): AppMode {
+  const saved = readPref<string>('mode', 'annotate');
+  return (APP_MODES as readonly string[]).includes(saved) ? (saved as AppMode) : 'annotate';
 }
 
 /** "3 arrows · 2 curves" for toasts and dialogs. */
@@ -95,6 +100,7 @@ export class App implements AppApi {
   readonly selection = new Selection();
   readonly display: DisplaySettings = loadDisplay();
   readonly feedback: Feedback;
+  mode: AppMode = loadMode();
 
   private viewer: Viewer | null = null;
   private lights: LightRig | null = null;
@@ -130,6 +136,7 @@ export class App implements AppApi {
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
   private saveBtn!: HTMLButtonElement;
+  private appModeSeg: ReturnType<typeof segmented> | null = null;
   private modeSeg: ReturnType<typeof segmented> | null = null;
   private snapSeg: ReturnType<typeof segmented> | null = null;
   private snapEl: HTMLElement | null = null;
@@ -139,7 +146,7 @@ export class App implements AppApi {
   constructor(private readonly root: HTMLElement) {
     document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en';
     this.appEl = h('div', { class: 'app' });
-    this.viewportEl = h('section', { class: 'viewport', id: 'viewport', 'data-bg': this.display.background });
+    this.viewportEl = h('section', { class: 'viewport', id: 'viewport', 'data-bg': this.display.background, 'data-mode': this.mode });
     this.toolbarEl = h('div', { class: 'viewport-ui vp-toolbar' });
     this.emptyEl = h('div', { class: 'viewport-ui vp-empty' });
     this.coordEl = h('span', { class: 'viewport-ui status-coords mono', id: 'status-coords' });
@@ -198,6 +205,7 @@ export class App implements AppApi {
       snapMode: () => this.display.curveSnap,
       notify: (key, tone) => this.feedback.toast(t(key), tone === 'warn' ? 'warn' : 'info'),
       changed: () => this.updateCursor(),
+      editable: () => this.mode === 'annotate',
     };
     this.tools = new ToolController(ctx, this.viewportEl);
     this.tools.register(new SelectTool(ctx));
@@ -248,10 +256,16 @@ export class App implements AppApi {
     this.undoBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-undo', 'aria-label': t('header.undo'), onclick: () => this.undo() }, icon(ICONS.undo)) as HTMLButtonElement;
     this.redoBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-redo', 'aria-label': t('header.redo'), onclick: () => this.redo() }, icon(ICONS.redo)) as HTMLButtonElement;
     this.saveBtn = btn('btn-save-project', ICONS.save, t('header.saveProject'), () => this.saveProject(), 'btn-quiet', `${t('header.saveProject')} (Ctrl+S)`);
+    this.appModeSeg = segmented('app-mode', null, APP_MODES.map((m) => ({ value: m, label: t(`appMode.${m}`), title: `${t(`appMode.${m}`)} (M)` })), this.mode, (v) =>
+      this.setMode(v as AppMode),
+    );
+    this.appModeSeg.el.classList.add('seg-app-mode');
+    this.appModeSeg.el.setAttribute('aria-label', t('appMode.label'));
     return h(
       'header',
       { class: 'topbar' },
       h('div', { class: 'brand' }, h('span', { class: 'brand-name' }, 'LithicAnalyst'), h('span', { class: 'brand-ver mono' }, `v${__APP_VERSION__}`)),
+      this.appModeSeg.el,
       h(
         'nav',
         { class: 'top-actions', 'aria-label': 'File' },
@@ -280,9 +294,16 @@ export class App implements AppApi {
     );
     this.snapSeg.el.setAttribute('aria-label', t('snap.label'));
     this.snapEl = h('div', { class: 'tb-snap', id: 'snap-control', title: `${t('snap.label')} (S)` }, icon(ICONS.magnet), this.snapSeg.el);
-    this.snapEl.hidden = this.tools?.activeId !== 'curve';
     const fit = h('button', { type: 'button', class: 'icon-btn tb-btn', id: 'btn-fit', title: `${t('view.fit')} (H)`, 'aria-label': t('view.fit'), onclick: () => this.viewer?.fitView() }, icon(ICONS.fit));
     this.toolbarEl.append(this.modeSeg.el, this.snapEl, fit);
+    this.updateToolbar();
+  }
+
+  /** Tools of the current work mode only. */
+  private updateToolbar(): void {
+    const annotate = this.mode === 'annotate';
+    if (this.modeSeg) this.modeSeg.el.hidden = !annotate;
+    if (this.snapEl) this.snapEl.hidden = !annotate || this.tools?.activeId !== 'curve';
   }
 
   private buildEmptyState(): void {
@@ -333,7 +354,7 @@ export class App implements AppApi {
     if (tools.adjustingLight) cursor = 'crosshair';
     this.viewportEl.style.cursor = cursor;
     this.modeSeg?.set(tools.activeId ?? 'select');
-    if (this.snapEl) this.snapEl.hidden = tools.activeId !== 'curve';
+    this.updateToolbar();
   }
 
   private queueCoords(): void {
@@ -377,7 +398,7 @@ export class App implements AppApi {
   }
 
   private syncAnnotations(): void {
-    const handles = this.tools?.activeId === 'select';
+    const handles = this.tools?.activeId === 'select' && this.mode === 'annotate';
     this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.occlusionDirty = true;
@@ -387,6 +408,24 @@ export class App implements AppApi {
     this.tools?.setActive(id);
     this.syncAnnotations();
     this.updateCursor();
+  }
+
+  /** Switch the work mode. The selection and the undo history are kept. */
+  setMode(mode: AppMode): void {
+    if (mode === this.mode) return;
+    // tools belong to their mode; an unfinished curve is kept (as on Esc)
+    if (mode !== 'annotate') this.setTool('select');
+    this.mode = mode;
+    writePref('mode', mode);
+    this.viewportEl.dataset.mode = mode;
+    this.appModeSeg?.set(mode);
+    this.updateToolbar();
+    this.syncAnnotations();
+    this.sidebar.refresh('mode');
+  }
+
+  private cycleMode(): void {
+    this.setMode(APP_MODES[(APP_MODES.indexOf(this.mode) + 1) % APP_MODES.length]);
   }
 
   /** The curve tool re-evaluates what is under the cursor (snap mode or curvature scale changed). */
@@ -832,11 +871,14 @@ export class App implements AppApi {
       }
       if (e.repeat && !['BracketLeft', 'BracketRight', 'Backspace'].includes(e.code)) return;
       switch (e.code) {
+        case 'KeyM':
+          this.cycleMode();
+          return;
         case 'KeyA':
-          if (this.hasMesh()) this.setTool('draw');
+          if (this.hasMesh() && this.mode === 'annotate') this.setTool('draw');
           return;
         case 'KeyP':
-          if (this.hasMesh()) this.setTool('curve');
+          if (this.hasMesh() && this.mode === 'annotate') this.setTool('curve');
           return;
         case 'KeyV':
           this.setTool('select');
@@ -856,11 +898,11 @@ export class App implements AppApi {
             e.preventDefault();
             return;
           }
-          if (e.repeat) return;
+          if (e.repeat || this.mode !== 'annotate') return;
           this.deleteSelection(e);
           return;
         case 'Delete':
-          this.deleteSelection(e);
+          if (this.mode === 'annotate') this.deleteSelection(e);
           return;
         case 'KeyH':
           this.viewer?.fitView();
@@ -873,6 +915,7 @@ export class App implements AppApi {
           return;
         case 'BracketRight':
         case 'BracketLeft': {
+          if (this.mode !== 'annotate') return;
           // step through the kind of item that is selected (arrows first when nothing is)
           const st = this.store.state;
           const ids = (sel && this.store.curve(sel)) || (!sel && !st.scars.length) ? st.curves.map((c) => c.id) : st.scars.map((a) => a.id);
@@ -890,7 +933,7 @@ export class App implements AppApi {
         return;
       }
       const digit = /^Digit([1-9])$/.exec(e.code) ?? /^Numpad([1-9])$/.exec(e.code);
-      if (digit && sel) {
+      if (digit && sel && this.mode === 'annotate') {
         const isCurve = !!this.store.curve(sel);
         const f = numberKeyField(isCurve ? CURVE_FIELDS : SCAR_FIELDS);
         const opt = f?.options?.[Number(digit[1]) - 1];
@@ -913,6 +956,7 @@ export class App implements AppApi {
   private showHelp(): void {
     const count = Math.max(numberKeyField(SCAR_FIELDS)?.options?.length ?? 0, numberKeyField(CURVE_FIELDS)?.options?.length ?? 0) || 5;
     const rows: Array<[string, string]> = [
+      ['M', t('help.k.mode')],
       ['A', t('help.k.draw')],
       ['P', t('help.k.curve')],
       ['V', t('help.k.select')],
@@ -962,6 +1006,8 @@ export class App implements AppApi {
       },
       view: (toward: Vec3, up: Vec3) => this.viewer?.viewFrom(toward, up),
       setTool: (id: string) => this.setTool(id),
+      mode: () => this.mode,
+      setMode: (m: AppMode) => this.setMode(m),
       exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }),
       exportCurvesCsvText: () => curveCsv(this.store.state, { excelBom: false }),
       /** Points of the curve being drawn (null when the curve tool is not active). */
