@@ -32,6 +32,25 @@ analysis  outside this repository (R, Python, …) reads the CSV or the project 
 6. **Interface text lives in `ui/strings.ts`** with Chinese and English for every key. Keep
    the interface lean: labels and controls, no explanatory paragraphs.
 
+## Mesh geometry
+
+`compute/meshGeometry.ts` holds whole-mesh geometry on typed arrays, each function with
+known-answer tests (boxes, icospheres, open and non-manifold meshes in
+`tests/meshGeometry.test.ts`):
+
+* `surfaceArea`, `signedVolume` (divergence theorem; meaningful only for closed meshes);
+* `buildEdges` (undirected edges with triangle counts) and `meshTopology`: boundary edges,
+  boundary loops, non-manifold edges, connected pieces, `closed`;
+* `vertexPca` (every vertex counted once) and `areaWeightedPca` (the surface itself, exact
+  second moments of each triangle);
+* `fitPlane`: total least-squares plane of a point set (direction of least variance);
+* `intersectPlane`: the section of the mesh by a plane, as polylines;
+* `partitionFaces`: connected regions of triangles separated by a set of mesh edges.
+
+`compute/linalg.ts` has the symmetric 3×3 eigen solver they share. On a 2-million-triangle
+scan the slowest of these (`buildEdges`) takes a few hundred milliseconds, so callers run them
+off the interaction path (after loading, in idle time or a worker), never per pointer move.
+
 ## Curves and snapping
 
 * `compute/surfacePath.ts` (pure): feature strength per vertex from signed mean curvature
