@@ -11,6 +11,10 @@
 - Curve CSV (one row per point, with arc length) and `annotations.curves` in the project file
   (format version 1; older files open unchanged).
 - A warning when the browser's autosave space is full.
+- Project files are saved in format version 2: scars are objects of their own
+  (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
+  orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from
+  earlier versions open unchanged and are converted when saved; the arrow CSV is unchanged.
 
 ## 0.1.0 — 2026-10-15
 

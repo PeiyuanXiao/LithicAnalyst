@@ -1,6 +1,6 @@
 import {
   deleteCurve,
-  deleteScarVector,
+  deleteScar,
   setCurveAttribute,
   setCurveLabel,
   setScarAttribute,
@@ -9,8 +9,8 @@ import {
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
 import { CURVE_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
-import { arrowLength } from '../core/store';
-import type { AttributeValue, Curve, ScarVector } from '../core/types';
+import { vectorLength } from '../core/store';
+import type { AttributeValue, Curve, Scar } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
@@ -106,16 +106,16 @@ function arrowsSection(api: AppApi): Section {
   body.append(list, inspector);
 
   let builtFor: string | null = null;
-  let refs: { label: HTMLInputElement; setters: Array<(a: ScarVector) => void>; coords: HTMLElement } | null = null;
+  let refs: { label: HTMLInputElement; setters: Array<(a: Scar) => void>; coords: HTMLElement } | null = null;
 
   const renderList = () => {
     const st = api.store.state;
-    badge.textContent = String(st.scarVectors.length);
-    list.hidden = st.scarVectors.length === 0;
+    badge.textContent = String(st.scars.length);
+    list.hidden = st.scars.length === 0;
     clear(list);
     const sel = api.selection.id;
     const unit = st.specimen.unit;
-    for (const a of st.scarVectors) {
+    for (const a of st.scars) {
       const isSel = a.id === sel;
       const color = isSel ? ARROW_COLORS.selected : arrowColor(a, api.display.arrows.colorMode);
       const li = h(
@@ -131,14 +131,14 @@ function arrowsSection(api: AppApi): Section {
         h('span', { class: 'chip', style: `--chip:${color}` }),
         h('span', { class: 'arrow-id mono' }, a.label),
         h('span', { class: 'arrow-meta' }, listSummary(a.attributes)),
-        h('span', { class: 'arrow-len mono' }, `${fmtNum(arrowLength(a), 1)}${unit ? ` ${unit}` : ''}`),
+        h('span', { class: 'arrow-len mono' }, a.vector ? `${fmtNum(vectorLength(a.vector), 1)}${unit ? ` ${unit}` : ''}` : '–'),
       );
       list.append(li);
       if (isSel) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest' }));
     }
   };
 
-  const buildField = (f: FieldDef, a: ScarVector): { el: HTMLElement; set: (a: ScarVector) => void } => {
+  const buildField = (f: FieldDef, a: Scar): { el: HTMLElement; set: (a: Scar) => void } => {
     const id = `field-${f.key}`;
     const current = a.attributes[f.key];
     const onPick = (v: string) => {
@@ -165,7 +165,7 @@ function arrowsSection(api: AppApi): Section {
   const renderInspector = (force: boolean) => {
     const st = api.store.state;
     const id = api.selection.id;
-    const a = id ? api.store.arrow(id) : undefined;
+    const a = id ? api.store.scar(id) : undefined;
     if (!a) {
       clear(inspector);
       builtFor = null;
@@ -191,7 +191,7 @@ function arrowsSection(api: AppApi): Section {
         { class: 'insp-head' },
         label,
         h('button', { type: 'button', class: 'icon-btn', id: 'insp-focus', title: t('arrows.focus'), 'aria-label': t('arrows.focus'), onclick: () => api.selection.id && api.focusArrow(api.selection.id) }, icon(ICONS.target)),
-        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteScarVector(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
+        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteScar(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
       );
       const fields = SCAR_FIELDS.map((f) => buildField(f, a));
       const coords = h('dl', { class: 'meta coords' });
@@ -204,11 +204,13 @@ function arrowsSection(api: AppApi): Section {
     clear(refs.coords);
     const u = st.specimen.unit;
     const p = (v: [number, number, number]) => `${fmtNum(v[0])}, ${fmtNum(v[1])}, ${fmtNum(v[2])}`;
-    refs.coords.append(
-      ...metaRow(t('arrows.start'), h('span', { class: 'mono' }, p(a.start))),
-      ...metaRow(t('arrows.end'), h('span', { class: 'mono' }, p(a.end))),
-      ...metaRow(t('arrows.length'), h('span', { class: 'mono' }, `${fmtNum(arrowLength(a))}${u ? ` ${u}` : ''}`)),
-    );
+    const v = a.vector;
+    if (v)
+      refs.coords.append(
+        ...metaRow(t('arrows.start'), h('span', { class: 'mono' }, p(v.start))),
+        ...metaRow(t('arrows.end'), h('span', { class: 'mono' }, p(v.end))),
+        ...metaRow(t('arrows.length'), h('span', { class: 'mono' }, `${fmtNum(vectorLength(v))}${u ? ` ${u}` : ''}`)),
+      );
   };
 
   const refresh = (kind: RefreshKind) => {

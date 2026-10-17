@@ -18,7 +18,9 @@
 - 如果 GitHub Actions 上能稳定安装浏览器，就把 e2e 加进 CI；否则只在本地跑。
 - 验收：`npm run e2e` 通过；`docs/developing.md` 写一行用法。
 
-### 0.2 数据模型 v2 ⬜
+### 0.2 数据模型 v2 ✅ 2026-10-17
+
+> 完成：片疤成为独立对象（`annotations.scars`，箭头为可选的 `vector`），新增 `specimen.frame` 与 `derived`；`formatVersion` 2，v1 文件读入时自动迁移，箭头 CSV 不变。
 
 给后续功能一个统一的骨架，避免返工。
 

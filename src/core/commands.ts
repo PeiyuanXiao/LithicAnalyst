@@ -1,4 +1,4 @@
-import type { Curve, ScarVector, SpecimenInfo } from './types';
+import type { Curve, Scar, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -84,66 +84,66 @@ export class CommandHistory {
   }
 }
 
-const cloneArrow = (a: ScarVector): ScarVector => structuredClone(a);
+const cloneScar = (a: Scar): Scar => structuredClone(a);
 
-export class AddArrowCommand implements Command {
+export class AddScarCommand implements Command {
   readonly labelKey = 'cmd.addArrow';
   readonly createdAt = Date.now();
   private prevNext = 0;
-  constructor(private readonly arrow: ScarVector, private readonly labelNumber: number | null) {}
+  constructor(private readonly scar: Scar, private readonly labelNumber: number | null) {}
   apply(store: ProjectStore): void {
     this.prevNext = store.state.nextLabelNumber;
-    store._insertArrow(cloneArrow(this.arrow));
+    store._insertScar(cloneScar(this.scar));
     if (this.labelNumber !== null) store._setNextLabelNumber(Math.max(this.prevNext, this.labelNumber + 1));
-    store.notify({ kind: 'arrows', ids: [this.arrow.id] });
+    store.notify({ kind: 'scars', ids: [this.scar.id] });
   }
   revert(store: ProjectStore): void {
-    store._removeArrow(this.arrow.id);
+    store._removeScar(this.scar.id);
     store._setNextLabelNumber(this.prevNext);
-    store.notify({ kind: 'arrows', ids: [this.arrow.id] });
+    store.notify({ kind: 'scars', ids: [this.scar.id] });
   }
 }
 
-export class DeleteArrowCommand implements Command {
+export class DeleteScarCommand implements Command {
   readonly labelKey = 'cmd.deleteArrow';
   readonly createdAt = Date.now();
-  private removed: { arrow: ScarVector; index: number } | null = null;
+  private removed: { scar: Scar; index: number } | null = null;
   constructor(private readonly id: string) {}
   apply(store: ProjectStore): void {
-    this.removed = store._removeArrow(this.id);
-    store.notify({ kind: 'arrows', ids: [this.id] });
+    this.removed = store._removeScar(this.id);
+    store.notify({ kind: 'scars', ids: [this.id] });
   }
   revert(store: ProjectStore): void {
-    if (this.removed) store._insertArrow(cloneArrow(this.removed.arrow), this.removed.index);
-    store.notify({ kind: 'arrows', ids: [this.id] });
+    if (this.removed) store._insertScar(cloneScar(this.removed.scar), this.removed.index);
+    store.notify({ kind: 'scars', ids: [this.id] });
   }
 }
 
-export class UpdateArrowCommand implements Command {
+export class UpdateScarCommand implements Command {
   readonly createdAt = Date.now();
-  private after: ScarVector;
+  private after: Scar;
   constructor(
     readonly labelKey: string,
-    private readonly before: ScarVector,
-    after: ScarVector,
+    private readonly before: Scar,
+    after: Scar,
     /** Commands with the same mergeKey issued within a short window collapse into one undo step. */
     private readonly mergeKey: string | null = null,
   ) {
-    this.after = cloneArrow(after);
+    this.after = cloneScar(after);
   }
   apply(store: ProjectStore): void {
-    store._putArrow(cloneArrow(this.after));
-    store.notify({ kind: 'arrows', ids: [this.after.id] });
+    store._putScar(cloneScar(this.after));
+    store.notify({ kind: 'scars', ids: [this.after.id] });
   }
   revert(store: ProjectStore): void {
-    store._putArrow(cloneArrow(this.before));
-    store.notify({ kind: 'arrows', ids: [this.before.id] });
+    store._putScar(cloneScar(this.before));
+    store.notify({ kind: 'scars', ids: [this.before.id] });
   }
   merge(next: Command): boolean {
-    if (!(next instanceof UpdateArrowCommand)) return false;
+    if (!(next instanceof UpdateScarCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
-    this.after = cloneArrow(next.after);
+    this.after = cloneScar(next.after);
     return true;
   }
 }
@@ -220,21 +220,21 @@ export class SetSpecimenCommand implements Command {
     after: SpecimenInfo,
     private readonly mergeKey: string | null = null,
   ) {
-    this.after = { ...after };
+    this.after = structuredClone(after);
   }
   apply(store: ProjectStore): void {
-    store._setSpecimen({ ...this.after });
+    store._setSpecimen(structuredClone(this.after));
     store.notify({ kind: 'specimen' });
   }
   revert(store: ProjectStore): void {
-    store._setSpecimen({ ...this.before });
+    store._setSpecimen(structuredClone(this.before));
     store.notify({ kind: 'specimen' });
   }
   merge(next: Command): boolean {
     if (!(next instanceof SetSpecimenCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
-    this.after = { ...next.after };
+    this.after = structuredClone(next.after);
     return true;
   }
 }

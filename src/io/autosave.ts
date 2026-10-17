@@ -1,4 +1,4 @@
-import type { ProjectFileV1 } from '../core/schema';
+import type { ProjectFile } from '../core/schema';
 
 /**
  * Crash recovery in this browser only (localStorage, keyed by the mesh hash).
@@ -8,7 +8,8 @@ const PREFIX = 'lithicanalyst:autosave:';
 
 export interface AutosaveEntry {
   savedAt: string;
-  file: ProjectFileV1;
+  /** A project file as written by this or an earlier version (read it with parseProjectFile). */
+  file: unknown;
 }
 
 export function autosaveAvailable(): boolean {
@@ -22,7 +23,7 @@ export function autosaveAvailable(): boolean {
   }
 }
 
-export function writeAutosave(sha256: string, file: ProjectFileV1): boolean {
+export function writeAutosave(sha256: string, file: ProjectFile): boolean {
   try {
     const entry: AutosaveEntry = { savedAt: new Date().toISOString(), file };
     localStorage.setItem(PREFIX + sha256, JSON.stringify(entry));

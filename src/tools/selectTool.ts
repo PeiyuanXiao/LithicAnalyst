@@ -67,7 +67,7 @@ export class SelectTool implements Tool {
     }
     const which = this.ctx.arrows.handleAt(e.clientX, e.clientY);
     if (which && id) {
-      const a = this.ctx.store.arrow(id);
+      const a = this.ctx.store.scar(id)?.vector;
       if (a) {
         this.drag = {
           id,

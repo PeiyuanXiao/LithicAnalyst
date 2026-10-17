@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { deleteCurve, deleteScarVector, setCurveAttribute, setScarAttribute } from '../core/actions';
+import { deleteCurve, deleteScar, setCurveAttribute, setScarAttribute } from '../core/actions';
 import { CURVE_FIELDS, numberKeyField, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
@@ -364,9 +364,9 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.arrow(sel) && !this.store.curve(sel)) this.selection.set(null);
+    if (sel && !this.store.scar(sel) && !this.store.curve(sel)) this.selection.set(null);
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { arrows: 'arrows', curves: 'curves', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
@@ -457,7 +457,7 @@ export class App implements AppApi {
   }
 
   focusArrow(id: string): void {
-    const a = this.store.arrow(id);
+    const a = this.store.scar(id)?.vector;
     const v = this.viewer;
     if (!a || !v) return;
     this.selection.set(id);
@@ -542,7 +542,7 @@ export class App implements AppApi {
     if (!sel) return;
     e.preventDefault();
     if (this.store.curve(sel)) deleteCurve(this.store, sel);
-    else deleteScarVector(this.store, sel);
+    else deleteScar(this.store, sel);
   }
 
   undo(): void {
@@ -617,6 +617,7 @@ export class App implements AppApi {
       annotator: readPref('annotator', prev.specimen.annotator),
       unit: readPref('unit', prev.specimen.unit || 'mm'),
       notes: '',
+      frame: null,
     };
     this.selection.set(null);
     this.store.reset(fresh);
@@ -630,7 +631,7 @@ export class App implements AppApi {
     this.tools?.cancel();
     this.selection.set(null);
     this.store.reset(state);
-    if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state.scarVectors.length, state.curves.length) }));
+    if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state.scars.length, state.curves.length) }));
   }
 
   private async openMeshFile(file: File): Promise<void> {
@@ -668,11 +669,17 @@ export class App implements AppApi {
       return;
     }
     const entry = readAutosave(loaded.info.sha256);
-    const nArrows = entry?.file.annotations?.scarVectors?.length ?? 0;
-    const nCurves = entry?.file.annotations?.curves?.length ?? 0;
-    if (!entry || (!nArrows && !nCurves)) return;
+    if (!entry) return;
+    let saved: ProjectState;
+    try {
+      saved = parseProjectFile(entry.file);
+    } catch (e) {
+      this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
+      return;
+    }
+    if (!saved.scars.length && !saved.curves.length) return;
     const when = new Date(entry.savedAt).toLocaleString(getLang() === 'zh' ? 'zh-CN' : 'en-GB');
-    const what = countsText(nArrows, nCurves);
+    const what = countsText(saved.scars.length, saved.curves.length);
     const ok = await this.feedback.confirm(
       t('dlg.restore.title'),
       t('dlg.restore.body', { what, time: when }),
@@ -680,12 +687,8 @@ export class App implements AppApi {
       t('dlg.restore.no'),
     );
     if (!ok) return;
-    try {
-      this.applyProject(parseProjectFile(entry.file), null);
-      this.feedback.toast(t('toast.restored', { what }));
-    } catch (e) {
-      this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
-    }
+    this.applyProject(saved, null);
+    this.feedback.toast(t('toast.restored', { what }));
   }
 
   private async openProjectFile(file: File): Promise<void> {
@@ -872,7 +875,7 @@ export class App implements AppApi {
         case 'BracketLeft': {
           // step through the kind of item that is selected (arrows first when nothing is)
           const st = this.store.state;
-          const ids = (sel && this.store.curve(sel)) || (!sel && !st.scarVectors.length) ? st.curves.map((c) => c.id) : st.scarVectors.map((a) => a.id);
+          const ids = (sel && this.store.curve(sel)) || (!sel && !st.scars.length) ? st.curves.map((c) => c.id) : st.scars.map((a) => a.id);
           if (!ids.length) return;
           const i = sel ? ids.indexOf(sel) : -1;
           const step = e.code === 'BracketRight' ? 1 : -1;

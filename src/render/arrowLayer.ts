@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { fieldByKey } from '../core/fields';
-import type { ProjectState, ScarVector, Vec3 } from '../core/types';
+import { hasVector, type ProjectState, type Scar, type Vec3 } from '../core/types';
 import type { Viewer } from './viewer';
 
 export type ArrowColorMode = 'uniform' | 'completeness' | 'certainty' | 'direction';
@@ -176,15 +176,16 @@ function hsl(h: number, s: number, l: number): string {
   return `#${new THREE.Color().setHSL(h, s, l, THREE.SRGBColorSpace).getHexString(THREE.SRGBColorSpace)}`;
 }
 
-export function arrowColor(a: ScarVector, mode: ArrowColorMode): string {
+export function arrowColor(a: Scar, mode: ArrowColorMode): string {
   if (mode === 'completeness' || mode === 'certainty') {
     const field = fieldByKey(mode);
     const i = field?.options?.findIndex((o) => o.value === a.attributes[mode]) ?? -1;
     return i >= 0 ? ARROW_COLORS.palette[i % ARROW_COLORS.palette.length] : ARROW_COLORS.palette[5];
   }
-  if (mode === 'direction') {
+  if (mode === 'direction' && a.vector) {
     // hue from the azimuth in the file's XY plane, lightness from the Z component
-    const d: Vec3 = [a.end[0] - a.start[0], a.end[1] - a.start[1], a.end[2] - a.start[2]];
+    const { start, end } = a.vector;
+    const d: Vec3 = [end[0] - start[0], end[1] - start[1], end[2] - start[2]];
     const len = Math.hypot(d[0], d[1], d[2]) || 1;
     const az = (Math.atan2(d[1], d[0]) / (2 * Math.PI) + 1) % 1;
     return hsl(az, 0.78, 0.5 + 0.18 * (d[2] / len));
@@ -192,7 +193,7 @@ export function arrowColor(a: ScarVector, mode: ArrowColorMode): string {
   return ARROW_COLORS.uniform;
 }
 
-/** Draws all scar vectors, the drawing preview, the hover marker and endpoint handles. */
+/** Draws the direction arrows of all scars, the drawing preview, the hover marker and endpoint handles. */
 export class ArrowLayer {
   readonly group = new THREE.Group();
   private visuals = new Map<string, ArrowVisual>();
@@ -242,7 +243,8 @@ export class ArrowLayer {
     const seen = new Set<string>();
     const radius = this.viewer.diagonal * 0.0028 * display.thickness;
     const lift = this.liftDistance(display);
-    for (const a of state.scarVectors) {
+    for (const a of state.scars) {
+      if (!hasVector(a)) continue;
       seen.add(a.id);
       let v = this.visuals.get(a.id);
       if (!v) {
@@ -252,7 +254,7 @@ export class ArrowLayer {
         this.visuals.set(a.id, v);
         this.group.add(v.root);
       }
-      let start = a.start, end = a.end, sn = a.startNormal, en = a.endNormal;
+      let { start, end, startNormal: sn, endNormal: en } = a.vector;
       if (this.override && this.override.id === a.id) {
         if (this.override.which === 'start') {
           start = this.override.point;

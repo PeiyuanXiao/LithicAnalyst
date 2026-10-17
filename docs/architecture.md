@@ -52,13 +52,26 @@ Curves were added this way; use them as the worked example.
 1. `core/types.ts`: add the item type (e.g. `Landmark { id, label, point, normal, attributes }`)
    and a list under `ProjectState`.
 2. `core/commands.ts` + `core/actions.ts`: add/delete/update commands, mirroring the scar
-   vector ones.
+   ones.
 3. `core/schema.ts`: serialise under `annotations.landmarks`; old files simply lack the key.
    Bump `formatVersion` only if old readers would misread the file.
 4. `render/`: a layer class that draws the items from state (see `ArrowLayer.sync`).
 5. `tools/`: a tool that creates and edits them; register it in `ui/app.ts`.
 6. `ui/sidebar.ts`: a section listing the items; `io/csv.ts`: an exporter.
 7. Tests for the commands, the format round trip and the exporter.
+
+## Data model
+
+* **Scars are objects of their own** (`ProjectState.scars`). The direction arrow is optional
+  (`scar.vector`, `null` for a scar known only by its area); the arrow layer, the arrow CSV and
+  the endpoint handles only see scars that have one (`hasVector`).
+* **Derived results** (`core/derived.ts`) are computed from the annotations and recomputed when
+  their inputs change. `serializeProject` writes the latest values under `derived` for external
+  readers; `parseProjectFile` ignores them. Later features add their results there.
+* **Orientation is metadata.** `specimen.frame` is a matrix from original to specimen
+  coordinates; nothing transforms stored coordinates.
+* The project file format and its migrations live in `core/schema.ts`
+  (`docs/project-format.md`); format 1 files are converted when read.
 
 ## Data flow
 

@@ -22,14 +22,14 @@ test('undo and redo step through arrows, fields and curves', async ({ page }) =>
   await page.keyboard.press('Enter');
   await expect.poll(() => counts(page)).toEqual({ arrows: 1, curves: 1 });
   const done = await state(page);
-  expect(done.scarVectors[0].attributes.completeness).toBe('bulb_complete');
+  expect(done.scars[0].attributes.completeness).toBe('bulb_complete');
   await expect(undo).toBeEnabled();
 
   // keyboard: back to the empty project, one step at a time
   await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(() => counts(page)).toEqual({ arrows: 1, curves: 0 });
   await page.keyboard.press('ControlOrMeta+z');
-  await expect.poll(async () => (await state(page)).scarVectors[0].attributes.completeness).toBe('point_complete');
+  await expect.poll(async () => (await state(page)).scars[0].attributes.completeness).toBe('point_complete');
   await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(() => counts(page)).toEqual({ arrows: 0, curves: 0 });
   await expect(undo).toBeDisabled();
@@ -39,12 +39,12 @@ test('undo and redo step through arrows, fields and curves', async ({ page }) =>
   await page.keyboard.press('ControlOrMeta+Shift+z');
   await expect.poll(() => counts(page)).toEqual({ arrows: 1, curves: 0 });
   await redo.click();
-  await expect.poll(async () => (await state(page)).scarVectors[0].attributes.completeness).toBe('bulb_complete');
+  await expect.poll(async () => (await state(page)).scars[0].attributes.completeness).toBe('bulb_complete');
   await redo.click();
   await expect.poll(() => counts(page)).toEqual({ arrows: 1, curves: 1 });
   await expect(redo).toBeDisabled();
   const redone = await state(page);
-  expect(redone.scarVectors).toEqual(done.scarVectors);
+  expect(redone.scars).toEqual(done.scars);
   expect(redone.curves).toEqual(done.curves);
 
   // a new change after an undo clears the redo history
@@ -54,7 +54,7 @@ test('undo and redo step through arrows, fields and curves', async ({ page }) =>
   await page.keyboard.press('a');
   await dragArrow(page, roofPoint(12, 30), roofPoint(9, 42));
   await expect(redo).toBeDisabled();
-  expect((await state(page)).scarVectors.map((a) => a.label)).toEqual(['S1', 'S2']);
+  expect((await state(page)).scars.map((a) => a.label)).toEqual(['S1', 'S2']);
 });
 
 test('while a curve is being drawn, Ctrl+Z removes its last point instead', async ({ page }) => {

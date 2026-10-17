@@ -29,22 +29,32 @@ export interface MeshInfo {
   bboxMax: Vec3;
 }
 
+/**
+ * Orientation of the specimen for display and length/width/thickness: a
+ * row-major 4×4 matrix taking original coordinates to specimen coordinates
+ * (+Z toward the viewer of the main face, +Y up on the page, +X right).
+ * Metadata only: stored coordinates are never transformed.
+ */
+export interface SpecimenFrame {
+  matrix: number[];
+  /** How the frame was set, e.g. "plane:P1" or "view". */
+  source: string;
+}
+
 export interface SpecimenInfo {
   id: string;
+  /** The observer. One project file = one annotator's annotation of one mesh. */
   annotator: string;
   /** Unit of the mesh coordinates as stated by the user. Coordinates are never rescaled. */
   unit: string;
   notes: string;
+  frame: SpecimenFrame | null;
 }
 
 export type AttributeValue = string | number | boolean | null;
 
 /** A flake scar direction: an ordered pair of surface points, origin → termination. */
 export interface ScarVector {
-  /** Stable unique id (UUID). Never reused. */
-  id: string;
-  /** Human-readable label such as "S1". Editable; not required to be unique. */
-  label: string;
   /** Origin of the removal (point-of-percussion side), on the mesh surface. */
   start: Vec3;
   /** Termination of the removal, on the mesh surface. */
@@ -53,11 +63,28 @@ export interface ScarVector {
   startNormal: Vec3;
   /** Unit surface normal at end. */
   endNormal: Vec3;
+}
+
+/**
+ * A flake scar. It may carry a direction arrow (`vector`); a scar known only
+ * by its surface area, whose direction cannot be read, has `vector = null`.
+ */
+export interface Scar {
+  /** Stable unique id (UUID). Never reused. */
+  id: string;
+  /** Human-readable label such as "S1". Editable; not required to be unique. */
+  label: string;
+  vector: ScarVector | null;
   /** Values for the fields in SCAR_FIELDS (src/core/fields.ts). */
   attributes: Record<string, AttributeValue>;
   createdAt: string;
   modifiedAt: string;
 }
+
+/** A scar that has a direction arrow. */
+export type ScarWithVector = Scar & { vector: ScarVector };
+
+export const hasVector = (s: Scar): s is ScarWithVector => s.vector !== null;
 
 /**
  * A curve traced on the surface (an edge, a ridge, a scar outline …). Every
@@ -86,9 +113,9 @@ export interface Curve {
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
-  scarVectors: ScarVector[];
+  scars: Scar[];
   curves: Curve[];
-  /** Next number used for automatic arrow labels (S1, S2, …). Never decreases except by undo. */
+  /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */
   nextCurveNumber: number;

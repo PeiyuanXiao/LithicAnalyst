@@ -1,7 +1,7 @@
 import { curveLength } from '../core/curveGeometry';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
-import { arrowLength } from '../core/store';
-import type { ProjectState } from '../core/types';
+import { vectorLength } from '../core/store';
+import { hasVector, type ProjectState } from '../core/types';
 import { distance } from '../core/vec';
 
 export interface CsvOptions {
@@ -21,7 +21,8 @@ export const csvCell = (v: unknown): string => {
 };
 
 /**
- * One row per scar vector, coordinates in the original mesh coordinate system.
+ * One row per scar with a direction arrow, coordinates in the original mesh
+ * coordinate system (scars without an arrow are left out).
  * Enumerated fields are written as their codes (e.g. "bulb_truncated"), which
  * stay the same in every interface language.
  */
@@ -39,17 +40,17 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions): 
     ...SCAR_FIELDS.map((f) => f.key),
     'unit',
   ];
-  const rows = state.scarVectors.map((a) =>
+  const rows = state.scars.filter(hasVector).map((a) =>
     [
       csvCell(state.specimen.id),
       csvCell(a.label),
-      fmt(a.start[0]),
-      fmt(a.start[1]),
-      fmt(a.start[2]),
-      fmt(a.end[0]),
-      fmt(a.end[1]),
-      fmt(a.end[2]),
-      fmt(arrowLength(a)),
+      fmt(a.vector.start[0]),
+      fmt(a.vector.start[1]),
+      fmt(a.vector.start[2]),
+      fmt(a.vector.end[0]),
+      fmt(a.vector.end[1]),
+      fmt(a.vector.end[2]),
+      fmt(vectorLength(a.vector)),
       ...SCAR_FIELDS.map((f) => csvCell(a.attributes[f.key])),
       csvCell(state.specimen.unit),
     ].join(','),

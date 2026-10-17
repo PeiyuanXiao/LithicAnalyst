@@ -1,6 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import type { ProjectFileV1 } from '../src/core/schema';
+import type { ProjectFile } from '../src/core/schema';
 import type { ProjectState } from '../src/core/types';
 import type { MeshFile, Vec3 } from './fixtures/meshes';
 
@@ -16,7 +16,7 @@ export interface LithicApi {
   exportCsvText(): string;
   exportCurvesCsvText(): string;
   curveDraft(): Vec3[] | null;
-  projectJson(): ProjectFileV1;
+  projectJson(): ProjectFile;
   snap: {
     prepare(mode: 'ridge' | 'valley' | 'off'): Promise<boolean>;
     strengthAt(mode: 'ridge' | 'valley' | 'off', p: Vec3): number | null;
@@ -98,7 +98,7 @@ export const state = (page: Page): Promise<ProjectState> => page.evaluate(() => 
 export const counts = (page: Page): Promise<{ arrows: number; curves: number }> =>
   page.evaluate(() => {
     const s = window.lithicanalyst.state();
-    return { arrows: s.scarVectors.length, curves: s.curves.length };
+    return { arrows: s.scars.length, curves: s.curves.length };
   });
 
 export const draftLength = (page: Page): Promise<number> => page.evaluate(() => window.lithicanalyst.curveDraft()?.length ?? 0);

@@ -27,18 +27,18 @@ test('draws arrows by dragging and by two clicks, sets fields and exports the CS
   await clickArrow(page, ...clicks);
 
   let st = await state(page);
-  expect(st.scarVectors.map((a) => a.label)).toEqual(['S1', 'S2']);
-  for (const [a, [s, e]] of st.scarVectors.map((a, i) => [a, i === 0 ? drag : clicks] as const)) {
-    expect(dist(a.start, s)).toBeLessThan(0.15);
-    expect(dist(a.end, e)).toBeLessThan(0.15);
-    expect(a.startNormal[2]).toBeGreaterThan(0.5);
+  expect(st.scars.map((a) => a.label)).toEqual(['S1', 'S2']);
+  for (const [a, [s, e]] of st.scars.map((a, i) => [a, i === 0 ? drag : clicks] as const)) {
+    expect(dist(a.vector!.start, s)).toBeLessThan(0.15);
+    expect(dist(a.vector!.end, e)).toBeLessThan(0.15);
+    expect(a.vector!.startNormal[2]).toBeGreaterThan(0.5);
     expect(a.attributes).toEqual({ completeness: 'point_complete', certainty: 'certain', note: '' });
   }
   await expect(page.locator('#sec-arrows .badge')).toHaveText('2');
   await expect(page.locator('#sec-arrows .arrow-row')).toHaveCount(2);
 
   // the new arrow is selected: number keys set its completeness
-  expect(await page.evaluate(() => window.lithicanalyst.selection())).toBe(st.scarVectors[1].id);
+  expect(await page.evaluate(() => window.lithicanalyst.selection())).toBe(st.scars[1].id);
   await expect(page.locator('#insp-label')).toHaveValue('S2');
   await page.keyboard.press('3');
   await expect(page.locator('#field-completeness-point_truncated')).toHaveAttribute('aria-checked', 'true');
@@ -51,8 +51,8 @@ test('draws arrows by dragging and by two clicks, sets fields and exports the CS
   await page.locator('#field-note').fill('platform, "crushed"');
 
   st = await state(page);
-  expect(st.scarVectors[0].attributes).toEqual({ completeness: 'both_missing', certainty: 'uncertain', note: 'platform, "crushed"' });
-  expect(st.scarVectors[1].attributes.completeness).toBe('point_truncated');
+  expect(st.scars[0].attributes).toEqual({ completeness: 'both_missing', certainty: 'uncertain', note: 'platform, "crushed"' });
+  expect(st.scars[1].attributes.completeness).toBe('point_truncated');
 
   const csv = await download(page, () => page.locator('#export-csv').click());
   expect(csv.name).toBe('roof_scar_vectors.csv');
@@ -61,16 +61,16 @@ test('draws arrows by dragging and by two clicks, sets fields and exports the CS
   const rows = parseCsv(csv.text);
   expect(rows).toHaveLength(2);
   rows.forEach((r, i) => {
-    const a = st.scarVectors[i];
+    const a = st.scars[i];
     expect(r.specimen_id).toBe('roof');
     expect(r.scar_id).toBe(a.label);
     const start = [Number(r.start_x), Number(r.start_y), Number(r.start_z)] as const;
     const end = [Number(r.end_x), Number(r.end_y), Number(r.end_z)] as const;
     for (let k = 0; k < 3; k++) {
-      expect(start[k]).toBeCloseTo(a.start[k], 5);
-      expect(end[k]).toBeCloseTo(a.end[k], 5);
+      expect(start[k]).toBeCloseTo(a.vector!.start[k], 5);
+      expect(end[k]).toBeCloseTo(a.vector!.end[k], 5);
     }
-    expect(Number(r.length)).toBeCloseTo(dist(a.start, a.end), 5);
+    expect(Number(r.length)).toBeCloseTo(dist(a.vector!.start, a.vector!.end), 5);
     expect(r.completeness).toBe(a.attributes.completeness);
     expect(r.certainty).toBe(a.attributes.certainty);
     expect(r.note).toBe(a.attributes.note);
@@ -90,9 +90,9 @@ test('ignores an arrow that is too short and deletes the selected one', async ({
   await page.mouse.move(s.x + 0.4, s.y, { steps: 3 });
   await page.mouse.up();
   await expect(page.locator('.toast-warn')).toContainText('too short');
-  expect((await state(page)).scarVectors).toHaveLength(1);
+  expect((await state(page)).scars).toHaveLength(1);
 
   await page.keyboard.press('Delete');
-  expect((await state(page)).scarVectors).toHaveLength(0);
+  expect((await state(page)).scars).toHaveLength(0);
   await expect(page.locator('#sec-arrows .badge')).toHaveText('0');
 });

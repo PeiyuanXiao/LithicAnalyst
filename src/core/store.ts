@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, MeshInfo, ProjectState, ScarVector, SpecimenInfo } from './types';
+import type { Curve, MeshInfo, ProjectState, Scar, ScarVector, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'arrows' | 'curves' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -13,9 +13,9 @@ export interface Change {
 export function emptyProject(): ProjectState {
   const t = nowIso();
   return {
-    specimen: { id: '', annotator: '', unit: 'mm', notes: '' },
+    specimen: { id: '', annotator: '', unit: 'mm', notes: '', frame: null },
     mesh: null,
-    scarVectors: [],
+    scars: [],
     curves: [],
     nextLabelNumber: 1,
     nextCurveNumber: 1,
@@ -24,7 +24,7 @@ export function emptyProject(): ProjectState {
   };
 }
 
-export const arrowLength = (a: ScarVector): number => distance(a.start, a.end);
+export const vectorLength = (v: ScarVector): number => distance(v.start, v.end);
 
 /**
  * Holds the project state. Mutating methods prefixed with "_" are for
@@ -55,8 +55,8 @@ export class ProjectStore {
     for (const fn of this.listeners) fn(change);
   }
 
-  arrow(id: string): ScarVector | undefined {
-    return this._state.scarVectors.find((a) => a.id === id);
+  scar(id: string): Scar | undefined {
+    return this._state.scars.find((a) => a.id === id);
   }
 
   curve(id: string): Curve | undefined {
@@ -76,22 +76,22 @@ export class ProjectStore {
 
   // ---- internal mutations used by commands ----
 
-  _insertArrow(a: ScarVector, index?: number): void {
-    const list = this._state.scarVectors;
+  _insertScar(a: Scar, index?: number): void {
+    const list = this._state.scars;
     if (index === undefined || index < 0 || index > list.length) list.push(a);
     else list.splice(index, 0, a);
   }
 
-  _removeArrow(id: string): { arrow: ScarVector; index: number } | null {
-    const list = this._state.scarVectors;
+  _removeScar(id: string): { scar: Scar; index: number } | null {
+    const list = this._state.scars;
     const index = list.findIndex((a) => a.id === id);
     if (index < 0) return null;
-    const [arrow] = list.splice(index, 1);
-    return { arrow, index };
+    const [scar] = list.splice(index, 1);
+    return { scar, index };
   }
 
-  _putArrow(a: ScarVector): void {
-    const list = this._state.scarVectors;
+  _putScar(a: Scar): void {
+    const list = this._state.scars;
     const index = list.findIndex((x) => x.id === a.id);
     if (index >= 0) list[index] = a;
   }

@@ -3,7 +3,7 @@ import {
   addCurve,
   addScarVector,
   deleteCurve,
-  deleteScarVector,
+  deleteScar,
   moveEndpoint,
   setCurveAttribute,
   setCurveLabel,
@@ -49,12 +49,12 @@ describe('commands and undo', () => {
     const s = new ProjectStore();
     add(s, [0, 0, 0], [1, 0, 0]);
     add(s, [0, 1, 0], [1, 1, 0]);
-    expect(s.state.scarVectors.map((a) => a.label)).toEqual(['S1', 'S2']);
+    expect(s.state.scars.map((a) => a.label)).toEqual(['S1', 'S2']);
     s.history.undo();
-    expect(s.state.scarVectors.length).toBe(1);
+    expect(s.state.scars.length).toBe(1);
     expect(s.state.nextLabelNumber).toBe(2);
     add(s, [0, 2, 0], [1, 2, 0]);
-    expect(s.state.scarVectors[1].label).toBe('S2');
+    expect(s.state.scars[1].label).toBe('S2');
     expect(s.history.canRedo).toBe(false);
   });
 
@@ -63,32 +63,32 @@ describe('commands and undo', () => {
     add(s, [0, 0, 0], [1, 0, 0]);
     const b = add(s, [0, 1, 0], [1, 1, 0]);
     add(s, [0, 2, 0], [1, 2, 0]);
-    deleteScarVector(s, b.id);
-    expect(s.state.scarVectors.map((x) => x.label)).toEqual(['S1', 'S3']);
+    deleteScar(s, b.id);
+    expect(s.state.scars.map((x) => x.label)).toEqual(['S1', 'S3']);
     s.history.undo();
-    expect(s.state.scarVectors.map((x) => x.label)).toEqual(['S1', 'S2', 'S3']);
+    expect(s.state.scars.map((x) => x.label)).toEqual(['S1', 'S2', 'S3']);
   });
 
   it('moves endpoints, renames, and merges quick note edits into one step', () => {
     const s = new ProjectStore();
     const a = add(s, [0, 0, 0], [3, 0, 0]);
     moveEndpoint(s, a.id, 'end', [5, 1, 0], [0, 1, 0]);
-    expect(s.arrow(a.id)!.end).toEqual([5, 1, 0]);
-    expect(s.arrow(a.id)!.endNormal).toEqual([0, 1, 0]);
+    expect(s.scar(a.id)!.vector!.end).toEqual([5, 1, 0]);
+    expect(s.scar(a.id)!.vector!.endNormal).toEqual([0, 1, 0]);
     s.history.undo();
-    expect(s.arrow(a.id)!.end).toEqual([3, 0, 0]);
+    expect(s.scar(a.id)!.vector!.end).toEqual([3, 0, 0]);
     setScarLabel(s, a.id, 'S1a');
-    expect(s.arrow(a.id)!.label).toBe('S1a');
+    expect(s.scar(a.id)!.label).toBe('S1a');
     setScarAttribute(s, a.id, 'note', 'r');
     setScarAttribute(s, a.id, 'note', 'ri');
     setScarAttribute(s, a.id, 'note', 'rip');
-    expect(s.arrow(a.id)!.attributes.note).toBe('rip');
+    expect(s.scar(a.id)!.attributes.note).toBe('rip');
     s.history.undo();
-    expect(s.arrow(a.id)!.attributes.note).toBe('');
+    expect(s.scar(a.id)!.attributes.note).toBe('');
     setScarAttribute(s, a.id, 'completeness', 'bulb_complete');
     setScarAttribute(s, a.id, 'completeness', 'bulb_truncated');
     s.history.undo();
-    expect(s.arrow(a.id)!.attributes.completeness).toBe('bulb_complete');
+    expect(s.scar(a.id)!.attributes.completeness).toBe('bulb_complete');
   });
 
   it('notifies subscribers', () => {
@@ -97,7 +97,7 @@ describe('commands and undo', () => {
     s.subscribe((c) => kinds.push(c.kind));
     add(s, [0, 0, 0], [1, 0, 0]);
     updateSpecimen(s, { id: 'core-7' });
-    expect(kinds).toEqual(['arrows', 'specimen']);
+    expect(kinds).toEqual(['scars', 'specimen']);
   });
 });
 
@@ -127,7 +127,7 @@ describe('project file', () => {
     const json = JSON.parse(JSON.stringify(serializeProject(s.state, '0.1.0')));
     expect(json.format).toBe('lithicanalyst-project');
     const back = parseProjectFile(json);
-    expect(back.scarVectors).toEqual(s.state.scarVectors);
+    expect(back.scars).toEqual(s.state.scars);
     expect(back.specimen).toEqual(s.state.specimen);
     expect(back.nextLabelNumber).toBe(3);
   });
@@ -141,8 +141,8 @@ describe('project file', () => {
 
   it('fills missing attributes with defaults', () => {
     const file = serializeProject(sampleStore().state, '0.1.0');
-    delete (file.annotations.scarVectors[1].attributes as Record<string, unknown>).certainty;
-    expect(parseProjectFile(JSON.parse(JSON.stringify(file))).scarVectors[1].attributes.certainty).toBe('certain');
+    delete (file.annotations.scars[1].attributes as Record<string, unknown>).certainty;
+    expect(parseProjectFile(JSON.parse(JSON.stringify(file))).scars[1].attributes.certainty).toBe('certain');
   });
 });
 
@@ -215,7 +215,7 @@ describe('curves in the project', () => {
     expect(kinds).toEqual(['curves', 'curves']);
     // arrows keep their own numbering
     add(s, [0, 0, 0], [1, 0, 0]);
-    expect(s.state.scarVectors[0].label).toBe('S1');
+    expect(s.state.scars[0].label).toBe('S1');
 
     setCurveAttribute(s, c1.id, 'type', 'edge');
     setCurveAttribute(s, c1.id, 'note', 'r');
@@ -250,7 +250,7 @@ describe('curves in the project', () => {
     const back = parseProjectFile(json);
     expect(back.curves).toEqual(s.state.curves);
     expect(back.nextCurveNumber).toBe(2);
-    expect(back.scarVectors).toEqual(s.state.scarVectors);
+    expect(back.scars).toEqual(s.state.scars);
 
     delete json.annotations.curves;
     delete json.nextCurveNumber;

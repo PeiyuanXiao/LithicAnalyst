@@ -1,8 +1,10 @@
-# LithicAnalyst project file — format version 1
+# LithicAnalyst project file — format version 2
 
-A project file (`*.lithicanalyst.json`) holds everything annotated on one mesh. It does not
-contain the mesh itself; it records the mesh's SHA-256 so the app can tell when a project is
-opened on a different file.
+A project file (`*.lithicanalyst.json`) holds everything one annotator (`specimen.annotator`)
+recorded on one mesh in one session of annotation. It does not contain the mesh itself; it
+records the mesh's SHA-256 so the app can tell when a project is opened on a different file.
+Comparing annotators means loading several project files of the same mesh; a single file never
+holds layers from several annotators.
 
 The format is the long-lived contract of the tool. Any change that existing readers cannot
 ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
@@ -12,42 +14,77 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 * Every coordinate is in the **original coordinate system of the mesh file**, in the unit
   given by `specimen.unit` (coordinates are never rescaled).
 * The app re-centres geometry internally for float precision; that offset never reaches the file.
+* Orientations (the specimen frame, later the plane frames) are stored as matrices next to the
+  data; they never change stored coordinates.
 
 ## Top level
 
 | key | type | notes |
 |---|---|---|
 | `format` | `"lithicanalyst-project"` | required |
-| `formatVersion` | `1` | required |
+| `formatVersion` | `2` | required |
 | `app` | `{ name, version }` | software that wrote the file |
 | `savedAt`, `createdAt`, `modifiedAt` | ISO 8601 strings | |
-| `specimen` | `{ id, annotator, unit, notes }` | |
+| `specimen` | `{ id, annotator, unit, notes, frame }` | see below |
 | `mesh` | object or `null` | `fileName`, `format`, `fileSize`, `sha256`, `vertexCount`, `triangleCount`, `bboxMin`, `bboxMax` |
-| `annotations.scarVectors` | array | in creation order |
-| `annotations.curves` | array | in creation order; absent in files from 0.1.0 (read as empty) |
-| `nextLabelNumber` | integer | next automatic arrow label (`S{n}`) |
-| `nextCurveNumber` | integer | next automatic curve label (`C{n}`); absent in files from 0.1.0 |
+| `annotations.scars` | array | in creation order |
+| `annotations.curves` | array | in creation order |
+| `derived` | object | latest computed results, see below |
+| `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
+| `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
 
 Readers should ignore keys they do not know. Future annotation layers (landmarks, surface
-regions) will be added next to `scarVectors` and `curves` inside `annotations`.
+regions, relations) will be added next to `scars` and `curves` inside `annotations`.
 
-## Scar vector
+## Specimen
+
+```json
+{
+  "id": "LB-1023",
+  "annotator": "PX",
+  "unit": "mm",
+  "notes": "",
+  "frame": { "matrix": [1, 0, 0, -12.5, 0, 1, 0, 3.2, 0, 0, 1, -8.1, 0, 0, 0, 1], "source": "view" }
+}
+```
+
+* `annotator` is the observer. One project file = one annotator's annotation of one mesh.
+* `unit` (`mm`, `cm`, `m`, `in`, or `""` for not stated) is a declaration only; coordinates
+  are never scaled.
+* `frame` is the specimen coordinate system used for display and for length, width and
+  thickness, or `null` when none is set. `matrix` is a row-major 4×4 matrix (16 numbers) that
+  maps original coordinates to specimen coordinates: +Z points toward the viewer of the main
+  face, +Y is up on the page, +X is to the right. `source` records how it was set.
+
+## Derived results
+
+`derived` holds the latest results computed from the annotations (fitted planes, measurements,
+fitted spheres, volumes …, added by later versions), so that R or Python can read them without
+recomputing. They are recomputed whenever their inputs change; when a file is opened, the app
+ignores the stored values and computes them again from the inputs. Version 0.2 writes `{}`.
+
+## Scar
 
 ```json
 {
   "id": "6f0c1c2e-6b0e-4d3f-9a7e-3a1f2b9c8d10",
   "label": "S4",
-  "start": [12.734, -3.118, 9.905],
-  "end": [2.051, 1.877, 11.402],
-  "startNormal": [0.12, -0.05, 0.99],
-  "endNormal": [0.02, 0.01, 0.99],
+  "vector": {
+    "start": [12.734, -3.118, 9.905],
+    "end": [2.051, 1.877, 11.402],
+    "startNormal": [0.12, -0.05, 0.99],
+    "endNormal": [0.02, 0.01, 0.99]
+  },
   "attributes": { "completeness": "bulb_truncated", "certainty": "certain", "note": "" },
   "createdAt": "2026-10-15T20:31:02.114Z",
   "modifiedAt": "2026-10-15T20:31:40.551Z"
 }
 ```
 
-* `start` is the origin of the removal (point-of-percussion side); `end` is the termination.
+* A scar is an object of its own. Its direction arrow (`vector`) is optional: a scar known only
+  by its surface area, whose direction cannot be read, has `"vector": null`.
+* `vector.start` is the origin of the removal (point-of-percussion side); `vector.end` is the
+  termination.
 * `startNormal` / `endNormal` are unit surface normals at the picked points (facing the viewer
   when picked); the app uses them only to lift arrows off the surface for display.
 * `id` is permanent; `label` is editable and need not be unique.
@@ -102,7 +139,7 @@ Defined in `src/core/fields.ts`.
 
 ## CSV export
 
-One row per scar vector:
+One row per scar that has a direction arrow (scars with `"vector": null` are left out):
 
 ```
 specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,certainty,note,unit
@@ -121,3 +158,17 @@ the segment back to the first point).
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.
 The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
+
+## Changes from format version 1
+
+Files of format 1 (written by 0.1.0 and the curve update) open unchanged; the app converts them
+when reading, and saving writes format 2.
+
+| format 1 | format 2 |
+|---|---|
+| `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
+| `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
+| no `derived` | `derived` (computed results; `{}` for now) |
+| `annotations.curves`, `nextCurveNumber` optional | always written |
+
+The arrow CSV is unchanged.
