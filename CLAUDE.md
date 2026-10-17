@@ -56,9 +56,9 @@ logo、副标题、示例石核、「记录方案」（自定义字段文件）�
 | 完整性 | `completeness` | `point_complete` / `bulb_complete` / `point_truncated` / `bulb_truncated` / `both_missing` |
 | 曲线 | `curve` | 表面上的折线，可开放可闭合 |
 | 拟合平面 | `plane` | 四种方法，见路线图 1.2 |
-| 表面区域 | `region` | `scar` 片疤（人工改造）；`cortex` 石皮、`joint` 节理面（未改造）；`damage` 破损 |
+| 表面区域 | `area` | `scar` 片疤（人工改造）；`cortex` 石皮、`joint` 节理面（未改造）；`damage` 破损 |
 | 打破关系 | `relation` | 「A 打破 B」= A 晚于 B |
-| 剥片序列 | `series` | 片疤的分组；序列之间有先后，序列内部可排先后 |
+| 剥片序列 | `sequences` | 片疤的分组；序列之间有先后，序列内部可排先后 |
 | 地标 | `landmark` | 只做固定地标和曲线半地标 |
 | 标注者 | `specimen.annotator` | 即观察者。一个项目文件 = 一位标注者对一个模型的一次标注 |
 | 标本坐标系 | `specimen.frame` | 展示和长宽厚使用的定向，4×4 矩阵 |
