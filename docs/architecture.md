@@ -120,6 +120,15 @@ mesh. Arrows are drawn only in views their surface faces. The outline comes from
 the rendered image (`compute/contour.ts`, marching squares + simplification). PNG files get a
 pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
 
+## Sections
+
+A `Section` (display only) is the plane through a line drawn on screen and the eye
+(`tools/sectionTool.ts`). The app cuts the model with it in slices (`App.cutModel`, shared with
+the planes) and, in the present mode only, clips the mesh material to the kept side
+(`SectionLayer.clipPlanes`); `render/sectionLayer.ts` draws the outline and the cut face (loops
+nested and triangulated in the plane, solid or hatched). Figures render the views without
+clipping and add the section drawings (`sectionLoops2D`) to the right of the views.
+
 ## Fitted planes
 
 * A `Plane` stores only its inputs (method, completeness filter, curves, `upHint`);

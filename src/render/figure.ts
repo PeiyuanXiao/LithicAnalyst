@@ -34,10 +34,19 @@ export const DEFAULT_FIGURE: FigureSettings = {
   dpi: 600,
 };
 
+/** A section drawing: closed loops in the section plane (x along the drawn line, y up), in model units. */
+export interface SectionDrawing {
+  label: string;
+  loops: Array<Array<[number, number]>>;
+  fill: 'solid' | 'hatch';
+}
+
 export interface FigureOverlays {
   arrows: Array<{ start: Vec3; end: Vec3; startNormal: Vec3; endNormal: Vec3; color: string }>;
   curves: Array<{ points: Vec3[]; closed: boolean; color: string }>;
   planes: Array<{ lines: Array<{ points: Vec3[]; closed: boolean }>; color: string }>;
+  /** Section drawings placed to the right of the views. */
+  sections: SectionDrawing[];
 }
 
 export interface FigureContext {
@@ -94,6 +103,14 @@ export interface FigureLayoutView {
   height: number;
 }
 
+export interface FigureLayoutSection {
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface FigureLayout {
   width: number;
   height: number;
@@ -101,6 +118,7 @@ export interface FigureLayout {
   /** Null when the unit is not stated (no physical size). */
   mmPerPx: number | null;
   views: FigureLayoutView[];
+  sections: FigureLayoutSection[];
   scaleBar: { x0: number; x1: number; y: number; length: number; unit: string } | null;
 }
 
@@ -131,8 +149,8 @@ export function scaleBarLength(span: number): { length: number; step: number } {
 }
 
 /** The figure's size and layout without rendering it (for showing the size before exporting). */
-export function figureLayout(ctx: FigureContext, frame: number[], unit: string, settings: FigureSettings): FigureLayout {
-  return planFigure(ctx, frame, unit, settings).layout;
+export function figureLayout(ctx: FigureContext, frame: number[], unit: string, settings: FigureSettings, sections: SectionDrawing[] = []): FigureLayout {
+  return planFigure(ctx, frame, unit, settings, sections).layout;
 }
 
 /**
@@ -140,7 +158,7 @@ export function figureLayout(ctx: FigureContext, frame: number[], unit: string, 
  * the specimen unit (no physical scale when it is not stated).
  */
 export function renderFigure(ctx: FigureContext, frame: number[], unit: string, settings: FigureSettings, overlays: FigureOverlays): Figure {
-  const plan = planFigure(ctx, frame, unit, settings);
+  const plan = planFigure(ctx, frame, unit, settings, overlays.sections);
   const { layout, size, axes, axis, lo, hi, pxPerUnit, mm, mmToPx } = plan;
   const max = ctx.renderer.capabilities.maxTextureSize;
   for (const v of layout.views) {
@@ -152,9 +170,9 @@ export function renderFigure(ctx: FigureContext, frame: number[], unit: string, 
   return drawFigure(ctx, settings, overlays, { layout, layoutViews, size, axes, axis, lo, hi, pxPerUnit, mm, mmToPx });
 }
 
-function planFigure(ctx: FigureContext, frame: number[], unit: string, settings: FigureSettings) {
+function planFigure(ctx: FigureContext, frame: number[], unit: string, settings: FigureSettings, sections: SectionDrawing[]) {
   const views = FIGURE_VIEWS.filter((v) => settings.views.includes(v));
-  if (!views.length) throw new FigureError('noViews', 'No view chosen.');
+  if (!views.length && !sections.length) throw new FigureError('noViews', 'No view chosen.');
   const axes = frameAxes(frame);
   const axis = ([a, s]: [Axis, number]): Vec3 => [axes[a][0] * s, axes[a][1] * s, axes[a][2] * s];
 
@@ -207,8 +225,22 @@ function planFigure(ctx: FigureContext, frame: number[], unit: string, settings:
   }
   const bar = settings.overlays.scaleBar && mm ? scaleBarLength((hi.x - lo.x) || 1) : null;
   const barSpace = bar ? Math.round(mmToPx(9)) : 0;
-  const width = x - gap + margin;
-  const height = y - gap + barSpace + margin;
+  // section drawings: a column to the right of the views, top-aligned with the front row
+  const layoutSections: FigureLayoutSection[] = [];
+  let sx = x;
+  let sy = rowY[1];
+  let colWidth = 0;
+  for (const d of sections) {
+    const b = loopsBounds(d.loops);
+    const w = Math.max(1, Math.ceil((b.x1 - b.x0) * pxPerUnit));
+    const h = Math.max(1, Math.ceil((b.y1 - b.y0) * pxPerUnit));
+    layoutSections.push({ label: d.label, x: sx, y: sy, width: w, height: h });
+    sy += h + gap;
+    colWidth = Math.max(colWidth, w);
+  }
+  if (sections.length) x = sx + colWidth + gap;
+  const width = Math.max(x - gap + margin, 2 * margin + 1);
+  const height = Math.max(y - gap, sy - gap) + barSpace + margin;
 
   const layoutViews: FigureLayoutView[] = views.map((v) => {
     const d = VIEWS[v];
@@ -218,12 +250,12 @@ function planFigure(ctx: FigureContext, frame: number[], unit: string, settings:
   });
   const barLayout = bar
     ? (() => {
-        const x0 = layoutViews[0].x;
+        const x0 = layoutViews[0]?.x ?? layoutSections[0]?.x ?? margin;
         const yb = height - margin - Math.round(mmToPx(3));
         return { x0, x1: x0 + bar.length * pxPerUnit, y: yb, length: bar.length, unit };
       })()
     : null;
-  const layout: FigureLayout = { width, height, pxPerUnit, mmPerPx: mm ? 1 / pxPerMm : null, views: layoutViews, scaleBar: barLayout };
+  const layout: FigureLayout = { width, height, pxPerUnit, mmPerPx: mm ? 1 / pxPerMm : null, views: layoutViews, sections: layoutSections, scaleBar: barLayout };
   return { layout, size, axes, axis, lo, hi, pxPerUnit, mm, mmToPx };
 }
 
@@ -313,10 +345,11 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
   });
 
   const stroke = { arrow: mmToPx(0.35), line: mmToPx(0.3), outline: mmToPx(0.25), head: mmToPx(2.2) };
+  const drawn = sectionsInPixels(overlays.sections, layout, pxPerUnit);
   return {
     layout,
-    png: () => composePng(rendered, layout, stroke, settings.dpi, !!mm),
-    svg: () => composeSvg(rendered, layout, stroke, mmToPx),
+    png: () => composePng(rendered, drawn, layout, stroke, settings.dpi, !!mm),
+    svg: () => composeSvg(rendered, drawn, layout, stroke, mmToPx),
   };
 }
 
@@ -349,6 +382,71 @@ function renderView(ctx: FigureContext, cam: THREE.OrthographicCamera, w: number
     ctx.lights.set(prevLight);
     ctx.overlay.visible = overlayShown;
     target.dispose();
+  }
+}
+
+function loopsBounds(loops: Array<Array<[number, number]>>): { x0: number; x1: number; y0: number; y1: number } {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const l of loops)
+    for (const [px, py] of l) {
+      x0 = Math.min(x0, px);
+      x1 = Math.max(x1, px);
+      y0 = Math.min(y0, py);
+      y1 = Math.max(y1, py);
+    }
+  return Number.isFinite(x0) ? { x0, x1, y0, y1 } : { x0: 0, x1: 0, y0: 0, y1: 0 };
+}
+
+interface DrawnSection {
+  fill: 'solid' | 'hatch';
+  /** Loops in figure pixels (y down). */
+  loops: Array<Array<[number, number]>>;
+}
+
+function sectionsInPixels(sections: SectionDrawing[], layout: FigureLayout, pxPerUnit: number): DrawnSection[] {
+  return sections.map((d, i) => {
+    const b = loopsBounds(d.loops);
+    const at = layout.sections[i];
+    return { fill: d.fill, loops: d.loops.map((l) => l.map(([px, py]) => [at.x + (px - b.x0) * pxPerUnit, at.y + (b.y1 - py) * pxPerUnit] as [number, number])) };
+  });
+}
+
+const SECTION_FILL = '#9aa39d';
+
+function hatchPattern(g: CanvasRenderingContext2D, spacing: number, width: number): CanvasPattern | string {
+  const n = Math.max(4, Math.round(spacing));
+  const tile = document.createElement('canvas');
+  tile.width = tile.height = n;
+  const t = tile.getContext('2d')!;
+  t.fillStyle = '#ffffff';
+  t.fillRect(0, 0, n, n);
+  t.strokeStyle = '#000';
+  t.lineWidth = width;
+  t.lineCap = 'square';
+  t.beginPath();
+  for (const o of [-n, 0, n]) {
+    t.moveTo(o, n);
+    t.lineTo(o + n, 0);
+  }
+  t.stroke();
+  return g.createPattern(tile, 'repeat') ?? '#ffffff';
+}
+
+function drawSections(g: CanvasRenderingContext2D, sections: DrawnSection[], stroke: Strokes, hatchSpacing: number): void {
+  for (const s of sections) {
+    g.save();
+    g.beginPath();
+    for (const l of s.loops) {
+      l.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py)));
+      g.closePath();
+    }
+    g.fillStyle = s.fill === 'hatch' ? hatchPattern(g, hatchSpacing, stroke.line * 0.8) : SECTION_FILL;
+    g.fill('evenodd');
+    g.strokeStyle = '#000';
+    g.lineWidth = stroke.outline;
+    g.lineJoin = 'round';
+    g.stroke();
+    g.restore();
   }
 }
 
@@ -439,7 +537,7 @@ function drawScaleBar(g: CanvasRenderingContext2D, layout: FigureLayout, stroke:
   g.restore();
 }
 
-async function composePng(views: RenderedView[], layout: FigureLayout, stroke: Strokes, dpi: number, physical: boolean): Promise<Uint8Array> {
+async function composePng(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, dpi: number, physical: boolean): Promise<Uint8Array> {
   const canvas = document.createElement('canvas');
   canvas.width = layout.width;
   canvas.height = layout.height;
@@ -452,6 +550,7 @@ async function composePng(views: RenderedView[], layout: FigureLayout, stroke: S
     g.drawImage(tile, v.x, v.y);
   }
   for (const v of views) drawOverlays(g, v, stroke);
+  drawSections(g, sections, stroke, layout.mmPerPx ? 1.2 / layout.mmPerPx : 12);
   drawScaleBar(g, layout, stroke, layout.mmPerPx ? 2.6 / layout.mmPerPx : 24);
   const png = await canvasPng(canvas);
   return physical ? pngWithDpi(png, dpi) : png;
@@ -461,7 +560,7 @@ const f2 = (v: number) => (Math.round(v * 100) / 100).toString();
 const pts = (run: Array<[number, number]>) => run.map(([px, py]) => `${f2(px)},${f2(py)}`).join(' ');
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
-async function composeSvg(views: RenderedView[], layout: FigureLayout, stroke: Strokes, mmToPx: (v: number) => number): Promise<string> {
+async function composeSvg(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, mmToPx: (v: number) => number): Promise<string> {
   const out: string[] = [];
   const mmPerPx = layout.mmPerPx;
   const size = mmPerPx ? `width="${f2(layout.width * mmPerPx)}mm" height="${f2(layout.height * mmPerPx)}mm"` : `width="${layout.width}" height="${layout.height}"`;
@@ -487,6 +586,16 @@ async function composeSvg(views: RenderedView[], layout: FigureLayout, stroke: S
       if (a.head) out.push(`<polygon fill="${esc(a.color)}" stroke="none" points="${pts(headPoints(a.head, stroke.head))}"/>`);
     }
     out.push('</g>');
+    out.push('</g>');
+  }
+  if (sections.length) {
+    const sp = f2(mmToPx(1.2));
+    out.push(`<defs><pattern id="hatch" patternUnits="userSpaceOnUse" width="${sp}" height="${sp}"><rect width="${sp}" height="${sp}" fill="#fff"/><path d="M0 ${sp} L${sp} 0" stroke="#000" stroke-width="${f2(stroke.line * 0.8)}"/></pattern></defs>`);
+    out.push('<g id="sections" stroke="#000" stroke-linejoin="round">');
+    sections.forEach((s, i) => {
+      const d = s.loops.map((l) => `M${pts(l).replace(/ /g, ' L')} Z`).join(' ');
+      out.push(`<path id="section-${esc(layout.sections[i].label)}" d="${d}" fill="${s.fill === 'hatch' ? 'url(#hatch)' : SECTION_FILL}" fill-rule="evenodd" stroke-width="${f2(stroke.outline)}"/>`);
+    });
     out.push('</g>');
   }
   const bar = layout.scaleBar;

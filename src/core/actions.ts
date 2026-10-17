@@ -2,21 +2,24 @@ import {
   AddCurveCommand,
   AddMeasurementCommand,
   AddPlaneCommand,
+  AddSectionCommand,
   AddScarCommand,
   DeleteCurveCommand,
   DeleteMeasurementCommand,
   DeletePlaneCommand,
+  DeleteSectionCommand,
   DeleteScarCommand,
   SetSpecimenCommand,
   UpdateCurveCommand,
   UpdatePlaneCommand,
+  UpdateSectionCommand,
   UpdateScarCommand,
 } from './commands';
 import type { CurveShape } from './curveGeometry';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import type { ProjectStore } from './store';
-import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, Scar, ScarWithVector, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, Scar, ScarWithVector, Section, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -278,6 +281,41 @@ export const setPlaneVisible = (store: ProjectStore, id: string, visible: boolea
   updatePlane(store, id, 'cmd.editPlane', (p) => {
     p.visible = visible;
   });
+
+// ---------------------------------------------------------------- sections
+
+export function addSection(store: ProjectStore, input: { point: Vec3; normal: Vec3; across: Vec3 }): Section {
+  const n = store.state.nextSectionNumber;
+  const t = nowIso();
+  const section: Section = {
+    id: uuid(),
+    label: `X${n}`,
+    point: copy(input.point),
+    normal: copy(input.normal),
+    across: copy(input.across),
+    keep: 'both',
+    fill: 'hatch',
+    inFigure: true,
+    createdAt: t,
+    modifiedAt: t,
+  };
+  store.history.execute(new AddSectionCommand(section, n));
+  return section;
+}
+
+export function deleteSection(store: ProjectStore, id: string): void {
+  if (!store.section(id)) return;
+  store.history.execute(new DeleteSectionCommand(id));
+}
+
+export function updateSection(store: ProjectStore, id: string, patch: Partial<Pick<Section, 'keep' | 'fill' | 'inFigure'>>): void {
+  const before = store.section(id);
+  if (!before) return;
+  const after = { ...structuredClone(before), ...patch };
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  after.modifiedAt = nowIso();
+  store.history.execute(new UpdateSectionCommand(structuredClone(before), after));
+}
 
 // ---------------------------------------------------------------- specimen
 

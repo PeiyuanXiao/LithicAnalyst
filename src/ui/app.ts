@@ -5,14 +5,14 @@ import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compu
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addPlane, deleteCurve, deleteMeasurement, deletePlane, deleteScar, setCurveAttribute, setScarAttribute, updateSpecimen } from '../core/actions';
+import { addPlane, deleteCurve, deleteMeasurement, deletePlane, deleteScar, deleteSection, setCurveAttribute, setScarAttribute, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, numberKeyField, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import type { Measurement, ProjectState, Vec3 } from '../core/types';
+import type { Measurement, ProjectState, Section, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, scarVectorCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
@@ -21,7 +21,9 @@ import { ArrowLayer, arrowColor, DEFAULT_ARROW_DISPLAY } from '../render/arrowLa
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
 import { PlaneLayer, planeColor } from '../render/planeLayer';
-import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, type Figure, type FigureContext, type FigureLayout, type FigureSettings } from '../render/figure';
+import { SectionLayer, sectionLoops2D } from '../render/sectionLayer';
+import { SectionTool } from '../tools/sectionTool';
+import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
 import { curveColor } from '../render/curveLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
 import { MeshView } from '../render/meshView';
@@ -143,8 +145,9 @@ export class App implements AppApi {
   private measures: MeasureLayer | null = null;
   private planesLayer: PlaneLayer | null = null;
   private planes: PlaneResult[] = [];
-  /** Sections of the model by each plane, keyed by the plane's id; `key` is the plane they were cut by. */
-  private sections = new Map<string, { key: string; lines: Polyline[] | null }>();
+  /** Where the model is cut by each plane and each section, keyed by their id; `key` is the plane it was cut by. */
+  private cuts = new Map<string, { key: string; lines: Polyline[] | null }>();
+  private sectionLayer: SectionLayer | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
@@ -180,6 +183,7 @@ export class App implements AppApi {
   private snapSeg: ReturnType<typeof segmented> | null = null;
   private snapEl: HTMLElement | null = null;
   private measureSeg: ReturnType<typeof segmented> | null = null;
+  private presentSeg: ReturnType<typeof segmented> | null = null;
   private measureBase: SurfaceMeasures | null = null;
   private auto: AutoMeasurements | null = null;
   private autoFrameKey = '';
@@ -228,6 +232,7 @@ export class App implements AppApi {
     this.measures = new MeasureLayer(viewer);
     this.measures.onLabelClick = (id) => this.selection.set(id);
     this.planesLayer = new PlaneLayer(viewer);
+    this.sectionLayer = new SectionLayer(viewer);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -261,6 +266,7 @@ export class App implements AppApi {
     this.tools.register(new DrawArrowTool(ctx));
     this.tools.register(new DrawCurveTool(ctx));
     for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
+    this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -349,8 +355,13 @@ export class App implements AppApi {
       ...MEASURE_TOOLS.map(([id, key, k]) => ({ value: id, label: `${t(key)}  ${k}` })),
     ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
     this.measureSeg.el.classList.add('seg-mode');
+    this.presentSeg = segmented('present-tool', null, [
+      { value: 'select', label: `${t('mode.select')}  V` },
+      { value: 'section', label: `${t('tool.section')}  X` },
+    ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
+    this.presentSeg.el.classList.add('seg-mode');
     const fit = h('button', { type: 'button', class: 'icon-btn tb-btn', id: 'btn-fit', title: `${t('view.fit')} (H)`, 'aria-label': t('view.fit'), onclick: () => this.viewer?.fitView() }, icon(ICONS.fit));
-    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.snapEl, fit);
+    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.snapEl, fit);
     this.updateToolbar();
   }
 
@@ -359,6 +370,7 @@ export class App implements AppApi {
     const annotate = this.mode === 'annotate';
     if (this.modeSeg) this.modeSeg.el.hidden = !annotate;
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
+    if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
     if (this.snapEl) this.snapEl.hidden = !annotate || this.tools?.activeId !== 'curve';
   }
 
@@ -411,6 +423,7 @@ export class App implements AppApi {
     this.viewportEl.style.cursor = cursor;
     this.modeSeg?.set(tools.activeId ?? 'select');
     this.measureSeg?.set(tools.activeId ?? 'select');
+    this.presentSeg?.set(tools.activeId ?? 'select');
     this.updateToolbar();
   }
 
@@ -442,10 +455,11 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel)) this.selection.set(null);
+    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel)) this.selection.set(null);
     if (c.kind !== 'measurements' && c.kind !== 'specimen') this.updatePlanes();
+    if (c.kind === 'sections' || c.kind === 'reset') this.updateSections();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
@@ -466,13 +480,15 @@ export class App implements AppApi {
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
     const mesh = this.store.state.mesh;
+    this.sectionLayer?.sync(this.store.state.sections, (id) => this.cuts.get(id)?.lines ?? null, this.selection.id, this.mode === 'present');
+    this.applyClipping();
     this.planesLayer?.sync(
       this.store.state.planes,
       this.planes,
       this.selection.id,
       this.mode !== 'annotate',
       mesh ? { min: mesh.bboxMin, max: mesh.bboxMax } : null,
-      (id) => this.sections.get(id)?.lines ?? null,
+      (id) => this.cuts.get(id)?.lines ?? null,
     );
     this.occlusionDirty = true;
   }
@@ -757,26 +773,96 @@ export class App implements AppApi {
   figureLayout(): FigureLayout | null {
     const ctx = this.figureContext();
     const frame = this.figureFrame();
-    if (!ctx || !frame || !this.figure.views.length) return null;
-    return figureLayout(ctx, frame, this.store.state.specimen.unit, this.figure);
+    const sections = this.sectionDrawings(this.store.state.sections.filter((x) => x.inFigure));
+    if (!ctx || !frame || (!this.figure.views.length && !sections.length)) return null;
+    return figureLayout(ctx, frame, this.store.state.specimen.unit, this.figure, sections);
   }
 
-  /** Render the figure with the current settings and annotations. */
-  private makeFigure(): Figure | null {
+  /** Render the figure with the current settings and annotations; `only`: just this section's drawing. */
+  private makeFigure(only?: Section): Figure | null {
     const ctx = this.figureContext();
     const frame = this.figureFrame();
     if (!ctx || !frame) return null;
     const st = this.store.state;
     const visiblePlanes = st.planes.filter((p) => p.visible);
-    return renderFigure(ctx, frame, st.specimen.unit, this.figure, {
+    const settings = only ? { ...this.figure, views: [] } : this.figure;
+    this.applyClipping(false);
+    const fig = renderFigure(ctx, frame, st.specimen.unit, settings, {
       arrows: st.scars.flatMap((s) =>
         s.vector ? [{ ...s.vector, color: arrowColor(s, this.display.arrows.colorMode) }] : [],
       ),
       curves: st.curves.map((c) => ({ points: c.points, closed: c.closed, color: curveColor(c) })),
       planes: visiblePlanes.flatMap((p) => {
-        const lines = this.sections.get(p.id)?.lines;
+        const lines = this.cuts.get(p.id)?.lines;
         return lines ? [{ lines, color: planeColor(p.label) }] : [];
       }),
+      sections: only ? this.sectionDrawings([only]) : this.sectionDrawings(st.sections.filter((x) => x.inFigure)),
+    });
+    this.applyClipping();
+    return fig;
+  }
+
+  private sectionDrawings(list: Section[]): SectionDrawing[] {
+    return list.flatMap((sec) => {
+      const lines = this.cuts.get(sec.id)?.lines;
+      // drawn as seen from the side the section was drawn from: the viewer's side up
+      const loops = lines ? sectionLoops2D(sec, lines).map((l) => l.map(([u, v]) => [u, -v] as [number, number])) : [];
+      return loops.length ? [{ label: sec.label, loops, fill: sec.fill }] : [];
+    });
+  }
+
+  /** Cut the model open in the present mode where sections ask for it (never while rendering figures). */
+  private applyClipping(on = true): void {
+    const mv = this.meshView;
+    if (!mv) return;
+    const planes = on && this.mode === 'present' ? SectionLayer.clipPlanes(this.store.state.sections).map((c) => c.plane) : [];
+    mv.material.clippingPlanes = planes;
+    this.viewer?.requestRender();
+  }
+
+  exportSection(id: string, format: 'png' | 'svg'): void {
+    const sec = this.store.section(id);
+    if (!sec || !this.hasMesh()) return;
+    void (async () => {
+      try {
+        const fig = this.makeFigure(sec);
+        if (!fig) return;
+        const name = `${this.stem()}_section_${sec.label}.${format}`;
+        if (format === 'png') {
+          const outcome = await saveFile(name, await fig.png(), 'image/png');
+          if (outcome === 'saved') this.feedback.toast(t('toast.saved', { name }));
+        } else await this.save(name, await fig.svg(), 'image/svg+xml');
+      } catch (e) {
+        this.feedback.toast((e as Error).message, 'error');
+      }
+    })();
+  }
+
+  /** Where each section cuts the model (in slices). */
+  private updateSections(): void {
+    for (const sec of this.store.state.sections) this.cutModel(sec.id, sec.point, sec.normal);
+    for (const id of [...this.cuts.keys()]) if (!this.store.plane(id) && !this.store.section(id)) this.cuts.delete(id);
+    this.sidebar?.refresh('sections');
+  }
+
+  /** Compute (once per position) where the plane through `point` with `normal` cuts the model. */
+  private cutModel(id: string, point: Vec3, normal: Vec3): void {
+    const base = this.measureBase;
+    const loaded = this.loaded;
+    if (!base || !loaded) return;
+    const key = JSON.stringify([point, normal]);
+    if (this.cuts.get(id)?.key === key) return;
+    this.cuts.set(id, { key, lines: null });
+    const o = loaded.offset;
+    const g = loaded.geometry;
+    const local: Vec3 = [point[0] - o[0], point[1] - o[1], point[2] - o[2]];
+    void runSliced(intersectPlaneSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, local, normal, base.edges)).then((lines) => {
+      const entry = this.cuts.get(id);
+      if (!entry || entry.key !== key || this.loaded !== loaded) return;
+      const shifted = lines.map((l) => ({ closed: l.closed, points: l.points.map((p) => [p[0] + o[0], p[1] + o[1], p[2] + o[2]] as Vec3) }));
+      this.cuts.set(id, { key, lines: shifted });
+      this.syncAnnotations();
+      this.sidebar.refresh('sections');
     });
   }
 
@@ -823,24 +909,9 @@ export class App implements AppApi {
     this.planes = st.planes.map((p) => computePlane(p, st, axes));
     const base = this.measureBase;
     const loaded = this.loaded;
-    for (const id of [...this.sections.keys()]) if (!this.planes.some((p) => p.id === id && p.valid)) this.sections.delete(id);
+    for (const id of [...this.cuts.keys()]) if (this.store.plane(id) && !this.planes.some((p) => p.id === id && p.valid)) this.cuts.delete(id);
     if (!base || !loaded) return;
-    for (const r of this.planes) {
-      if (!r.valid) continue;
-      const key = JSON.stringify([r.center, r.normal]);
-      if (this.sections.get(r.id)?.key === key) continue;
-      this.sections.set(r.id, { key, lines: null });
-      const o = loaded.offset;
-      const g = loaded.geometry;
-      const centre: Vec3 = [r.center![0] - o[0], r.center![1] - o[1], r.center![2] - o[2]];
-      void runSliced(intersectPlaneSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, centre, r.normal!, base.edges)).then((lines) => {
-        const entry = this.sections.get(r.id);
-        if (!entry || entry.key !== key || this.loaded !== loaded) return;
-        const shifted = lines.map((l) => ({ closed: l.closed, points: l.points.map((p) => [p[0] + o[0], p[1] + o[1], p[2] + o[2]] as Vec3) }));
-        this.sections.set(r.id, { key, lines: shifted });
-        this.syncAnnotations();
-      });
-    }
+    for (const r of this.planes) if (r.valid) this.cutModel(r.id, r.center!, r.normal!);
     this.sidebar?.refresh('planes');
   }
 
@@ -872,6 +943,7 @@ export class App implements AppApi {
       this.measureBase = base;
       this.updateAuto();
       this.updatePlanes();
+      this.updateSections();
       this.syncAnnotations();
     });
   }
@@ -914,6 +986,10 @@ export class App implements AppApi {
     if (this.mode === 'measure') {
       if (this.store.measurement(sel)) deleteMeasurement(this.store, sel);
       else if (this.store.plane(sel)) deletePlane(this.store, sel);
+      return;
+    }
+    if (this.mode === 'present') {
+      if (this.store.section(sel)) deleteSection(this.store, sel);
       return;
     }
     if (this.store.curve(sel)) deleteCurve(this.store, sel);
@@ -971,7 +1047,8 @@ export class App implements AppApi {
     this.curves?.clearAll();
     this.measures?.clearAll();
     this.planesLayer?.clearAll();
-    this.sections.clear();
+    this.sectionLayer?.clearAll();
+    this.cuts.clear();
     this.planes = [];
     this.loaded = loaded;
     this.meshView = new MeshView(loaded);
@@ -987,6 +1064,7 @@ export class App implements AppApi {
     this.curves?.setOrigin(loaded.offset);
     this.measures?.setOrigin(loaded.offset);
     this.planesLayer?.setOrigin(loaded.offset);
+    this.sectionLayer?.setOrigin(loaded.offset);
     this.curvBusy = false;
     v.setMesh(this.meshView.mesh, loaded.offset, loaded.diagonal);
 
@@ -1223,6 +1301,9 @@ export class App implements AppApi {
         case 'KeyP':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('curve');
           return;
+        case 'KeyX':
+          if (this.hasMesh() && this.mode === 'present') this.setTool('section');
+          return;
         case 'KeyD':
         case 'KeyG':
         case 'KeyN': {
@@ -1248,11 +1329,11 @@ export class App implements AppApi {
             e.preventDefault();
             return;
           }
-          if (e.repeat || this.mode === 'present') return;
+          if (e.repeat) return;
           this.deleteSelection(e);
           return;
         case 'Delete':
-          if (this.mode !== 'present') this.deleteSelection(e);
+          this.deleteSelection(e);
           return;
         case 'KeyH':
           this.viewer?.fitView();
@@ -1309,6 +1390,7 @@ export class App implements AppApi {
       ['M', t('help.k.mode')],
       ['A', t('help.k.draw')],
       ['D / G / N', t('help.k.measure')],
+      ['X', t('help.k.section')],
       ['P', t('help.k.curve')],
       ['V', t('help.k.select')],
       ['S', t('help.k.snap')],
@@ -1363,7 +1445,14 @@ export class App implements AppApi {
       exportCurvesCsvText: () => curveCsv(this.store.state, { excelBom: false }),
       autoMeasurements: () => this.auto,
       planes: () => this.planes,
-      planeSectionCount: (id: string) => this.sections.get(id)?.lines?.length ?? null,
+      planeSectionCount: (id: string) => this.cuts.get(id)?.lines?.length ?? null,
+      sectionFigure: async (id: string, format: 'png' | 'svg') => {
+        const sec = this.store.section(id);
+        const fig = sec ? this.makeFigure(sec) : null;
+        if (!fig) return null;
+        return { layout: fig.layout, data: format === 'svg' ? await fig.svg() : btoa(Array.from(await fig.png(), (c) => String.fromCharCode(c)).join('')) };
+      },
+      clipping: () => this.meshView?.material.clippingPlanes?.length ?? 0,
       exportPlanesCsvText: () => planesCsv(this.store.state, this.planes, { excelBom: false }),
       towardViewer: () => this.viewer?.towardViewer() ?? null,
       cameraUp: () => this.viewer?.cameraUp() ?? null,

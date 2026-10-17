@@ -101,3 +101,42 @@ export function simplifyLoop(loop: Array<[number, number]>, tolerance: number): 
   }
   return loop.filter((_, i) => keep[i]);
 }
+
+/** Signed area of a closed 2D polyline (positive when counter-clockwise in a y-up frame). */
+export function signedArea(loop: ReadonlyArray<readonly [number, number]>): number {
+  let a = 0;
+  for (let i = 0; i < loop.length; i++) {
+    const p = loop[i], q = loop[(i + 1) % loop.length];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return a / 2;
+}
+
+function insideLoop(p: readonly [number, number], loop: ReadonlyArray<readonly [number, number]>): boolean {
+  let inside = false;
+  for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+    const a = loop[i], b = loop[j];
+    if (a[1] > p[1] !== b[1] > p[1] && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Group closed loops into filled shapes with holes (even-odd nesting): a loop
+ * inside an even number of others is an outline, one inside an odd number is
+ * a hole of the smallest outline around it.
+ */
+export function nestLoops(loops: Array<Array<[number, number]>>): Array<{ outer: Array<[number, number]>; holes: Array<Array<[number, number]>> }> {
+  const order = loops.map((l, i) => ({ l, i, area: Math.abs(signedArea(l)) })).filter((x) => x.l.length >= 3 && x.area > 0).sort((a, b) => b.area - a.area);
+  const depth = order.map((x) => order.filter((y) => y !== x && y.area > x.area && insideLoop(x.l[0], y.l)).length);
+  const shapes: Array<{ outer: Array<[number, number]>; holes: Array<Array<[number, number]>>; area: number }> = [];
+  order.forEach((x, k) => {
+    if (depth[k] % 2 === 0) shapes.push({ outer: x.l, holes: [], area: x.area });
+  });
+  order.forEach((x, k) => {
+    if (depth[k] % 2 === 0) return;
+    const host = shapes.filter((s) => s.area > x.area && insideLoop(x.l[0], s.outer)).sort((a, b) => a.area - b.area)[0];
+    host?.holes.push(x.l);
+  });
+  return shapes.map(({ outer, holes }) => ({ outer, holes }));
+}

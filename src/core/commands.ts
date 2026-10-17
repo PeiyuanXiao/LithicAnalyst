@@ -1,4 +1,4 @@
-import type { Curve, Measurement, Plane, Scar, SpecimenInfo } from './types';
+import type { Curve, Measurement, Plane, Scar, Section, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -291,6 +291,56 @@ export class UpdatePlaneCommand implements Command {
   revert(store: ProjectStore): void {
     store._putPlane(structuredClone(this.before));
     store.notify({ kind: 'planes', ids: [this.before.id] });
+  }
+}
+
+export class AddSectionCommand implements Command {
+  readonly labelKey = 'cmd.addSection';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly section: Section, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextSectionNumber;
+    store._insertSection(structuredClone(this.section));
+    store._setNextSectionNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'sections', ids: [this.section.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removeSection(this.section.id);
+    store._setNextSectionNumber(this.prevNext);
+    store.notify({ kind: 'sections', ids: [this.section.id] });
+  }
+}
+
+export class DeleteSectionCommand implements Command {
+  readonly labelKey = 'cmd.deleteSection';
+  readonly createdAt = Date.now();
+  private removed: { section: Section; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removeSection(this.id);
+    store.notify({ kind: 'sections', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertSection(structuredClone(this.removed.section), this.removed.index);
+    store.notify({ kind: 'sections', ids: [this.id] });
+  }
+}
+
+export class UpdateSectionCommand implements Command {
+  readonly labelKey = 'cmd.editSection';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: Section,
+    private readonly after: Section,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._putSection(structuredClone(this.after));
+    store.notify({ kind: 'sections', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putSection(structuredClone(this.before));
+    store.notify({ kind: 'sections', ids: [this.before.id] });
   }
 }
 

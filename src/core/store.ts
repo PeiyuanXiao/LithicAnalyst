@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Scar, ScarVector, SpecimenInfo } from './types';
+import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Scar, ScarVector, Section, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -19,10 +19,12 @@ export function emptyProject(): ProjectState {
     curves: [],
     measurements: [],
     planes: [],
+    sections: [],
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,
     nextPlaneNumber: 1,
+    nextSectionNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
@@ -73,6 +75,10 @@ export class ProjectStore {
 
   plane(id: string): Plane | undefined {
     return this._state.planes.find((p) => p.id === id);
+  }
+
+  section(id: string): Section | undefined {
+    return this._state.sections.find((s) => s.id === id);
   }
 
   /** Replace the whole project (new mesh, loaded project file). Clears history. */
@@ -168,6 +174,30 @@ export class ProjectStore {
 
   _setNextPlaneNumber(n: number): void {
     this._state.nextPlaneNumber = n;
+  }
+
+  _insertSection(s: Section, index?: number): void {
+    const list = this._state.sections;
+    if (index === undefined || index < 0 || index > list.length) list.push(s);
+    else list.splice(index, 0, s);
+  }
+
+  _removeSection(id: string): { section: Section; index: number } | null {
+    const list = this._state.sections;
+    const index = list.findIndex((s) => s.id === id);
+    if (index < 0) return null;
+    const [section] = list.splice(index, 1);
+    return { section, index };
+  }
+
+  _putSection(s: Section): void {
+    const list = this._state.sections;
+    const index = list.findIndex((x) => x.id === s.id);
+    if (index >= 0) list[index] = s;
+  }
+
+  _setNextSectionNumber(n: number): void {
+    this._state.nextSectionNumber = n;
   }
 
   _setSpecimen(s: SpecimenInfo): void {

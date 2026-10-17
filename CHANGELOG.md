@@ -34,6 +34,10 @@
   background at a physical scale (1:2, 1:1, 2:1) and 300 / 600 / 1200 dpi (written into the file);
   SVG in millimetres with the shading embedded and arrows, curves, sections, scale bar and outline
   as vectors, hidden parts left out. Without a stated unit there is no scale bar or physical scale.
+- Sections (present mode, X): drag a line across the model; the section is the plane through it
+  and the view direction. The model can be cut open on one side, with the cut face solid or
+  hatched; the section drawing exports to SVG / PNG on its own or joins the figure, to the right of
+  the views. For display only: no measurements come from sections.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

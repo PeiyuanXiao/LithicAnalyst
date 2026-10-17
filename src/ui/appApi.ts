@@ -72,6 +72,7 @@ export interface AppApi {
   /** Size of the figure with the current settings (null without a mesh). */
   figureLayout(): FigureLayout | null;
   exportFigure(format: 'png' | 'svg'): void;
+  exportSection(id: string, format: 'png' | 'svg'): void;
   saveProject(): void;
   openProject(): void;
 }

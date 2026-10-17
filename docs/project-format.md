@@ -31,11 +31,13 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.curves` | array | in creation order |
 | `annotations.measurements` | array | manual measurements, in creation order |
 | `annotations.planes` | array | fitted planes (their inputs), in creation order |
+| `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
 | `nextMeasureNumber` | integer | next measurement label (`M{n}`) |
 | `nextPlaneNumber` | integer | next plane label (`P{n}`) |
+| `nextSectionNumber` | integer | next section label (`X{n}`) |
 
 Readers should ignore keys they do not know. Future annotation layers (landmarks, surface
 regions, relations) will be added next to `scars` and `curves` inside `annotations`.
@@ -276,7 +278,7 @@ when reading, and saving writes format 2.
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
 | no `derived` | `derived` (computed results) |
-| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber` |
+| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.

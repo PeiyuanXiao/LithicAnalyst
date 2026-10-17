@@ -150,6 +150,28 @@ export interface Plane {
   modifiedAt: string;
 }
 
+/**
+ * A section for display (no measurements come from it): the plane through a
+ * line drawn on screen and the view direction.
+ */
+export interface Section {
+  id: string;
+  /** "X1", "X2", … */
+  label: string;
+  /** A point on the plane (original coordinates) and its unit normal. */
+  point: Vec3;
+  normal: Vec3;
+  /** In-plane direction of the drawn line: the horizontal of the section drawing. */
+  across: Vec3;
+  /** Which part of the model stays in the 3D view: all of it, the side the normal points to, or the other. */
+  keep: 'both' | 'front' | 'back';
+  fill: 'solid' | 'hatch';
+  /** Add the section drawing to the figure (to the right of the views). */
+  inFigure: boolean;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -157,6 +179,7 @@ export interface ProjectState {
   curves: Curve[];
   measurements: Measurement[];
   planes: Plane[];
+  sections: Section[];
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */
@@ -165,6 +188,8 @@ export interface ProjectState {
   nextMeasureNumber: number;
   /** Next number used for plane labels (P1, P2, …). */
   nextPlaneNumber: number;
+  /** Next number used for section labels (X1, X2, …). */
+  nextSectionNumber: number;
   createdAt: string;
   modifiedAt: string;
 }

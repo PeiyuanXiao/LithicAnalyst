@@ -3,7 +3,7 @@ import { computeDerived, type DerivedResults, type MeshResults } from './derived
 import { defaultAttributes, defaultCurveAttributes } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, Curve, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Scar, ScarVector, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Scar, ScarVector, Section, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -22,13 +22,14 @@ export interface ProjectFile {
   savedAt: string;
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
-  annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[] };
+  annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[] };
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
   nextCurveNumber: number;
   nextMeasureNumber: number;
   nextPlaneNumber: number;
+  nextSectionNumber: number;
   createdAt: string;
   modifiedAt: string;
 }
@@ -42,12 +43,13 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     savedAt: nowIso(),
     specimen: structuredClone(state.specimen),
     mesh: state.mesh ? structuredClone(state.mesh) : null,
-    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes) },
+    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections) },
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
     nextMeasureNumber: state.nextMeasureNumber,
     nextPlaneNumber: state.nextPlaneNumber,
+    nextSectionNumber: state.nextSectionNumber,
     createdAt: state.createdAt,
     modifiedAt: state.modifiedAt,
   };
@@ -202,6 +204,26 @@ function parsePlane(raw: unknown, i: number): Plane {
   };
 }
 
+function parseSection(raw: unknown, i: number): Section {
+  if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Section ${i + 1} is not an object.`);
+  const r = raw as Record<string, unknown>;
+  if (!isFiniteVec(r.point) || !isFiniteVec(r.normal) || !isFiniteVec(r.across))
+    throw new ProjectFileError(`Section ${i + 1} needs numeric "point", "normal" and "across" [x, y, z].`);
+  const t = nowIso();
+  return {
+    id: str(r.id) || uuid(),
+    label: str(r.label, `X${i + 1}`),
+    point: [r.point[0], r.point[1], r.point[2]],
+    normal: normalize(r.normal as Vec3),
+    across: normalize(r.across as Vec3),
+    keep: r.keep === 'front' || r.keep === 'back' ? r.keep : 'both',
+    fill: r.fill === 'solid' ? 'solid' : 'hatch',
+    inFigure: r.inFigure !== false,
+    createdAt: str(r.createdAt, t),
+    modifiedAt: str(r.modifiedAt, t),
+  };
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -225,6 +247,8 @@ export function parseProjectFile(input: unknown): ProjectState {
   const measurements = measureList.map((m, i) => parseMeasurement(m, i));
   const planeList = Array.isArray(ann?.planes) ? (ann!.planes as unknown[]) : [];
   const planes = planeList.map((p, i) => parsePlane(p, i));
+  const sectionList = Array.isArray(ann?.sections) ? (ann!.sections as unknown[]) : [];
+  const sections = sectionList.map((s, i) => parseSection(s, i));
   const sp = (raw.specimen ?? {}) as Record<string, unknown>;
   const specimen: SpecimenInfo = {
     id: str(sp.id),
@@ -240,10 +264,12 @@ export function parseProjectFile(input: unknown): ProjectState {
     curves,
     measurements,
     planes,
+    sections,
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
     nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),
     nextPlaneNumber: Math.max(positiveInt(raw.nextPlaneNumber), maxLabelNumber(planes.map((p) => p.label), 'P') + 1),
+    nextSectionNumber: Math.max(positiveInt(raw.nextSectionNumber), maxLabelNumber(sections.map((s) => s.label), 'X') + 1),
     createdAt: str(raw.createdAt, nowIso()),
     modifiedAt: str(raw.modifiedAt, nowIso()),
   };

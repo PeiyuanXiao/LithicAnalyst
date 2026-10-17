@@ -22,6 +22,8 @@ export interface LithicApi {
   exportPlanesCsvText(): string;
   towardViewer(): Vec3 | null;
   cameraUp(): Vec3 | null;
+  sectionFigure(id: string, format: 'png' | 'svg'): Promise<{ layout: import('../src/render/figure').FigureLayout; data: string } | null>;
+  clipping(): number;
   figure(format: 'png' | 'svg'): Promise<{ layout: import('../src/render/figure').FigureLayout; data: string } | null>;
   autoMeasurements(): import('../src/core/derived').AutoMeasurements | null;
   exportMeasurementsCsvText(): string;

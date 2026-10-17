@@ -2,12 +2,14 @@ import {
   deleteCurve,
   deleteMeasurement,
   deletePlane,
+  deleteSection,
   deleteScar,
   flipPlane,
   setPlaneCurve,
   setPlaneExclusion,
   setPlaneMethod,
   setPlaneVisible,
+  updateSection,
   setCurveAttribute,
   setCurveLabel,
   setScarAttribute,
@@ -24,13 +26,14 @@ import { CURVE_COLORS, curveColor } from '../render/curveLayer';
 import { MEASURE_COLORS } from '../render/measureLayer';
 import { planeColor } from '../render/planeLayer';
 import { FIGURE_VIEWS } from '../render/figure';
+import { SECTION_COLORS } from '../render/sectionLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -697,7 +700,7 @@ function figureSection(api: AppApi): Section {
   const svg = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-svg', onclick: () => api.exportFigure('svg') }, 'SVG') as HTMLButtonElement;
   body.append(views, light.el, overlays, h('div', { class: 'ctl-grid' }, scale.el, dpi.el), sizeEl, h('div', { class: 'btn-row' }, png, svg));
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'figure', 'specimen'].includes(kind)) return;
+    if (!['all', 'mesh', 'figure', 'specimen', 'sections'].includes(kind)) return;
     const f = api.figure;
     viewBoxes.forEach((b, i) => (b.checked = f.views.includes(FIGURE_VIEWS[i])));
     light.set(f.lightElevation);
@@ -708,13 +711,66 @@ function figureSection(api: AppApi): Section {
     (scaleBarEl.querySelector('input') as HTMLInputElement).disabled = !unitStated;
     for (const b of scale.el.querySelectorAll('button')) (b as HTMLButtonElement).disabled = !unitStated;
     for (const b of dpi.el.querySelectorAll('button')) (b as HTMLButtonElement).disabled = !unitStated;
-    png.disabled = svg.disabled = !api.hasMesh() || !f.views.length;
+    png.disabled = svg.disabled = !api.hasMesh() || (!f.views.length && !api.store.state.sections.some((x) => x.inFigure));
     clear(sizeEl);
     const layout = api.hasMesh() && api.mode === 'present' ? api.figureLayout() : null;
     if (layout) {
       const size = layout.mmPerPx ? `${fmtNum(layout.width * layout.mmPerPx, 0)} × ${fmtNum(layout.height * layout.mmPerPx, 0)} mm · ` : '';
       sizeEl.append(...metaRow(t('figure.size'), h('span', { class: 'mono', id: 'fig-size' }, `${size}${layout.width} × ${layout.height} px`)));
     }
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+function sectionsSection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('sections', t('sec.sections'), badge);
+  const list = h('ol', { class: 'arrow-list', id: 'section-list', role: 'listbox', 'aria-label': t('sec.sections') });
+  const inspector = h('div', { class: 'inspector', id: 'section-inspector' });
+  body.append(list, inspector);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'sections', 'selection', 'mesh'].includes(kind)) return;
+    const st = api.store.state;
+    badge.textContent = String(st.sections.length);
+    list.hidden = st.sections.length === 0;
+    clear(list);
+    const sel = api.selection.id;
+    for (const s of st.sections) {
+      const isSel = s.id === sel;
+      list.append(
+        h(
+          'li',
+          { class: 'arrow-row section-row', role: 'option', 'aria-selected': String(isSel), 'data-id': s.id, onclick: () => api.selection.set(s.id) },
+          h('span', { class: 'chip chip-line', style: `--chip:${isSel ? SECTION_COLORS.selected : SECTION_COLORS.line}` }),
+          h('span', { class: 'arrow-id mono' }, s.label),
+          h('span', { class: 'arrow-meta' }, t(`section.keep.${s.keep}`)),
+          h('span', { class: 'arrow-len' }, s.inFigure ? t('section.inFigure') : ''),
+        ),
+      );
+    }
+    clear(inspector);
+    const s = sel ? api.store.section(sel) : undefined;
+    if (!s) return;
+    const keep = segmented('section-keep', t('section.keep'), (['both', 'front', 'back'] as const).map((k) => ({ value: k, label: t(`section.keep.${k}`) })), s.keep, (v) =>
+      updateSection(api.store, s.id, { keep: v as 'both' | 'front' | 'back' }),
+    );
+    const fill = segmented('section-fill', t('section.fill'), (['solid', 'hatch'] as const).map((k) => ({ value: k, label: t(`section.fill.${k}`) })), s.fill, (v) =>
+      updateSection(api.store, s.id, { fill: v as 'solid' | 'hatch' }),
+    );
+    const inFigure = checkbox('section-in-figure', t('section.inFigure'), s.inFigure, (on) => updateSection(api.store, s.id, { inFigure: on }));
+    inspector.append(
+      keep.el,
+      fill.el,
+      inFigure,
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'section-png', onclick: () => api.exportSection(s.id, 'png') }, 'PNG'),
+        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'section-svg', onclick: () => api.exportSection(s.id, 'svg') }, 'SVG'),
+        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'section-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSection(api.store, s.id) }, icon(ICONS.trash), t('arrows.delete')),
+      ),
+    );
   };
   refresh('all');
   return { el, refresh };
@@ -763,6 +819,7 @@ const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present'];
 const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [specimenSection, ALL_MODES],
   [orientationSection, ['present']],
+  [sectionsSection, ['present']],
   [figureSection, ['present']],
   [arrowsSection, ['annotate']],
   [curvesSection, ['annotate']],

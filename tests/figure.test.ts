@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { simplifyLoop, traceOutlines } from '../src/compute/contour';
+import { nestLoops, signedArea, simplifyLoop, traceOutlines } from '../src/compute/contour';
 import { crc32, pngDpi, pngWithDpi } from '../src/io/png';
 
 const area = (loop: Array<[number, number]>) => Math.abs(loop.reduce((s, p, i) => s + p[0] * loop[(i + 1) % loop.length][1] - loop[(i + 1) % loop.length][0] * p[1], 0) / 2);
@@ -37,5 +37,18 @@ describe('PNG resolution', () => {
     expect(pngDpi(out)).toBeCloseTo(600, 1);
     expect(pngDpi(pngWithDpi(out, 300))).toBeCloseTo(300, 1);
     expect(pngWithDpi(out, 300).length).toBe(out.length);
+  });
+});
+
+describe('section loops', () => {
+  it('nest outlines and holes', () => {
+    const square = (c: number, r: number): Array<[number, number]> => [[c - r, c - r], [c + r, c - r], [c + r, c + r], [c - r, c + r]];
+    const shapes = nestLoops([square(0, 1), square(0, 5), square(20, 2), square(0, 3)]);
+    // 5 with a hole of 3 (inside which 1 is an island again), and 2 on its own
+    expect(shapes.map((s) => [Math.abs(signedArea(s.outer)), s.holes.map((h) => Math.abs(signedArea(h)))])).toEqual([
+      [100, [36]],
+      [16, []],
+      [4, []],
+    ]);
   });
 });
