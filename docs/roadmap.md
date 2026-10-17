@@ -9,7 +9,9 @@
 
 ## 阶段 0　基础
 
-### 0.1 端到端测试 ⬜
+### 0.1 端到端测试 ✅ 2026-10-17
+
+> 完成：`npm run e2e` 用 Playwright 在 Chromium（SwiftShader）中操作构建后的 `dist/index.html`，覆盖下列全部流程，测试模型由 `e2e/fixtures/meshes.ts` 生成；CI 增加 e2e 任务。
 
 - 加 Playwright（TypeScript）端到端测试，命令 `npm run e2e`。先覆盖现有流程：导入模型、画箭头、画曲线（吸附与不吸附）、撤销/重做、导出两种 CSV、保存并读回项目文件、切换中英文。
 - 测试模型由脚本生成（几万面以内），不提交大文件。

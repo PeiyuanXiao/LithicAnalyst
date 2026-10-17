@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build && node scripts/make-artifact.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "e2e": "tsc --noEmit -p e2e && npm run build && playwright test",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e"
   },
   "license": "MIT",
   "dependencies": {
@@ -17,6 +18,8 @@
     "three-mesh-bvh": "0.9.15"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.19.1",
     "@types/three": "0.186.0",
     "typescript": "5.9.3",
     "vite": "8.3.4",
