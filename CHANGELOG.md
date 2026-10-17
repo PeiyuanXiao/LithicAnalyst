@@ -24,6 +24,10 @@
   change; each is drawn as a translucent disc with its section of the model and its normal, can be
   flipped, viewed along its normal and shown or hidden. Export: `<specimen>_planes.csv` with the
   centre, the normal and the 4×4 matrix to the plane frame.
+- Specimen orientation (present mode): the main face is seen from the current view or along a
+  plane's normal; an arrow can set the vertical (origin at the bottom); turn by 90° or fine-tune.
+  Only the matrix is recorded (`specimen.frame`); the camera follows it, the model and the
+  annotations keep their coordinates, and length, width and thickness use the frame.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

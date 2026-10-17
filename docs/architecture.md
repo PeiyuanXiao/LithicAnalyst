@@ -102,6 +102,14 @@ keeps the selection and the undo history.
   a geodesic is a `PathSearch` over mesh edges, pulled taut with `relaxPath` and kept on the
   surface (`SurfaceSnap.hug`). `render/measureLayer.ts` draws them (only in the measure mode).
 
+## Specimen frame
+
+`core/frame.ts` builds and changes the frame matrix (from a view direction and an up vector,
+turning on the page, taking the vertical from a direction). The present mode sets it through
+`App.setFrameFromView / setFrameFromPlane / setFrameVertical / turnFrame`; each button press is
+one undo step, a fine-turn drag is one. `App.viewFrame` puts the camera on the frame (looking
+along −Z, +Y up); nothing transforms the model or stored coordinates.
+
 ## Fitted planes
 
 * A `Plane` stores only its inputs (method, completeness filter, curves, `upHint`);

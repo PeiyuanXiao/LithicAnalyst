@@ -5,8 +5,9 @@ import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compu
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addPlane, deleteCurve, deleteMeasurement, deletePlane, deleteScar, setCurveAttribute, setScarAttribute } from '../core/actions';
+import { addPlane, deleteCurve, deleteMeasurement, deletePlane, deleteScar, setCurveAttribute, setScarAttribute, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
+import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, numberKeyField, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
@@ -470,6 +471,7 @@ export class App implements AppApi {
     this.setTool('select');
     this.mode = mode;
     writePref('mode', mode);
+    if (mode === 'present') this.viewFrame();
     this.viewportEl.dataset.mode = mode;
     this.appModeSeg?.set(mode);
     this.updateToolbar();
@@ -644,6 +646,62 @@ export class App implements AppApi {
   exportPlanesCsv(): void {
     if (!this.hasMesh() || !this.planes.length) return;
     void this.save(`${this.stem()}_planes.csv`, planesCsv(this.store.state, this.planes, { excelBom: this.display.excelBom }), 'text/csv');
+  }
+
+  /** Centre of the model's bounding box: the origin of specimen coordinates. */
+  private modelCentre(): Vec3 | null {
+    const m = this.store.state.mesh;
+    return m ? [(m.bboxMin[0] + m.bboxMax[0]) / 2, (m.bboxMin[1] + m.bboxMax[1]) / 2, (m.bboxMin[2] + m.bboxMax[2]) / 2] : null;
+  }
+
+  private setFrame(matrix: number[] | null, source: string, merge = false): void {
+    if (!matrix) return;
+    updateSpecimen(this.store, { frame: { matrix: matrix.map((x) => Math.round(x * 1e9) / 1e9), source } }, merge);
+    this.viewFrame();
+  }
+
+  setFrameFromView(): void {
+    const v = this.viewer;
+    const c = this.modelCentre();
+    if (!v || !c) return;
+    this.setFrame(frameFromView(v.towardViewer(), v.cameraUp(), c), 'view');
+  }
+
+  setFrameFromPlane(id: string): void {
+    const r = this.planes.find((p) => p.id === id);
+    const v = this.viewer;
+    const c = this.modelCentre();
+    if (!r?.valid || !v || !c) return;
+    // keep what is up on screen now, as far as the plane allows
+    this.setFrame(frameFromView(r.normal!, v.cameraUp(), c) ?? frameFromView(r.normal!, [r.matrix![4], r.matrix![5], r.matrix![6]], c), `plane:${r.label}`);
+  }
+
+  setFrameVertical(scarId: string): void {
+    const f = this.store.state.specimen.frame;
+    const s = this.store.scar(scarId);
+    if (!f || !s?.vector) return;
+    const v = s.vector;
+    const base = f.source.replace(/; vertical:.*$/, '');
+    this.setFrame(frameWithVertical(f.matrix, [v.end[0] - v.start[0], v.end[1] - v.start[1], v.end[2] - v.start[2]]), `${base}; vertical:${s.label}`);
+  }
+
+  turnFrame(deg: number, base?: number[]): void {
+    const f = this.store.state.specimen.frame;
+    if (!f) return;
+    // fine turning (from a fixed start) is one undo step
+    this.setFrame(rotateFrame(base ?? f.matrix, deg), f.source, !!base);
+  }
+
+  clearFrame(): void {
+    if (this.store.state.specimen.frame) updateSpecimen(this.store, { frame: null }, false);
+  }
+
+  /** Put the camera on the specimen frame: looking at the main face, +Y up. */
+  viewFrame(): void {
+    const f = this.store.state.specimen.frame;
+    if (!f || !this.viewer) return;
+    const a = frameAxes(f.matrix);
+    this.viewer.viewFrom(a.z, a.y);
   }
 
   /** Principal axes of all vertices in original coordinates (the mesh keeps them re-centred). */
@@ -1208,6 +1266,7 @@ export class App implements AppApi {
       planeSectionCount: (id: string) => this.sections.get(id)?.lines?.length ?? null,
       exportPlanesCsvText: () => planesCsv(this.store.state, this.planes, { excelBom: false }),
       towardViewer: () => this.viewer?.towardViewer() ?? null,
+      cameraUp: () => this.viewer?.cameraUp() ?? null,
       exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }),
       exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
       /** Points of the measurement being taken (null when no measuring tool is active). */

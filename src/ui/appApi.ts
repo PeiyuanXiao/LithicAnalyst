@@ -58,6 +58,14 @@ export interface AppApi {
   addPlane(): void;
   viewAlongPlane(id: string): void;
   exportPlanesCsv(): void;
+  /** Specimen frame: front view from the current view or a plane's normal; vertical from an arrow; turn on the page. */
+  setFrameFromView(): void;
+  setFrameFromPlane(id: string): void;
+  setFrameVertical(scarId: string): void;
+  /** `base`: the matrix to turn from (fine turning keeps turning the same start). */
+  turnFrame(deg: number, base?: number[]): void;
+  clearFrame(): void;
+  viewFrame(): void;
   saveProject(): void;
   openProject(): void;
 }

@@ -281,10 +281,11 @@ export const setPlaneVisible = (store: ProjectStore, id: string, visible: boolea
 
 // ---------------------------------------------------------------- specimen
 
-export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>): void {
+/** `merge`: quick successive edits of the same fields become one undo step (typing, dragging a slider). */
+export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>, merge = true): void {
   const before = store.state.specimen;
   const after = { ...structuredClone(before), ...patch };
   if (JSON.stringify(before) === JSON.stringify(after)) return;
   const key = Object.keys(patch).sort().join(',');
-  store.history.execute(new SetSpecimenCommand(structuredClone(before), after, `specimen:${key}`));
+  store.history.execute(new SetSpecimenCommand(structuredClone(before), after, merge ? `specimen:${key}` : null));
 }

@@ -579,6 +579,77 @@ function planesSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+function orientationSection(api: AppApi): Section {
+  const { el, body } = section('orientation', t('sec.orientation'));
+  const status = h('dl', { class: 'meta' });
+  const btn = (id: string, label: string, onclick: () => void, kind = 'btn-quiet') =>
+    h('button', { type: 'button', class: `btn ${kind} btn-sm`, id, onclick }, label) as HTMLButtonElement;
+  const fromView = btn('frame-from-view', t('frame.fromView'), () => api.setFrameFromView(), 'btn-primary');
+  const planeSel = h('select', { id: 'frame-plane', class: 'ctl-select', 'aria-label': t('sec.planes') }) as HTMLSelectElement;
+  const fromPlane = btn('frame-from-plane', t('frame.fromPlane'), () => planeSel.value && api.setFrameFromPlane(planeSel.value));
+  const arrowSel = h('select', { id: 'frame-arrow', class: 'ctl-select', 'aria-label': t('sec.arrows') }) as HTMLSelectElement;
+  const vertical = btn('frame-vertical', t('frame.vertical'), () => arrowSel.value && api.setFrameVertical(arrowSel.value));
+  const ccw = btn('frame-rot-ccw', t('frame.ccw'), () => api.turnFrame(90));
+  const cw = btn('frame-rot-cw', t('frame.cw'), () => api.turnFrame(-90));
+  // fine turning: keep turning the frame the slider started from, then let the slider go back to 0
+  let fineBase: number[] | null = null;
+  const fine = slider({
+    id: 'frame-fine',
+    label: t('frame.fine'),
+    min: -45,
+    max: 45,
+    step: 0.5,
+    value: 0,
+    format: (v) => `${v > 0 ? '+' : ''}${v}°`,
+    onInput: (v) => {
+      const f = api.store.state.specimen.frame;
+      if (!f) return;
+      fineBase ??= [...f.matrix];
+      api.turnFrame(-v, fineBase);
+    },
+  });
+  fine.el.querySelector('input')?.addEventListener('change', () => {
+    fineBase = null;
+    fine.set(0);
+  });
+  const view = btn('frame-view', t('frame.view'), () => api.viewFrame());
+  const clearBtn = btn('frame-clear', t('frame.clear'), () => api.clearFrame(), 'btn-danger');
+  const planeRow = h('div', { class: 'btn-row frame-pick' }, planeSel, fromPlane);
+  const arrowRow = h('div', { class: 'btn-row frame-pick' }, arrowSel, vertical);
+  body.append(
+    status,
+    h('div', { class: 'btn-row' }, fromView),
+    planeRow,
+    arrowRow,
+    h('div', { class: 'btn-row' }, ccw, cw),
+    fine.el,
+    h('div', { class: 'btn-row' }, view, clearBtn),
+  );
+  const options = (sel: HTMLSelectElement, items: Array<[string, string]>) => {
+    const keep = sel.value;
+    clear(sel);
+    for (const [value, label] of items) sel.append(h('option', { value }, label));
+    if (items.some(([v]) => v === keep)) sel.value = keep;
+  };
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'specimen', 'planes', 'arrows'].includes(kind)) return;
+    const st = api.store.state;
+    const f = st.specimen.frame;
+    clear(status);
+    status.append(...metaRow(t('frame.source'), h('span', { class: 'mono', id: 'frame-status' }, f ? f.source : t('frame.none'))));
+    options(planeSel, api.planeResults().filter((p) => p.valid).map((p) => [p.id, p.label]));
+    options(arrowSel, st.scars.filter((s) => s.vector).map((s) => [s.id, s.label]));
+    fromView.disabled = !api.hasMesh();
+    planeRow.hidden = planeSel.options.length === 0;
+    arrowRow.hidden = arrowSel.options.length === 0;
+    vertical.disabled = !f;
+    for (const b of [ccw, cw, view, clearBtn]) b.disabled = !f;
+    (fine.el.querySelector('input') as HTMLInputElement).disabled = !f;
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
 function measureExportSection(api: AppApi): Section {
   const { el, body } = section('measure-export', t('sec.export'));
   const autoBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-measurements-csv', onclick: () => api.exportMeasurementsCsv() }, t('export.measurements')) as HTMLButtonElement;
@@ -621,6 +692,7 @@ const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present'];
 /** The sidebar sections, in order, and the work modes that show them. */
 const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [specimenSection, ALL_MODES],
+  [orientationSection, ['present']],
   [arrowsSection, ['annotate']],
   [curvesSection, ['annotate']],
   [measureAutoSection, ['measure']],

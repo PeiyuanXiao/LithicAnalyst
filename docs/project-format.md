@@ -58,7 +58,9 @@ regions, relations) will be added next to `scars` and `curves` inside `annotatio
 * `frame` is the specimen coordinate system used for display and for length, width and
   thickness, or `null` when none is set. `matrix` is a row-major 4×4 matrix (16 numbers) that
   maps original coordinates to specimen coordinates: +Z points toward the viewer of the main
-  face, +Y is up on the page, +X is to the right. `source` records how it was set.
+  face, +Y is up on the page, +X is to the right; the origin is the centre of the mesh's
+  bounding box. `source` records how it was set: `view`, or `plane:P1`, followed by
+  `; vertical:S3` when an arrow set the vertical (pointing up, origin at the bottom).
 
 ## Derived results
 

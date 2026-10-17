@@ -875,6 +875,15 @@ textarea.ctl-text {
   font-size: var(--step--1);
 }
 
+.frame-pick {
+  flex-wrap: nowrap;
+}
+
+.frame-pick .ctl-select {
+  width: auto;
+  min-width: 5.5em;
+}
+
 .plane-row {
   grid-template-columns: auto auto minmax(0, 1fr) auto auto;
 }

@@ -21,6 +21,7 @@ export interface LithicApi {
   planeSectionCount(id: string): number | null;
   exportPlanesCsvText(): string;
   towardViewer(): Vec3 | null;
+  cameraUp(): Vec3 | null;
   autoMeasurements(): import('../src/core/derived').AutoMeasurements | null;
   exportMeasurementsCsvText(): string;
   exportManualMeasurementsCsvText(): string;
