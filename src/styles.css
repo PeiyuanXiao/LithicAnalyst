@@ -884,6 +884,13 @@ textarea.ctl-text {
   min-width: 5.5em;
 }
 
+.fig-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-bottom: 10px;
+}
+
 .plane-row {
   grid-template-columns: auto auto minmax(0, 1fr) auto auto;
 }

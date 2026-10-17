@@ -31,6 +31,12 @@ export function initHostDownloads(): void {
 export type SaveOutcome = 'saved' | 'declined' | 'busy' | 'fallback';
 
 export async function saveTextFile(filename: string, text: string, mime: string): Promise<SaveOutcome> {
+  return saveFile(filename, text, mime);
+}
+
+/** Save text or bytes (images). */
+export async function saveFile(filename: string, data: string | Uint8Array, mime: string): Promise<SaveOutcome> {
+  const text = data;
   if (runningInHost()) {
     const dl = downloadsPromise ? await downloadsPromise : null;
     if (!dl) return 'fallback';
@@ -45,7 +51,7 @@ export async function saveTextFile(filename: string, text: string, mime: string)
     }
   }
   try {
-    const blob = new Blob([text], { type: mime });
+    const blob = new Blob([text as BlobPart], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

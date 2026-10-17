@@ -28,6 +28,12 @@
   plane's normal; an arrow can set the vertical (origin at the bottom); turn by 90° or fine-tune.
   Only the matrix is recorded (`specimen.frame`); the camera follows it, the model and the
   annotations keep their coordinates, and length, width and thickness use the frame.
+- Figures (present mode): any of the six standard views, laid out by the European convention
+  (ISO first-angle projection) at one scale; raking light from the upper left with adjustable
+  height; overlays for scar arrows, curves, plane sections and a scale bar. PNG with a transparent
+  background at a physical scale (1:2, 1:1, 2:1) and 300 / 600 / 1200 dpi (written into the file);
+  SVG in millimetres with the shading embedded and arrows, curves, sections, scale bar and outline
+  as vectors, hidden parts left out. Without a stated unit there is no scale bar or physical scale.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

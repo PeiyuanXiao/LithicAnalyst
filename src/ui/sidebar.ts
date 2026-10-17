@@ -23,13 +23,14 @@ import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLa
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
 import { MEASURE_COLORS } from '../render/measureLayer';
 import { planeColor } from '../render/planeLayer';
+import { FIGURE_VIEWS } from '../render/figure';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -650,6 +651,75 @@ function orientationSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+function figureSection(api: AppApi): Section {
+  const { el, body } = section('figure', t('sec.figure'));
+  const views = h('div', { class: 'fig-views', role: 'group', 'aria-label': t('figure.views') });
+  const viewBoxes = FIGURE_VIEWS.map((v) => {
+    const box = checkbox(`fig-view-${v}`, t(`figure.view.${v}`), api.figure.views.includes(v), (on) =>
+      api.setFigure((f) => {
+        f.views = FIGURE_VIEWS.filter((x) => (x === v ? on : f.views.includes(x)));
+      }),
+    );
+    views.append(box);
+    return box.querySelector('input') as HTMLInputElement;
+  });
+  const light = slider({
+    id: 'fig-light',
+    label: t('figure.light'),
+    min: 5,
+    max: 85,
+    step: 1,
+    value: api.figure.lightElevation,
+    format: (v) => `${v}°`,
+    onInput: (v) => api.setFigure((f) => (f.lightElevation = v)),
+  });
+  const overlay = (id: string, key: 'arrows' | 'curves' | 'planes' | 'scaleBar', label: string) =>
+    checkbox(id, label, api.figure.overlays[key], (on) => api.setFigure((f) => (f.overlays[key] = on)));
+  const scaleBarEl = overlay('fig-scalebar', 'scaleBar', t('figure.scaleBar'));
+  const overlays = h(
+    'div',
+    { class: 'fig-views', role: 'group', 'aria-label': t('figure.overlays') },
+    overlay('fig-arrows', 'arrows', t('figure.arrows')),
+    overlay('fig-curves', 'curves', t('figure.curves')),
+    overlay('fig-planes', 'planes', t('figure.planes')),
+    scaleBarEl,
+  );
+  const scale = segmented('fig-scale', t('figure.scale'), [
+    { value: '0.5', label: '1:2' },
+    { value: '1', label: '1:1' },
+    { value: '2', label: '2:1' },
+  ], String(api.figure.scale), (v) => api.setFigure((f) => (f.scale = Number(v))));
+  const dpi = segmented('fig-dpi', t('figure.dpi'), [300, 600, 1200].map((d) => ({ value: String(d), label: `${d} dpi` })), String(api.figure.dpi), (v) =>
+    api.setFigure((f) => (f.dpi = Number(v))),
+  );
+  const sizeEl = h('dl', { class: 'meta' });
+  const png = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-png', onclick: () => api.exportFigure('png') }, 'PNG') as HTMLButtonElement;
+  const svg = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-svg', onclick: () => api.exportFigure('svg') }, 'SVG') as HTMLButtonElement;
+  body.append(views, light.el, overlays, h('div', { class: 'ctl-grid' }, scale.el, dpi.el), sizeEl, h('div', { class: 'btn-row' }, png, svg));
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'figure', 'specimen'].includes(kind)) return;
+    const f = api.figure;
+    viewBoxes.forEach((b, i) => (b.checked = f.views.includes(FIGURE_VIEWS[i])));
+    light.set(f.lightElevation);
+    scale.set(String(f.scale));
+    dpi.set(String(f.dpi));
+    // without a stated unit there is no physical scale
+    const unitStated = !!api.store.state.specimen.unit;
+    (scaleBarEl.querySelector('input') as HTMLInputElement).disabled = !unitStated;
+    for (const b of scale.el.querySelectorAll('button')) (b as HTMLButtonElement).disabled = !unitStated;
+    for (const b of dpi.el.querySelectorAll('button')) (b as HTMLButtonElement).disabled = !unitStated;
+    png.disabled = svg.disabled = !api.hasMesh() || !f.views.length;
+    clear(sizeEl);
+    const layout = api.hasMesh() && api.mode === 'present' ? api.figureLayout() : null;
+    if (layout) {
+      const size = layout.mmPerPx ? `${fmtNum(layout.width * layout.mmPerPx, 0)} × ${fmtNum(layout.height * layout.mmPerPx, 0)} mm · ` : '';
+      sizeEl.append(...metaRow(t('figure.size'), h('span', { class: 'mono', id: 'fig-size' }, `${size}${layout.width} × ${layout.height} px`)));
+    }
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
 function measureExportSection(api: AppApi): Section {
   const { el, body } = section('measure-export', t('sec.export'));
   const autoBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-measurements-csv', onclick: () => api.exportMeasurementsCsv() }, t('export.measurements')) as HTMLButtonElement;
@@ -693,6 +763,7 @@ const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present'];
 const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [specimenSection, ALL_MODES],
   [orientationSection, ['present']],
+  [figureSection, ['present']],
   [arrowsSection, ['annotate']],
   [curvesSection, ['annotate']],
   [measureAutoSection, ['measure']],
@@ -720,7 +791,10 @@ export function buildSidebar(api: AppApi): Sidebar {
     el,
     refresh: (kind) => {
       if (kind === 'mode' || kind === 'all') showMode();
-      if (kind === 'mode') return;
+      if (kind === 'mode') {
+        for (const s of sections) s.refresh('figure');
+        return;
+      }
       for (const s of sections) s.refresh(kind);
     },
   };

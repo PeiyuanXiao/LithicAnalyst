@@ -1,5 +1,6 @@
 import type { SnapMode } from '../compute/surfacePath';
 import type { PlaneResult } from '../compute/planes';
+import type { FigureLayout, FigureSettings } from '../render/figure';
 import type { AutoMeasurements } from '../core/derived';
 import type { ProjectStore } from '../core/store';
 import type { Measurement } from '../core/types';
@@ -66,6 +67,11 @@ export interface AppApi {
   turnFrame(deg: number, base?: number[]): void;
   clearFrame(): void;
   viewFrame(): void;
+  readonly figure: FigureSettings;
+  setFigure(change: (f: FigureSettings) => void): void;
+  /** Size of the figure with the current settings (null without a mesh). */
+  figureLayout(): FigureLayout | null;
+  exportFigure(format: 'png' | 'svg'): void;
   saveProject(): void;
   openProject(): void;
 }

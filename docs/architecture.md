@@ -110,6 +110,16 @@ turning on the page, taking the vertical from a direction). The present mode set
 one undo step, a fine-turn drag is one. `App.viewFrame` puts the camera on the frame (looking
 along −Z, +Y up); nothing transforms the model or stored coordinates.
 
+## Figures
+
+`render/figure.ts` renders the standard views off screen with an orthographic camera per view
+(the main scene with the annotation overlay hidden, the key light set to the upper left of the
+page), into transparent render targets at the exact pixel scale. Annotations are projected into
+each view as 2D polylines; a point counts as hidden when a ray from it toward the camera hits the
+mesh. Arrows are drawn only in views their surface faces. The outline comes from the coverage of
+the rendered image (`compute/contour.ts`, marching squares + simplification). PNG files get a
+pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
+
 ## Fitted planes
 
 * A `Plane` stores only its inputs (method, completeness filter, curves, `upHint`);

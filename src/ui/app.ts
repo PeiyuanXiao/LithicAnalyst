@@ -16,11 +16,13 @@ import type { Measurement, ProjectState, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, scarVectorCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
-import { fileStem, initHostDownloads, saveTextFile } from '../io/saveFile';
-import { ArrowLayer, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
+import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
+import { ArrowLayer, arrowColor, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
-import { PlaneLayer } from '../render/planeLayer';
+import { PlaneLayer, planeColor } from '../render/planeLayer';
+import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, type Figure, type FigureContext, type FigureLayout, type FigureSettings } from '../render/figure';
+import { curveColor } from '../render/curveLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
 import { MeshView } from '../render/meshView';
 import { Viewer, type SurfaceHit } from '../render/viewer';
@@ -64,6 +66,19 @@ function loadDisplay(): DisplaySettings {
     light: { ...DEFAULT_LIGHT, ...(saved.light ?? {}) },
     arrows: { ...DEFAULT_ARROW_DISPLAY, ...(saved.arrows ?? {}) },
     curveSnap: SNAP_MODES.includes(saved.curveSnap as SnapMode) ? (saved.curveSnap as SnapMode) : DEFAULT_DISPLAY.curveSnap,
+  };
+}
+
+function loadFigure(): FigureSettings {
+  const saved = readPref<Partial<FigureSettings>>('figure', {});
+  const views = (saved.views ?? DEFAULT_FIGURE.views).filter((v) => FIGURE_VIEWS.includes(v));
+  return {
+    ...DEFAULT_FIGURE,
+    ...saved,
+    views,
+    overlays: { ...DEFAULT_FIGURE.overlays, ...(saved.overlays ?? {}) },
+    scale: [0.5, 1, 2].includes(saved.scale ?? 0) ? saved.scale! : DEFAULT_FIGURE.scale,
+    dpi: [300, 600, 1200].includes(saved.dpi ?? 0) ? saved.dpi! : DEFAULT_FIGURE.dpi,
   };
 }
 
@@ -119,6 +134,7 @@ export class App implements AppApi {
   readonly display: DisplaySettings = loadDisplay();
   readonly feedback: Feedback;
   mode: AppMode = loadMode();
+  readonly figure: FigureSettings = loadFigure();
 
   private viewer: Viewer | null = null;
   private lights: LightRig | null = null;
@@ -436,7 +452,10 @@ export class App implements AppApi {
       this.sidebar.refresh('curves');
       this.sidebar.refresh('measurements');
     }
-    if (c.kind === 'specimen' || c.kind === 'reset') this.updateAuto();
+    if (c.kind === 'specimen' || c.kind === 'reset') {
+      this.updateAuto();
+      this.sidebar.refresh('figure');
+    }
     if (c.kind !== 'reset') this.scheduleAutosave();
     this.queueCoords();
   }
@@ -702,6 +721,87 @@ export class App implements AppApi {
     if (!f || !this.viewer) return;
     const a = frameAxes(f.matrix);
     this.viewer.viewFrom(a.z, a.y);
+  }
+
+  setFigure(change: (f: FigureSettings) => void): void {
+    change(this.figure);
+    writePref('figure', this.figure);
+    this.sidebar.refresh('figure');
+  }
+
+  private figureContext(): FigureContext | null {
+    const v = this.viewer;
+    const loaded = this.loaded;
+    if (!v || !loaded || !v.mesh || !this.lights) return null;
+    return {
+      renderer: v.renderer,
+      scene: v.scene,
+      overlay: v.overlay,
+      mesh: v.mesh,
+      lights: this.lights,
+      positions: loaded.geometry.getAttribute('position').array as Float32Array,
+      offset: loaded.offset,
+      diagonal: loaded.diagonal,
+    };
+  }
+
+  /** The specimen frame, or the current view when none is set. */
+  private figureFrame(): number[] | null {
+    const f = this.store.state.specimen.frame;
+    if (f) return f.matrix;
+    const v = this.viewer;
+    const c = this.modelCentre();
+    return v && c ? frameFromView(v.towardViewer(), v.cameraUp(), c) : null;
+  }
+
+  figureLayout(): FigureLayout | null {
+    const ctx = this.figureContext();
+    const frame = this.figureFrame();
+    if (!ctx || !frame || !this.figure.views.length) return null;
+    return figureLayout(ctx, frame, this.store.state.specimen.unit, this.figure);
+  }
+
+  /** Render the figure with the current settings and annotations. */
+  private makeFigure(): Figure | null {
+    const ctx = this.figureContext();
+    const frame = this.figureFrame();
+    if (!ctx || !frame) return null;
+    const st = this.store.state;
+    const visiblePlanes = st.planes.filter((p) => p.visible);
+    return renderFigure(ctx, frame, st.specimen.unit, this.figure, {
+      arrows: st.scars.flatMap((s) =>
+        s.vector ? [{ ...s.vector, color: arrowColor(s, this.display.arrows.colorMode) }] : [],
+      ),
+      curves: st.curves.map((c) => ({ points: c.points, closed: c.closed, color: curveColor(c) })),
+      planes: visiblePlanes.flatMap((p) => {
+        const lines = this.sections.get(p.id)?.lines;
+        return lines ? [{ lines, color: planeColor(p.label) }] : [];
+      }),
+    });
+  }
+
+  exportFigure(format: 'png' | 'svg'): void {
+    void (async () => {
+      if (!this.hasMesh()) return;
+      if (!this.store.state.specimen.frame) this.feedback.toast(t('figure.noFrame'), 'info', 3500);
+      this.feedback.busy(t('figure.busy'), this.viewportEl);
+      await nextFrame();
+      try {
+        const fig = this.makeFigure();
+        if (!fig) return;
+        const name = `${this.stem()}_figure.${format}`;
+        if (format === 'png') {
+          const outcome = await saveFile(name, await fig.png(), 'image/png');
+          if (outcome === 'saved') this.feedback.toast(t('toast.saved', { name }));
+        } else await this.save(name, await fig.svg(), 'image/svg+xml');
+      } catch (e) {
+        const msg = e instanceof FigureError && e.code === 'tooLarge' ? t('figure.tooLarge', { msg: e.message }) : (e as Error).message;
+        this.feedback.toast(msg, 'error');
+      } finally {
+        this.feedback.busy(null);
+        this.viewer?.requestRender();
+      }
+    })();
   }
 
   /** Principal axes of all vertices in original coordinates (the mesh keeps them re-centred). */
@@ -1267,6 +1367,14 @@ export class App implements AppApi {
       exportPlanesCsvText: () => planesCsv(this.store.state, this.planes, { excelBom: false }),
       towardViewer: () => this.viewer?.towardViewer() ?? null,
       cameraUp: () => this.viewer?.cameraUp() ?? null,
+      /** Render the figure; PNG bytes as base64, or the SVG text. */
+      figure: async (format: 'png' | 'svg') => {
+        const fig = this.makeFigure();
+        if (!fig) return null;
+        if (format === 'svg') return { layout: fig.layout, data: await fig.svg() };
+        const bytes = await fig.png();
+        return { layout: fig.layout, data: btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join('')) };
+      },
       exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }),
       exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
       /** Points of the measurement being taken (null when no measuring tool is active). */
