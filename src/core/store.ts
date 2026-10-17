@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, Measurement, MeshInfo, ProjectState, Scar, ScarVector, SpecimenInfo } from './types';
+import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Scar, ScarVector, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -18,9 +18,11 @@ export function emptyProject(): ProjectState {
     scars: [],
     curves: [],
     measurements: [],
+    planes: [],
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,
+    nextPlaneNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
@@ -67,6 +69,10 @@ export class ProjectStore {
 
   measurement(id: string): Measurement | undefined {
     return this._state.measurements.find((m) => m.id === id);
+  }
+
+  plane(id: string): Plane | undefined {
+    return this._state.planes.find((p) => p.id === id);
   }
 
   /** Replace the whole project (new mesh, loaded project file). Clears history. */
@@ -138,6 +144,30 @@ export class ProjectStore {
 
   _setNextMeasureNumber(n: number): void {
     this._state.nextMeasureNumber = n;
+  }
+
+  _insertPlane(p: Plane, index?: number): void {
+    const list = this._state.planes;
+    if (index === undefined || index < 0 || index > list.length) list.push(p);
+    else list.splice(index, 0, p);
+  }
+
+  _removePlane(id: string): { plane: Plane; index: number } | null {
+    const list = this._state.planes;
+    const index = list.findIndex((p) => p.id === id);
+    if (index < 0) return null;
+    const [plane] = list.splice(index, 1);
+    return { plane, index };
+  }
+
+  _putPlane(p: Plane): void {
+    const list = this._state.planes;
+    const index = list.findIndex((x) => x.id === p.id);
+    if (index >= 0) list[index] = p;
+  }
+
+  _setNextPlaneNumber(n: number): void {
+    this._state.nextPlaneNumber = n;
   }
 
   _setSpecimen(s: SpecimenInfo): void {

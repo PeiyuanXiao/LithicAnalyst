@@ -95,7 +95,7 @@ describe('project file format 2', () => {
       expect(saved.formatVersion).toBe(2);
       expect(saved.annotations.scarVectors).toBeUndefined();
       expect(saved.annotations.scars).toHaveLength(2);
-      expect(saved.derived).toEqual({ measurements: null, manualMeasurements: [] });
+      expect(saved.derived).toEqual({ measurements: null, manualMeasurements: [], planes: [] });
       // read → save → read again: nothing changes
       expect(second).toEqual(first);
     }
@@ -149,7 +149,7 @@ describe('project file format 2', () => {
   it('ignores stored derived results on reading', () => {
     const file = JSON.parse(JSON.stringify(serializeProject(parseProjectFile(v1File()), '0.2.0')));
     file.derived = { stale: 42 };
-    expect(serializeProject(parseProjectFile(file), '0.2.0').derived).toEqual({ measurements: null, manualMeasurements: [] });
+    expect(serializeProject(parseProjectFile(file), '0.2.0').derived).toEqual({ measurements: null, manualMeasurements: [], planes: [] });
   });
 
   it('rejects a scar vector without coordinates', () => {

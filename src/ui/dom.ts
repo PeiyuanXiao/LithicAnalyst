@@ -63,4 +63,5 @@ export const ICONS = {
   lang: 'M4 5h9|M8.5 3v2|M6 5c.5 3 2.5 6 6 8|M11 5c-.5 3-2.5 6-6 8|M13 20l4-9 4 9|M14.5 17h5',
   close: 'M6 6l12 12|M18 6L6 18',
   magnet: 'M5 4h5v7a2 2 0 0 0 4 0V4h5v7a7 7 0 0 1-14 0z|M5 8h5|M14 8h5',
+  plus: 'M12 5v14|M5 12h14',
 };

@@ -1,3 +1,4 @@
+import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
 import type { AutoMeasurements } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
@@ -159,6 +160,17 @@ export function manualMeasurementsCsv(state: Readonly<ProjectState>, opts: CsvOp
       pts.push(...(p ? [fmt(p[0]), fmt(p[1]), fmt(p[2])] : ['', '', '']));
     }
     return [csvCell(state.specimen.id), csvCell(m.label), m.type, fmt(measurementValue(m)), csvCell(measurementUnit(m, state.specimen.unit)), ...pts].join(',');
+  });
+  return (opts.excelBom ? '﻿' : '') + [header.join(','), ...rows].join('\n') + '\n';
+}
+
+/** One row per fitted plane; `m00 … m33` is the row-major matrix from original to plane coordinates. Invalid planes have empty numbers. */
+export function planesCsv(state: Readonly<ProjectState>, planes: PlaneResult[], opts: CsvOptions): string {
+  const header = ['specimen_id', 'plane_id', 'method', 'center_x', 'center_y', 'center_z', 'normal_x', 'normal_y', 'normal_z'];
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) header.push(`m${r}${c}`);
+  const rows = planes.map((p) => {
+    const nums = p.valid && p.center && p.normal && p.matrix ? [...p.center, ...p.normal, ...p.matrix].map(fmt) : new Array<string>(22).fill('');
+    return [csvCell(state.specimen.id), csvCell(p.label), p.method, ...nums].join(',');
   });
   return (opts.excelBom ? '﻿' : '') + [header.join(','), ...rows].join('\n') + '\n';
 }

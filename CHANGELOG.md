@@ -19,6 +19,11 @@
   no hole filling), Surface-to-Volume Ratio and Wadell sphericity. Manual measurements (D / G / N):
   straight distance, distance along the surface and angle, labelled M1, M2 …, undoable and saved in
   the project file. Exports: `<specimen>_measurements.csv` and `<specimen>_manual_measurements.csv`.
+- Fitted planes (measure mode): all vertices (Lin et al. 2024), scar directions (Xiao et al. 2026),
+  scar origins (with a completeness filter) and curves. Planes are recomputed whenever their inputs
+  change; each is drawn as a translucent disc with its section of the model and its normal, can be
+  flipped, viewed along its normal and shown or hidden. Export: `<specimen>_planes.csv` with the
+  centre, the normal and the 4×4 matrix to the plane frame.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

@@ -875,6 +875,21 @@ textarea.ctl-text {
   font-size: var(--step--1);
 }
 
+.plane-row {
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+}
+
+.plane-eye {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.plane-inputs {
+  display: grid;
+  gap: 4px;
+  margin-block: 8px;
+}
+
 .arrow-row:last-child {
   border-bottom: 0;
 }

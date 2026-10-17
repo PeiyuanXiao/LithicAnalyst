@@ -1,22 +1,25 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
 import { autoMeasurements, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
+import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
+import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { deleteCurve, deleteMeasurement, deleteScar, setCurveAttribute, setScarAttribute } from '../core/actions';
-import type { AutoMeasurements } from '../core/derived';
+import { addPlane, deleteCurve, deleteMeasurement, deletePlane, deleteScar, setCurveAttribute, setScarAttribute } from '../core/actions';
+import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, numberKeyField, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import type { Measurement, ProjectState, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { curveCsv, manualMeasurementsCsv, measurementsCsv, scarVectorCsv } from '../io/csv';
+import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, scarVectorCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { fileStem, initHostDownloads, saveTextFile } from '../io/saveFile';
 import { ArrowLayer, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
+import { PlaneLayer } from '../render/planeLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
 import { MeshView } from '../render/meshView';
 import { Viewer, type SurfaceHit } from '../render/viewer';
@@ -121,6 +124,10 @@ export class App implements AppApi {
   private arrows: ArrowLayer | null = null;
   private curves: CurveLayer | null = null;
   private measures: MeasureLayer | null = null;
+  private planesLayer: PlaneLayer | null = null;
+  private planes: PlaneResult[] = [];
+  /** Sections of the model by each plane, keyed by the plane's id; `key` is the plane they were cut by. */
+  private sections = new Map<string, { key: string; lines: Polyline[] | null }>();
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
@@ -203,6 +210,7 @@ export class App implements AppApi {
     this.curves.onLabelClick = (id) => this.selection.set(id);
     this.measures = new MeasureLayer(viewer);
     this.measures.onLabelClick = (id) => this.selection.set(id);
+    this.planesLayer = new PlaneLayer(viewer);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -417,9 +425,10 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel)) this.selection.set(null);
+    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel)) this.selection.set(null);
+    if (c.kind !== 'measurements' && c.kind !== 'specimen') this.updatePlanes();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
@@ -436,6 +445,15 @@ export class App implements AppApi {
     this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
+    const mesh = this.store.state.mesh;
+    this.planesLayer?.sync(
+      this.store.state.planes,
+      this.planes,
+      this.selection.id,
+      this.mode !== 'annotate',
+      mesh ? { min: mesh.bboxMin, max: mesh.bboxMax } : null,
+      (id) => this.sections.get(id)?.lines ?? null,
+    );
     this.occlusionDirty = true;
   }
 
@@ -605,6 +623,69 @@ export class App implements AppApi {
     return this.auto;
   }
 
+  planeResults(): PlaneResult[] {
+    return this.planes;
+  }
+
+  addPlane(): void {
+    if (!this.hasMesh() || !this.viewer) return;
+    const p = addPlane(this.store, 'all_vertices', this.viewer.towardViewer());
+    this.selection.set(p.id);
+  }
+
+  /** Look straight at the plane, along its normal, with its +Y up. */
+  viewAlongPlane(id: string): void {
+    const r = this.planes.find((p) => p.id === id);
+    if (!r?.valid || !this.viewer) return;
+    const m = r.matrix!;
+    this.viewer.viewFrom(r.normal!, [m[4], m[5], m[6]], r.center!);
+  }
+
+  exportPlanesCsv(): void {
+    if (!this.hasMesh() || !this.planes.length) return;
+    void this.save(`${this.stem()}_planes.csv`, planesCsv(this.store.state, this.planes, { excelBom: this.display.excelBom }), 'text/csv');
+  }
+
+  /** Principal axes of all vertices in original coordinates (the mesh keeps them re-centred). */
+  private vertexAxes(): PrincipalAxes | null {
+    const v = this.measureBase?.vertices;
+    const o = this.loaded?.offset;
+    if (!v || !o) return null;
+    return { ...v, mean: [v.mean[0] + o[0], v.mean[1] + o[1], v.mean[2] + o[2]] };
+  }
+
+  private meshResults(): MeshResults {
+    return { measurements: this.auto, vertices: this.vertexAxes() };
+  }
+
+  /** Recompute the planes from their inputs, then their sections of the model (in slices). */
+  private updatePlanes(): void {
+    const st = this.store.state;
+    const axes = this.vertexAxes();
+    this.planes = st.planes.map((p) => computePlane(p, st, axes));
+    const base = this.measureBase;
+    const loaded = this.loaded;
+    for (const id of [...this.sections.keys()]) if (!this.planes.some((p) => p.id === id && p.valid)) this.sections.delete(id);
+    if (!base || !loaded) return;
+    for (const r of this.planes) {
+      if (!r.valid) continue;
+      const key = JSON.stringify([r.center, r.normal]);
+      if (this.sections.get(r.id)?.key === key) continue;
+      this.sections.set(r.id, { key, lines: null });
+      const o = loaded.offset;
+      const g = loaded.geometry;
+      const centre: Vec3 = [r.center![0] - o[0], r.center![1] - o[1], r.center![2] - o[2]];
+      void runSliced(intersectPlaneSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, centre, r.normal!, base.edges)).then((lines) => {
+        const entry = this.sections.get(r.id);
+        if (!entry || entry.key !== key || this.loaded !== loaded) return;
+        const shifted = lines.map((l) => ({ closed: l.closed, points: l.points.map((p) => [p[0] + o[0], p[1] + o[1], p[2] + o[2]] as Vec3) }));
+        this.sections.set(r.id, { key, lines: shifted });
+        this.syncAnnotations();
+      });
+    }
+    this.sidebar?.refresh('planes');
+  }
+
   measuringBusy(): boolean {
     return this.hasMesh() && !this.measureBase;
   }
@@ -632,6 +713,8 @@ export class App implements AppApi {
       if (token !== this.measureToken) return;
       this.measureBase = base;
       this.updateAuto();
+      this.updatePlanes();
+      this.syncAnnotations();
     });
   }
 
@@ -650,7 +733,7 @@ export class App implements AppApi {
 
   saveProject(): void {
     if (!this.hasMesh()) return;
-    const file = serializeProject(this.store.state, __APP_VERSION__, this.auto);
+    const file = serializeProject(this.store.state, __APP_VERSION__, this.meshResults());
     void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json');
   }
 
@@ -672,6 +755,7 @@ export class App implements AppApi {
     e.preventDefault();
     if (this.mode === 'measure') {
       if (this.store.measurement(sel)) deleteMeasurement(this.store, sel);
+      else if (this.store.plane(sel)) deletePlane(this.store, sel);
       return;
     }
     if (this.store.curve(sel)) deleteCurve(this.store, sel);
@@ -728,6 +812,9 @@ export class App implements AppApi {
     this.arrows?.clearAll();
     this.curves?.clearAll();
     this.measures?.clearAll();
+    this.planesLayer?.clearAll();
+    this.sections.clear();
+    this.planes = [];
     this.loaded = loaded;
     this.meshView = new MeshView(loaded);
     this.meshView.setRoughness(0.95 - 0.7 * this.display.gloss);
@@ -741,6 +828,7 @@ export class App implements AppApi {
     this.surfaceSnap = new SurfaceSnap(loaded, this.curvature, () => this.display.curvScale);
     this.curves?.setOrigin(loaded.offset);
     this.measures?.setOrigin(loaded.offset);
+    this.planesLayer?.setOrigin(loaded.offset);
     this.curvBusy = false;
     v.setMesh(this.meshView.mesh, loaded.offset, loaded.diagonal);
 
@@ -880,7 +968,7 @@ export class App implements AppApi {
     this.autosaveTimer = 0;
     const st = this.store.state;
     if (!st.mesh) return;
-    const ok = writeAutosave(st.mesh.sha256, serializeProject(st, __APP_VERSION__, this.auto));
+    const ok = writeAutosave(st.mesh.sha256, serializeProject(st, __APP_VERSION__, this.meshResults()));
     // the browser's storage is small; say so once instead of failing silently
     if (!ok && !this.autosaveWarned) {
       this.autosaveWarned = true;
@@ -1116,6 +1204,10 @@ export class App implements AppApi {
       exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }),
       exportCurvesCsvText: () => curveCsv(this.store.state, { excelBom: false }),
       autoMeasurements: () => this.auto,
+      planes: () => this.planes,
+      planeSectionCount: (id: string) => this.sections.get(id)?.lines?.length ?? null,
+      exportPlanesCsvText: () => planesCsv(this.store.state, this.planes, { excelBom: false }),
+      towardViewer: () => this.viewer?.towardViewer() ?? null,
       exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }),
       exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
       /** Points of the measurement being taken (null when no measuring tool is active). */
@@ -1128,7 +1220,7 @@ export class App implements AppApi {
         const tool = this.tools?.activeTool;
         return tool instanceof DrawCurveTool ? tool.draftPoints() : null;
       },
-      projectJson: () => serializeProject(this.store.state, __APP_VERSION__, this.auto),
+      projectJson: () => serializeProject(this.store.state, __APP_VERSION__, this.meshResults()),
       /** Snapping on the current mesh: readiness and per-vertex feature strength (for tests). */
       snap: {
         prepare: (mode: SnapMode) => this.surfaceSnap?.prepare(mode) ?? Promise.resolve(false),

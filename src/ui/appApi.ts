@@ -1,4 +1,5 @@
 import type { SnapMode } from '../compute/surfacePath';
+import type { PlaneResult } from '../compute/planes';
 import type { AutoMeasurements } from '../core/derived';
 import type { ProjectStore } from '../core/store';
 import type { Measurement } from '../core/types';
@@ -53,6 +54,10 @@ export interface AppApi {
   autoMeasurements(): AutoMeasurements | null;
   measuringBusy(): boolean;
   formatMeasurement(m: Measurement): string;
+  planeResults(): PlaneResult[];
+  addPlane(): void;
+  viewAlongPlane(id: string): void;
+  exportPlanesCsv(): void;
   saveProject(): void;
   openProject(): void;
 }

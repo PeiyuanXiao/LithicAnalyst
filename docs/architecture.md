@@ -102,6 +102,17 @@ keeps the selection and the undo history.
   a geodesic is a `PathSearch` over mesh edges, pulled taut with `relaxPath` and kept on the
   surface (`SurfaceSnap.hug`). `render/measureLayer.ts` draws them (only in the measure mode).
 
+## Fitted planes
+
+* A `Plane` stores only its inputs (method, completeness filter, curves, `upHint`);
+  `compute/planes.ts` (`computePlane`) derives centre, normal and frame matrix from them. The
+  app recomputes all planes on every change of scars, curves or planes (cheap), and stores the
+  results under `derived.planes` when saving.
+* The `all_vertices` plane and the plane frames use the vertex PCA computed with the other
+  mesh measurements. Sections of the model by each plane (`intersectPlaneSteps`, using the
+  edge table kept from that pass) run in slices and are cached per plane position.
+* `render/planeLayer.ts` draws discs, sections and normals in the measure and present modes.
+
 ## Data model
 
 * **Scars are objects of their own** (`ProjectState.scars`). The direction arrow is optional

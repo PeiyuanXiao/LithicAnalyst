@@ -1,4 +1,4 @@
-import type { Curve, Measurement, Scar, SpecimenInfo } from './types';
+import type { Curve, Measurement, Plane, Scar, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -241,6 +241,56 @@ export class DeleteMeasurementCommand implements Command {
   revert(store: ProjectStore): void {
     if (this.removed) store._insertMeasurement(structuredClone(this.removed.measurement), this.removed.index);
     store.notify({ kind: 'measurements', ids: [this.id] });
+  }
+}
+
+export class AddPlaneCommand implements Command {
+  readonly labelKey = 'cmd.addPlane';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly plane: Plane, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextPlaneNumber;
+    store._insertPlane(structuredClone(this.plane));
+    store._setNextPlaneNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'planes', ids: [this.plane.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removePlane(this.plane.id);
+    store._setNextPlaneNumber(this.prevNext);
+    store.notify({ kind: 'planes', ids: [this.plane.id] });
+  }
+}
+
+export class DeletePlaneCommand implements Command {
+  readonly labelKey = 'cmd.deletePlane';
+  readonly createdAt = Date.now();
+  private removed: { plane: Plane; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removePlane(this.id);
+    store.notify({ kind: 'planes', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertPlane(structuredClone(this.removed.plane), this.removed.index);
+    store.notify({ kind: 'planes', ids: [this.id] });
+  }
+}
+
+export class UpdatePlaneCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: Plane,
+    private readonly after: Plane,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._putPlane(structuredClone(this.after));
+    store.notify({ kind: 'planes', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putPlane(structuredClone(this.before));
+    store.notify({ kind: 'planes', ids: [this.before.id] });
   }
 }
 

@@ -1,7 +1,13 @@
 import {
   deleteCurve,
   deleteMeasurement,
+  deletePlane,
   deleteScar,
+  flipPlane,
+  setPlaneCurve,
+  setPlaneExclusion,
+  setPlaneMethod,
+  setPlaneVisible,
   setCurveAttribute,
   setCurveLabel,
   setScarAttribute,
@@ -11,18 +17,19 @@ import {
 import { curveLength } from '../core/curveGeometry';
 import { CURVE_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
 import { vectorLength } from '../core/store';
-import type { AttributeValue, Curve, Scar } from '../core/types';
+import type { AttributeValue, Curve, PlaneMethod, Scar } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
 import { MEASURE_COLORS } from '../render/measureLayer';
+import { planeColor } from '../render/planeLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -497,15 +504,92 @@ function measureManualSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+const PLANE_METHODS: PlaneMethod[] = ['all_vertices', 'scar_directions', 'scar_starts', 'curves'];
+
+function planesSection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('planes', t('sec.planes'), badge);
+  const add = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'plane-add', onclick: () => api.addPlane() }, icon(ICONS.plus), t('plane.add')) as HTMLButtonElement;
+  const list = h('ol', { class: 'arrow-list', id: 'plane-list', role: 'listbox', 'aria-label': t('sec.planes') });
+  const inspector = h('div', { class: 'inspector', id: 'plane-inspector' });
+  body.append(list, h('div', { class: 'btn-row' }, add), inspector);
+
+  const renderInspector = () => {
+    clear(inspector);
+    const id = api.selection.id;
+    const p = id ? api.store.plane(id) : undefined;
+    if (!p) return;
+    const method = selectRow('plane-method', t('plane.method'), PLANE_METHODS.map((m) => ({ value: m, label: t(`plane.method.${m}`) })), p.method, (v) =>
+      setPlaneMethod(api.store, p.id, v as PlaneMethod),
+    );
+    const inputs = h('div', { class: 'plane-inputs', id: 'plane-inputs' });
+    if (p.method === 'scar_starts') {
+      const f = SCAR_FIELDS.find((x) => x.key === 'completeness');
+      for (const o of f?.options ?? []) {
+        const box = checkbox(`plane-use-${o.value}`, tl(o.label), !p.excludeCompleteness.includes(o.value), (on) => setPlaneExclusion(api.store, p.id, o.value, !on));
+        inputs.append(box);
+      }
+    } else if (p.method === 'curves') {
+      for (const c of api.store.state.curves) {
+        const type = CURVE_FIELDS.find((f) => f.key === 'type')?.options?.find((o) => o.value === c.attributes.type);
+        inputs.append(checkbox(`plane-curve-${c.id}`, type ? `${c.label} · ${tl(type.label)}` : c.label, p.curveIds.includes(c.id), (on) => setPlaneCurve(api.store, p.id, c.id, on)));
+      }
+    }
+    const actions = h(
+      'div',
+      { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'plane-flip', onclick: () => flipPlane(api.store, p.id) }, t('plane.flip')),
+      h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'plane-view', onclick: () => api.viewAlongPlane(p.id) }, icon(ICONS.target), t('plane.view')),
+      h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'plane-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deletePlane(api.store, p.id) }, icon(ICONS.trash), t('arrows.delete')),
+    );
+    inspector.append(method.el, inputs, actions);
+  };
+
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'planes', 'selection', 'mesh', 'arrows', 'curves'].includes(kind)) return;
+    const st = api.store.state;
+    const results = api.planeResults();
+    badge.textContent = String(st.planes.length);
+    add.disabled = !api.hasMesh();
+    list.hidden = st.planes.length === 0;
+    clear(list);
+    const sel = api.selection.id;
+    for (const p of st.planes) {
+      const r = results.find((x) => x.id === p.id);
+      const isSel = p.id === sel;
+      const eye = h('input', { type: 'checkbox', class: 'plane-eye', title: t('plane.show'), 'aria-label': `${t('plane.show')} ${p.label}` }) as HTMLInputElement;
+      eye.checked = p.visible;
+      eye.addEventListener('click', (e) => e.stopPropagation());
+      eye.addEventListener('change', () => setPlaneVisible(api.store, p.id, eye.checked));
+      list.append(
+        h(
+          'li',
+          { class: 'arrow-row plane-row', role: 'option', 'aria-selected': String(isSel), 'data-id': p.id, onclick: () => api.selection.set(p.id), ondblclick: () => api.viewAlongPlane(p.id) },
+          h('span', { class: 'chip', style: `--chip:${planeColor(p.label)}` }),
+          h('span', { class: 'arrow-id mono' }, p.label),
+          h('span', { class: 'arrow-meta' }, t(`plane.short.${p.method}`)),
+          h('span', { class: 'arrow-len' }, r && !r.valid ? t('plane.invalid') : ''),
+          eye,
+        ),
+      );
+    }
+    renderInspector();
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
 function measureExportSection(api: AppApi): Section {
   const { el, body } = section('measure-export', t('sec.export'));
   const autoBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-measurements-csv', onclick: () => api.exportMeasurementsCsv() }, t('export.measurements')) as HTMLButtonElement;
   const manualBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-manual-csv', onclick: () => api.exportManualMeasurementsCsv() }, t('export.manualMeasurements')) as HTMLButtonElement;
-  body.append(h('div', { class: 'btn-row' }, autoBtn, manualBtn));
+  const planeBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-planes-csv', onclick: () => api.exportPlanesCsv() }, t('export.planes')) as HTMLButtonElement;
+  body.append(h('div', { class: 'btn-row' }, autoBtn, manualBtn, planeBtn));
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'measure', 'measurements'].includes(kind)) return;
+    if (!['all', 'mesh', 'measure', 'measurements', 'planes'].includes(kind)) return;
     autoBtn.disabled = !api.autoMeasurements();
     manualBtn.disabled = !api.hasMesh() || api.store.state.measurements.length === 0;
+    planeBtn.disabled = !api.hasMesh() || api.store.state.planes.length === 0;
   };
   refresh('all');
   return { el, refresh };
@@ -541,6 +625,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [curvesSection, ['annotate']],
   [measureAutoSection, ['measure']],
   [measureManualSection, ['measure']],
+  [planesSection, ['measure']],
   [displaySection, ALL_MODES],
   [exportSection, ['annotate']],
   [measureExportSection, ['measure']],

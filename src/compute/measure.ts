@@ -1,6 +1,6 @@
 import { shapeIndices, type AutoMeasurements } from '../core/derived';
 import type { SpecimenFrame, Vec3 } from '../core/types';
-import { buildEdgesSteps, meshTopology, surfaceIntegralsSteps, surfacePca, type MeshTopology, type PrincipalAxes } from './meshGeometry';
+import { buildEdgesSteps, meshTopology, surfaceIntegralsSteps, surfacePca, vertexPcaSteps, type EdgeTable, type MeshTopology, type PrincipalAxes } from './meshGeometry';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /** What the automatic measurements need from the mesh; computed once per mesh. */
@@ -11,6 +11,10 @@ export interface SurfaceMeasures {
   topology: MeshTopology;
   /** Principal axes of the surface (area-weighted). */
   principal: PrincipalAxes;
+  /** Principal axes of the vertices, every vertex counted once (the `all_vertices` plane and plane frames use it). */
+  vertices: PrincipalAxes;
+  /** Edge table, kept for plane sections. */
+  edges: EdgeTable;
 }
 
 export function* surfaceMeasuresSteps(positions: ArrayLike<number>, index: ArrayLike<number>): Steps<SurfaceMeasures> {
@@ -19,11 +23,14 @@ export function* surfaceMeasuresSteps(positions: ArrayLike<number>, index: Array
   const edges = yield* buildEdgesSteps(index, vertexCount);
   yield;
   const topology = meshTopology(index, vertexCount, edges);
+  const vertices = yield* vertexPcaSteps(positions);
   return {
     surfaceArea: integrals.area,
     volume: topology.closed ? Math.abs(integrals.volume) : null,
     topology,
     principal: surfacePca(integrals),
+    vertices,
+    edges,
   };
 }
 

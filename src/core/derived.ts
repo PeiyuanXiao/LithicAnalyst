@@ -1,3 +1,5 @@
+import type { PrincipalAxes } from '../compute/meshGeometry';
+import { computePlane, type PlaneResult } from '../compute/planes';
 import { measurementUnit, measurementValue } from './measurements';
 import type { MeasureType, ProjectState } from './types';
 
@@ -37,6 +39,14 @@ export interface DerivedResults {
   /** Null until the mesh has been measured. */
   measurements: AutoMeasurements | null;
   manualMeasurements: ManualMeasurementValue[];
+  planes: PlaneResult[];
+}
+
+/** What derived results need from the mesh (null before it is measured). */
+export interface MeshResults {
+  measurements: AutoMeasurements | null;
+  /** Principal axes of all vertices, original coordinates. */
+  vertices: PrincipalAxes | null;
 }
 
 /** Volume-based shape indices; null when the volume is unknown. */
@@ -48,7 +58,8 @@ export function shapeIndices(area: number, volume: number | null): { surfaceToVo
   };
 }
 
-export function computeDerived(state: Readonly<ProjectState>, auto: AutoMeasurements | null = null): DerivedResults {
+export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults | null = null): DerivedResults {
+  const auto = mesh?.measurements ?? null;
   return {
     measurements: auto ? { ...auto } : null,
     manualMeasurements: state.measurements.map((m) => ({
@@ -58,5 +69,6 @@ export function computeDerived(state: Readonly<ProjectState>, auto: AutoMeasurem
       value: measurementValue(m),
       unit: measurementUnit(m, state.specimen.unit),
     })),
+    planes: state.planes.map((p) => computePlane(p, state, mesh?.vertices ?? null)),
   };
 }

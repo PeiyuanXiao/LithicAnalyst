@@ -183,13 +183,21 @@ function axesFromMoments(n: number, sum: number[], m: number[], ref: Vec3): Prin
 
 /** PCA of the vertices, every vertex counted once. */
 export function vertexPca(positions: ArrayLike<number>): PrincipalAxes {
+  return runSync(vertexPcaSteps(positions));
+}
+
+export function* vertexPcaSteps(positions: ArrayLike<number>): Steps<PrincipalAxes> {
   const n = Math.floor(positions.length / 3);
   // accumulate relative to the first vertex: scans can sit far from the origin
   const ref: Vec3 = n ? [positions[0], positions[1], positions[2]] : [0, 0, 0];
   const sum = [0, 0, 0];
   const m = new Array<number>(9).fill(0);
+  const p = [0, 0, 0];
   for (let v = 0; v < n; v++) {
-    const p = [positions[3 * v] - ref[0], positions[3 * v + 1] - ref[1], positions[3 * v + 2] - ref[2]];
+    if (v % YIELD_EVERY === 0) yield;
+    p[0] = positions[3 * v] - ref[0];
+    p[1] = positions[3 * v + 1] - ref[1];
+    p[2] = positions[3 * v + 2] - ref[2];
     for (let i = 0; i < 3; i++) {
       sum[i] += p[i];
       for (let j = 0; j < 3; j++) m[3 * i + j] += p[i] * p[j];
@@ -301,10 +309,22 @@ export function intersectPlane(
   normal: Vec3,
   edges = buildEdges(index, Math.floor(positions.length / 3)),
 ): Polyline[] {
+  return runSync(intersectPlaneSteps(positions, index, point, normal, edges));
+}
+
+export function* intersectPlaneSteps(
+  positions: ArrayLike<number>,
+  index: ArrayLike<number>,
+  point: Vec3,
+  normal: Vec3,
+  edges: EdgeTable,
+): Steps<Polyline[]> {
   const n = Math.floor(positions.length / 3);
   const d = new Float64Array(n);
-  for (let v = 0; v < n; v++)
+  for (let v = 0; v < n; v++) {
+    if (v % YIELD_EVERY === 0) yield;
     d[v] = (positions[3 * v] - point[0]) * normal[0] + (positions[3 * v + 1] - point[1]) * normal[1] + (positions[3 * v + 2] - point[2]) * normal[2];
+  }
   const side = (v: number) => d[v] >= 0;
   const edgeCount = edges.v0.length;
   // each crossed edge links to at most two others (the other crossed side of its triangles)
@@ -312,6 +332,7 @@ export function intersectPlane(
   const crossed = new Uint8Array(edgeCount);
   const tris = Math.floor(index.length / 3);
   for (let t = 0; t < tris; t++) {
+    if (t % YIELD_EVERY === 0) yield;
     const hits: number[] = [];
     for (let k = 0; k < 3; k++) {
       const a = index[3 * t + k], b = index[3 * t + ((k + 1) % 3)];

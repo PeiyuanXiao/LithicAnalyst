@@ -30,10 +30,12 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.scars` | array | in creation order |
 | `annotations.curves` | array | in creation order |
 | `annotations.measurements` | array | manual measurements, in creation order |
+| `annotations.planes` | array | fitted planes (their inputs), in creation order |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
 | `nextMeasureNumber` | integer | next measurement label (`M{n}`) |
+| `nextPlaneNumber` | integer | next plane label (`P{n}`) |
 
 Readers should ignore keys they do not know. Future annotation layers (landmarks, surface
 regions, relations) will be added next to `scars` and `curves` inside `annotations`.
@@ -89,6 +91,42 @@ fitted planes, fitted spheres, volumes ….
   π^(1/3) (6V)^(2/3) / A.
 * `manualMeasurements`: the value of each manual measurement (length in the specimen unit, or
   degrees for angles).
+* `planes`: each fitted plane as computed from its inputs: `{ id, label, method, valid, center,
+  normal, matrix, inputCount }`. `valid` is false when the inputs are not enough (then `center`,
+  `normal` and `matrix` are null). `matrix` is row-major 4×4 and maps original coordinates to the
+  plane frame (origin = centre, +Z = normal, +X = the model's first principal axis of the
+  vertices projected onto the plane, or the second when the first is almost along the normal,
+  with its largest component positive; +Y = Z × X).
+
+## Fitted plane
+
+```json
+{
+  "id": "9a1b…",
+  "label": "P1",
+  "method": "scar_starts",
+  "excludeCompleteness": ["both_missing"],
+  "curveIds": [],
+  "upHint": [0.12, -0.31, 0.94],
+  "visible": true,
+  "createdAt": "…",
+  "modifiedAt": "…"
+}
+```
+
+Only the inputs are stored; the plane is recomputed whenever they change.
+
+| `method` | plane | centre |
+|---|---|---|
+| `all_vertices` (Lin et al. 2024) | least-squares plane of all mesh vertices, unweighted | mean of the vertices |
+| `scar_directions` (Xiao et al. 2026) | normal = eigenvector of the smallest eigenvalue of T = Σ u uᵀ over the unit directions u of all scars with an arrow | mean of the arrows' midpoints |
+| `scar_starts` | least-squares plane of the arrow origins, leaving out the completeness codes in `excludeCompleteness` | mean of the origins used |
+| `curves` | least-squares plane of the curves in `curveIds`, resampled at equal arc length (256 points over all of them) | mean of the resampled points |
+
+* A plane is invalid with fewer than 3 points, or (`scar_directions`) fewer than 2 non-parallel
+  directions.
+* The normal is taken on the side of `upHint`, which points toward the viewer when the plane is
+  created; flipping the plane negates it.
 
 ## Manual measurement
 
@@ -216,6 +254,12 @@ angles with unit `deg`):
 specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p3_z
 ```
 
+Fitted planes (`<specimen>_planes.csv`, one row each; numbers empty for an invalid plane):
+
+```
+specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_z,m00,m01,…,m33
+```
+
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.
 The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
@@ -230,7 +274,7 @@ when reading, and saving writes format 2.
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
 | no `derived` | `derived` (computed results) |
-| — | `annotations.measurements`, `nextMeasureNumber` |
+| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.

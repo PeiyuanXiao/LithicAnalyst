@@ -17,6 +17,10 @@ export interface LithicApi {
   exportCurvesCsvText(): string;
   curveDraft(): Vec3[] | null;
   measureDraft(): Vec3[] | null;
+  planes(): import('../src/compute/planes').PlaneResult[];
+  planeSectionCount(id: string): number | null;
+  exportPlanesCsvText(): string;
+  towardViewer(): Vec3 | null;
   autoMeasurements(): import('../src/core/derived').AutoMeasurements | null;
   exportMeasurementsCsvText(): string;
   exportManualMeasurementsCsvText(): string;

@@ -12,6 +12,7 @@
 - 每条曲线记录类型（刃缘 / 棱脊 / 片疤边界 / 其他）和备注。
 - 界面分「标注 / 测量 / 展示」三种模式，每种只显示自己的工具和侧栏。
 - 测量模式：打开模型即自动算长、宽、厚（标本坐标系或面积加权主轴）、表面积、体积（仅封闭模型）、Surface-to-Volume Ratio、Wadell 球度；手动测量两点直线距离、沿表面距离、三点角度（编号 M1、M2……，可撤销，存入项目文件）。
+- 拟合平面（测量模式）：全部顶点（Lin et al. 2024）、片疤方向（Xiao et al. 2026）、片疤起点（可按完整性筛选）、曲线；输入一变就重算；显示半透明圆盘、与模型的交线和法向，可翻转、沿法向观察、逐个显示 / 隐藏。
 - 掠射光、曲率着色、浅色 / 深色背景。
 - 导出 CSV 和项目文件（JSON，格式见 `docs/project-format.md`；旧版本的项目文件可直接打开，保存时转为新格式）。中文 / English 界面。
 
@@ -55,6 +56,12 @@ specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_vol
 
 ```
 specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p3_z
+```
+
+拟合平面 CSV（每个平面一行；m00 … m33 为行主序 4×4 矩阵，把原始坐标变换到平面坐标系；无效平面的数值留空）：
+
+```
+specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_z,m00,m01,…,m33
 ```
 
 ## License

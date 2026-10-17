@@ -1,19 +1,22 @@
 import {
   AddCurveCommand,
   AddMeasurementCommand,
+  AddPlaneCommand,
   AddScarCommand,
   DeleteCurveCommand,
   DeleteMeasurementCommand,
+  DeletePlaneCommand,
   DeleteScarCommand,
   SetSpecimenCommand,
   UpdateCurveCommand,
+  UpdatePlaneCommand,
   UpdateScarCommand,
 } from './commands';
 import type { CurveShape } from './curveGeometry';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import type { ProjectStore } from './store';
-import type { AttributeValue, Curve, Measurement, MeasureType, Scar, ScarWithVector, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, Scar, ScarWithVector, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -207,6 +210,74 @@ export function deleteMeasurement(store: ProjectStore, id: string): void {
   if (!store.measurement(id)) return;
   store.history.execute(new DeleteMeasurementCommand(id));
 }
+
+// ---------------------------------------------------------------- planes
+
+/** A new plane; `upHint` is the direction toward the viewer at the time. */
+export function addPlane(store: ProjectStore, method: PlaneMethod, upHint: Vec3): Plane {
+  const n = store.state.nextPlaneNumber;
+  const t = nowIso();
+  const plane: Plane = {
+    id: uuid(),
+    label: `P${n}`,
+    method,
+    excludeCompleteness: [],
+    curveIds: [],
+    upHint: copy(upHint),
+    visible: true,
+    createdAt: t,
+    modifiedAt: t,
+  };
+  store.history.execute(new AddPlaneCommand(plane, n));
+  return plane;
+}
+
+export function deletePlane(store: ProjectStore, id: string): void {
+  if (!store.plane(id)) return;
+  store.history.execute(new DeletePlaneCommand(id));
+}
+
+function updatePlane(store: ProjectStore, id: string, labelKey: string, change: (p: Plane) => void): void {
+  const before = store.plane(id);
+  if (!before) return;
+  const after = structuredClone(before);
+  change(after);
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  after.modifiedAt = nowIso();
+  store.history.execute(new UpdatePlaneCommand(labelKey, structuredClone(before), after));
+}
+
+export const setPlaneMethod = (store: ProjectStore, id: string, method: PlaneMethod): void =>
+  updatePlane(store, id, 'cmd.editPlane', (p) => {
+    p.method = method;
+  });
+
+/** Leave a completeness category out of (or back into) a scar_starts plane. */
+export const setPlaneExclusion = (store: ProjectStore, id: string, code: string, excluded: boolean): void =>
+  updatePlane(store, id, 'cmd.editPlane', (p) => {
+    const set = new Set(p.excludeCompleteness);
+    if (excluded) set.add(code);
+    else set.delete(code);
+    p.excludeCompleteness = [...set];
+  });
+
+/** Use (or stop using) a curve in a curves plane. */
+export const setPlaneCurve = (store: ProjectStore, id: string, curveId: string, used: boolean): void =>
+  updatePlane(store, id, 'cmd.editPlane', (p) => {
+    const ids = p.curveIds.filter((x) => x !== curveId);
+    if (used) ids.push(curveId);
+    p.curveIds = ids;
+  });
+
+export const flipPlane = (store: ProjectStore, id: string): void =>
+  updatePlane(store, id, 'cmd.flipPlane', (p) => {
+    p.upHint = [-p.upHint[0], -p.upHint[1], -p.upHint[2]];
+  });
+
+export const setPlaneVisible = (store: ProjectStore, id: string, visible: boolean): void =>
+  updatePlane(store, id, 'cmd.editPlane', (p) => {
+    p.visible = visible;
+  });
 
 // ---------------------------------------------------------------- specimen
 

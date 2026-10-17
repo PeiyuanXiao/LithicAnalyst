@@ -127,18 +127,44 @@ export interface Measurement {
   modifiedAt: string;
 }
 
+export type PlaneMethod = 'all_vertices' | 'scar_directions' | 'scar_starts' | 'curves';
+
+/**
+ * A fitted plane. Only its inputs are stored here; the plane itself is
+ * derived from them (core/planes.ts) and recomputed whenever they change.
+ */
+export interface Plane {
+  /** Stable unique id (UUID). Never reused. */
+  id: string;
+  /** "P1", "P2", … */
+  label: string;
+  method: PlaneMethod;
+  /** scar_starts: completeness codes left out (none by default). */
+  excludeCompleteness: string[];
+  /** curves: the curves used. */
+  curveIds: string[];
+  /** The normal is taken on the side of this direction (toward the viewer when created; flipping negates it). */
+  upHint: Vec3;
+  visible: boolean;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
   scars: Scar[];
   curves: Curve[];
   measurements: Measurement[];
+  planes: Plane[];
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */
   nextCurveNumber: number;
   /** Next number used for measurement labels (M1, M2, …). */
   nextMeasureNumber: number;
+  /** Next number used for plane labels (P1, P2, …). */
+  nextPlaneNumber: number;
   createdAt: string;
   modifiedAt: string;
 }
