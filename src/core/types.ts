@@ -191,6 +191,33 @@ export interface Region {
   modifiedAt: string;
 }
 
+/** "A cuts B" (A is later than B), or "cannot tell", which is kept apart from "not judged yet". */
+export type RelationKind = 'a_cuts_b' | 'indeterminate';
+
+/** A stratigraphic relation between two scars (ids). At most one per pair of scars. */
+export interface Relation {
+  id: string;
+  /** The later scar for `a_cuts_b`. */
+  a: string;
+  b: string;
+  kind: RelationKind;
+  createdAt: string;
+  modifiedAt: string;
+}
+
+/** A removal sequence: a group of scars. Sequences are listed earliest first. */
+export interface Sequence {
+  id: string;
+  /** "Q1", "Q2", … Editable. */
+  label: string;
+  /** Members (a scar is in one sequence at most); earliest first when `ordered`. */
+  scarIds: string[];
+  /** The order of the members counts. */
+  ordered: boolean;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -200,6 +227,9 @@ export interface ProjectState {
   planes: Plane[];
   sections: Section[];
   regions: Region[];
+  relations: Relation[];
+  /** Earliest first. */
+  sequences: Sequence[];
   /** Sphere fitted to the cortex: cortex regions left out, and whether the sphere is drawn. */
   nodule: { exclude: string[]; show: boolean };
   /**
@@ -220,6 +250,8 @@ export interface ProjectState {
   nextSectionNumber: number;
   /** Next number used for region labels (R1, R2, …). */
   nextRegionNumber: number;
+  /** Next number used for sequence labels (Q1, Q2, …). */
+  nextSequenceNumber: number;
   createdAt: string;
   modifiedAt: string;
 }

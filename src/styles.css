@@ -1283,3 +1283,116 @@ textarea.ctl-text {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* ------------------------------------------------------------ relations and sequences */
+
+.checks-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.problem-toggle.is-warn {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.problem-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+  border-radius: var(--radius);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.problem-item {
+  padding: 6px 10px;
+  font-size: var(--step--1);
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+
+.problem-item:last-child {
+  border-bottom: 0;
+}
+
+.problem-item:hover {
+  background: var(--surface-2);
+}
+
+.problem-item.is-focused {
+  background: var(--accent-soft);
+}
+
+.relation-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.member-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding-block: 2px;
+}
+
+.member-tools {
+  display: inline-flex;
+}
+
+.member-tools .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.member-tools .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.harris-panel {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left, 0px));
+  bottom: 10px;
+  max-width: min(60%, 640px);
+  max-height: 55%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.harris-panel[hidden] {
+  display: none;
+}
+
+.harris-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.harris-title {
+  margin-right: auto;
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.harris-body {
+  overflow: auto;
+  min-height: 40px;
+  background: #ffffff;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.harris-body svg {
+  display: block;
+}
+
+.harris-body .hm-node {
+  cursor: pointer;
+}

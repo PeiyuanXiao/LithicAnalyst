@@ -55,7 +55,7 @@ export class Feedback {
       };
       const titleId = `dlg-${Math.random().toString(36).slice(2)}`;
       const btnEls = buttons.map((b) =>
-        h('button', { type: 'button', class: `btn btn-${b.kind ?? 'quiet'}`, onclick: () => close(b.id) }, b.label),
+        h('button', { type: 'button', class: `btn btn-${b.kind ?? 'quiet'}`, 'data-choice': b.id, onclick: () => close(b.id) }, b.label),
       );
       const dialog = h(
         'div',

@@ -1,4 +1,12 @@
 import {
+  addSequence,
+  deleteRelation,
+  deleteSequence,
+  moveInSequence,
+  moveSequence,
+  setRelation,
+  setScarSequence,
+  updateSequence,
   deleteCurve,
   deleteMeasurement,
   deletePlane,
@@ -31,14 +39,16 @@ import { MEASURE_COLORS } from '../render/measureLayer';
 import { planeColor } from '../render/planeLayer';
 import { FIGURE_VIEWS } from '../render/figure';
 import { SECTION_COLORS } from '../render/sectionLayer';
-import { regionColor } from '../render/regionLayer';
+import { regionColorOf } from '../render/regionLayer';
+import { relationProblems, type RelationProblem } from '../compute/relations';
+import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -119,12 +129,27 @@ function listSummary(attributes: Record<string, AttributeValue>, fields: FieldDe
 function arrowsSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('arrows', t('sec.arrows'), badge);
-  const list = h('ol', { class: 'arrow-list', role: 'listbox', 'aria-label': t('sec.arrows') });
+  const list = h('ol', { class: 'arrow-list', id: 'scar-list', role: 'listbox', 'aria-label': t('sec.arrows') });
   const inspector = h('div', { class: 'inspector', id: 'arrow-inspector' });
   body.append(list, inspector);
 
   let builtFor: string | null = null;
   let refs: { label: HTMLInputElement; setters: Array<(a: Scar) => void>; coords: HTMLElement } | null = null;
+
+  /** Which sequence the scar is in (options follow the sequences). */
+  const sequenceField = (): { el: HTMLElement; set: (a: Scar) => void } => {
+    const select = h('select', { id: 'scar-sequence', class: 'ctl-select' }) as HTMLSelectElement;
+    select.addEventListener('change', () => api.selection.id && setScarSequence(api.store, api.selection.id, select.value || null));
+    return {
+      el: h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'scar-sequence' }, t('arrows.sequence')), select),
+      set: (a) => {
+        const st = api.store.state;
+        clear(select);
+        select.append(h('option', { value: '' }, t('sequence.none')), ...st.sequences.map((q) => h('option', { value: q.id }, q.label)));
+        select.value = st.sequences.find((q) => q.scarIds.includes(a.id))?.id ?? '';
+      },
+    };
+  };
 
   const renderList = () => {
     const st = api.store.state;
@@ -133,9 +158,10 @@ function arrowsSection(api: AppApi): Section {
     clear(list);
     const sel = api.selection.id;
     const unit = st.specimen.unit;
+    const seq = api.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
     for (const a of st.scars) {
       const isSel = a.id === sel;
-      const color = isSel ? ARROW_COLORS.selected : arrowColor(a, api.display.arrows.colorMode);
+      const color = isSel ? ARROW_COLORS.selected : arrowColor(a, api.display.arrows.colorMode, seq);
       const li = h(
         'li',
         {
@@ -211,7 +237,7 @@ function arrowsSection(api: AppApi): Section {
         h('button', { type: 'button', class: 'icon-btn', id: 'insp-focus', title: t('arrows.focus'), 'aria-label': t('arrows.focus'), onclick: () => api.selection.id && api.focusArrow(api.selection.id) }, icon(ICONS.target)),
         h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteScar(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
       );
-      const fields = SCAR_FIELDS.map((f) => buildField(f, a));
+      const fields = [...SCAR_FIELDS.map((f) => buildField(f, a)), sequenceField()];
       const coords = h('dl', { class: 'meta coords' });
       inspector.append(head, ...fields.map((f) => f.el), coords);
       refs = { label, setters: fields.map((f) => f.set), coords };
@@ -414,6 +440,7 @@ function displaySection(api: AppApi): Section {
     { value: 'completeness', label: t('color.completeness') },
     { value: 'certainty', label: t('color.certainty') },
     { value: 'direction', label: t('color.direction') },
+    { value: 'sequence', label: t('color.sequence') },
   ], d.arrows.colorMode, (v) => api.setDisplay((x) => (x.arrows.colorMode = v as ArrowColorMode), 'arrows'));
   const labels = checkbox('arrow-labels', t('display.labels'), d.arrows.labels, (v) => api.setDisplay((x) => (x.arrows.labels = v), 'arrows'));
   const hidden = checkbox('arrow-hidden', t('display.hidden'), d.arrows.showHidden, (v) => api.setDisplay((x) => (x.arrows.showHidden = v), 'arrows'));
@@ -739,7 +766,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
   body.append(list, inspector, totals);
   const typeField = REGION_FIELDS[0];
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'regions', 'selection', 'specimen', 'arrows', 'mesh'].includes(kind)) return;
+    if (!['all', 'regions', 'selection', 'specimen', 'arrows', 'sequences', 'display', 'mesh'].includes(kind)) return;
     const st = api.store.state;
     const info = api.regionInfo();
     const u = st.specimen.unit;
@@ -748,6 +775,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     list.hidden = st.regions.length === 0;
     clear(list);
     const sel = api.selection.id;
+    const seq = api.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
     for (const r of st.regions) {
       const res = info?.results.find((x) => x.id === r.id);
       const scar = r.scarId ? st.scars.find((s) => s.id === r.scarId)?.label ?? null : null;
@@ -757,7 +785,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
         h(
           'li',
           { class: 'arrow-row region-row', role: 'option', 'aria-selected': String(isSel), 'data-id': r.id, onclick: () => api.selection.set(r.id) },
-          h('span', { class: 'chip', style: `--chip:${regionColor(r.type, scar)}` }),
+          h('span', { class: 'chip', style: `--chip:${regionColorOf(r, st.scars, seq)}` }),
           h('span', { class: 'arrow-id mono' }, r.label),
           h('span', { class: 'arrow-meta' }, `${tl(opt.label)}${scar ? ` · ${scar}` : ''}${res?.conflict ? ` · ${t('region.conflict')}` : ''}`),
           h('span', { class: 'arrow-len mono' }, area(res?.area ?? null)),
@@ -780,6 +808,162 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
         totals.append(h('dt', {}, t(`region.area.${k}`)), h('dd', { class: 'mono', id: `region-total-${k}` }, area(info.totals[k])));
       totals.append(h('dt', {}, t('region.cortexRatio')), h('dd', { class: 'mono', id: 'region-cortex-ratio' }, fmtNum(info.totals.cortexRatio, 3)));
     }
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+function relationsSection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('relations', t('sec.relations'), badge);
+  const checks = h('button', { type: 'button', class: 'btn btn-quiet btn-sm problem-toggle mono', id: 'relation-problems', onclick: () => api.setProblems(!api.problemsOpen) }) as HTMLButtonElement;
+  const problems = h('ol', { class: 'problem-list', id: 'relation-problem-list' });
+  const list = h('ol', { class: 'arrow-list', id: 'relation-list', role: 'listbox', 'aria-label': t('sec.relations') });
+  const inspector = h('div', { class: 'inspector', id: 'relation-inspector' });
+  const addSeq = h('button', { type: 'button', class: 'icon-btn', id: 'sequence-add', title: t('sequence.add'), 'aria-label': t('sequence.add'), onclick: () => api.selection.set(addSequence(api.store).id) }, icon(ICONS.plus));
+  const seqList = h('ol', { class: 'arrow-list', id: 'sequence-list', role: 'listbox', 'aria-label': t('sequence.title') });
+  const seqInspector = h('div', { class: 'inspector', id: 'sequence-inspector' });
+  const harris = checkbox('harris-show', t('harris.title'), api.display.harris, (on) => api.setDisplay((d) => (d.harris = on), 'harris'));
+  body.append(
+    h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('relation.checks')), checks),
+    problems,
+    list,
+    inspector,
+    h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('sequence.title')), addSeq),
+    seqList,
+    seqInspector,
+    harris,
+  );
+
+  const scarLabel = (id: string) => api.store.scar(id)?.label ?? '?';
+  const seqLabel = (id: string) => api.store.sequence(id)?.label ?? '?';
+  const relationText = (r: { a: string; b: string; kind: string }) =>
+    r.kind === 'a_cuts_b' ? t('relation.cuts', { a: scarLabel(r.a), b: scarLabel(r.b) }) : t('relation.pairUnknown', { a: scarLabel(r.a), b: scarLabel(r.b) });
+  const problemText = (p: RelationProblem): string => {
+    switch (p.kind) {
+      case 'cycle':
+        return t('relation.problem.cycle', { list: p.scars.map(scarLabel).join(' · ') });
+      case 'sequence':
+        return t('relation.problem.sequence', { a: scarLabel(p.scars[0]), b: scarLabel(p.scars[1]), qa: seqLabel(p.sequences[0]), qb: seqLabel(p.sequences[1]) });
+      case 'order':
+        return t('relation.problem.order', { a: scarLabel(p.scars[0]), b: scarLabel(p.scars[1]), q: seqLabel(p.sequence) });
+      default:
+        return t('relation.problem.unassigned', { list: p.scars.map(scarLabel).join(' · ') });
+    }
+  };
+
+  let seqBuiltFor: string | null = null;
+  let seqLabelInput: HTMLInputElement | null = null;
+
+  const renderSequence = () => {
+    const st = api.store.state;
+    const sel = api.selection.id;
+    const q = sel ? api.store.sequence(sel) : undefined;
+    if (!q) {
+      clear(seqInspector);
+      seqBuiltFor = null;
+      seqLabelInput = null;
+      return;
+    }
+    if (seqBuiltFor !== q.id || !seqLabelInput) {
+      clear(seqInspector);
+      const row = textRow('sequence-label', t('sequence.label'), q.label, (v) => updateSequence(api.store, q.id, { label: v }), { mono: true });
+      seqLabelInput = row.input as HTMLInputElement;
+      seqInspector.append(row.el, h('div', { class: 'seq-body' }));
+      seqBuiltFor = q.id;
+    }
+    softSet(seqLabelInput, q.label);
+    const holder = seqInspector.querySelector('.seq-body') as HTMLElement;
+    clear(holder);
+    const i = st.sequences.indexOf(q);
+    const colors = sequenceColors(st.sequences);
+    const members = h('ol', { class: 'arrow-list', id: 'sequence-members' });
+    q.scarIds.forEach((id, k) => {
+      const tools = q.ordered
+        ? [
+            h('button', { type: 'button', class: 'icon-btn', 'data-act': 'up', title: t('sequence.earlier'), 'aria-label': t('sequence.earlier'), disabled: k === 0, onclick: (e: Event) => (e.stopPropagation(), moveInSequence(api.store, id, -1)) }, icon(ICONS.up)),
+            h('button', { type: 'button', class: 'icon-btn', 'data-act': 'down', title: t('sequence.later'), 'aria-label': t('sequence.later'), disabled: k === q.scarIds.length - 1, onclick: (e: Event) => (e.stopPropagation(), moveInSequence(api.store, id, 1)) }, icon(ICONS.down)),
+          ]
+        : [];
+      members.append(
+        h(
+          'li',
+          { class: 'arrow-row member-row', 'data-id': id, onclick: () => api.selection.set(id) },
+          h('span', { class: 'chip', style: `--chip:${colors.get(id)}` }),
+          h('span', { class: 'arrow-id mono' }, scarLabel(id)),
+          h('span', { class: 'member-tools' }, ...tools, h('button', { type: 'button', class: 'icon-btn', 'data-act': 'remove', title: t('sequence.remove'), 'aria-label': t('sequence.remove'), onclick: (e: Event) => (e.stopPropagation(), setScarSequence(api.store, id, null)) }, icon(ICONS.close))),
+        ),
+      );
+    });
+    members.hidden = q.scarIds.length === 0;
+    holder.append(
+      checkbox('sequence-ordered', t('sequence.ordered'), q.ordered, (on) => updateSequence(api.store, q.id, { ordered: on })),
+      members,
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'sequence-earlier', disabled: i === 0, onclick: () => moveSequence(api.store, q.id, -1) }, icon(ICONS.up), t('sequence.earlier')),
+        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'sequence-later', disabled: i === st.sequences.length - 1, onclick: () => moveSequence(api.store, q.id, 1) }, icon(ICONS.down), t('sequence.later')),
+        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'sequence-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSequence(api.store, q.id) }, icon(ICONS.trash), t('arrows.delete')),
+      ),
+    );
+  };
+
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'relations', 'sequences', 'arrows', 'selection', 'display', 'mesh'].includes(kind)) return;
+    const st = api.store.state;
+    const sel = api.selection.id;
+    badge.textContent = String(st.relations.length);
+    // checks
+    const found = relationProblems(api.relationChecks());
+    checks.textContent = found.length ? `⚠ ${found.length}` : '✓';
+    checks.classList.toggle('is-warn', found.length > 0);
+    checks.disabled = found.length === 0;
+    checks.setAttribute('aria-expanded', String(api.problemsOpen && found.length > 0));
+    clear(problems);
+    problems.hidden = !api.problemsOpen || !found.length;
+    const focus = api.problemFocus();
+    found.forEach((p, i) =>
+      problems.append(h('li', { class: `problem-item${focus === i ? ' is-focused' : ''}`, 'data-kind': p.kind, onclick: () => api.setProblems(true, focus === i ? null : i) }, problemText(p))),
+    );
+    // relations
+    clear(list);
+    list.hidden = st.relations.length === 0;
+    for (const r of st.relations)
+      list.append(h('li', { class: 'arrow-row relation-row', role: 'option', 'aria-selected': String(r.id === sel), 'data-id': r.id, onclick: () => api.selection.set(r.id) }, h('span', { class: 'arrow-meta' }, relationText(r))));
+    clear(inspector);
+    const r = sel ? api.store.relation(sel) : undefined;
+    if (r) {
+      const A = scarLabel(r.a), B = scarLabel(r.b);
+      const value = r.kind === 'indeterminate' ? 'ind' : 'ab';
+      const kind = segmented('relation-kind', null, [
+        { value: 'ab', label: t('relation.cuts', { a: A, b: B }) },
+        { value: 'ba', label: t('relation.cuts', { a: B, b: A }) },
+        { value: 'ind', label: t('relation.indeterminate') },
+      ], value, (v) => {
+        if (v === 'ab') setRelation(api.store, r.a, r.b, 'a_cuts_b');
+        else if (v === 'ba') setRelation(api.store, r.b, r.a, 'a_cuts_b');
+        else setRelation(api.store, r.a, r.b, 'indeterminate');
+      });
+      inspector.append(kind.el, h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'relation-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteRelation(api.store, r.id) }, icon(ICONS.trash), t('arrows.delete'))));
+    }
+    // sequences
+    clear(seqList);
+    seqList.hidden = st.sequences.length === 0;
+    st.sequences.forEach((q, i) =>
+      seqList.append(
+        h(
+          'li',
+          { class: 'arrow-row sequence-row', role: 'option', 'aria-selected': String(q.id === sel), 'data-id': q.id, onclick: () => api.selection.set(q.id) },
+          h('span', { class: 'chip', style: `--chip:${sequenceSwatch(i)}` }),
+          h('span', { class: 'arrow-id mono' }, q.label),
+          h('span', { class: 'arrow-meta' }, q.scarIds.map(scarLabel).join(q.ordered ? ' → ' : ' · ')),
+          h('span', { class: 'arrow-len mono' }, String(q.scarIds.length)),
+        ),
+      ),
+    );
+    renderSequence();
+    (harris.querySelector('input') as HTMLInputElement).checked = api.display.harris;
   };
   refresh('all');
   return { el, refresh };
@@ -929,14 +1113,18 @@ function exportSection(api: AppApi): Section {
   const csvBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-csv', onclick: () => api.exportCsv() }, t('export.csv')) as HTMLButtonElement;
   const curveBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-curves-csv', onclick: () => api.exportCurvesCsv() }, t('export.curvesCsv')) as HTMLButtonElement;
   const regionBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-regions-csv', onclick: () => api.exportRegionsCsv() }, t('export.regions')) as HTMLButtonElement;
+  const relationBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-relations-csv', onclick: () => api.exportRelationsCsv() }, t('export.relations')) as HTMLButtonElement;
+  const seriesBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-series-csv', onclick: () => api.exportSeriesCsv() }, t('export.series')) as HTMLButtonElement;
   const bom = checkbox('export-bom', t('export.bom'), api.display.excelBom, (v) => api.setDisplay((x) => (x.excelBom = v), 'other'));
   const saveBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-project', onclick: () => api.saveProject() }, icon(ICONS.save), t('export.project')) as HTMLButtonElement;
   const openBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-open-project', onclick: () => api.openProject() }, icon(ICONS.open), t('header.openProject'));
-  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, regionBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
+  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, regionBtn, relationBtn, seriesBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
 
   const refresh = (kind: RefreshKind) => {
-    if (kind !== 'all' && kind !== 'mesh' && kind !== 'curves' && kind !== 'regions') return;
+    if (!['all', 'mesh', 'curves', 'regions', 'relations', 'sequences'].includes(kind)) return;
     csvBtn.disabled = !api.hasMesh();
+    relationBtn.disabled = !api.hasMesh() || api.store.state.relations.length === 0;
+    seriesBtn.disabled = !api.hasMesh() || !api.store.state.sequences.some((q) => q.scarIds.length);
     curveBtn.disabled = !api.hasMesh() || api.store.state.curves.length === 0;
     regionBtn.disabled = !api.hasMesh() || api.store.state.regions.length === 0;
     saveBtn.disabled = !api.hasMesh();
@@ -956,6 +1144,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [arrowsSection, ['annotate']],
   [curvesSection, ['annotate']],
   [(api) => regionsSection(api, (id, type) => api.setRegionType(id, type)), ['annotate']],
+  [relationsSection, ['annotate']],
   [measureAutoSection, ['measure']],
   [measureManualSection, ['measure']],
   [planesSection, ['measure']],

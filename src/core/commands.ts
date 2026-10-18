@@ -1,4 +1,4 @@
-import type { Curve, Measurement, Plane, ProjectState, Region, Scar, Section, SpecimenInfo } from './types';
+import type { Curve, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -406,6 +406,55 @@ export class UpdateRegionCommand implements Command {
   revert(store: ProjectStore): void {
     store._putRegion(structuredClone(this.before));
     store.notify({ kind: 'regions', ids: [this.before.id] });
+  }
+}
+
+/** Replace the relations (they are few; the whole list is kept before and after). */
+export class SetRelationsCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: Relation[],
+    private readonly after: Relation[],
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setRelations(structuredClone(this.after));
+    store.notify({ kind: 'relations' });
+  }
+  revert(store: ProjectStore): void {
+    store._setRelations(structuredClone(this.before));
+    store.notify({ kind: 'relations' });
+  }
+}
+
+/** Replace the sequences; `next` is the label counter after the change (null: unchanged). */
+export class SetSequencesCommand implements Command {
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(
+    readonly labelKey: string,
+    private readonly before: Sequence[],
+    private after: Sequence[],
+    private readonly next: number | null = null,
+    private readonly mergeKey: string | null = null,
+  ) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextSequenceNumber;
+    store._setSequences(structuredClone(this.after));
+    if (this.next !== null) store._setNextSequenceNumber(Math.max(this.prevNext, this.next));
+    store.notify({ kind: 'sequences' });
+  }
+  revert(store: ProjectStore): void {
+    store._setSequences(structuredClone(this.before));
+    store._setNextSequenceNumber(this.prevNext);
+    store.notify({ kind: 'sequences' });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetSequencesCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
   }
 }
 

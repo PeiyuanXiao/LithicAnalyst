@@ -32,10 +32,12 @@ export interface DisplaySettings {
   curveSnap: SnapMode;
   /** Colour the surface regions. */
   regions: boolean;
+  /** Show the Harris matrix panel (annotate mode). */
+  harris: boolean;
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'background' | 'arrows' | 'snap' | 'regions' | 'other';
+export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'background' | 'arrows' | 'snap' | 'regions' | 'harris' | 'other';
 
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
@@ -86,6 +88,14 @@ export interface AppApi {
   /** Direction toward the viewer (for orienting a curve's normal). */
   towardViewer(): Vec3;
   noduleFit(): (import('../compute/sphere').SphereFit & { regions: string[] }) | null;
+  /** Checks of the relations and sequences. */
+  relationChecks(): import('../compute/relations').RelationChecks;
+  /** Problem list opened (its scars are highlighted); `focus`: highlight only this problem's scars. */
+  readonly problemsOpen: boolean;
+  setProblems(open: boolean, focus?: number | null): void;
+  problemFocus(): number | null;
+  exportRelationsCsv(): void;
+  exportSeriesCsv(): void;
   saveProject(): void;
   openProject(): void;
 }

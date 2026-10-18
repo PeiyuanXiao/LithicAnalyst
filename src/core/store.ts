@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Region, Scar, ScarVector, Section, SpecimenInfo } from './types';
+import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, Sequence, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'nodule' | 'split' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'nodule' | 'split' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -21,6 +21,8 @@ export function emptyProject(): ProjectState {
     planes: [],
     sections: [],
     regions: [],
+    relations: [],
+    sequences: [],
     nodule: { exclude: [], show: false },
     split: null,
     nextLabelNumber: 1,
@@ -29,6 +31,7 @@ export function emptyProject(): ProjectState {
     nextPlaneNumber: 1,
     nextSectionNumber: 1,
     nextRegionNumber: 1,
+    nextSequenceNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
@@ -87,6 +90,14 @@ export class ProjectStore {
 
   region(id: string): Region | undefined {
     return this._state.regions.find((r) => r.id === id);
+  }
+
+  relation(id: string): Relation | undefined {
+    return this._state.relations.find((r) => r.id === id);
+  }
+
+  sequence(id: string): Sequence | undefined {
+    return this._state.sequences.find((q) => q.id === id);
   }
 
   /** Replace the whole project (new mesh, loaded project file). Clears history. */
@@ -226,6 +237,18 @@ export class ProjectStore {
     const list = this._state.regions;
     const index = list.findIndex((x) => x.id === r.id);
     if (index >= 0) list[index] = r;
+  }
+
+  _setRelations(list: Relation[]): void {
+    this._state.relations = list;
+  }
+
+  _setSequences(list: Sequence[]): void {
+    this._state.sequences = list;
+  }
+
+  _setNextSequenceNumber(n: number): void {
+    this._state.nextSequenceNumber = n;
   }
 
   _setSplit(s: ProjectState['split']): void {

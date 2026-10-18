@@ -1,6 +1,7 @@
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
+import { relationResults, type RelationResults } from '../compute/relations';
 import type { SphereFit } from '../compute/sphere';
 import type { VolumeSplit } from '../compute/split';
 import { measurementUnit, measurementValue } from './measurements';
@@ -51,6 +52,8 @@ export interface DerivedResults {
   nodule: (SphereFit & { regions: string[] }) | null;
   /** Upper and lower volume (null without a split, a closed mesh, or a valid plane / closed curve). */
   split: VolumeSplit | null;
+  /** Checks of the relations and sequences (scar ids), and the direct relations. */
+  relations: RelationResults;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -88,5 +91,6 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     regionTotals: mesh?.regions?.totals ?? null,
     nodule: mesh?.nodule ?? null,
     split: mesh?.split ?? null,
+    relations: relationResults(state),
   };
 }

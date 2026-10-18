@@ -212,3 +212,28 @@ export function regionsCsv(state: Readonly<ProjectState>, regions: RegionResult[
   });
   return (opts.excelBom ? '\uFEFF' : '') + [header.join(','), ...rows].join('\n') + '\n';
 }
+
+/** One row per recorded relation: `a_cuts_b` (scar_a is later than scar_b) or `indeterminate`; scars by label. */
+export function relationsCsv(state: Readonly<ProjectState>, opts: CsvOptions): string {
+  const label = new Map(state.scars.map((s) => [s.id, s.label]));
+  const rows = state.relations
+    .filter((r) => label.has(r.a) && label.has(r.b))
+    .map((r) => [csvCell(state.specimen.id), csvCell(label.get(r.a)), csvCell(label.get(r.b)), r.kind].join(','));
+  return (opts.excelBom ? '﻿' : '') + [['specimen_id', 'scar_a', 'scar_b', 'relation'].join(','), ...rows].join('\n') + '\n';
+}
+
+/**
+ * One row per scar in a sequence: `series_order` counts the sequences from the
+ * earliest (1); `order_in_series` counts the scars from the earliest, and is
+ * empty when the order within the sequence is not set.
+ */
+export function seriesCsv(state: Readonly<ProjectState>, opts: CsvOptions): string {
+  const label = new Map(state.scars.map((s) => [s.id, s.label]));
+  const rows: string[] = [];
+  state.sequences.forEach((q, i) => {
+    q.scarIds
+      .filter((id) => label.has(id))
+      .forEach((id, k) => rows.push([csvCell(state.specimen.id), csvCell(q.label), String(i + 1), csvCell(label.get(id)), q.ordered ? String(k + 1) : ''].join(',')));
+  });
+  return (opts.excelBom ? '﻿' : '') + [['specimen_id', 'series_id', 'series_order', 'scar_id', 'order_in_series'].join(','), ...rows].join('\n') + '\n';
+}

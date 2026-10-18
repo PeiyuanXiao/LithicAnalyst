@@ -133,6 +133,24 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   scar region has no arrow, and remove it again when it is no longer used (`CompoundCommand`).
 * The curve tool snaps points onto existing curves (T-junctions) so curves can close regions.
 
+## Relations and sequences
+
+* `ProjectState.relations` (one per pair of scars, `a_cuts_b` or `indeterminate`) and
+  `ProjectState.sequences` (earliest first) change through `SetRelationsCommand` /
+  `SetSequencesCommand`, which keep the whole list before and after (the lists are short).
+  `deleteScar` takes the scar out of both in the same undo step.
+* `compute/relations.ts` is pure and works on ids: `checkRelations` (cycles by Tarjan's strongly
+  connected components, contradictions with the order of the sequences and within ordered
+  ones, scars in no sequence), `directRelations` (transitive reduction) and `harrisLayout`
+  (rows by the longest chain of earlier scars, columns grouped by sequence). The app recomputes
+  them on every change (cheap) and stores the checks under `derived.relations`.
+* `tools/relationTool.ts`: two clicks on scars (an arrow, else the scar region under the click),
+  then a dialog. `render/harris.ts` draws the matrix as SVG (shown in a viewport panel and
+  exported as is); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
+  light (earliest) to dark (latest), used by the `sequence` colour mode for arrows and scar
+  regions. Arrows and regions of a selected relation, or of the opened problems, are drawn
+  highlighted (`ArrowLayer.setHighlight`, `App.emphasis`).
+
 ## Cortex sphere
 
 `compute/sphere.ts` fits a sphere (algebraic start, Gauss–Newton on the geometric residuals,

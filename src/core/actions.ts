@@ -13,6 +13,8 @@ import {
   DeleteSectionCommand,
   DeleteScarCommand,
   SetNoduleCommand,
+  SetRelationsCommand,
+  SetSequencesCommand,
   SetSplitCommand,
   SetSpecimenCommand,
   UpdateCurveCommand,
@@ -20,12 +22,13 @@ import {
   UpdateRegionCommand,
   UpdateSectionCommand,
   UpdateScarCommand,
+  type Command,
 } from './commands';
 import type { CurveShape } from './curveGeometry';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import type { ProjectStore } from './store';
-import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Scar, ScarWithVector, Section, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, Sequence, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -60,9 +63,22 @@ export function addScarVector(store: ProjectStore, input: NewArrowInput): ScarWi
   return scar;
 }
 
+/** Deleting a scar also takes it out of its relations and its sequence (one undo step). */
+function deleteScarCommands(store: ProjectStore, id: string): Command[] {
+  const parts: Command[] = [new DeleteScarCommand(id)];
+  const rel = store.state.relations;
+  if (rel.some((r) => r.a === id || r.b === id))
+    parts.push(new SetRelationsCommand('cmd.deleteArrow', structuredClone(rel), structuredClone(rel.filter((r) => r.a !== id && r.b !== id))));
+  const seq = store.state.sequences;
+  if (seq.some((q) => q.scarIds.includes(id)))
+    parts.push(new SetSequencesCommand('cmd.deleteArrow', structuredClone(seq), seq.map((q) => ({ ...structuredClone(q), scarIds: q.scarIds.filter((x) => x !== id) }))));
+  return parts;
+}
+
 export function deleteScar(store: ProjectStore, id: string): void {
   if (!store.scar(id)) return;
-  store.history.execute(new DeleteScarCommand(id));
+  const parts = deleteScarCommands(store, id);
+  store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.deleteArrow', parts));
 }
 
 function update(
@@ -354,18 +370,18 @@ export function addRegion(store: ProjectStore, seed: Vec3, type: RegionType, sca
 }
 
 /** The scar created for a region (no direction) is removed with it when nothing else uses it. */
-function dropAreaScar(store: ProjectStore, region: Region): DeleteScarCommand | null {
+function dropAreaScar(store: ProjectStore, region: Region): Command[] {
   const scar = region.scarId ? store.scar(region.scarId) : undefined;
-  if (!scar || scar.vector) return null;
-  if (store.state.regions.some((r) => r.id !== region.id && r.scarId === scar.id)) return null;
-  return new DeleteScarCommand(scar.id);
+  if (!scar || scar.vector) return [];
+  if (store.state.regions.some((r) => r.id !== region.id && r.scarId === scar.id)) return [];
+  return deleteScarCommands(store, scar.id);
 }
 
 /** Change a region's type; becoming a scar links it to `scarId` or to a new scar without a direction. */
 export function setRegionType(store: ProjectStore, id: string, type: RegionType, scarId: string | null): void {
   const before = store.region(id);
   if (!before || before.type === type) return;
-  const parts = [];
+  const parts: Command[] = [];
   let linked = scarId ?? before.scarId;
   if (type === 'scar' && !linked) {
     const s = newAreaScar(store);
@@ -374,10 +390,7 @@ export function setRegionType(store: ProjectStore, id: string, type: RegionType,
   }
   const after: Region = { ...structuredClone(before), type, scarId: type === 'scar' ? linked : null, modifiedAt: nowIso() };
   parts.push(new UpdateRegionCommand(structuredClone(before), after));
-  if (type !== 'scar') {
-    const drop = dropAreaScar(store, before);
-    if (drop) parts.push(drop);
-  }
+  if (type !== 'scar') parts.push(...dropAreaScar(store, before));
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editRegion', parts));
 }
 
@@ -385,7 +398,97 @@ export function deleteRegion(store: ProjectStore, id: string): void {
   const r = store.region(id);
   if (!r) return;
   const drop = dropAreaScar(store, r);
-  store.history.execute(drop ? new CompoundCommand('cmd.deleteRegion', [new DeleteRegionCommand(id), drop]) : new DeleteRegionCommand(id));
+  store.history.execute(drop.length ? new CompoundCommand('cmd.deleteRegion', [new DeleteRegionCommand(id), ...drop]) : new DeleteRegionCommand(id));
+}
+
+// ---------------------------------------------------------------- relations and sequences
+
+/** The relation recorded for a pair of scars (either way round), if any. */
+export const relationBetween = (state: Readonly<ProjectState>, x: string, y: string): Relation | undefined =>
+  state.relations.find((r) => (r.a === x && r.b === y) || (r.a === y && r.b === x));
+
+/** Record "a cuts b" or "cannot tell" for a pair of scars, replacing what was recorded for the pair. */
+export function setRelation(store: ProjectStore, a: string, b: string, kind: RelationKind): Relation | null {
+  if (a === b || !store.scar(a) || !store.scar(b)) return null;
+  const before = store.state.relations;
+  const old = relationBetween(store.state, a, b);
+  if (old && old.kind === kind && (kind === 'indeterminate' || old.a === a)) return old;
+  const t = nowIso();
+  const rel: Relation = old ? { ...structuredClone(old), a, b, kind, modifiedAt: t } : { id: uuid(), a, b, kind, createdAt: t, modifiedAt: t };
+  const after = old ? before.map((r) => (r.id === old.id ? rel : structuredClone(r))) : [...structuredClone(before), rel];
+  store.history.execute(new SetRelationsCommand(old ? 'cmd.editRelation' : 'cmd.addRelation', structuredClone(before), after));
+  return rel;
+}
+
+export function deleteRelation(store: ProjectStore, id: string): void {
+  const before = store.state.relations;
+  if (!before.some((r) => r.id === id)) return;
+  store.history.execute(new SetRelationsCommand('cmd.deleteRelation', structuredClone(before), structuredClone(before.filter((r) => r.id !== id))));
+}
+
+function changeSequences(store: ProjectStore, labelKey: string, change: (list: Sequence[]) => Sequence[], mergeKey: string | null = null): void {
+  const before = store.state.sequences;
+  const after = change(structuredClone(before));
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  store.history.execute(new SetSequencesCommand(labelKey, structuredClone(before), after, null, mergeKey));
+}
+
+/** A new, empty sequence after (later than) the others. */
+export function addSequence(store: ProjectStore): Sequence {
+  const n = store.state.nextSequenceNumber;
+  const t = nowIso();
+  const q: Sequence = { id: uuid(), label: `Q${n}`, scarIds: [], ordered: false, createdAt: t, modifiedAt: t };
+  const before = store.state.sequences;
+  store.history.execute(new SetSequencesCommand('cmd.addSequence', structuredClone(before), [...structuredClone(before), q], n + 1));
+  return q;
+}
+
+export const deleteSequence = (store: ProjectStore, id: string): void =>
+  changeSequences(store, 'cmd.deleteSequence', (list) => list.filter((q) => q.id !== id));
+
+export function updateSequence(store: ProjectStore, id: string, patch: Partial<Pick<Sequence, 'label' | 'ordered'>>): void {
+  const q = store.sequence(id);
+  if (!q || Object.entries(patch).every(([k, v]) => q[k as keyof typeof patch] === v)) return;
+  const key = 'label' in patch ? `sequence-label:${id}` : null;
+  changeSequences(store, 'cmd.editSequence', (list) => list.map((q) => (q.id === id ? { ...q, ...patch, modifiedAt: nowIso() } : q)), key);
+}
+
+/** Move a sequence earlier (−1) or later (+1). */
+export function moveSequence(store: ProjectStore, id: string, step: -1 | 1): void {
+  changeSequences(store, 'cmd.editSequence', (list) => {
+    const i = list.findIndex((q) => q.id === id);
+    const j = i + step;
+    if (i < 0 || j < 0 || j >= list.length) return list;
+    [list[i], list[j]] = [list[j], list[i]];
+    return list;
+  });
+}
+
+/** Put a scar at the end of a sequence (taking it out of any other), or out of every sequence (null). */
+export function setScarSequence(store: ProjectStore, scarId: string, sequenceId: string | null): void {
+  if (!store.scar(scarId)) return;
+  if (sequenceId && store.sequence(sequenceId)?.scarIds.includes(scarId)) return;
+  changeSequences(store, 'cmd.editSequence', (list) =>
+    list.map((q) => {
+      const ids = q.scarIds.filter((x) => x !== scarId);
+      if (q.id === sequenceId) ids.push(scarId);
+      return ids.length === q.scarIds.length && q.id !== sequenceId ? q : { ...q, scarIds: ids, modifiedAt: nowIso() };
+    }),
+  );
+}
+
+/** Move a scar earlier (−1) or later (+1) within its sequence. */
+export function moveInSequence(store: ProjectStore, scarId: string, step: -1 | 1): void {
+  changeSequences(store, 'cmd.editSequence', (list) =>
+    list.map((q) => {
+      const i = q.scarIds.indexOf(scarId);
+      const j = i + step;
+      if (i < 0 || j < 0 || j >= q.scarIds.length) return q;
+      const ids = [...q.scarIds];
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+      return { ...q, scarIds: ids, modifiedAt: nowIso() };
+    }),
+  );
 }
 
 /** Split the volume by a plane or a closed curve (null: no split); `upHint` orients a curve's normal. */

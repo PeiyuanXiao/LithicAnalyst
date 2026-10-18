@@ -5,7 +5,7 @@ import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compu
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addPlane, addRegion, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteScar, deleteSection, setCurveAttribute, setRegionType, setScarAttribute, updateSpecimen } from '../core/actions';
+import { addPlane, addRegion, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -14,17 +14,22 @@ import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import type { Measurement, ProjectState, RegionType, Section, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, scarVectorCsv } from '../io/csv';
+import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
-import { ArrowLayer, arrowColor, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
+import { ArrowLayer, arrowColor, ARROW_COLORS, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
 import { PlaneLayer, planeColor } from '../render/planeLayer';
 import { SectionLayer, sectionLoops2D } from '../render/sectionLayer';
 import { SectionTool } from '../tools/sectionTool';
 import { ClickTool } from '../tools/clickTool';
-import { RegionLayer, regionColor } from '../render/regionLayer';
+import { RegionLayer, regionColorOf } from '../render/regionLayer';
+import { checkRelations, harrisLayout, relationInputs, relationProblems, type HarrisLayout, type RelationChecks } from '../compute/relations';
+import { harrisSvg, type HarrisStyle } from '../render/harris';
+import { sequenceColors } from '../render/sequenceColor';
+import { RelationTool, type ScarPick } from '../tools/relationTool';
+import type { HitProvider } from '../tools/tool';
 import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
 import { splitByLoopSteps, splitByPlaneSteps, type VolumeSplit } from '../compute/split';
@@ -45,7 +50,7 @@ import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type DisplayAspect, type DisplaySettings } from './appApi';
 import { segmented } from './controls';
 import { clear, h, icon, ICONS } from './dom';
-import { Feedback } from './feedback';
+import { Feedback, type ChoiceButton } from './feedback';
 import { getLang, onLangChange, setLang, t } from './i18n';
 import { buildSidebar, fmtNum, type RefreshKind, type Sidebar } from './sidebar';
 
@@ -61,8 +66,12 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   arrows: { ...DEFAULT_ARROW_DISPLAY },
   curveSnap: 'ridge',
   regions: true,
+  harris: false,
   excelBom: false,
 };
+
+/** Scars involved in a problem of the relation checks. */
+const PROBLEM_COLOR = '#ff3b30';
 
 function loadDisplay(): DisplaySettings {
   const saved = readPref<Partial<DisplaySettings>>('display', {});
@@ -166,6 +175,10 @@ export class App implements AppApi {
   private noduleMesh: THREE.Mesh | null = null;
   private split: VolumeSplit | null = null;
   private splitToken = 0;
+  problemsOpen = false;
+  private focusedProblem: number | null = null;
+  private harrisEl: HTMLElement | null = null;
+  private harrisBody: HTMLElement | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
@@ -287,6 +300,7 @@ export class App implements AppApi {
     for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
+    this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b) => void this.askRelation(a, b)));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -301,6 +315,7 @@ export class App implements AppApi {
 
     this.buildToolbar();
     this.buildEmptyState();
+    this.buildHarrisPanel();
     this.setTool('select');
 
     this.store.subscribe((c) => this.onStoreChange(c));
@@ -309,6 +324,7 @@ export class App implements AppApi {
       this.syncAnnotations();
       if (this.store.region(this.selection.id ?? '') || this.regions?.results.length) this.paintRegions();
       this.sidebar.refresh('selection');
+      this.updateHarris();
       this.updateCursor();
     });
     onLangChange(() => this.rebuildChrome());
@@ -365,6 +381,7 @@ export class App implements AppApi {
       { value: 'draw', label: `${t('mode.draw')}  A` },
       { value: 'curve', label: `${t('mode.curve')}  P` },
       { value: 'region', label: `${t('tool.region')}  R` },
+      { value: 'relation', label: `${t('tool.relation')}  B` },
     ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
     this.modeSeg.el.classList.add('seg-mode');
     this.snapSeg = segmented('snap', null, SNAP_MODES.map((m) => ({ value: m, label: t(`snap.${m}`) })), this.display.curveSnap, (v) =>
@@ -413,6 +430,7 @@ export class App implements AppApi {
     this.sidebar = newSidebar;
     this.buildToolbar();
     this.buildEmptyState();
+    this.buildHarrisPanel();
     this.updateUndoButtons();
     this.updateMeshDependentUi();
     this.updateCursor();
@@ -433,6 +451,7 @@ export class App implements AppApi {
     this.toolbarEl.hidden = !has;
     this.saveBtn.disabled = !has;
     this.sidebar.refresh('mesh');
+    this.updateHarris();
   }
 
   private updateCursor(): void {
@@ -477,7 +496,16 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel)) this.selection.set(null);
+    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel))
+      this.selection.set(null);
+    if (['scars', 'relations', 'sequences', 'reset'].includes(c.kind)) {
+      // the problem list closes once there is nothing in it
+      const n = relationProblems(this.relationChecks()).length;
+      if (n === 0) this.problemsOpen = false;
+      if (this.focusedProblem !== null && this.focusedProblem >= n) this.focusedProblem = null;
+      if (c.kind !== 'scars') this.paintRegions();
+      this.updateHarris();
+    }
     if (c.kind !== 'measurements' && c.kind !== 'specimen') this.updatePlanes();
     if (c.kind === 'sections' || c.kind === 'reset') this.updateSections();
     if (c.kind === 'curves' || c.kind === 'reset') this.updatePartition();
@@ -485,7 +513,7 @@ export class App implements AppApi {
     if (c.kind === 'nodule') this.updateNodule();
     if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', nodule: 'nodule', split: 'split', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', nodule: 'nodule', split: 'split', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
@@ -502,6 +530,7 @@ export class App implements AppApi {
 
   private syncAnnotations(): void {
     const handles = this.tools?.activeId === 'select' && this.mode === 'annotate';
+    this.arrows?.setHighlight(this.emphasis());
     this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
@@ -537,7 +566,9 @@ export class App implements AppApi {
     this.appModeSeg?.set(mode);
     this.updateToolbar();
     this.syncAnnotations();
+    this.paintRegions();
     this.showNodule();
+    this.updateHarris();
     this.sidebar.refresh('mode');
   }
 
@@ -581,9 +612,14 @@ export class App implements AppApi {
         break;
       case 'arrows':
         this.syncAnnotations();
+        this.paintRegions();
         this.sidebar.refresh('display');
         this.sidebar.refresh('arrows');
         this.sidebar.refresh('curves');
+        break;
+      case 'harris':
+        this.updateHarris();
+        this.sidebar.refresh('display');
         break;
       case 'snap':
         this.snapSeg?.set(this.display.curveSnap);
@@ -820,9 +856,10 @@ export class App implements AppApi {
     const settings = only ? { ...this.figure, views: [] } : this.figure;
     this.applyClipping(false);
     const fig = renderFigure(ctx, frame, st.specimen.unit, settings, {
-      arrows: st.scars.flatMap((s) =>
-        s.vector ? [{ ...s.vector, color: arrowColor(s, this.display.arrows.colorMode) }] : [],
-      ),
+      arrows: (() => {
+        const seq = this.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
+        return st.scars.flatMap((s) => (s.vector ? [{ ...s.vector, color: arrowColor(s, this.display.arrows.colorMode, seq) }] : []));
+      })(),
       curves: st.curves.map((c) => ({ points: c.points, closed: c.closed, color: curveColor(c) })),
       planes: visiblePlanes.flatMap((p) => {
         const lines = this.cuts.get(p.id)?.lines;
@@ -1037,6 +1074,149 @@ export class App implements AppApi {
     return this.viewer?.towardViewer() ?? [0, 0, 1];
   }
 
+  // ------------------------------------------------------------ relations and sequences
+
+  relationChecks(): RelationChecks {
+    const { scarIds, edges, sequences } = relationInputs(this.store.state);
+    return checkRelations(scarIds, edges, sequences);
+  }
+
+  problemFocus(): number | null {
+    return this.problemsOpen ? this.focusedProblem : null;
+  }
+
+  setProblems(open: boolean, focus: number | null = null): void {
+    this.problemsOpen = open;
+    this.focusedProblem = open ? focus : null;
+    this.syncAnnotations();
+    this.paintRegions();
+    this.sidebar.refresh('relations');
+  }
+
+  /** Scars to draw highlighted: those of the selected relation, or of the opened problems. */
+  private emphasis(): { ids: Set<string>; color: string } | null {
+    if (this.mode !== 'annotate') return null;
+    const sel = this.selection.id;
+    const rel = sel ? this.store.relation(sel) : undefined;
+    if (rel) return { ids: new Set([rel.a, rel.b]), color: ARROW_COLORS.selected };
+    if (!this.problemsOpen) return null;
+    const found = relationProblems(this.relationChecks());
+    const shown = this.focusedProblem !== null && found[this.focusedProblem] ? [found[this.focusedProblem]] : found;
+    return shown.length ? { ids: new Set(shown.flatMap((p) => p.scars)), color: PROBLEM_COLOR } : null;
+  }
+
+  /** The scar under a click: an arrow near it, else the scar region it falls in. */
+  private scarAt(x: number, y: number, hit: HitProvider): ScarPick | null {
+    const arrow = this.arrows?.pickNearest(x, y);
+    if (arrow) return { scarId: arrow.id, selectId: arrow.id };
+    const h = hit();
+    const part = this.partition;
+    if (!h || !part || h.faceIndex < 0) return null;
+    const c = part.region[h.faceIndex];
+    const i = this.seedComponent.findIndex((x) => x === c);
+    const r = i >= 0 ? this.store.state.regions[i] : undefined;
+    return r?.scarId && this.store.scar(r.scarId) ? { scarId: r.scarId, selectId: r.id } : null;
+  }
+
+  /** Relation tool: ask how two scars relate, and record it. */
+  private async askRelation(a: string, b: string): Promise<void> {
+    const A = this.store.scar(a)?.label ?? '', B = this.store.scar(b)?.label ?? '';
+    const old = relationBetween(this.store.state, a, b);
+    const current = !old ? null : old.kind === 'indeterminate' ? 'ind' : old.a === a ? 'ab' : 'ba';
+    const kind = (id: string): ChoiceButton['kind'] => (id === current ? 'primary' : 'quiet');
+    const buttons: ChoiceButton[] = [
+      { id: 'ab', label: t('relation.cuts', { a: A, b: B }), kind: kind('ab') },
+      { id: 'ba', label: t('relation.cuts', { a: B, b: A }), kind: kind('ba') },
+      { id: 'ind', label: t('relation.indeterminate'), kind: kind('ind') },
+    ];
+    if (old) buttons.push({ id: 'delete', label: t('arrows.delete'), kind: 'danger' });
+    const choice = await this.feedback.choose(`${A} · ${B}`, '', buttons);
+    if (!this.store.scar(a) || !this.store.scar(b)) return;
+    if (choice === 'delete' && old) {
+      deleteRelation(this.store, old.id);
+      this.selection.set(null);
+      return;
+    }
+    const rel = choice === 'ab' ? setRelation(this.store, a, b, 'a_cuts_b') : choice === 'ba' ? setRelation(this.store, b, a, 'a_cuts_b') : choice === 'ind' ? setRelation(this.store, a, b, 'indeterminate') : null;
+    this.selection.set(rel?.id ?? null);
+  }
+
+  private buildHarrisPanel(): void {
+    const body = h('div', { class: 'harris-body', id: 'harris-body' });
+    body.addEventListener('click', (e) => {
+      const id = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
+      if (id) this.selectScar(id);
+    });
+    const el = h(
+      'div',
+      { class: 'viewport-ui harris-panel', id: 'harris-panel', hidden: true },
+      h(
+        'div',
+        { class: 'harris-head' },
+        h('span', { class: 'harris-title' }, t('harris.title')),
+        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'harris-svg', onclick: () => this.exportHarrisSvg() }, 'SVG'),
+        h('button', { type: 'button', class: 'icon-btn', id: 'harris-close', 'aria-label': t('dlg.close'), onclick: () => this.setDisplay((d) => (d.harris = false), 'harris') }, icon(ICONS.close)),
+      ),
+      body,
+    );
+    if (this.harrisEl) this.harrisEl.replaceWith(el);
+    else this.viewportEl.append(el);
+    this.harrisEl = el;
+    this.harrisBody = body;
+    this.updateHarris();
+  }
+
+  private harrisLayoutNow(): HarrisLayout {
+    const { scarIds, edges, sequences } = relationInputs(this.store.state);
+    return harrisLayout(scarIds, edges, sequences, checkRelations(scarIds, edges, sequences));
+  }
+
+  private harrisStyle(selected: string | null): HarrisStyle {
+    const st = this.store.state;
+    return { labels: new Map(st.scars.map((s) => [s.id, s.label])), fills: sequenceColors(st.sequences), selected };
+  }
+
+  /** Redraw the Harris matrix panel (annotate mode, when switched on). */
+  private updateHarris(): void {
+    const el = this.harrisEl, body = this.harrisBody;
+    if (!el || !body) return;
+    const shown = this.display.harris && this.mode === 'annotate' && this.hasMesh();
+    el.hidden = !shown;
+    if (!shown) return;
+    body.innerHTML = this.store.state.scars.length ? harrisSvg(this.harrisLayoutNow(), this.harrisStyle(this.selectedScar())) : '';
+  }
+
+  /** The scar the selection shows: a selected scar, or a selected region's scar. */
+  private selectedScar(): string | null {
+    const sel = this.selection.id;
+    if (!sel) return null;
+    if (this.store.scar(sel)) return sel;
+    return this.store.region(sel)?.scarId ?? null;
+  }
+
+  /** Select a scar where it shows in 3D: its arrow, else its region. */
+  private selectScar(id: string): void {
+    const s = this.store.scar(id);
+    if (!s) return;
+    const region = s.vector ? undefined : this.store.state.regions.find((r) => r.scarId === id);
+    this.selection.set(region?.id ?? id);
+  }
+
+  exportHarrisSvg(): void {
+    if (!this.hasMesh() || !this.store.state.scars.length) return;
+    void this.save(`${this.stem()}_harris.svg`, harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null)), 'image/svg+xml');
+  }
+
+  exportRelationsCsv(): void {
+    if (!this.hasMesh() || !this.store.state.relations.length) return;
+    void this.save(`${this.stem()}_relations.csv`, relationsCsv(this.store.state, { excelBom: this.display.excelBom }), 'text/csv');
+  }
+
+  exportSeriesCsv(): void {
+    if (!this.hasMesh() || !this.store.state.sequences.length) return;
+    void this.save(`${this.stem()}_series.csv`, seriesCsv(this.store.state, { excelBom: this.display.excelBom }), 'text/csv');
+  }
+
   volumeSplit(): VolumeSplit | null {
     return this.split;
   }
@@ -1145,12 +1325,14 @@ export class App implements AppApi {
     if (!layer) return;
     const results = this.regions?.results ?? [];
     const st = this.store.state;
+    const seq = this.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
+    const em = this.emphasis();
     const paints = this.display.regions
       ? results.flatMap((r, i) => {
           const c = this.seedComponent[i];
           if (c < 0 || this.seedComponent.indexOf(c) !== i) return [];
-          const scar = r.scarId ? st.scars.find((s) => s.id === r.scarId)?.label ?? null : null;
-          return [{ component: c, color: regionColor(r.type, scar), selected: r.id === this.selection.id }];
+          const hl = !!em && !!r.scarId && em.ids.has(r.scarId);
+          return [{ component: c, color: hl ? em!.color : regionColorOf(r, st.scars, seq), selected: hl || r.id === this.selection.id }];
         })
       : [];
     const g = loaded?.geometry;
@@ -1251,6 +1433,8 @@ export class App implements AppApi {
       return;
     }
     if (this.store.region(sel)) deleteRegion(this.store, sel);
+    else if (this.store.relation(sel)) deleteRelation(this.store, sel);
+    else if (this.store.sequence(sel)) deleteSequence(this.store, sel);
     else if (this.store.curve(sel)) deleteCurve(this.store, sel);
     else if (this.store.scar(sel)) deleteScar(this.store, sel);
   }
@@ -1569,6 +1753,9 @@ export class App implements AppApi {
         case 'KeyP':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('curve');
           return;
+        case 'KeyB':
+          if (this.hasMesh() && this.mode === 'annotate') this.setTool('relation');
+          return;
         case 'KeyX':
           if (this.hasMesh() && this.mode === 'present') this.setTool('section');
           return;
@@ -1666,6 +1853,7 @@ export class App implements AppApi {
       ['X', t('help.k.section')],
       ['P', t('help.k.curve')],
       ['R', t('help.k.region')],
+      ['B', t('help.k.relation')],
       ['V', t('help.k.select')],
       ['S', t('help.k.snap')],
       ['Shift', t('help.k.shift')],
@@ -1745,6 +1933,18 @@ export class App implements AppApi {
       regionCount: () => this.partition?.count ?? null,
       exportRegionsCsvText: () => regionsCsv(this.store.state, this.regions?.results ?? [], { excelBom: false }),
       exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
+      exportRelationsCsvText: () => relationsCsv(this.store.state, { excelBom: false }),
+      exportSeriesCsvText: () => seriesCsv(this.store.state, { excelBom: false }),
+      relationChecks: () => this.relationChecks(),
+      harris: () => this.harrisLayoutNow(),
+      harrisSvg: () => harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null)),
+      /** Scars drawn highlighted (a selected relation's, or those of the opened problems). */
+      highlighted: () => [...(this.emphasis()?.ids ?? [])],
+      /** Scar clicked first with the relation tool (null when none). */
+      relationPending: (): string | null => {
+        const tool = this.tools?.activeTool;
+        return tool instanceof RelationTool ? tool.pending() : null;
+      },
       /** Points of the measurement being taken (null when no measuring tool is active). */
       measureDraft: (): Vec3[] | null => {
         const tool = this.tools?.activeTool;

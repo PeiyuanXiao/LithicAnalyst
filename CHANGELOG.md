@@ -50,6 +50,16 @@
 - Upper / lower volume (measure mode, closed meshes): split by a closed curve (e.g. the edge of a
   core) or a fitted plane; the upper side is where the normal points (swappable). `volume_upper`,
   `volume_lower` and `volume_ratio` in the measurement CSV.
+- Relations and removal sequences (annotate mode, B): click two scars (their arrows or regions)
+  and record "A cuts B" (A is later), "B cuts A" or "cannot tell", which is kept apart from pairs
+  not judged yet; edit or delete relations in the sidebar. Sequences (Q1, Q2 …) are put in order,
+  scars are assigned from the scar inspector, and the order within a sequence is optional.
+  Live checks — cycles, contradictions with the order of the sequences and within an ordered
+  sequence, scars in no sequence — show as a count; the list highlights the scars involved. A
+  Harris matrix panel (later scars higher, direct relations only, cycles in red, sequences
+  framed) follows every change, selects scars on click and exports to SVG. "By sequence" colours
+  arrows and scar regions by sequence, light to dark from the earliest scar. Exports:
+  `<specimen>_relations.csv` and `<specimen>_series.csv`. Deleting a scar removes its relations.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

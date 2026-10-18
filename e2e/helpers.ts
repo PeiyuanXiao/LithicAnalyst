@@ -33,6 +33,13 @@ export interface LithicApi {
   autoMeasurements(): import('../src/core/derived').AutoMeasurements | null;
   exportMeasurementsCsvText(): string;
   exportManualMeasurementsCsvText(): string;
+  exportRelationsCsvText(): string;
+  exportSeriesCsvText(): string;
+  relationChecks(): import('../src/compute/relations').RelationChecks;
+  harris(): import('../src/compute/relations').HarrisLayout;
+  harrisSvg(): string;
+  highlighted(): string[];
+  relationPending(): string | null;
   mode(): string;
   setMode(m: 'annotate' | 'measure' | 'present'): void;
   projectJson(): ProjectFile;

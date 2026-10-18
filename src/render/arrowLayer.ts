@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { fieldByKey } from '../core/fields';
 import { hasVector, type ProjectState, type Scar, type Vec3 } from '../core/types';
+import { sequenceColors, UNASSIGNED_COLOR } from './sequenceColor';
 import type { Viewer } from './viewer';
 
-export type ArrowColorMode = 'uniform' | 'completeness' | 'certainty' | 'direction';
+export type ArrowColorMode = 'uniform' | 'completeness' | 'certainty' | 'direction' | 'sequence';
 
 export interface ArrowDisplay {
   /** Multiplier on the default shaft radius. */
@@ -176,7 +177,9 @@ function hsl(h: number, s: number, l: number): string {
   return `#${new THREE.Color().setHSL(h, s, l, THREE.SRGBColorSpace).getHexString(THREE.SRGBColorSpace)}`;
 }
 
-export function arrowColor(a: Scar, mode: ArrowColorMode): string {
+/** `sequences`: scar id → sequence colour (for the `sequence` mode; see sequenceColors). */
+export function arrowColor(a: Scar, mode: ArrowColorMode, sequences: Map<string, string> | null = null): string {
+  if (mode === 'sequence') return sequences?.get(a.id) ?? UNASSIGNED_COLOR;
   if (mode === 'completeness' || mode === 'certainty') {
     const field = fieldByKey(mode);
     const i = field?.options?.findIndex((o) => o.value === a.attributes[mode]) ?? -1;
@@ -204,6 +207,7 @@ export class ArrowLayer {
   private handleHotMat = new THREE.MeshBasicMaterial({ color: ARROW_COLORS.selected, depthTest: false, transparent: true, opacity: 1 });
   private override: EndpointOverride | null = null;
   private last: { state: Readonly<ProjectState>; selected: string | null; display: ArrowDisplay; handles: boolean } | null = null;
+  private highlight: { ids: ReadonlySet<string>; color: string } | null = null;
   onLabelClick: (id: string) => void = () => {};
 
   constructor(private readonly viewer: Viewer) {
@@ -243,6 +247,8 @@ export class ArrowLayer {
     const seen = new Set<string>();
     const radius = this.viewer.diagonal * 0.0028 * display.thickness;
     const lift = this.liftDistance(display);
+    const seq = display.colorMode === 'sequence' ? sequenceColors(state.sequences) : null;
+    const hl = this.highlight;
     for (const a of state.scars) {
       if (!hasVector(a)) continue;
       seen.add(a.id);
@@ -267,8 +273,9 @@ export class ArrowLayer {
       const s = toV(start).addScaledVector(toV(sn), lift);
       const e = toV(end).addScaledVector(toV(en), lift);
       const isSel = a.id === selected;
-      const color = isSel ? ARROW_COLORS.selected : arrowColor(a, display.colorMode);
-      v.update(s, e, toV(sn), isSel ? radius * 1.15 : radius, color, display.showHidden, display.labels ? a.label : null, isSel);
+      const isHl = !isSel && !!hl?.ids.has(a.id);
+      const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : arrowColor(a, display.colorMode, seq);
+      v.update(s, e, toV(sn), isSel || isHl ? radius * 1.15 : radius, color, display.showHidden, display.labels ? a.label : null, isSel);
     }
     for (const [id, v] of this.visuals) {
       if (!seen.has(id)) {
@@ -283,6 +290,11 @@ export class ArrowLayer {
 
   resync(): void {
     if (this.last) this.sync(this.last.state, this.last.selected, this.last.display, this.last.handles);
+  }
+
+  /** Draw these scars' arrows in `color` (e.g. scars involved in a problem), from the next sync; null for none. */
+  setHighlight(h: { ids: ReadonlySet<string>; color: string } | null): void {
+    this.highlight = h;
   }
 
   setEndpointOverride(o: EndpointOverride | null): void {

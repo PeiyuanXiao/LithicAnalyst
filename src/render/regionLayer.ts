@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { RegionType, Vec3 } from '../core/types';
+import type { Region, RegionType, Scar, Vec3 } from '../core/types';
+import { UNASSIGNED_COLOR } from './sequenceColor';
 
 export const REGION_COLORS: Record<Exclude<RegionType, 'scar'>, string> = {
   cortex: '#d9a441',
@@ -14,6 +15,12 @@ export function regionColor(type: RegionType, scarLabel: string | null): string 
   if (type !== 'scar') return REGION_COLORS[type];
   const n = Number(/(\d+)$/.exec(scarLabel ?? '')?.[1] ?? 1);
   return SCAR_PALETTE[(Math.max(1, n) - 1) % SCAR_PALETTE.length];
+}
+
+/** A region's colour; with sequence colours (scar id → colour), scar regions take their scar's. */
+export function regionColorOf(r: Pick<Region, 'type' | 'scarId'>, scars: readonly Scar[], sequences: Map<string, string> | null): string {
+  if (r.type === 'scar' && sequences) return (r.scarId && sequences.get(r.scarId)) || UNASSIGNED_COLOR;
+  return regionColor(r.type, r.scarId ? scars.find((s) => s.id === r.scarId)?.label ?? null : null);
 }
 
 export interface RegionPaint {

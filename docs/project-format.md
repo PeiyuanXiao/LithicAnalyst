@@ -32,6 +32,8 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.measurements` | array | manual measurements, in creation order |
 | `annotations.planes` | array | fitted planes (their inputs), in creation order |
 | `annotations.regions` | array | surface regions as seeds (`{ id, label, seed, type, scarId }`) |
+| `annotations.relations` | array | stratigraphic relations between scars (`{ id, a, b, kind }`), see below |
+| `annotations.sequences` | array | removal sequences, earliest first (`{ id, label, scarIds, ordered }`), see below |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
 | `split` | `{ source, id, upHint }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
@@ -42,9 +44,10 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `nextPlaneNumber` | integer | next plane label (`P{n}`) |
 | `nextSectionNumber` | integer | next section label (`X{n}`) |
 | `nextRegionNumber` | integer | next region label (`R{n}`) |
+| `nextSequenceNumber` | integer | next sequence label (`Q{n}`) |
 
-Readers should ignore keys they do not know. Future annotation layers (landmarks, surface
-regions, relations) will be added next to `scars` and `curves` inside `annotations`.
+Readers should ignore keys they do not know. Future annotation layers (landmarks) will be added
+next to `scars` and `curves` inside `annotations`.
 
 ## Specimen
 
@@ -113,6 +116,16 @@ fitted planes, fitted spheres, volumes ….
   (no volume with that centre as the reference point). Upper = the side the normal points to
   (the plane's normal, or the normal of the plane fitted to the curve, oriented by `upHint`).
   Closed meshes only.
+* `relations`: checks of the relations and sequences, by scar and sequence id:
+  `{ cycles, cycleEdges, sequenceConflicts, orderConflicts, unassigned, count, direct }`.
+  Only `a_cuts_b` relations take part (as `{ later, earlier }`). `cycles`: groups of scars whose
+  relations go round in a circle (strongly connected components), `cycleEdges` the relations
+  inside them. `sequenceConflicts`: A cuts B but A's sequence comes before B's
+  (`laterSequence`, `earlierSequence`). `orderConflicts`: A cuts B in the same ordered sequence
+  but A is listed first (`sequence`). `unassigned`: scars in no sequence (only when there are
+  sequences). `count` = cycles + conflicts + 1 when some scars are unassigned. `direct`: the
+  relations left after the transitive reduction (relations in a cycle are kept) — the lines of
+  the Harris matrix.
 * `planes`: each fitted plane as computed from its inputs: `{ id, label, method, valid, center,
   normal, matrix, inputCount }`. `valid` is false when the inputs are not enough (then `center`,
   `normal` and `matrix` are null). `matrix` is row-major 4×4 and maps original coordinates to the
@@ -132,6 +145,20 @@ fitted planes, fitted spheres, volumes ….
 * `type`: `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`. A scar region links
   to a scar (`scarId`): the one whose arrow starts in it, or a scar without a direction created
   with the region.
+
+## Relation and sequence
+
+```json
+{ "id": "…", "a": "<scar id>", "b": "<scar id>", "kind": "a_cuts_b", "createdAt": "…", "modifiedAt": "…" }
+{ "id": "…", "label": "Q1", "scarIds": ["<scar id>", "…"], "ordered": true, "createdAt": "…", "modifiedAt": "…" }
+```
+
+* `kind`: `a_cuts_b` — scar `a` cuts scar `b` (a is later than b) — or `indeterminate` (looked
+  at, cannot tell; kept apart from pairs not judged yet, which have no relation). One relation
+  per pair of scars. On reading, relations with unknown scars and repeated pairs are dropped.
+* Sequences are listed earliest first. A scar is in one sequence at most; within an `ordered`
+  sequence `scarIds` runs from the earliest scar, otherwise their order means nothing.
+* Deleting a scar removes its relations and takes it out of its sequence.
 
 ## Fitted plane
 
@@ -301,6 +328,21 @@ Surface regions (`<specimen>_regions.csv`, one row each):
 specimen_id,region_id,type,scar_id,area,unit
 ```
 
+Relations (`<specimen>_relations.csv`, one row each; scars by label; `relation` is `a_cuts_b`
+— scar_a is later than scar_b — or `indeterminate`):
+
+```
+specimen_id,scar_a,scar_b,relation
+```
+
+Sequences (`<specimen>_series.csv`, one row per scar in a sequence; `series_order` counts the
+sequences from the earliest, 1; `order_in_series` counts the scars from the earliest, and is
+empty when the sequence is not ordered):
+
+```
+specimen_id,series_id,series_order,scar_id,order_in_series
+```
+
 The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio`.
 
 Enumerated fields are written as their codes, which are the same in every interface language.
@@ -317,7 +359,7 @@ when reading, and saving writes format 2.
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
 | no `derived` | `derived` (computed results) |
-| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber` |
+| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber`, `annotations.relations`, `annotations.sequences`, `nextSequenceNumber` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.
