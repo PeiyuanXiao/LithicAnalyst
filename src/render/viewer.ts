@@ -37,6 +37,7 @@ export class Viewer {
   private readonly ndc = new THREE.Vector2();
   private cameraListeners = new Set<() => void>();
   private frameListeners = new Set<() => void>();
+  private renderListeners = new Set<() => void>();
   private readonly resizeObserver: ResizeObserver;
   private navMode: NavMode = 'select';
   private navOverride = false;
@@ -81,6 +82,7 @@ export class Viewer {
         this.dirty = false;
         this.renderer.render(this.scene, this.camera);
         this.labelRenderer.render(this.scene, this.camera);
+        for (const fn of this.renderListeners) fn();
       }
     };
     loop();
@@ -103,6 +105,12 @@ export class Viewer {
   }
 
   /** Called every animation frame before rendering (cheap work only). */
+  /** Called after each render, once the labels are in place. */
+  onAfterRender(fn: () => void): () => void {
+    this.renderListeners.add(fn);
+    return () => this.renderListeners.delete(fn);
+  }
+
   onFrame(fn: () => void): () => void {
     this.frameListeners.add(fn);
     return () => this.frameListeners.delete(fn);
@@ -244,6 +252,8 @@ export class Viewer {
   }
 
   private onWheel(e: WheelEvent): void {
+    // panels over the view scroll themselves
+    if ((e.target as Element | null)?.closest?.('.viewport-ui')) return;
     e.preventDefault();
     const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1;
     const delta = THREE.MathUtils.clamp(e.deltaY * unit, -400, 400);

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, spherePly, SPHERE, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, dist, download, expect, loadMesh, nextFrames, openApp, parseCsv, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
+import { counts, curveClick, dist, download, expect, exportFile, fileMenu, loadMesh, nextFrames, openApp, openSection, parseCsv, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
 
 const table = (page: Page) => page.evaluate(() => window.lithicanalyst.landmarkTable());
 const names = async (page: Page) => (await state(page)).landmarks.map((l) => l.name);
@@ -90,6 +90,7 @@ test('places, names, orders and moves landmarks; semilandmarks follow; exports a
   await expect.poll(() => xs(page)).toEqual([-5, 0, 5, 10]);
   expect((await state(page)).landmarks).toHaveLength(3);
   // deleting the curve leaves the set without points; undo brings them back
+  await openSection(page, 'curves');
   await page.locator('#curve-list .curve-row').first().click();
   await page.keyboard.press('Delete');
   await expect(page.locator('#semilandmark-list .arrow-len')).toHaveText('–');
@@ -98,18 +99,18 @@ test('places, names, orders and moves landmarks; semilandmarks follow; exports a
 
   // exports: the same seven points everywhere
   tb = await table(page);
-  const tps = await download(page, () => page.locator('#export-landmarks-tps').click());
+  const tps = await exportFile(page, 'landmarks-tps');
   expect(tps.name).toBe('box_landmarks.tps');
   const lines = tps.text.trim().split('\n');
   expect([lines[0], lines[8], lines.length]).toEqual(['LM3=7', 'ID=box', 9]);
   expect(lines[1].split(' ').map(Number)).toEqual(tb.rows[0].point.map((v) => +v.toFixed(6)));
-  const fcsv = await download(page, () => page.locator('#export-landmarks-fcsv').click());
+  const fcsv = await exportFile(page, 'landmarks-fcsv');
   expect(fcsv.name).toBe('box_landmarks.fcsv');
   expect(fcsv.text.split('\n')[1]).toBe('# CoordinateSystem = LPS');
   expect(fcsv.text.split('\n')[3]).toMatch(/^1,[-\d.]+,[-\d.]+,[-\d.]+,0,0,0,1,1,1,0,apex,,$/);
-  const csv = await download(page, () => page.locator('#export-landmarks-csv').click());
+  const csv = await exportFile(page, 'landmarks-csv');
   expect(parseCsv(csv.text).map((r) => [r.index, r.name, r.kind, r.set_id])).toEqual(tb.rows.map((r) => [String(r.index), r.name, r.kind, r.setId]));
-  const sliders = await download(page, () => page.locator('#export-sliders-csv').click());
+  const sliders = await exportFile(page, 'sliders');
   expect(sliders.name).toBe('box_sliders.csv');
   expect(sliders.text).toBe('before,slider,after\n2,4,5\n4,5,6\n5,6,7\n6,7,3\n');
 
@@ -132,7 +133,7 @@ test('places, names, orders and moves landmarks; semilandmarks follow; exports a
   await openApp(fresh);
   await loadMesh(fresh, ply);
   const chooser = fresh.waitForEvent('filechooser');
-  await fresh.locator('#btn-open-project').click();
+  await fileMenu(fresh, '#btn-open-project');
   await (await chooser).setFiles({ name: saved.name, mimeType: 'application/json', buffer: Buffer.from(saved.text) });
   await waitForMesh(fresh, 'box.ply');
   await expect.poll(async () => (await state(fresh)).landmarks).toEqual(st.landmarks);
@@ -145,7 +146,7 @@ test('names landmarks of the next specimen from the last one, with skipping', as
   await openApp(page);
   await loadMesh(page, boxPly());
   await viewFromTop(page);
-  await expect(page.locator('#landmark-reuse-names')).toBeDisabled();
+  await expect(page.locator('#landmark-reuse-names')).toHaveCount(0);
   await page.keyboard.press('k');
   for (const p of [boxPoint(-10, 0, 5), boxPoint(10, 0, 5)]) await place(page, p);
   for (const [i, name] of ['apex', 'base'].entries()) {

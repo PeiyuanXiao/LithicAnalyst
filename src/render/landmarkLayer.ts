@@ -9,13 +9,16 @@ export const LANDMARK_COLORS = { fixed: '#00a6a6', semi: '#8c5cf0', selected: '#
 const BALL = new THREE.SphereGeometry(1, 16, 12);
 const materials = new Map<string, THREE.Material>();
 
-function material(color: string, ghost: boolean): THREE.Material {
-  const key = `${color}:${ghost}`;
+function material(color: string, kind: 'solid' | 'ghost' | 'dim'): THREE.Material {
+  const key = `${color}:${kind}`;
   let m = materials.get(key);
   if (!m) {
-    m = ghost
-      ? new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthTest: false, depthWrite: false })
-      : new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0, emissive: new THREE.Color(color), emissiveIntensity: 0.3 });
+    m =
+      kind === 'ghost'
+        ? new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthTest: false, depthWrite: false })
+        : kind === 'dim'
+          ? new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, depthWrite: false })
+          : new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0, emissive: new THREE.Color(color), emissiveIntensity: 0.3 });
     materials.set(key, m);
   }
   return m;
@@ -32,12 +35,12 @@ class Dot {
     this.root.add(this.solid, this.ghost);
   }
 
-  set(p: Vec3, radius: number, color: string, ghost: boolean): void {
+  set(p: Vec3, radius: number, color: string, ghost: boolean, dim = false): void {
     this.root.position.set(p[0], p[1], p[2]);
     this.root.scale.setScalar(radius);
-    this.solid.material = material(color, false);
-    this.ghost.material = material(color, true);
-    this.ghost.visible = ghost;
+    this.solid.material = material(color, dim ? 'dim' : 'solid');
+    this.ghost.material = material(color, 'ghost');
+    this.ghost.visible = ghost && !dim;
   }
 }
 
@@ -56,6 +59,8 @@ export class LandmarkLayer {
   onLabelClick: (id: string) => void = () => {};
   /** Draw every point in this colour (another observer's annotations). */
   fixedColor: string | null = null;
+  /** Draw the points faded (they are not what the current work mode is about). */
+  dimmed = false;
 
   constructor(private readonly viewer: Viewer) {
     this.group.name = 'landmarks';
@@ -95,7 +100,7 @@ export class LandmarkLayer {
       const isSel = l.id === selected;
       const color = isSel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.fixed;
       v.point = l.point;
-      v.dot.set(l.point, isSel ? r * 1.25 : r, color, ghost);
+      v.dot.set(l.point, isSel ? r * 1.25 : r, color, ghost, this.dimmed && !isSel);
       v.label.visible = labels;
       const el = v.label.element;
       if (el.textContent !== l.name) el.textContent = l.name;
@@ -116,7 +121,7 @@ export class LandmarkLayer {
     }
     this.semi.forEach((d, i) => {
       d.root.visible = i < pts.length;
-      if (i < pts.length) d.set(pts[i].p, r * 0.75, pts[i].sel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.semi, ghost);
+      if (i < pts.length) d.set(pts[i].p, r * 0.75, pts[i].sel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.semi, ghost, this.dimmed && !pts[i].sel);
     });
     this.viewer.requestRender();
   }

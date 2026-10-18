@@ -1,7 +1,7 @@
 import { roofPly, roofPoint } from './fixtures/meshes';
 import { counts, curveClick, dragArrow, expect, loadMesh, openApp, state, test, toScreen, viewFromTop } from './helpers';
 
-const sections = ['specimen', 'arrows', 'curves', 'display', 'export'] as const;
+const sections = ['arrows', 'curves', 'measure-auto', 'orientation', 'observers'] as const;
 
 async function visibleSections(page: import('@playwright/test').Page): Promise<string[]> {
   const out: string[] = [];
@@ -14,7 +14,7 @@ test('each mode shows its own tools and sections; switching keeps the selection 
   await loadMesh(page, roofPly());
   await viewFromTop(page);
   await expect(page.locator('#app-mode-annotate')).toHaveAttribute('aria-checked', 'true');
-  expect(await visibleSections(page)).toEqual(['specimen', 'arrows', 'curves', 'display', 'export']);
+  expect(await visibleSections(page)).toEqual(['arrows', 'curves']);
 
   await page.keyboard.press('a');
   const start = roofPoint(-14, 10);
@@ -27,7 +27,7 @@ test('each mode shows its own tools and sections; switching keeps the selection 
   // M: annotate → measure
   await page.keyboard.press('m');
   await expect(page.locator('#app-mode-measure')).toHaveAttribute('aria-checked', 'true');
-  expect(await visibleSections(page)).toEqual(['specimen', 'display']);
+  expect(await visibleSections(page)).toEqual(['measure-auto']);
   await expect(page.locator('#mode-draw')).toBeHidden();
   await expect(page.locator('#btn-fit')).toBeVisible();
   expect(await page.evaluate(() => window.lithicanalyst.selection())).toBe(id);
@@ -45,17 +45,17 @@ test('each mode shows its own tools and sections; switching keeps the selection 
 
   await page.locator('#app-mode-present').click();
   await expect(page.locator('#app-mode-present')).toHaveAttribute('aria-checked', 'true');
-  expect(await visibleSections(page)).toEqual(['specimen', 'display']);
+  expect(await visibleSections(page)).toEqual(['orientation']);
 
   await page.keyboard.press('m');
   await expect(page.locator('#app-mode-compare')).toHaveAttribute('aria-checked', 'true');
-  expect(await visibleSections(page)).toEqual(['specimen', 'display']);
+  expect(await visibleSections(page)).toEqual(['observers']);
   await expect(page.locator('#sec-observers')).toBeVisible();
 
   // M wraps around to annotate: selection and history are still there
   await page.keyboard.press('m');
   await expect(page.locator('#app-mode-annotate')).toHaveAttribute('aria-checked', 'true');
-  expect(await visibleSections(page)).toEqual(['specimen', 'arrows', 'curves', 'display', 'export']);
+  expect(await visibleSections(page)).toEqual(['arrows', 'curves']);
   await expect(page.locator('#mode-select')).toBeVisible();
   await expect(page.locator('#insp-label')).toHaveValue('S1');
   await page.keyboard.press('ControlOrMeta+z');
@@ -86,14 +86,14 @@ test('works in a window 400 px wide', async ({ page }) => {
   await loadMesh(page, roofPly());
   const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
   expect(await fits()).toBe(true);
-  for (const id of ['#app-mode-annotate', '#app-mode-measure', '#app-mode-present', '#app-mode-compare', '#btn-open', '#btn-save-project', '#btn-lang', '#btn-help']) {
+  for (const id of ['#app-mode-annotate', '#app-mode-measure', '#app-mode-present', '#app-mode-compare', '#btn-file', '#btn-save-project', '#btn-lang', '#btn-help']) {
     const box = await page.locator(id).boundingBox();
     expect(box, id).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(400);
   }
   await page.locator('#app-mode-measure').click();
-  expect(await visibleSections(page)).toEqual(['specimen', 'display']);
+  expect(await visibleSections(page)).toEqual(['measure-auto']);
   await page.locator('#app-mode-annotate').click();
   await page.locator('#mode-draw').click();
   await viewFromTop(page);

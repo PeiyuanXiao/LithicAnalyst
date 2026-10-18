@@ -32,7 +32,6 @@ import {
   setCurveLabel,
   setScarAttribute,
   setScarLabel,
-  updateSpecimen,
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
 import { CURVE_FIELDS, REGION_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
@@ -73,7 +72,11 @@ const fmtInt = (n: number): string => n.toLocaleString('en-US');
 function section(id: string, title: string, badge?: HTMLElement): { el: HTMLDetailsElement; body: HTMLElement } {
   const el = h('details', { class: 'panel', id: `sec-${id}` }) as HTMLDetailsElement;
   el.open = readPref(`sec:${id}`, true);
-  el.addEventListener('toggle', () => writePref(`sec:${id}`, el.open));
+  // only what the user opens or closes is remembered (not what follows the tools)
+  el.addEventListener('toggle', () => {
+    if (el.dataset.auto === String(el.open)) delete el.dataset.auto;
+    else writePref(`sec:${id}`, el.open);
+  });
   const summary = h('summary', { class: 'panel-head' }, h('h2', { class: 'panel-title' }, title), badge ?? null);
   const body = h('div', { class: 'panel-body' });
   el.append(summary, body);
@@ -81,45 +84,6 @@ function section(id: string, title: string, badge?: HTMLElement): { el: HTMLDeta
 }
 
 const metaRow = (term: string, value: Node | string, title?: string) => [h('dt', {}, term), h('dd', { title }, value)];
-
-// ---------------------------------------------------------------- specimen
-
-function specimenSection(api: AppApi): Section {
-  const { el, body } = section('specimen', t('sec.specimen'));
-  const s = api.store.state.specimen;
-  const idRow = textRow('specimen-id', t('field.specimenId'), s.id, (v) => updateSpecimen(api.store, { id: v }), { mono: true });
-  const annRow = textRow('specimen-annotator', t('field.annotator'), s.annotator, (v) => {
-    updateSpecimen(api.store, { annotator: v });
-    writePref('annotator', v);
-  });
-  const units = ['mm', 'cm', 'm', 'in'].map((u) => ({ value: u, label: u }));
-  units.push({ value: '', label: t('unit.unknown') });
-  const unitRow = selectRow('specimen-unit', t('field.unit'), units, s.unit, (v) => {
-    updateSpecimen(api.store, { unit: v });
-    writePref('unit', v);
-  });
-  const meta = h('dl', { class: 'meta' });
-  body.append(h('div', { class: 'ctl-grid' }, idRow.el, annRow.el), unitRow.el, meta);
-
-  const refresh = (kind: RefreshKind) => {
-    if (kind !== 'all' && kind !== 'specimen' && kind !== 'mesh') return;
-    const st = api.store.state;
-    softSet(idRow.input, st.specimen.id);
-    softSet(annRow.input, st.specimen.annotator);
-    unitRow.set(st.specimen.unit);
-    clear(meta);
-    const m = st.mesh;
-    if (m) {
-      meta.append(
-        ...metaRow(t('mesh.file'), m.fileName, `SHA-256 ${m.sha256}`),
-        ...metaRow(t('mesh.size'), t('status.mesh', { v: fmtInt(m.vertexCount), t: fmtInt(m.triangleCount) })),
-      );
-    }
-    meta.hidden = !m;
-  };
-  refresh('all');
-  return { el, refresh };
-}
 
 // ---------------------------------------------------------------- arrows
 
@@ -399,8 +363,10 @@ function curvesSection(api: AppApi): Section {
 
 // ---------------------------------------------------------------- display
 
+/** Display settings: shown in a panel over the view, not in the sidebar. */
 function displaySection(api: AppApi): Section {
-  const { el, body } = section('display', t('sec.display'));
+  const body = h('div', { class: 'display-body', id: 'display-body' });
+  const el = body;
   const d = api.display;
   const shading = segmented('shading', t('display.shading'), [
     { value: 'plain', label: t('shading.plain') },
@@ -662,15 +628,9 @@ function orientationSection(api: AppApi): Section {
   const clearBtn = btn('frame-clear', t('frame.clear'), () => api.clearFrame(), 'btn-danger');
   const planeRow = h('div', { class: 'btn-row frame-pick' }, planeSel, fromPlane);
   const arrowRow = h('div', { class: 'btn-row frame-pick' }, arrowSel, vertical);
-  body.append(
-    status,
-    h('div', { class: 'btn-row' }, fromView),
-    planeRow,
-    arrowRow,
-    h('div', { class: 'btn-row' }, ccw, cw),
-    fine.el,
-    h('div', { class: 'btn-row' }, view, clearBtn),
-  );
+  const turnRow = h('div', { class: 'btn-row' }, ccw, cw);
+  const viewRow = h('div', { class: 'btn-row' }, view, clearBtn);
+  body.append(status, h('div', { class: 'btn-row' }, fromView), planeRow, arrowRow, turnRow, fine.el, viewRow);
   const options = (sel: HTMLSelectElement, items: Array<[string, string]>) => {
     const keep = sel.value;
     clear(sel);
@@ -687,7 +647,8 @@ function orientationSection(api: AppApi): Section {
     options(arrowSel, st.scars.filter((s) => s.vector).map((s) => [s.id, s.label]));
     fromView.disabled = !api.hasMesh();
     planeRow.hidden = planeSel.options.length === 0;
-    arrowRow.hidden = arrowSel.options.length === 0;
+    arrowRow.hidden = arrowSel.options.length === 0 || !f;
+    turnRow.hidden = viewRow.hidden = fine.el.hidden = !f;
     vertical.disabled = !f;
     for (const b of [ccw, cw, view, clearBtn]) b.disabled = !f;
     (fine.el.querySelector('input') as HTMLInputElement).disabled = !f;
@@ -815,8 +776,9 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     totals.hidden = !info || st.regions.length === 0;
     if (info && st.regions.length) {
       for (const k of ['scar', 'cortex', 'joint', 'damage'] as const)
-        totals.append(h('dt', {}, t(`region.area.${k}`)), h('dd', { class: 'mono', id: `region-total-${k}` }, area(info.totals[k])));
-      totals.append(h('dt', {}, t('region.cortexRatio')), h('dd', { class: 'mono', id: 'region-cortex-ratio' }, fmtNum(info.totals.cortexRatio, 3)));
+        if (info.totals[k] > 0) totals.append(h('dt', {}, t(`region.area.${k}`)), h('dd', { class: 'mono', id: `region-total-${k}` }, area(info.totals[k])));
+      if (info.totals.cortex > 0) totals.append(h('dt', {}, t('region.cortexRatio')), h('dd', { class: 'mono', id: 'region-cortex-ratio' }, fmtNum(info.totals.cortexRatio, 3)));
+      totals.hidden = !totals.childElementCount;
     }
   };
   refresh('all');
@@ -834,8 +796,9 @@ function relationsSection(api: AppApi): Section {
   const seqList = h('ol', { class: 'arrow-list', id: 'sequence-list', role: 'listbox', 'aria-label': t('sequence.title') });
   const seqInspector = h('div', { class: 'inspector', id: 'sequence-inspector' });
   const harris = checkbox('harris-show', t('harris.title'), api.display.harris, (on) => api.setDisplay((d) => (d.harris = on), 'harris'));
+  const checksRow = h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('relation.checks')), checks);
   body.append(
-    h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('relation.checks')), checks),
+    checksRow,
     problems,
     list,
     inspector,
@@ -924,6 +887,9 @@ function relationsSection(api: AppApi): Section {
     const st = api.store.state;
     const sel = api.selection.id;
     badge.textContent = String(st.relations.length);
+    // nothing to check or draw before something is recorded
+    checksRow.hidden = !st.relations.length && !st.sequences.length;
+    harris.hidden = !st.relations.length;
     // checks
     const found = relationProblems(api.relationChecks());
     checks.textContent = found.length ? `⚠ ${found.length}` : '✓';
@@ -994,7 +960,8 @@ function landmarksSection(api: AppApi): Section {
   addSet.append(icon(ICONS.plus));
   const setList = h('ol', { class: 'arrow-list', id: 'semilandmark-list', role: 'listbox', 'aria-label': t('semi.title') });
   const setInspector = h('div', { class: 'inspector', id: 'semilandmark-inspector' });
-  body.append(names, list, inspector, h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('semi.title')), addSet), setList, setInspector);
+  const setHead = h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('semi.title')), addSet);
+  body.append(names, list, inspector, setHead, setList, setInspector);
 
   let dragId: string | null = null;
   let builtFor: string | null = null;
@@ -1027,9 +994,10 @@ function landmarksSection(api: AppApi): Section {
           h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-skip-name', disabled: !queue.next, onclick: () => api.skipName() }, t('landmark.skip')),
           h('button', { type: 'button', class: 'icon-btn', id: 'landmark-stop-names', title: t('landmark.stopNames'), 'aria-label': t('landmark.stopNames'), onclick: () => api.stopNames() }, icon(ICONS.close))),
       );
-    } else {
-      names.append(h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-reuse-names', disabled: !api.hasMesh() || !api.previousNames().length, onclick: () => api.reuseNames() }, t('landmark.reuseNames')));
+    } else if (api.previousNames().length) {
+      names.append(h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-reuse-names', onclick: () => api.reuseNames() }, t('landmark.reuseNames')));
     }
+    names.hidden = !names.childElementCount;
 
     // fixed landmarks, in export order (drag to reorder)
     clear(list);
@@ -1096,6 +1064,8 @@ function landmarksSection(api: AppApi): Section {
 
     // curve semilandmarks
     addSet.disabled = !api.hasMesh() || st.curves.length === 0;
+    // semilandmarks need a curve
+    setHead.hidden = !st.curves.length && !st.semilandmarks.length;
     clear(setList);
     setList.hidden = st.semilandmarks.length === 0;
     for (const q of st.semilandmarks) {
@@ -1174,7 +1144,8 @@ function noduleSection(api: AppApi): Section {
     (show.querySelector('input') as HTMLInputElement).disabled = !f;
   };
   refresh('all');
-  return { el, refresh };
+  // a sphere needs cortex
+  return { el, refresh, visible: () => api.store.state.regions.some((r) => r.type === 'cortex') };
 }
 
 function splitSection(api: AppApi): Section {
@@ -1214,7 +1185,8 @@ function splitSection(api: AppApi): Section {
       );
   };
   refresh('all');
-  return { el, refresh };
+  // a split needs a closed curve or a plane
+  return { el, refresh, visible: () => api.store.state.curves.some((c) => c.closed) || api.planeResults().some((p) => p.valid) };
 }
 
 function sectionsSection(api: AppApi): Section {
@@ -1265,55 +1237,6 @@ function sectionsSection(api: AppApi): Section {
         h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'section-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSection(api.store, s.id) }, icon(ICONS.trash), t('arrows.delete')),
       ),
     );
-  };
-  refresh('all');
-  return { el, refresh };
-}
-
-function measureExportSection(api: AppApi): Section {
-  const { el, body } = section('measure-export', t('sec.export'));
-  const autoBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-measurements-csv', onclick: () => api.exportMeasurementsCsv() }, t('export.measurements')) as HTMLButtonElement;
-  const manualBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-manual-csv', onclick: () => api.exportManualMeasurementsCsv() }, t('export.manualMeasurements')) as HTMLButtonElement;
-  const planeBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-planes-csv', onclick: () => api.exportPlanesCsv() }, t('export.planes')) as HTMLButtonElement;
-  body.append(h('div', { class: 'btn-row' }, autoBtn, manualBtn, planeBtn));
-  const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'measure', 'measurements', 'planes'].includes(kind)) return;
-    autoBtn.disabled = !api.autoMeasurements();
-    manualBtn.disabled = !api.hasMesh() || api.store.state.measurements.length === 0;
-    planeBtn.disabled = !api.hasMesh() || api.store.state.planes.length === 0;
-  };
-  refresh('all');
-  return { el, refresh };
-}
-
-// ---------------------------------------------------------------- export
-
-function exportSection(api: AppApi): Section {
-  const { el, body } = section('export', t('sec.export'));
-  const csvBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-csv', onclick: () => api.exportCsv() }, t('export.csv')) as HTMLButtonElement;
-  const curveBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-curves-csv', onclick: () => api.exportCurvesCsv() }, t('export.curvesCsv')) as HTMLButtonElement;
-  const regionBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-regions-csv', onclick: () => api.exportRegionsCsv() }, t('export.regions')) as HTMLButtonElement;
-  const relationBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-relations-csv', onclick: () => api.exportRelationsCsv() }, t('export.relations')) as HTMLButtonElement;
-  const seriesBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-series-csv', onclick: () => api.exportSeriesCsv() }, t('export.series')) as HTMLButtonElement;
-  const lmBtn = (id: string, kind: 'tps' | 'fcsv' | 'csv' | 'sliders', label: string) => h('button', { type: 'button', class: 'btn btn-primary', id, onclick: () => api.exportLandmarks(kind) }, label) as HTMLButtonElement;
-  const lmBtns = [lmBtn('export-landmarks-tps', 'tps', t('export.landmarksTps')), lmBtn('export-landmarks-fcsv', 'fcsv', t('export.landmarksFcsv')), lmBtn('export-landmarks-csv', 'csv', t('export.landmarksCsv'))];
-  const slidersBtn = lmBtn('export-sliders-csv', 'sliders', t('export.sliders'));
-  const bom = checkbox('export-bom', t('export.bom'), api.display.excelBom, (v) => api.setDisplay((x) => (x.excelBom = v), 'other'));
-  const saveBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-project', onclick: () => api.saveProject() }, icon(ICONS.save), t('export.project')) as HTMLButtonElement;
-  const openBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-open-project', onclick: () => api.openProject() }, icon(ICONS.open), t('header.openProject'));
-  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, regionBtn, relationBtn, seriesBtn, ...lmBtns, slidersBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
-
-  const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'curves', 'regions', 'relations', 'sequences', 'landmarks'].includes(kind)) return;
-    csvBtn.disabled = !api.hasMesh();
-    const table = api.landmarkTable();
-    for (const b of lmBtns) b.disabled = !api.hasMesh() || table.rows.length === 0;
-    slidersBtn.disabled = !api.hasMesh() || table.sliders.length === 0;
-    relationBtn.disabled = !api.hasMesh() || api.store.state.relations.length === 0;
-    seriesBtn.disabled = !api.hasMesh() || !api.store.state.sequences.some((q) => q.scarIds.length);
-    curveBtn.disabled = !api.hasMesh() || api.store.state.curves.length === 0;
-    regionBtn.disabled = !api.hasMesh() || api.store.state.regions.length === 0;
-    saveBtn.disabled = !api.hasMesh();
   };
   refresh('all');
   return { el, refresh };
@@ -1399,34 +1322,127 @@ function observersSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+/** The groups of the agreement table, in order; region rows include the per-triangle type agreement. */
+const AGREE_GROUPS: Array<[string, string[]]> = [
+  ['arrow', ['arrow']],
+  ['scar_attribute', ['scar_attribute']],
+  ['curve', ['curve']],
+  ['plane', ['plane']],
+  ['region', ['region', 'region_type']],
+  ['landmark', ['landmark']],
+  ['semilandmark', ['semilandmark']],
+  ['relation', ['relation']],
+  ['measurement', ['measurement']],
+];
+
+/** Item types whose rows compare pairs of drawn items: a click shows the most different pair. */
+const AGREE_PAIRS = new Set(['arrow', 'curve', 'landmark', 'semilandmark']);
+
+const REGION_KEYS = ['scar', 'cortex', 'joint', 'damage'];
+
 function agreementSection(api: AppApi): Section {
   const { el, body } = section('agreement', t('sec.agreement'));
   const status = h('p', { class: 'agree-status', id: 'agreement-status' });
   const table = h('div', { class: 'agree-wrap', id: 'agreement-table' });
-  const longBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-agreement-csv', onclick: () => api.exportAgreement('long') }, t('export.agreement')) as HTMLButtonElement;
-  const sumBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-agreement-summary', onclick: () => api.exportAgreement('summary') }, t('export.agreementSummary')) as HTMLButtonElement;
-  body.append(status, table, h('div', { class: 'btn-row' }, longBtn, sumBtn));
+  body.append(status, table);
+  const mean = (v: number[]) => (v.length ? v.reduce((s, x) => s + x, 0) / v.length : NaN);
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'compare', 'mesh'].includes(kind)) return;
+    if (!['all', 'compare', 'mesh', 'specimen'].includes(kind)) return;
     const busy = api.agreementBusy();
     status.textContent = busy ? t('compare.computing') : '';
     status.hidden = !busy;
     const res = api.agreementResult();
     clear(table);
-    longBtn.disabled = sumBtn.disabled = !res || busy;
     if (!res) return;
-    const head = h('tr', {}, ...[`${t('compare.item')} · ${t('compare.metric')}`, t('compare.pair'), 'n', t('compare.mean')].map((x) => h('th', {}, x)));
-    const rows = res.summary.map((r) =>
-      h(
-        'tr',
-        { 'data-item': r.itemType, 'data-metric': r.metric },
-        h('td', { class: 'mono agree-item' }, r.itemType, h('br'), h('span', { class: 'agree-metric' }, r.metric)),
-        h('td', {}, r.b ? `${r.a} – ${r.b}` : r.a),
-        h('td', { class: 'mono num' }, String(r.n)),
-        h('td', { class: 'mono num' }, Number.isFinite(r.mean) ? fmtNum(r.mean, 3) : '–'),
-      ),
-    );
-    table.append(h('table', { class: 'agree-table' }, h('thead', {}, head), h('tbody', {}, ...rows)));
+    const u = api.store.state.specimen.unit;
+    const unitOf = (metric: string, itemType: string, key: string): string => {
+      if (metric.endsWith('_deg')) return '°';
+      if (metric === 'area' || (itemType === 'measurement' && key.startsWith('area_'))) return u ? `${u}²` : '';
+      if (['start_distance', 'end_distance', 'mean_distance', 'hausdorff', 'center_distance', 'distance'].includes(metric)) return u;
+      if (itemType === 'measurement' && ['length', 'width', 'thickness'].includes(key)) return u;
+      if (itemType === 'measurement' && key !== 'cortex_ratio') {
+        const m = api.store.state.measurements.find((x) => x.label === key);
+        if (m) return m.type === 'angle' ? '°' : u;
+      }
+      return '';
+    };
+    const keyName = (itemType: string, key: string): string => {
+      if (itemType === 'scar_attribute') {
+        const f = SCAR_FIELDS.find((x) => x.key === key);
+        return f ? tl(f.label) : key;
+      }
+      if (itemType === 'region' && REGION_KEYS.includes(key)) {
+        const o = REGION_FIELDS[0].options?.find((x) => x.value === key);
+        return o ? tl(o.label) : key;
+      }
+      if (itemType === 'region') return t('agree.scarRegions');
+      if (itemType === 'region_type') return t('agree.regionTypes');
+      if (itemType === 'measurement') return ['length', 'width', 'thickness', 'cortex_ratio'].includes(key) || key.startsWith('area_') ? t(`agree.measure.${key}`) : key;
+      return '';
+    };
+    const focus = api.agreementFocus();
+    // pairs of observers in the order they come, the joint (Fleiss) rows last
+    const pairs = [...new Map(res.rows.map((r) => [`${r.a}\u0000${r.b}`, [r.a, r.b] as const])).values()];
+    const sections: HTMLElement[] = [];
+    for (const [group, types] of AGREE_GROUPS) {
+      for (const [a, b] of pairs) {
+        const rows = res.rows.filter((r) => types.includes(r.itemType) && r.a === a && r.b === b);
+        if (!rows.length) continue;
+        const who = b ? `${a} – ${b}` : t('agree.all');
+        const value = (type: string, key: string, metric: string) => rows.find((r) => r.itemType === type && r.itemKey === key && r.metric === metric)?.value;
+        // how the items were paired
+        let pairing: string;
+        if (group === 'arrow' || group === 'curve') {
+          const m = value(group, 'all', 'matched') ?? 0, ua = value(group, 'all', 'unmatched_a') ?? 0, ub = value(group, 'all', 'unmatched_b') ?? 0;
+          pairing = t('agree.pairing', { m, n: m + ua, a, ua, b, ub });
+        } else {
+          const n = rows.find((r) => r.metric === 'n_items')?.value ?? new Set(rows.filter((r) => r.itemKey !== 'all').map((r) => r.itemKey)).size;
+          pairing = t('agree.paired', { n });
+        }
+        const lines: HTMLElement[] = [];
+        // one line per metric (and per key where the key names a quantity)
+        const perKey = group === 'scar_attribute' || group === 'region' || group === 'measurement';
+        const seen = new Map<string, { type: string; key: string; metric: string; values: number[] }>();
+        for (const r of rows) {
+          if (['matched', 'unmatched_a', 'unmatched_b', 'n_items'].includes(r.metric)) continue;
+          const keyed = perKey && (r.itemType !== 'region' || REGION_KEYS.includes(r.itemKey) || r.itemKey === 'all');
+          const id = `${r.itemType}\u0000${keyed ? r.itemKey : '*'}\u0000${r.metric}`;
+          const g = seen.get(id) ?? seen.set(id, { type: r.itemType, key: keyed ? r.itemKey : '*', metric: r.metric, values: [] }).get(id)!;
+          if (Number.isFinite(r.value)) g.values.push(r.value);
+        }
+        for (const g of seen.values()) {
+          const name = [g.key === '*' && g.type !== 'region' ? '' : keyName(g.type, g.key), t(`agree.metric.${g.metric}`)].filter(Boolean).join(' · ');
+          const v = mean(g.values);
+          const clickable = AGREE_PAIRS.has(g.type) && g.values.length > 0;
+          const rowKey = `${g.type}|${g.metric}|${a}|${b}`;
+          const unit = unitOf(g.metric, g.type, g.key);
+          const tr = h(
+            'tr',
+            {
+              'data-item': g.type,
+              'data-metric': g.metric,
+              class: `${clickable ? 'is-clickable' : ''}${focus === rowKey ? ' is-focused' : ''}`,
+              title: g.values.length > 1 ? `n = ${g.values.length} · max ${fmtNum(Math.max(...g.values), 3)}` : undefined,
+              onclick: clickable ? () => api.focusAgreement(g.type, g.metric, a, b) : undefined,
+            },
+            h('td', {}, name),
+            h('td', { class: 'mono num' }, Number.isFinite(v) ? fmtNum(v, 3) : '–'),
+            h('td', { class: 'agree-unit' }, unit),
+          );
+          lines.push(tr);
+        }
+        sections.push(
+          h(
+            'tbody',
+            { 'data-group': group },
+            h('tr', { class: 'agree-group' }, h('th', { colspan: 3 }, `${t(`agree.group.${group}`)} · ${who}`)),
+            h('tr', { class: 'agree-pairing' }, h('td', { colspan: 3 }, pairing)),
+            ...lines,
+          ),
+        );
+      }
+    }
+    table.append(h('table', { class: 'agree-table' }, ...sections));
   };
   refresh('all');
   return { el, refresh };
@@ -1437,7 +1453,6 @@ const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present', 'compare'];
 /** The sidebar sections, in order, and the work modes that show them. */
 const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [workspaceSection, ALL_MODES],
-  [specimenSection, ALL_MODES],
   [orientationSection, ['present']],
   [sectionsSection, ['present']],
   [figureSection, ['present']],
@@ -1451,9 +1466,6 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [planesSection, ['measure']],
   [noduleSection, ['measure']],
   [splitSection, ['measure']],
-  [displaySection, ALL_MODES],
-  [exportSection, ['annotate']],
-  [measureExportSection, ['measure']],
   [observersSection, ['compare']],
   [agreementSection, ['compare']],
 ];
@@ -1461,25 +1473,104 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
 export interface Sidebar {
   el: HTMLElement;
   refresh: (kind: RefreshKind) => void;
+  /** The display settings, for the panel over the view. */
+  displayEl: HTMLElement;
+  /** A tool was chosen: open its section and fold the others (choosing Select changes nothing). */
+  focusTool: (tool: string) => void;
+}
+
+/** The section each tool works in: switching to the tool opens it and folds the others. */
+const TOOL_SECTIONS: Record<string, string> = {
+  draw: 'arrows',
+  curve: 'curves',
+  region: 'regions',
+  relation: 'relations',
+  landmark: 'landmarks',
+  'measure-distance': 'measure-manual',
+  'measure-geodesic': 'measure-manual',
+  'measure-angle': 'measure-manual',
+  section: 'sections',
+};
+
+/** Where the selected object is shown: its section and the part to bring into view. */
+function selectionTarget(api: AppApi): [string, string] | null {
+  const id = api.selection.id;
+  const st = api.store;
+  if (!id) return null;
+  if (st.scar(id)) return ['arrows', '#arrow-inspector'];
+  if (st.curve(id)) return ['curves', '#curve-inspector'];
+  if (st.region(id)) return ['regions', '#region-inspector'];
+  if (st.relation(id)) return ['relations', '#relation-inspector'];
+  if (st.sequence(id)) return ['relations', '#sequence-inspector'];
+  if (st.landmark(id)) return ['landmarks', '#landmark-inspector'];
+  if (st.semilandmarkSet(id)) return ['landmarks', '#semilandmark-inspector'];
+  if (st.measurement(id)) return ['measure-manual', '#measure-list [aria-selected="true"]'];
+  if (st.plane(id)) return ['planes', '#plane-inspector'];
+  if (st.section(id)) return ['sections', '#section-inspector'];
+  return null;
 }
 
 export function buildSidebar(api: AppApi): Sidebar {
   const el = h('aside', { class: 'sidebar', id: 'sidebar' });
   const sections = SECTIONS.map(([make, modes]) => ({ ...make(api), modes }));
   el.append(...sections.map((s) => s.el));
+  const display = displaySection(api);
+  const exportBtn = h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'btn-export', onclick: () => api.openExport() }, icon(ICONS.download), t('export.button'));
+  const foot = h('div', { class: 'sidebar-foot' }, exportBtn);
+  // before a model is open, only the ways to open one
+  const empty = h(
+    'div',
+    { class: 'sidebar-empty', id: 'sidebar-empty' },
+    h('button', { type: 'button', class: 'btn btn-primary btn-block', id: 'sidebar-open-model', onclick: () => api.openModel() }, icon(ICONS.cube), t('header.openMesh')),
+    h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'sidebar-open-folder', onclick: () => void api.openFolder() }, icon(ICONS.open), t('header.openFolder')),
+  );
+  el.prepend(empty);
+  el.append(foot);
   const showMode = () => {
-    for (const s of sections) s.el.hidden = !s.modes.includes(api.mode) || (!!s.visible && !s.visible());
+    const has = api.hasMesh();
+    for (const s of sections) s.el.hidden = !has || !s.modes.includes(api.mode) || (!!s.visible && !s.visible());
+    empty.hidden = has;
+    // data exports of the mode (figures and sections export from their own sections)
+    foot.hidden = !has || api.mode === 'present';
+  };
+  const setOpen = (d: HTMLDetailsElement, open: boolean) => {
+    if (d.open === open) return;
+    d.dataset.auto = String(open);
+    d.open = open;
+  };
+  const shown = () => sections.filter((s) => !s.el.hidden && s.el instanceof HTMLDetailsElement).map((s) => s.el as HTMLDetailsElement);
+  /** Bring the selected object's section and its inspector into view. */
+  const focusSelection = () => {
+    const target = selectionTarget(api);
+    if (!target) return;
+    const sec = shown().find((d) => d.id === `sec-${target[0]}`);
+    if (!sec) return;
+    setOpen(sec, true);
+    requestAnimationFrame(() => {
+      const part = sec.querySelector(target[1]);
+      if (!part || el.scrollHeight <= el.clientHeight) return;
+      el.scrollTop += part.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+    });
   };
   showMode();
   return {
     el,
     refresh: (kind) => {
-      if (kind === 'mode' || kind === 'all' || kind === 'workspace') showMode();
+      showMode();
       if (kind === 'mode') {
         for (const s of sections) s.refresh('figure');
         return;
       }
       for (const s of sections) s.refresh(kind);
+      display.refresh(kind);
+      showMode();
+      if (kind === 'selection') focusSelection();
+    },
+    displayEl: display.el,
+    focusTool: (tool) => {
+      const target = TOOL_SECTIONS[tool];
+      if (!target) return;
+      for (const d of shown()) setOpen(d, d.id === `sec-${target}`);
     },
   };
 }

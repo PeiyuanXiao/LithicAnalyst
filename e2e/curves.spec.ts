@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { offCrest, OFFSET, ROOF, roofPly, roofPoint, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, dist, download, draftLength, expect, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop } from './helpers';
+import { counts, curveClick, dist, draftLength, expect, exportAvailable, exportFile, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop } from './helpers';
 
 const CURVE_CSV_HEADER = 'specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note,unit';
 
@@ -83,7 +83,7 @@ test('with snapping off, points stay where clicked and the curve takes the short
 });
 
 test('Shift skips snapping, Backspace removes a point, the first point closes the curve; both kinds export to CSV', async ({ page }) => {
-  await expect(page.locator('#export-curves-csv')).toBeDisabled();
+  expect(await exportAvailable(page, 'curves')).toBe(false);
   await page.keyboard.press('p');
   await expect(page.locator('#snap-ridge')).toHaveAttribute('aria-checked', 'true');
 
@@ -124,8 +124,8 @@ test('Shift skips snapping, Backspace removes a point, the first point closes th
     ['C2', false, 'edge'],
   ]);
 
-  await expect(page.locator('#export-curves-csv')).toBeEnabled();
-  const csv = await download(page, () => page.locator('#export-curves-csv').click());
+  expect(await exportAvailable(page, 'curves')).toBe(true);
+  const csv = await exportFile(page, 'curves');
   expect(csv.name).toBe('roof_curves.csv');
   expect(csv.text).toBe(await page.evaluate(() => window.lithicanalyst.exportCurvesCsvText()));
   expect(csv.text.split('\n')[0]).toBe(CURVE_CSV_HEADER);

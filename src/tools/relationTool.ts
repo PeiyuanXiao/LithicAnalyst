@@ -10,7 +10,7 @@ export interface ScarPick {
 
 /**
  * Record a relation: click one scar (its arrow or its region), then another;
- * `onPair` then asks how the two relate. Dragging still turns the view.
+ * `onPair` then asks, next to the click, how the two relate. Dragging still turns the view.
  */
 export class RelationTool implements Tool {
   readonly id = 'relation';
@@ -20,7 +20,8 @@ export class RelationTool implements Tool {
   constructor(
     private readonly ctx: ToolContext,
     private readonly scarAt: (clientX: number, clientY: number, hit: HitProvider) => ScarPick | null,
-    private readonly onPair: (a: string, b: string) => void,
+    /** `at`: where the second scar was clicked (client coordinates). */
+    private readonly onPair: (a: string, b: string, at: { x: number; y: number }) => void,
   ) {}
 
   activate(): void {
@@ -54,7 +55,7 @@ export class RelationTool implements Tool {
     const a = this.first;
     this.first = null;
     this.ctx.changed();
-    this.onPair(a, p.scarId);
+    this.onPair(a, p.scarId, { x: e.clientX, y: e.clientY });
   }
 
   cancel(): boolean {

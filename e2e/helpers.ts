@@ -87,10 +87,17 @@ export async function openApp(page: Page): Promise<void> {
   await expect(page.locator('canvas.viewport-canvas')).toBeVisible();
 }
 
-/** Open a model through the "Open model" button and wait until it is shown. */
+/** Choose an item of the File menu in the top bar (#btn-open, #btn-open-project, #btn-open-folder). */
+export async function fileMenu(page: Page, item: string): Promise<void> {
+  await page.locator('#btn-file').click();
+  await page.locator(item).click();
+}
+
+/** Open a model through the File menu (or another button) and wait until it is shown. */
 export async function loadMesh(page: Page, file: MeshFile, button = '#btn-open'): Promise<void> {
   const chooser = page.waitForEvent('filechooser');
-  await page.locator(button).click();
+  if (button === '#btn-open') await fileMenu(page, button);
+  else await page.locator(button).click();
   await (await chooser).setFiles(file);
   await waitForMesh(page, file.name);
 }
@@ -211,3 +218,42 @@ export const dist = (a: Vec3, b: Vec3): number => Math.hypot(a[0] - b[0], a[1] -
 
 /** Points of the measurement being taken. */
 export const measureDraftLength = (page: Page): Promise<number> => page.evaluate(() => window.lithicanalyst.measureDraft()?.length ?? 0);
+
+/** Open a sidebar section (sections fold when another tool is chosen). */
+export async function openSection(page: Page, id: string): Promise<void> {
+  await page.locator(`#sec-${id}`).evaluate((d) => ((d as HTMLDetailsElement).open = true));
+}
+
+/** Set the annotator in the specimen panel of the top bar. */
+export async function setAnnotator(page: Page, name: string): Promise<void> {
+  await page.locator('#specimen-more').click();
+  await page.locator('#specimen-annotator').fill(name);
+  await page.keyboard.press('Escape');
+}
+
+/** Open the display settings panel over the view. */
+export async function displayPanel(page: Page): Promise<void> {
+  if (!(await page.locator('#display-panel').isVisible())) await page.locator('#btn-display').click();
+}
+
+/** Export one file through the export dialog (`key`: the dialog's file key, e.g. "curves"). */
+export async function exportFile(page: Page, key: string): Promise<{ name: string; text: string }> {
+  await page.locator('#btn-export').click();
+  const boxes = page.locator('.export-list input[data-key]');
+  for (let i = 0; i < (await boxes.count()); i++) {
+    const box = boxes.nth(i);
+    if (await box.isDisabled()) continue;
+    if ((await box.getAttribute('data-key')) === key) await box.check();
+    else await box.uncheck();
+  }
+  return download(page, () => page.locator('.modal [data-choice="export"]').click());
+}
+
+/** Whether the export dialog offers a file (it has data); the dialog is closed again. */
+export async function exportAvailable(page: Page, key: string): Promise<boolean> {
+  await page.locator('#btn-export').click();
+  const enabled = await page.locator(`.export-list input[data-key="${key}"]`).isEnabled();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.modal')).toHaveCount(0);
+  return enabled;
+}

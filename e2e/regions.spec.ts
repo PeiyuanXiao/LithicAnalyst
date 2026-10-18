@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, loadMesh, nextFrames, openApp, parseCsv, state, test, toScreen } from './helpers';
+import { counts, curveClick, dragArrow, expect, exportFile, loadMesh, nextFrames, openApp, openSection, parseCsv, state, test, toScreen } from './helpers';
 
 const regions = (page: Page) => page.evaluate(() => window.lithicanalyst.regions());
 const pieces = (page: Page) => page.evaluate(() => window.lithicanalyst.regionCount());
@@ -56,7 +56,7 @@ test('curves split the surface into regions; regions keep their type when the cu
   await click(page, boxPoint(-6, 3, 5));
   expect(await page.evaluate(() => window.lithicanalyst.selection())).toBe((await state(page)).regions[0].id);
 
-  const csv = await download(page, () => page.locator('#export-regions-csv').click());
+  const csv = await exportFile(page, 'regions');
   expect(csv.name).toBe('box_regions.csv');
   expect(parseCsv(csv.text).map((r) => [r.region_id, r.type, r.scar_id, Number(r.area).toFixed(3), r.unit])).toEqual([
     ['R1', 'scar', 'S1', '200.000', 'mm'],
@@ -99,6 +99,7 @@ test('curves split the surface into regions; regions keep their type when the cu
   ]);
 
   // deleting a region; undo
+  await openSection(page, 'regions');
   await page.locator('#region-list .region-row', { hasText: 'R1' }).click();
   await page.keyboard.press('Delete');
   await expect(page.locator('#region-list .region-row')).toHaveCount(1);

@@ -88,6 +88,26 @@ lists which modes show each section. Outside the annotate mode the select tool o
 (`ToolContext.editable()`), and keys that change annotations are ignored. Switching modes
 keeps the selection and the undo history.
 
+* **Layers per mode** (`App.syncAnnotations`, `App.applyLayerVisibility`): the measure mode draws
+  the annotation layers faded (`dimmed` on the arrow, curve, landmark and region layers; labels
+  by CSS); the present mode shows the layers the figure's overlay switches show, without
+  labels; the compare mode draws each observer's annotations instead of the open project's.
+* **Sidebar** (`buildSidebar`): choosing a tool opens its section and folds the others
+  (`TOOL_SECTIONS`; these changes are not remembered, only the user's own); selecting an object
+  opens its section and scrolls its inspector to the top. Sections that cannot be used are
+  hidden (`Section.visible`); without a model only the open buttons are shown. The data exports
+  of a mode are one dialog (`App.openExport`, files from `App.exportables`; several files go
+  into a stored ZIP, `io/zip.ts`).
+* **Top bar**: specimen ID and unit, with annotator, notes and the model file in a panel; the
+  File menu; the mode switch in the middle; Save. Menus and small panels (`ui/popover.ts`)
+  close on a press outside or Esc. The display settings are a panel over the view
+  (`Sidebar.displayEl`, mounted by `App.buildDisplayControl`); the sidebar's left edge resizes
+  it (`sidebarWidth` preference).
+* **Labels**: after each render `render/labelLayout.ts` moves labels that would cover each
+  other apart by priority (selected first, hidden-behind-the-surface last) and hides those
+  without a free place. `.viewport-labels` is its own stacking context, below every panel over
+  the view.
+
 ## Measurements
 
 * `compute/measure.ts` measures a mesh once after loading (`surfaceMeasuresSteps`: area, volume,
@@ -260,6 +280,10 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   its own copy.
 
 ## Hosting
+
+The IBM Plex fonts (SIL OFL 1.1) come from `@fontsource`: `src/fonts.css` declares only the Latin
+subset of the weights the interface uses, and the build inlines them, so the page requests
+no font server. Chinese text uses the system fonts.
 
 `npm run build` writes `dist/index.html` (complete page, works from `file://` and any static
 host such as GitHub Pages) and `dist/artifact.html` (the same app without the document

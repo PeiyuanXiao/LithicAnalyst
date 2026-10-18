@@ -14,6 +14,9 @@ export function planeColor(label: string): string {
 }
 
 const Z = new THREE.Vector3(0, 0, 1);
+/** The disc is barely there unless its plane is selected. */
+const DISC_OPACITY = 0.032;
+const DISC_OPACITY_SELECTED = 0.26;
 
 /** A plane on screen: translucent disc, the section of the model, and the normal as an arrow. */
 class PlaneVisual {
@@ -26,7 +29,7 @@ class PlaneVisual {
   constructor() {
     this.disc = new THREE.Mesh(
       new THREE.CircleGeometry(1, 96),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: DISC_OPACITY, side: THREE.DoubleSide, depthWrite: false }),
     );
     this.disc.renderOrder = 5;
     this.arrow = new THREE.ArrowHelper(Z, new THREE.Vector3(), 1);
@@ -41,7 +44,7 @@ class PlaneVisual {
     this.disc.scale.setScalar(radius);
     const mat = this.disc.material as THREE.MeshBasicMaterial;
     mat.color.set(color);
-    mat.opacity = selected ? 0.26 : 0.16;
+    mat.opacity = selected ? DISC_OPACITY_SELECTED : DISC_OPACITY;
     this.arrow.position.copy(c);
     this.arrow.setDirection(n);
     this.arrow.setLength(arrowLength, arrowLength * 0.18, arrowLength * 0.09);

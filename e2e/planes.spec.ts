@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { BOX, boxPly, boxPoint, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, loadMesh, nextFrames, openApp, parseCsv, state, test, toScreen } from './helpers';
+import { counts, curveClick, download, dragArrow, expect, exportAvailable, exportFile, loadMesh, nextFrames, openApp, openSection, parseCsv, state, test, toScreen } from './helpers';
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const planes = (page: Page) => page.evaluate(() => window.lithicanalyst.planes());
@@ -33,7 +33,7 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
 
   await page.keyboard.press('m');
   await expect(page.locator('#sec-planes')).toBeVisible();
-  await expect(page.locator('#export-planes-csv')).toBeDisabled();
+  expect(await exportAvailable(page, 'planes')).toBe(false);
 
   // P1: all vertices — the box's mid-plane across its thickness, its normal toward the viewer
   await page.locator('#plane-add').click();
@@ -81,6 +81,7 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
 
   // planes follow their inputs: deleting an arrow (annotate mode) refits P1
   await page.locator('#app-mode-annotate').click();
+  await openSection(page, 'arrows');
   await page.locator('#sec-arrows .arrow-row', { hasText: 'S1' }).click();
   await page.keyboard.press('Delete');
   await expect.poll(async () => (await plane(page, 'P1')).inputCount).toBe(2);
@@ -96,7 +97,7 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
   await page.locator('#plane-list .plane-row', { hasText: 'P2' }).locator('.plane-eye').uncheck();
   expect((await state(page)).planes.map((p) => p.visible)).toEqual([true, false, true]);
 
-  const csv = await download(page, () => page.locator('#export-planes-csv').click());
+  const csv = await exportFile(page, 'planes');
   expect(csv.name).toBe('box_planes.csv');
   const rows = parseCsv(csv.text);
   expect(rows.map((r) => [r.plane_id, r.method])).toEqual([

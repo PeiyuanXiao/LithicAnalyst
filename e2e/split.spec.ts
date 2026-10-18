@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { boxPly, boxPoint } from './fixtures/meshes';
-import { expect, loadMesh, nextFrames, openApp, parseCsv, state, test } from './helpers';
+import { expect, fileMenu, loadMesh, nextFrames, openApp, parseCsv, state, test } from './helpers';
 
 const split = (page: import('@playwright/test').Page) => page.evaluate(() => window.lithicanalyst.volumeSplit());
 
@@ -18,7 +18,7 @@ test('splits the volume by a plane and by a closed curve', async ({ page }) => {
     annotations: { scars: [], curves: [{ id: 'ring', label: 'C1', anchors: corners, points: corners, anchorIndex: [0, 1, 2, 3], closed: true, attributes: { type: 'edge', note: '' } }] },
   };
   const chooser = page.waitForEvent('filechooser');
-  await page.locator('#btn-open-project').click();
+  await fileMenu(page, '#btn-open-project');
   await (await chooser).setFiles({ name: 'ring.lithicanalyst.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)) });
   await expect.poll(async () => (await state(page)).curves.length).toBe(1);
 

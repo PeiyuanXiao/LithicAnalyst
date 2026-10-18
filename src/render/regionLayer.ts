@@ -38,6 +38,9 @@ export interface RegionPaint {
 export class RegionLayer {
   readonly group = new THREE.Group();
   private meshes: THREE.Mesh[] = [];
+  private figureStyle = false;
+  /** Fainter colours (the measure mode); applies from the next sync. */
+  dimmed = false;
 
   constructor(scene: THREE.Scene) {
     this.group.name = 'regions';
@@ -64,28 +67,32 @@ export class RegionLayer {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', position);
       g.setIndex(idx);
-      const m = new THREE.MeshBasicMaterial({
-        color: p.color,
-        transparent: true,
-        opacity: p.selected ? 0.62 : 0.42,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      });
-      const mesh = new THREE.Mesh(g, m);
+      const common = { depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
+      // in the view the colour multiplies the shading, so the relief of the scars shows through
+      const tint = new THREE.Color(1, 1, 1).lerp(new THREE.Color(p.color), p.selected ? 0.72 : this.dimmed ? 0.2 : 0.5);
+      const view = new THREE.MeshBasicMaterial({ ...common, color: tint, transparent: true, blending: THREE.MultiplyBlending, premultipliedAlpha: true });
+      // figures keep the plain translucent colour
+      const figure = new THREE.MeshBasicMaterial({ ...common, color: p.color, transparent: true, opacity: p.selected ? 0.62 : 0.42 });
+      const mesh = new THREE.Mesh(g, this.figureStyle ? figure : view);
+      mesh.userData = { view, figure };
       mesh.renderOrder = 3;
       this.meshes.push(mesh);
       this.group.add(mesh);
     }
   }
 
+  /** Draw the colours as figures show them (plain translucent) instead of multiplied onto the shading. */
+  useFigureStyle(on: boolean): void {
+    this.figureStyle = on;
+    for (const m of this.meshes) m.material = on ? m.userData.figure : m.userData.view;
+  }
+
   clear(): void {
     for (const m of this.meshes) {
       m.geometry.setIndex(null);
       m.geometry.dispose();
-      (m.material as THREE.Material).dispose();
+      (m.userData.view as THREE.Material).dispose();
+      (m.userData.figure as THREE.Material).dispose();
       this.group.remove(m);
     }
     this.meshes = [];

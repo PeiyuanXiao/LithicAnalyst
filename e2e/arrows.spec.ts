@@ -1,5 +1,5 @@
 import { roofPly, roofPoint } from './fixtures/meshes';
-import { clickArrow, dist, download, dragArrow, expect, loadMesh, openApp, parseCsv, state, test, viewFromTop } from './helpers';
+import { clickArrow, dist, dragArrow, expect, exportAvailable, exportFile, loadMesh, openApp, parseCsv, state, test, viewFromTop } from './helpers';
 
 const ARROW_CSV_HEADER = 'specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,certainty,note,unit';
 
@@ -10,9 +10,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('draws arrows by dragging and by two clicks, sets fields and exports the CSV', async ({ page }) => {
-  await expect(page.locator('#export-csv')).toBeEnabled();
-  const first = await download(page, () => page.locator('#export-csv').click());
-  expect(first.text).toBe(`${ARROW_CSV_HEADER}\n`);
+  // nothing to export before the first arrow
+  expect(await exportAvailable(page, 'scar-vectors')).toBe(false);
 
   // press–drag–release (tool chosen with the A key)
   await page.keyboard.press('a');
@@ -54,7 +53,7 @@ test('draws arrows by dragging and by two clicks, sets fields and exports the CS
   expect(st.scars[0].attributes).toEqual({ completeness: 'both_missing', certainty: 'uncertain', note: 'platform, "crushed"' });
   expect(st.scars[1].attributes.completeness).toBe('point_truncated');
 
-  const csv = await download(page, () => page.locator('#export-csv').click());
+  const csv = await exportFile(page, 'scar-vectors');
   expect(csv.name).toBe('roof_scar_vectors.csv');
   expect(csv.text).toBe(await page.evaluate(() => window.lithicanalyst.exportCsvText()));
   expect(csv.text.split('\n')[0]).toBe(ARROW_CSV_HEADER);

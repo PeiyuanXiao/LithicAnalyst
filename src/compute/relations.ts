@@ -172,16 +172,31 @@ export interface HarrisLayout {
   nodes: Array<{ id: string; x: number; y: number }>;
   edges: Array<{ from: string; to: string; cycle: boolean }>;
   boxes: Array<{ sequence: string; label: string; x: number; y: number; w: number; h: number }>;
+  /** Scars without any "cuts" relation, set apart in their own column (not in the matrix proper). */
+  unrelated: string[];
 }
 
 /**
  * Harris matrix: one node per scar, later scars higher up (rows by the longest
  * chain of relations below them, cycles ignored), grouped side by side by
- * sequence, with only the direct relations drawn.
+ * sequence, with only the direct relations drawn. Scars without any "cuts"
+ * relation (none, or only "cannot tell") stand apart in a last column,
+ * framed and labelled `unrelatedLabel`.
  */
-export function harrisLayout(scarIds: string[], edges: RelationEdge[], sequences: SequenceInput[], checks: RelationChecks, cell = { w: 64, h: 52, pad: 14 }): HarrisLayout {
+export function harrisLayout(
+  scarIds: string[],
+  edges: RelationEdge[],
+  sequences: SequenceInput[],
+  checks: RelationChecks,
+  cell = { w: 64, h: 52, pad: 14 },
+  unrelatedLabel = '',
+): HarrisLayout {
+  const all = new Set(scarIds);
+  const valid = edges.filter((e) => all.has(e.later) && all.has(e.earlier) && e.later !== e.earlier);
+  const related = new Set(valid.flatMap((e) => [e.later, e.earlier]));
+  const unrelated = scarIds.filter((id) => !related.has(id));
+  scarIds = scarIds.filter((id) => related.has(id));
   const known = new Set(scarIds);
-  const valid = edges.filter((e) => known.has(e.later) && known.has(e.earlier) && e.later !== e.earlier);
   const cyc = new Set(checks.cycleEdges.map(key));
   // rank = longest chain of earlier scars (without cycle edges)
   const below = new Map<string, string[]>();
@@ -223,11 +238,19 @@ export function harrisLayout(scarIds: string[], edges: RelationEdge[], sequences
       boxes.push({ sequence: g.sequence, label: g.label, x: x0, y: Math.min(...ys) - cell.h / 2 - 4, w: cols * cell.w + 2 * cell.pad, h: Math.max(...ys) - Math.min(...ys) + cell.h + 8 });
     x0 += cols * cell.w + 3 * cell.pad;
   }
+  // the unrelated scars: one column, from the top
+  const rows = Math.max(scarIds.length ? top + 1 : 0, unrelated.length);
+  if (unrelated.length) {
+    unrelated.forEach((id, i) => nodes.push({ id, x: x0 + cell.pad + cell.w / 2, y: cell.pad * 2 + i * cell.h + cell.h / 2 }));
+    boxes.push({ sequence: '', label: unrelatedLabel, x: x0, y: cell.pad * 2 - 4, w: cell.w + 2 * cell.pad, h: unrelated.length * cell.h + 8 });
+    x0 += cell.w + 3 * cell.pad;
+  }
   return {
     width: Math.max(x0, 2 * cell.pad + cell.w),
-    height: (top + 1) * cell.h + 4 * cell.pad,
+    height: Math.max(1, rows) * cell.h + 4 * cell.pad,
     nodes,
     edges: directRelations(valid, checks.cycleEdges).map((e) => ({ from: e.later, to: e.earlier, cycle: cyc.has(key(e)) })),
     boxes,
+    unrelated,
   };
 }

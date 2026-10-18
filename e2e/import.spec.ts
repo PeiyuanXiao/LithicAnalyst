@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ROOF_TRIANGLES, ROOF_VERTICES, roofMesh, roofObj, roofPly, roofPoint, roofStl, type MeshFile, type Vec3 } from './fixtures/meshes';
-import { dist, expect, loadMesh, openApp, state, test, toScreen, viewFromTop } from './helpers';
+import { dist, expect, fileMenu, loadMesh, openApp, state, test, toScreen, viewFromTop } from './helpers';
 
 function bbox(positions: Float32Array): { min: Vec3; max: Vec3 } {
   const min: Vec3 = [Infinity, Infinity, Infinity];
@@ -29,8 +29,8 @@ for (const { file, format, button } of cases) {
     await expect(page.locator('#empty-open')).toBeHidden();
     await expect(page.locator('#btn-save-project')).toBeEnabled();
     await expect(page.locator('#specimen-id')).toHaveValue('roof');
-    await expect(page.locator('#sec-specimen')).toContainText(`${ROOF_VERTICES.toLocaleString('en-US')} vertices`);
-    await expect(page.locator('#sec-specimen')).toContainText(`${ROOF_TRIANGLES.toLocaleString('en-US')} triangles`);
+    await expect(page.locator('#specimen-meta')).toContainText(`${ROOF_VERTICES.toLocaleString('en-US')} vertices`);
+    await expect(page.locator('#specimen-meta')).toContainText(`${ROOF_TRIANGLES.toLocaleString('en-US')} triangles`);
 
     const mesh = (await state(page)).mesh!;
     expect(mesh).toMatchObject({ fileName: file.name, format, fileSize: file.buffer.length, vertexCount: ROOF_VERTICES, triangleCount: ROOF_TRIANGLES });
@@ -55,7 +55,7 @@ for (const { file, format, button } of cases) {
 test('refuses a file that is not a model', async ({ page }) => {
   await openApp(page);
   const chooser = page.waitForEvent('filechooser');
-  await page.locator('#btn-open').click();
+  await fileMenu(page, '#btn-open');
   await (await chooser).setFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a mesh') });
   await expect(page.locator('.toast-error')).toContainText('Unsupported file');
   expect((await state(page)).mesh).toBeNull();
