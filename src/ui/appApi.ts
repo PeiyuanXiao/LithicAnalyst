@@ -80,6 +80,7 @@ export interface AppApi {
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null;
   exportRegionsCsv(): void;
   setRegionType(id: string, type: string): void;
+  noduleFit(): (import('../compute/sphere').SphereFit & { regions: string[] }) | null;
   saveProject(): void;
   openProject(): void;
 }

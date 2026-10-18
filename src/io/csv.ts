@@ -120,7 +120,13 @@ const cell = (n: number | null): string => (n === null ? '' : fmt(n));
  * specimen unit, the area in unit², the volume in unit³; volume-based values
  * are empty when the mesh is not closed (or not yet measured).
  */
-export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasurements | null, opts: CsvOptions, regions: RegionTotals | null = null): string {
+export function measurementsCsv(
+  state: Readonly<ProjectState>,
+  auto: AutoMeasurements | null,
+  opts: CsvOptions,
+  regions: RegionTotals | null = null,
+  nodule: { radius: number; rms: number } | null = null,
+): string {
   const header = [
     'specimen_id',
     'unit',
@@ -138,6 +144,8 @@ export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasure
     'area_joint',
     'area_damage',
     'cortex_ratio',
+    'nodule_radius',
+    'nodule_fit_rms',
   ];
   const row = [
     csvCell(state.specimen.id),
@@ -156,6 +164,8 @@ export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasure
     cell(regions?.joint ?? null),
     cell(regions?.damage ?? null),
     cell(regions?.cortexRatio ?? null),
+    cell(nodule?.radius ?? null),
+    cell(nodule?.rms ?? null),
   ];
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }

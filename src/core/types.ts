@@ -200,6 +200,8 @@ export interface ProjectState {
   planes: Plane[];
   sections: Section[];
   regions: Region[];
+  /** Sphere fitted to the cortex: cortex regions left out, and whether the sphere is drawn. */
+  nodule: { exclude: string[]; show: boolean };
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */

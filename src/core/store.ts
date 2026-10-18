@@ -3,7 +3,7 @@ import { nowIso } from './ids';
 import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Region, Scar, ScarVector, Section, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'nodule' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -21,6 +21,7 @@ export function emptyProject(): ProjectState {
     planes: [],
     sections: [],
     regions: [],
+    nodule: { exclude: [], show: false },
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,
@@ -224,6 +225,10 @@ export class ProjectStore {
     const list = this._state.regions;
     const index = list.findIndex((x) => x.id === r.id);
     if (index >= 0) list[index] = r;
+  }
+
+  _setNodule(n: ProjectState['nodule']): void {
+    this._state.nodule = n;
   }
 
   _setNextRegionNumber(n: number): void {

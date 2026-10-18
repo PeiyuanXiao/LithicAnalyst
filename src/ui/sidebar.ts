@@ -4,6 +4,8 @@ import {
   deletePlane,
   deleteSection,
   deleteRegion,
+  setNoduleRegion,
+  setNoduleShown,
   deleteScar,
   flipPlane,
   setPlaneCurve,
@@ -35,7 +37,7 @@ import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } 
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'nodule' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -782,6 +784,34 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
   return { el, refresh };
 }
 
+function noduleSection(api: AppApi): Section {
+  const { el, body } = section('nodule', t('sec.nodule'));
+  const regions = h('div', { class: 'fig-views', id: 'nodule-regions' });
+  const meta = h('dl', { class: 'meta' });
+  const show = checkbox('nodule-show', t('nodule.show'), api.store.state.nodule.show, (on) => setNoduleShown(api.store, on));
+  body.append(regions, meta, show);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'nodule', 'regions', 'specimen', 'mesh'].includes(kind)) return;
+    const st = api.store.state;
+    const cortex = st.regions.filter((r) => r.type === 'cortex');
+    clear(regions);
+    for (const r of cortex) regions.append(checkbox(`nodule-use-${r.label}`, r.label, !st.nodule.exclude.includes(r.id), (on) => setNoduleRegion(api.store, r.id, on)));
+    clear(meta);
+    const f = api.noduleFit();
+    const u = st.specimen.unit;
+    if (f)
+      meta.append(
+        ...metaRow(t('nodule.radius'), h('span', { class: 'mono', id: 'nodule-radius' }, `${fmtNum(f.radius, 3)}${u ? ` ${u}` : ''}`)),
+        ...metaRow(t('nodule.rms'), h('span', { class: 'mono', id: 'nodule-rms' }, `${fmtNum(f.rms, 3)}${u ? ` ${u}` : ''}`)),
+        ...metaRow(t('nodule.points'), h('span', { class: 'mono' }, fmtInt(f.count))),
+      );
+    (show.querySelector('input') as HTMLInputElement).checked = st.nodule.show;
+    (show.querySelector('input') as HTMLInputElement).disabled = !f;
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
 function sectionsSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('sections', t('sec.sections'), badge);
@@ -888,6 +918,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [measureAutoSection, ['measure']],
   [measureManualSection, ['measure']],
   [planesSection, ['measure']],
+  [noduleSection, ['measure']],
   [displaySection, ALL_MODES],
   [exportSection, ['annotate']],
   [measureExportSection, ['measure']],

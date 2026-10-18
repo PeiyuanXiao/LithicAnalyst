@@ -1,4 +1,4 @@
-import type { Curve, Measurement, Plane, Region, Scar, Section, SpecimenInfo } from './types';
+import type { Curve, Measurement, Plane, ProjectState, Region, Scar, Section, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -406,6 +406,23 @@ export class UpdateRegionCommand implements Command {
   revert(store: ProjectStore): void {
     store._putRegion(structuredClone(this.before));
     store.notify({ kind: 'regions', ids: [this.before.id] });
+  }
+}
+
+export class SetNoduleCommand implements Command {
+  readonly labelKey = 'cmd.editNodule';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: ProjectState['nodule'],
+    private readonly after: ProjectState['nodule'],
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setNodule(structuredClone(this.after));
+    store.notify({ kind: 'nodule' });
+  }
+  revert(store: ProjectStore): void {
+    store._setNodule(structuredClone(this.before));
+    store.notify({ kind: 'nodule' });
   }
 }
 

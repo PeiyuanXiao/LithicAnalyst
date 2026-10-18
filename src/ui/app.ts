@@ -26,6 +26,7 @@ import { SectionTool } from '../tools/sectionTool';
 import { ClickTool } from '../tools/clickTool';
 import { RegionLayer, regionColor } from '../render/regionLayer';
 import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
+import { fitSphere, type SphereFit } from '../compute/sphere';
 import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
 import { curveColor } from '../render/curveLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
@@ -159,6 +160,8 @@ export class App implements AppApi {
   private regions: { results: RegionResult[]; totals: RegionTotals } | null = null;
   private seedComponent: number[] = [];
   private conflictKey = '';
+  private nodule: (SphereFit & { regions: string[] }) | null = null;
+  private noduleMesh: THREE.Mesh | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
@@ -475,8 +478,9 @@ export class App implements AppApi {
     if (c.kind === 'sections' || c.kind === 'reset') this.updateSections();
     if (c.kind === 'curves' || c.kind === 'reset') this.updatePartition();
     else if (c.kind === 'regions' || c.kind === 'scars') this.resolveRegionsNow();
+    if (c.kind === 'nodule') this.updateNodule();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', nodule: 'nodule', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
@@ -528,6 +532,7 @@ export class App implements AppApi {
     this.appModeSeg?.set(mode);
     this.updateToolbar();
     this.syncAnnotations();
+    this.showNodule();
     this.sidebar.refresh('mode');
   }
 
@@ -921,7 +926,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -1019,7 +1024,60 @@ export class App implements AppApi {
     if (conflicts && conflicts !== this.conflictKey) this.feedback.toast(t('toast.regionConflict'), 'warn', 4000);
     this.conflictKey = conflicts;
     this.paintRegions();
+    this.updateNodule();
     this.sidebar.refresh('regions');
+  }
+
+  noduleFit(): (SphereFit & { regions: string[] }) | null {
+    return this.nodule;
+  }
+
+  /** Fit a sphere to the vertices of the chosen cortex regions (at most ~200 000 of them, evenly picked). */
+  private updateNodule(): void {
+    const part = this.partition;
+    const loaded = this.loaded;
+    const st = this.store.state;
+    this.nodule = null;
+    if (part && loaded && this.regions) {
+      const used = st.regions.filter((r, i) => r.type === 'cortex' && !st.nodule.exclude.includes(r.id) && this.seedComponent[i] >= 0 && this.seedComponent.indexOf(this.seedComponent[i]) === i);
+      const comps = new Set(used.map((r) => this.seedComponent[st.regions.indexOf(r)]));
+      if (comps.size) {
+        const idx = loaded.geometry.index!.array;
+        const pos = loaded.geometry.getAttribute('position').array as Float32Array;
+        const take = new Uint8Array(pos.length / 3);
+        for (let t = 0; t < part.region.length; t++) if (comps.has(part.region[t])) take[idx[3 * t]] = take[idx[3 * t + 1]] = take[idx[3 * t + 2]] = 1;
+        const verts: number[] = [];
+        let n = 0;
+        for (let v = 0; v < take.length; v++) if (take[v]) n++;
+        const stride = Math.max(1, Math.ceil(n / 200_000));
+        let k = 0;
+        const o = loaded.offset;
+        for (let v = 0; v < take.length; v++) if (take[v] && k++ % stride === 0) verts.push(pos[3 * v] + o[0], pos[3 * v + 1] + o[1], pos[3 * v + 2] + o[2]);
+        const fit = fitSphere(verts);
+        if (fit) this.nodule = { ...fit, regions: used.map((r) => r.id) };
+      }
+    }
+    this.showNodule();
+    this.sidebar.refresh('nodule');
+  }
+
+  /** The fitted sphere as a wireframe, in the measure mode when asked for. */
+  private showNodule(): void {
+    const v = this.viewer;
+    if (!v) return;
+    if (this.noduleMesh) {
+      v.overlay.remove(this.noduleMesh);
+      this.noduleMesh.geometry.dispose();
+      (this.noduleMesh.material as THREE.Material).dispose();
+      this.noduleMesh = null;
+    }
+    const f = this.nodule;
+    if (f && this.store.state.nodule.show && this.mode === 'measure') {
+      this.noduleMesh = new THREE.Mesh(new THREE.SphereGeometry(f.radius, 48, 24), new THREE.MeshBasicMaterial({ color: '#d9a441', wireframe: true, transparent: true, opacity: 0.45 }));
+      this.noduleMesh.position.set(...f.center);
+      v.overlay.add(this.noduleMesh);
+    }
+    v.requestRender();
   }
 
   private paintRegions(): void {
@@ -1060,7 +1118,7 @@ export class App implements AppApi {
 
   exportMeasurementsCsv(): void {
     if (!this.hasMesh() || !this.auto) return;
-    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom }, this.regions?.totals ?? null);
+    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom }, this.regions?.totals ?? null, this.nodule);
     void this.save(`${this.stem()}_measurements.csv`, csv, 'text/csv');
   }
 
@@ -1194,6 +1252,7 @@ export class App implements AppApi {
     this.regions = null;
     this.seedComponent = [];
     this.partitionToken++;
+    this.nodule = null;
     this.cuts.clear();
     this.planes = [];
     this.loaded = loaded;
@@ -1619,7 +1678,8 @@ export class App implements AppApi {
         const bytes = await fig.png();
         return { layout: fig.layout, data: btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join('')) };
       },
-      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null),
+      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule),
+      nodule: () => this.nodule,
       regions: () => this.regions,
       regionCount: () => this.partition?.count ?? null,
       exportRegionsCsvText: () => regionsCsv(this.store.state, this.regions?.results ?? [], { excelBom: false }),

@@ -33,6 +33,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.planes` | array | fitted planes (their inputs), in creation order |
 | `annotations.regions` | array | surface regions as seeds (`{ id, label, seed, type, scarId }`) |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
+| `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
@@ -101,6 +102,9 @@ fitted planes, fitted spheres, volumes ….
   (area in unit², null when the seed is off the mesh; `conflict` when another seed lies in the
   same piece). `regionTotals`: `{ scar, cortex, joint, damage, cortexRatio }` — areas by type
   (each piece counted once, for the first region in it) and cortex area / total surface area.
+* `nodule`: the sphere fitted to the chosen cortex regions: `{ center, radius, rms, count, regions }`
+  (least squares on their vertices — algebraic fit, then Gauss–Newton on the distances; at most
+  about 200 000 vertices, evenly picked), or null.
 * `planes`: each fitted plane as computed from its inputs: `{ id, label, method, valid, center,
   normal, matrix, inputCount }`. `valid` is false when the inputs are not enough (then `center`,
   `normal` and `matrix` are null). `matrix` is row-major 4×4 and maps original coordinates to the
@@ -289,7 +293,7 @@ Surface regions (`<specimen>_regions.csv`, one row each):
 specimen_id,region_id,type,scar_id,area,unit
 ```
 
-The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio`.
+The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms`.
 
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.

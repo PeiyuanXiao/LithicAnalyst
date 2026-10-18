@@ -185,7 +185,9 @@
   - `_measurements.csv` 增加：`area_scar, area_cortex, area_joint, area_damage, cortex_ratio`
 - **验收**：在合成模型上用曲线围出已知区域，面积与解析值之差在网格分辨率允许的范围内；曲线修改后区域类型保持不变。
 
-### 3.2 石皮拟合球 ⬜
+### 3.2 石皮拟合球 ✅ 2026-10-18
+
+> 完成：选定石皮区域（默认全部）的顶点做代数初值 + 几何迭代的球面拟合，给出半径、球心、残差 RMS，可显示线框球；测量 CSV 增加 `nodule_radius, nodule_fit_rms`。
 
 - 对选定的石皮区域（默认全部）做球面最小二乘拟合：先用代数解求初值，再做几何迭代精化。输出半径、球心、残差 RMS。三维中可显示拟合球（线框）。
 - 导出：`_measurements.csv` 增加 `nodule_radius, nodule_fit_rms`。

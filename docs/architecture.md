@@ -133,6 +133,13 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   scar region has no arrow, and remove it again when it is no longer used (`CompoundCommand`).
 * The curve tool snaps points onto existing curves (T-junctions) so curves can close regions.
 
+## Cortex sphere
+
+`compute/sphere.ts` fits a sphere (algebraic start, Gauss–Newton on the geometric residuals,
+relative to the centroid). The app refits whenever the regions or `ProjectState.nodule` (which
+cortex regions are left out, whether the sphere is drawn) change, using the vertices of the
+chosen cortex pieces, and keeps the result for `derived.nodule` and the measurement CSV.
+
 ## Sections
 
 A `Section` (display only) is the plane through a line drawn on screen and the eye

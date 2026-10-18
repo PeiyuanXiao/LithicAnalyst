@@ -12,6 +12,7 @@ import {
   DeleteRegionCommand,
   DeleteSectionCommand,
   DeleteScarCommand,
+  SetNoduleCommand,
   SetSpecimenCommand,
   UpdateCurveCommand,
   UpdatePlaneCommand,
@@ -384,6 +385,21 @@ export function deleteRegion(store: ProjectStore, id: string): void {
   if (!r) return;
   const drop = dropAreaScar(store, r);
   store.history.execute(drop ? new CompoundCommand('cmd.deleteRegion', [new DeleteRegionCommand(id), drop]) : new DeleteRegionCommand(id));
+}
+
+/** Use (or leave out) a cortex region in the nodule sphere fit. */
+export function setNoduleRegion(store: ProjectStore, regionId: string, used: boolean): void {
+  const before = store.state.nodule;
+  const exclude = before.exclude.filter((id) => id !== regionId);
+  if (!used) exclude.push(regionId);
+  if (exclude.length === before.exclude.length && exclude.every((x) => before.exclude.includes(x))) return;
+  store.history.execute(new SetNoduleCommand(structuredClone(before), { ...before, exclude }));
+}
+
+export function setNoduleShown(store: ProjectStore, show: boolean): void {
+  const before = store.state.nodule;
+  if (before.show === show) return;
+  store.history.execute(new SetNoduleCommand(structuredClone(before), { ...before, show }));
 }
 
 // ---------------------------------------------------------------- specimen
