@@ -80,8 +80,7 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
   expect(p3.normal![2]).toBeCloseTo(1, 4);
 
   // planes follow their inputs: deleting an arrow (annotate mode) refits P1
-  await page.keyboard.press('m');
-  await page.keyboard.press('m');
+  await page.locator('#app-mode-annotate').click();
   await page.locator('#sec-arrows .arrow-row', { hasText: 'S1' }).click();
   await page.keyboard.press('Delete');
   await expect.poll(async () => (await plane(page, 'P1')).inputCount).toBe(2);

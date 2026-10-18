@@ -12,7 +12,7 @@ import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, numberKeyField, REGION_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import type { Measurement, ProjectState, RegionType, Section, Vec3 } from '../core/types';
+import type { Curve, Measurement, ProjectState, RegionType, Section, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
@@ -33,6 +33,9 @@ import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
 import { landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
 import { LandmarkTool } from '../tools/landmarkTool';
+import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLabels, type ObserverData, type SummaryRow } from '../compute/agreement';
+import { uuid } from '../core/ids';
+import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
 import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
@@ -76,6 +79,24 @@ const DEFAULT_DISPLAY: DisplaySettings = {
 
 /** Scars involved in a problem of the relation checks. */
 const PROBLEM_COLOR = '#ff3b30';
+
+/** One colour per observer in the compare mode. */
+const OBSERVER_COLORS = ['#e0287d', '#1f9e89', '#3a7fd5', '#e8a10e', '#7b5cd6', '#c8611f', '#5a8f29', '#8a8f98'];
+
+/** A project compared in the compare mode: the open one (`state` null) or one read from a file. */
+interface Observer {
+  id: string;
+  /** Annotator, or the file name. */
+  label: string;
+  fileName: string;
+  state: ProjectState | null;
+  included: boolean;
+  color: string;
+  layers: { arrows: ArrowLayer; curves: CurveLayer; landmarks: LandmarkLayer } | null;
+  /** Region of each triangle, and what it was computed from. */
+  faces: { key: string; labels: FaceLabels | null } | null;
+  table: LandmarkTable | null;
+}
 
 function loadDisplay(): DisplaySettings {
   const saved = readPref<Partial<DisplaySettings>>('display', {});
@@ -186,6 +207,15 @@ export class App implements AppApi {
   private landmarks: LandmarkTable = { rows: [], sliders: [], sets: [] };
   /** Landmark names carried over from the last specimen, and those skipped. */
   private names: { list: string[]; skipped: Set<string> } | null = null;
+  private observers: Observer[] = [{ id: 'current', label: '', fileName: '', state: null, included: true, color: OBSERVER_COLORS[0], layers: null, faces: null, table: null }];
+  private agreement: { rows: AgreementRow[]; summary: SummaryRow[] } | null = null;
+  private agreementBusyFlag = false;
+  private agreementStale = true;
+  private agreementToken = 0;
+  private agreementTimer = 0;
+  private faceAreas: Float32Array | null = null;
+  /** Largest distance for matching arrows and curves (null: a tenth of the model's diagonal). */
+  private gate: number | null = null;
   private harrisBody: HTMLElement | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
@@ -229,6 +259,7 @@ export class App implements AppApi {
   private measureToken = 0;
   private readonly meshInput: HTMLInputElement;
   private readonly projectInput: HTMLInputElement;
+  private readonly compareInput: HTMLInputElement;
 
   constructor(private readonly root: HTMLElement) {
     document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en';
@@ -240,6 +271,7 @@ export class App implements AppApi {
     this.dropEl = h('div', { class: 'drop-overlay', hidden: true }, icon(ICONS.open));
     this.meshInput = h('input', { type: 'file', accept: '.ply,.stl,.obj', hidden: true, id: 'file-mesh' }) as HTMLInputElement;
     this.projectInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true, id: 'file-project' }) as HTMLInputElement;
+    this.compareInput = h('input', { type: 'file', accept: '.json,application/json', multiple: true, hidden: true, id: 'file-compare' }) as HTMLInputElement;
     this.feedback = new Feedback(this.appEl);
     this.sidebar = buildSidebar(this);
   }
@@ -251,7 +283,12 @@ export class App implements AppApi {
     this.header = this.buildHeader();
     const main = h('main', { class: 'workspace' }, this.viewportEl, this.sidebar.el);
     this.appEl.prepend(this.header, main);
-    this.appEl.append(this.meshInput, this.projectInput);
+    this.appEl.append(this.meshInput, this.projectInput, this.compareInput);
+    this.compareInput.addEventListener('change', () => {
+      const files = [...(this.compareInput.files ?? [])];
+      this.compareInput.value = '';
+      if (files.length) void this.addObservers(files);
+    });
     this.root.append(this.appEl);
 
     try {
@@ -543,6 +580,7 @@ export class App implements AppApi {
       this.sidebar.refresh('figure');
     }
     if (c.kind !== 'reset') this.scheduleAutosave();
+    this.scheduleAgreement();
     this.queueCoords();
   }
 
@@ -560,10 +598,11 @@ export class App implements AppApi {
       this.store.state.planes,
       this.planes,
       this.selection.id,
-      this.mode !== 'annotate',
+      this.mode === 'measure' || this.mode === 'present',
       mesh ? { min: mesh.bboxMin, max: mesh.bboxMax } : null,
       (id) => this.cuts.get(id)?.lines ?? null,
     );
+    this.syncCompare();
     this.occlusionDirty = true;
   }
 
@@ -581,6 +620,7 @@ export class App implements AppApi {
     this.mode = mode;
     writePref('mode', mode);
     if (mode === 'present') this.viewFrame();
+    if (mode === 'compare' && this.agreementStale) this.scheduleAgreement();
     this.viewportEl.dataset.mode = mode;
     this.appModeSeg?.set(mode);
     this.updateToolbar();
@@ -1051,30 +1091,35 @@ export class App implements AppApi {
 
   /** Split the surface along the curves (in slices), then find the regions again. */
   private updatePartition(): void {
+    const token = ++this.partitionToken;
+    void this.partitionFor(this.store.state.curves).then((part) => {
+      if (!part || token !== this.partitionToken) return;
+      this.partition = part;
+      this.resolveRegionsNow();
+    });
+  }
+
+  /** Pieces of surface between these curves (in slices); null when the mesh is not ready or changed meanwhile. */
+  private async partitionFor(curves: readonly Curve[]): Promise<Partition | null> {
     const base = this.measureBase;
     const loaded = this.loaded;
     const snap = this.surfaceSnap;
-    const token = ++this.partitionToken;
-    if (!base || !loaded || !snap) return;
-    void snap.prepare('off').then(() => {
-      if (token !== this.partitionToken || this.loaded !== loaded) return;
-      const search = snap.search(3);
-      const barrier: number[] = [];
-      for (const c of this.store.state.curves)
-        barrier.push(
-          ...polylineEdges(c.points, c.closed, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
-            if (!search) return null;
-            search.start(a, null);
-            return search.reach(b) ? search.path(b) : null;
-          }),
-        );
-      const g = loaded.geometry;
-      return runSliced(regionsSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, barrier)).then((part) => {
-        if (token !== this.partitionToken || this.loaded !== loaded) return;
-        this.partition = part;
-        this.resolveRegionsNow();
-      });
-    });
+    if (!base || !loaded || !snap) return null;
+    await snap.prepare('off');
+    if (this.loaded !== loaded) return null;
+    const search = snap.search(3);
+    const barrier: number[] = [];
+    for (const c of curves)
+      barrier.push(
+        ...polylineEdges(c.points, c.closed, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
+          if (!search) return null;
+          search.start(a, null);
+          return search.reach(b) ? search.path(b) : null;
+        }),
+      );
+    const g = loaded.geometry;
+    const part = await runSliced(regionsSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, barrier));
+    return this.loaded === loaded ? part : null;
   }
 
   /** Which piece each region's seed falls in; areas, totals and conflicts; repaint. */
@@ -1095,6 +1140,243 @@ export class App implements AppApi {
 
   towardViewer(): Vec3 {
     return this.viewer?.towardViewer() ?? [0, 0, 1];
+  }
+
+  // ------------------------------------------------------------ compare mode
+
+  observerList(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }> {
+    const labels = this.observerLabels();
+    return this.observers.map((o) => ({ id: o.id, label: labels.get(o.id)!, fileName: o.fileName, included: o.included, color: o.color, current: !o.state }));
+  }
+
+  /** Observer labels, made unique (" (2)", " (3)" …). */
+  private observerLabels(): Map<string, string> {
+    const out = new Map<string, string>();
+    const seen = new Map<string, number>();
+    for (const o of this.observers) {
+      const base = (o.state ? o.label : this.store.state.specimen.annotator) || t('compare.current');
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      out.set(o.id, n > 1 ? `${base} (${n})` : base);
+    }
+    return out;
+  }
+
+  addObserverFiles(): void {
+    this.compareInput.click();
+  }
+
+  private async addObservers(files: File[]): Promise<void> {
+    const sha = this.store.state.mesh?.sha256;
+    if (!sha) return;
+    for (const f of files) {
+      let st: ProjectState;
+      try {
+        st = parseProjectFile(JSON.parse(await f.text()));
+      } catch (err) {
+        this.feedback.toast(`${f.name}: ${err instanceof Error ? err.message : String(err)}`, 'error');
+        continue;
+      }
+      if (st.mesh?.sha256 !== sha) {
+        this.feedback.toast(t('compare.otherMesh', { name: f.name }), 'warn', 4000);
+        continue;
+      }
+      const used = new Set(this.observers.map((o) => o.color));
+      const color = OBSERVER_COLORS.find((c) => !used.has(c)) ?? OBSERVER_COLORS[this.observers.length % OBSERVER_COLORS.length];
+      const label = st.specimen.annotator || f.name.replace(/\.json$/i, '').replace(/\.lithicanalyst$/i, '');
+      this.observers.push({ id: uuid(), label, fileName: f.name, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st) });
+    }
+    this.observersChanged();
+  }
+
+  setObserverIncluded(id: string, included: boolean): void {
+    const o = this.observers.find((x) => x.id === id);
+    if (!o || o.included === included) return;
+    o.included = included;
+    this.observersChanged();
+  }
+
+  removeObserver(id: string): void {
+    const o = this.observers.find((x) => x.id === id);
+    if (!o || !o.state) return;
+    this.disposeObserverLayers(o);
+    this.observers = this.observers.filter((x) => x !== o);
+    this.observersChanged();
+  }
+
+  /** A new mesh: only the open project is left to compare. */
+  private resetObservers(): void {
+    for (const o of this.observers) this.disposeObserverLayers(o);
+    this.observers = this.observers.filter((o) => !o.state);
+    this.observers[0].faces = null;
+    this.faceAreas = null;
+    this.gate = null;
+    this.agreement = null;
+    this.agreementStale = true;
+  }
+
+  private observersChanged(): void {
+    this.syncCompare();
+    this.agreementStale = true;
+    this.scheduleAgreement();
+    this.sidebar.refresh('compare');
+  }
+
+  compareGate(): number {
+    if (this.gate !== null) return this.gate;
+    const d = this.viewer?.diagonal ?? 0;
+    return d > 0 ? Number((d * 0.1).toPrecision(2)) : 1;
+  }
+
+  setCompareGate(v: number): void {
+    if (!(v > 0) || v === this.gate) return;
+    this.gate = v;
+    this.agreementStale = true;
+    this.scheduleAgreement();
+  }
+
+  agreementResult(): { rows: AgreementRow[]; summary: SummaryRow[] } | null {
+    return this.agreement;
+  }
+
+  agreementBusy(): boolean {
+    return this.agreementBusyFlag;
+  }
+
+  /** Each observer's annotations in its colour (compare mode); the open project's own layers step aside. */
+  private syncCompare(): void {
+    const viewer = this.viewer;
+    const show = this.mode === 'compare';
+    for (const g of [this.arrows?.group, this.curves?.group, this.landmarkLayer?.group, this.regionLayer?.group]) if (g) g.visible = !show;
+    if (!viewer) return;
+    for (const o of this.observers) {
+      if (!(show && o.included && this.hasMesh())) {
+        this.disposeObserverLayers(o);
+        continue;
+      }
+      if (!o.layers) {
+        const arrows = new ArrowLayer(viewer), curves = new CurveLayer(viewer), landmarks = new LandmarkLayer(viewer);
+        arrows.fixedColor = curves.fixedColor = landmarks.fixedColor = o.color;
+        if (this.loaded) curves.setOrigin(this.loaded.offset);
+        o.layers = { arrows, curves, landmarks };
+      }
+      const st = o.state ?? this.store.state;
+      o.layers.arrows.sync(st, null, this.display.arrows, false);
+      o.layers.curves.sync(st, null, this.display.arrows, false);
+      o.layers.landmarks.sync(st.landmarks, (o.state ? o.table : this.landmarks)?.sets ?? [], null, this.display.arrows.labels, this.display.arrows.showHidden);
+    }
+  }
+
+  private disposeObserverLayers(o: Observer): void {
+    const l = o.layers;
+    if (!l || !this.viewer) return;
+    l.arrows.clearAll();
+    l.curves.clearAll();
+    l.landmarks.clearAll();
+    for (const g of [l.arrows.group, l.curves.group, l.landmarks.group]) this.viewer.overlay.remove(g);
+    o.layers = null;
+    this.viewer.requestRender();
+  }
+
+  /** Recompute the comparison shortly (only in the compare mode; otherwise when it is entered). */
+  private scheduleAgreement(): void {
+    this.agreementStale = true;
+    if (this.mode !== 'compare') return;
+    clearTimeout(this.agreementTimer);
+    this.agreementTimer = window.setTimeout(() => void this.updateAgreement(), 200);
+  }
+
+  /** Region of each triangle by an observer's curves and region seeds (cached until they change). */
+  private async observerFaces(o: Observer, st: Readonly<ProjectState>): Promise<FaceLabels | null> {
+    if (!st.regions.length) return null;
+    const key = JSON.stringify([st.curves.map((c) => [c.points, c.closed]), st.regions.map((r) => [r.seed, r.type])]);
+    if (o.faces?.key === key) return o.faces.labels;
+    const part = await this.partitionFor(st.curves);
+    if (!part) return null;
+    const owner = new Int32Array(part.count).fill(-1);
+    st.regions.forEach((r, i) => {
+      const f = this.faceAt(r.seed);
+      const c = f >= 0 ? part.region[f] : -1;
+      if (c >= 0 && owner[c] < 0) owner[c] = i;
+    });
+    const n = part.region.length;
+    const labels: FaceLabels = { type: new Uint8Array(n), region: new Int32Array(n).fill(-1) };
+    for (let f = 0; f < n; f++) {
+      const i = owner[part.region[f]];
+      if (i < 0) continue;
+      labels.type[f] = FACE_TYPES.indexOf(st.regions[i].type);
+      labels.region[f] = i;
+    }
+    o.faces = { key, labels };
+    return labels;
+  }
+
+  private triangleAreas(): Float32Array | null {
+    if (this.faceAreas) return this.faceAreas;
+    const g = this.loaded?.geometry;
+    if (!g) return null;
+    const pos = g.getAttribute('position').array as Float32Array;
+    const idx = g.index!.array;
+    const out = new Float32Array(idx.length / 3);
+    for (let t = 0; t < out.length; t++) {
+      const a = 3 * idx[3 * t], b = 3 * idx[3 * t + 1], c = 3 * idx[3 * t + 2];
+      const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+      const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+      out[t] = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    }
+    return (this.faceAreas = out);
+  }
+
+  private async updateAgreement(): Promise<void> {
+    const token = ++this.agreementToken;
+    const base = this.measureBase;
+    const loaded = this.loaded;
+    const included = this.observers.filter((o) => o.included);
+    if (!base || !loaded || included.length < 2) {
+      this.agreement = null;
+      this.agreementBusyFlag = false;
+      this.agreementStale = false;
+      this.sidebar.refresh('compare');
+      return;
+    }
+    this.agreementBusyFlag = true;
+    this.sidebar.refresh('compare');
+    const labels = this.observerLabels();
+    const axes = this.vertexAxes();
+    const areas = this.triangleAreas();
+    const positions = loaded.geometry.getAttribute('position').array as Float32Array;
+    const data: ObserverData[] = [];
+    for (const o of included) {
+      const st = o.state ?? this.store.state;
+      const faces = await this.observerFaces(o, st);
+      if (token !== this.agreementToken) return;
+      const auto = autoMeasurements(positions, base, st.specimen.frame);
+      const measures: Record<string, number | null> = { length: auto.length, width: auto.width, thickness: auto.thickness };
+      if (faces && areas) {
+        const sums = new Float64Array(FACE_TYPES.length);
+        for (let f = 0; f < areas.length; f++) sums[faces.type[f]] += areas[f];
+        FACE_TYPES.forEach((type, i) => i > 0 && (measures[`area_${type}`] = sums[i]));
+        measures.cortex_ratio = base.surfaceArea > 0 ? sums[2] / base.surfaceArea : null;
+      }
+      data.push({ label: labels.get(o.id)!, state: st, planes: st.planes.map((p) => computePlane(p, st, axes)), faces, measures });
+      await nextFrame();
+      if (token !== this.agreementToken) return;
+    }
+    const rows = compareObservers(data, { gate: this.compareGate(), faceArea: areas });
+    if (token !== this.agreementToken) return;
+    this.agreement = { rows, summary: summarize(rows) };
+    this.agreementBusyFlag = false;
+    this.agreementStale = false;
+    this.sidebar.refresh('compare');
+  }
+
+  exportAgreement(kind: 'long' | 'summary'): void {
+    const a = this.agreement;
+    if (!a || !this.hasMesh()) return;
+    const id = this.store.state.specimen.id || this.stem();
+    const opts = { excelBom: this.display.excelBom };
+    if (kind === 'long') void this.save(`${this.stem()}_agreement.csv`, agreementCsv(id, a.rows, opts), 'text/csv');
+    else void this.save(`${this.stem()}_agreement_summary.csv`, agreementSummaryCsv(id, a.summary, opts), 'text/csv');
   }
 
   // ------------------------------------------------------------ landmarks
@@ -1540,6 +1822,7 @@ export class App implements AppApi {
       if (this.store.section(sel)) deleteSection(this.store, sel);
       return;
     }
+    if (this.mode !== 'annotate') return;
     if (this.store.region(sel)) deleteRegion(this.store, sel);
     else if (this.store.relation(sel)) deleteRelation(this.store, sel);
     else if (this.store.sequence(sel)) deleteSequence(this.store, sel);
@@ -1599,6 +1882,7 @@ export class App implements AppApi {
     this.arrows?.clearAll();
     this.curves?.clearAll();
     this.landmarkLayer?.clearAll();
+    this.resetObservers();
     this.measures?.clearAll();
     this.planesLayer?.clearAll();
     this.sectionLayer?.clearAll();
@@ -2050,6 +2334,9 @@ export class App implements AppApi {
       exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
       exportRelationsCsvText: () => relationsCsv(this.store.state, { excelBom: false }),
       landmarkTable: () => this.landmarks,
+      agreement: () => this.agreement,
+      agreementBusy: () => this.agreementBusyFlag,
+      observers: () => this.observerList(),
       exportLandmarksText: (kind: 'tps' | 'fcsv' | 'csv' | 'sliders') => this.landmarkExport(kind, false).text,
       exportSeriesCsvText: () => seriesCsv(this.store.state, { excelBom: false }),
       relationChecks: () => this.relationChecks(),

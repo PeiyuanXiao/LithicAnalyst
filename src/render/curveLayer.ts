@@ -277,6 +277,9 @@ export class CurveLayer {
     this.group.updateMatrixWorld(true);
   }
 
+  /** Draw every curve in this colour (another observer's annotations), instead of by type. */
+  fixedColor: string | null = null;
+
   sync(state: Readonly<ProjectState>, selected: string | null, display: ArrowDisplay, showHandles: boolean): void {
     this.last = { state, selected, display, handles: showHandles };
     const seen = new Set<string>();
@@ -292,7 +295,7 @@ export class CurveLayer {
       const isSel = c.id === selected;
       const pts = this.override?.id === c.id ? this.override.points : c.points;
       v.setPoints(pts, c.closed, this.origin);
-      const color = isSel ? CURVE_COLORS.selected : curveColor(c);
+      const color = isSel ? CURVE_COLORS.selected : this.fixedColor ?? curveColor(c);
       v.style(color, isSel ? WIDTH_SELECTED : WIDTH, display.showHidden);
       v.setLabel(display.labels ? c.label : null, color, isSel);
     }

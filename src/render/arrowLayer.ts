@@ -208,6 +208,8 @@ export class ArrowLayer {
   private override: EndpointOverride | null = null;
   private last: { state: Readonly<ProjectState>; selected: string | null; display: ArrowDisplay; handles: boolean } | null = null;
   private highlight: { ids: ReadonlySet<string>; color: string } | null = null;
+  /** Draw every arrow in this colour (another observer's annotations), instead of the colour mode. */
+  fixedColor: string | null = null;
   onLabelClick: (id: string) => void = () => {};
 
   constructor(private readonly viewer: Viewer) {
@@ -274,7 +276,7 @@ export class ArrowLayer {
       const e = toV(end).addScaledVector(toV(en), lift);
       const isSel = a.id === selected;
       const isHl = !isSel && !!hl?.ids.has(a.id);
-      const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : arrowColor(a, display.colorMode, seq);
+      const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : this.fixedColor ?? arrowColor(a, display.colorMode, seq);
       v.update(s, e, toV(sn), isSel || isHl ? radius * 1.15 : radius, color, display.showHidden, display.labels ? a.label : null, isSel);
     }
     for (const [id, v] of this.visuals) {

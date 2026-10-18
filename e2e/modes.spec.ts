@@ -47,6 +47,11 @@ test('each mode shows its own tools and sections; switching keeps the selection 
   await expect(page.locator('#app-mode-present')).toHaveAttribute('aria-checked', 'true');
   expect(await visibleSections(page)).toEqual(['specimen', 'display']);
 
+  await page.keyboard.press('m');
+  await expect(page.locator('#app-mode-compare')).toHaveAttribute('aria-checked', 'true');
+  expect(await visibleSections(page)).toEqual(['specimen', 'display']);
+  await expect(page.locator('#sec-observers')).toBeVisible();
+
   // M wraps around to annotate: selection and history are still there
   await page.keyboard.press('m');
   await expect(page.locator('#app-mode-annotate')).toHaveAttribute('aria-checked', 'true');
@@ -81,7 +86,7 @@ test('works in a window 400 px wide', async ({ page }) => {
   await loadMesh(page, roofPly());
   const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
   expect(await fits()).toBe(true);
-  for (const id of ['#app-mode-annotate', '#app-mode-measure', '#app-mode-present', '#btn-open', '#btn-save-project', '#btn-lang', '#btn-help']) {
+  for (const id of ['#app-mode-annotate', '#app-mode-measure', '#app-mode-present', '#app-mode-compare', '#btn-open', '#btn-save-project', '#btn-lang', '#btn-help']) {
     const box = await page.locator(id).boundingBox();
     expect(box, id).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);

@@ -121,7 +121,7 @@ test('places, names, orders and moves landmarks; semilandmarks follow; exports a
   const front = /<g id="view-front"[\s\S]*?<\/g>\n<\/g>/.exec(fig!.data)?.[0] ?? '';
   expect(front.match(/<circle class="fixed"/g)).toHaveLength(3);
   expect(front.match(/<circle class="curve"/g)).toHaveLength(4);
-  await page.keyboard.press('m');
+  await page.locator('#app-mode-annotate').click();
 
   // save, reopen
   st = await state(page);

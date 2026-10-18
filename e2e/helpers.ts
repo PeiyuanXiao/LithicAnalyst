@@ -43,7 +43,10 @@ export interface LithicApi {
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;
-  setMode(m: 'annotate' | 'measure' | 'present'): void;
+  setMode(m: 'annotate' | 'measure' | 'present' | 'compare'): void;
+  agreement(): { rows: import('../src/compute/agreement').AgreementRow[]; summary: import('../src/compute/agreement').SummaryRow[] } | null;
+  agreementBusy(): boolean;
+  observers(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }>;
   projectJson(): ProjectFile;
   snap: {
     prepare(mode: 'ridge' | 'valley' | 'off'): Promise<boolean>;

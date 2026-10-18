@@ -55,7 +55,7 @@ import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } 
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'compare' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -1317,7 +1317,75 @@ function exportSection(api: AppApi): Section {
   return { el, refresh };
 }
 
-const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present'];
+// ---------------------------------------------------------------- compare
+
+function observersSection(api: AppApi): Section {
+  const { el, body } = section('observers', t('sec.observers'));
+  const list = h('ol', { class: 'arrow-list', id: 'observer-list', 'aria-label': t('sec.observers') });
+  const add = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'compare-add', onclick: () => api.addObserverFiles() }, icon(ICONS.open), t('compare.add')) as HTMLButtonElement;
+  const gate = h('input', { id: 'compare-gate', class: 'ctl-text mono', type: 'number', min: 0, step: 'any' }) as HTMLInputElement;
+  gate.addEventListener('change', () => api.setCompareGate(Number(gate.value)));
+  const unit = h('span', { class: 'gate-unit mono' });
+  body.append(list, h('div', { class: 'btn-row' }, add), h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'compare-gate' }, t('compare.gate')), h('div', { class: 'gate-row' }, gate, unit)));
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'compare', 'mesh', 'specimen'].includes(kind)) return;
+    clear(list);
+    for (const o of api.observerList()) {
+      const box = h('input', { type: 'checkbox', checked: o.included, 'aria-label': o.label }) as HTMLInputElement;
+      box.addEventListener('change', () => api.setObserverIncluded(o.id, box.checked));
+      list.append(
+        h(
+          'li',
+          { class: 'arrow-row observer-row', 'data-id': o.id },
+          box,
+          h('span', { class: 'chip', style: `--chip:${o.color}` }),
+          h('span', { class: 'arrow-meta observer-name', title: o.fileName }, o.label),
+          o.current ? h('span') : h('button', { type: 'button', class: 'icon-btn', 'data-act': 'remove', title: t('compare.remove'), 'aria-label': t('compare.remove'), onclick: () => api.removeObserver(o.id) }, icon(ICONS.close)),
+        ),
+      );
+    }
+    add.disabled = !api.hasMesh();
+    softSet(gate, String(api.compareGate()));
+    unit.textContent = api.store.state.specimen.unit;
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+function agreementSection(api: AppApi): Section {
+  const { el, body } = section('agreement', t('sec.agreement'));
+  const status = h('p', { class: 'agree-status', id: 'agreement-status' });
+  const table = h('div', { class: 'agree-wrap', id: 'agreement-table' });
+  const longBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-agreement-csv', onclick: () => api.exportAgreement('long') }, t('export.agreement')) as HTMLButtonElement;
+  const sumBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-agreement-summary', onclick: () => api.exportAgreement('summary') }, t('export.agreementSummary')) as HTMLButtonElement;
+  body.append(status, table, h('div', { class: 'btn-row' }, longBtn, sumBtn));
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'compare', 'mesh'].includes(kind)) return;
+    const busy = api.agreementBusy();
+    status.textContent = busy ? t('compare.computing') : '';
+    status.hidden = !busy;
+    const res = api.agreementResult();
+    clear(table);
+    longBtn.disabled = sumBtn.disabled = !res || busy;
+    if (!res) return;
+    const head = h('tr', {}, ...[`${t('compare.item')} · ${t('compare.metric')}`, t('compare.pair'), 'n', t('compare.mean')].map((x) => h('th', {}, x)));
+    const rows = res.summary.map((r) =>
+      h(
+        'tr',
+        { 'data-item': r.itemType, 'data-metric': r.metric },
+        h('td', { class: 'mono agree-item' }, r.itemType, h('br'), h('span', { class: 'agree-metric' }, r.metric)),
+        h('td', {}, r.b ? `${r.a} – ${r.b}` : r.a),
+        h('td', { class: 'mono num' }, String(r.n)),
+        h('td', { class: 'mono num' }, Number.isFinite(r.mean) ? fmtNum(r.mean, 3) : '–'),
+      ),
+    );
+    table.append(h('table', { class: 'agree-table' }, h('thead', {}, head), h('tbody', {}, ...rows)));
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present', 'compare'];
 
 /** The sidebar sections, in order, and the work modes that show them. */
 const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
@@ -1338,6 +1406,8 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [displaySection, ALL_MODES],
   [exportSection, ['annotate']],
   [measureExportSection, ['measure']],
+  [observersSection, ['compare']],
+  [agreementSection, ['compare']],
 ];
 
 export interface Sidebar {

@@ -384,6 +384,31 @@ then each semilandmark set), numbered from 1:
 * `<specimen>_sliders.csv`: `before,slider,after`, one row per sliding semilandmark, by `index`
   (geomorph's `curves` matrix: `as.matrix(read.csv(…))`).
 
+Observer agreement (compare mode; not part of the project file):
+
+* `<specimen>_agreement.csv`: `specimen_id,item_type,item_key,annotator_a,annotator_b,metric,value`
+  — one row per value, for every pair of observers; with three or more, Fleiss' κ rows have
+  `annotator_a = all` and an empty `annotator_b`. `item_type` / `metric`: `arrow` (per matched
+  pair `item_key = <label a>|<label b>`: `angle_deg`, `start_distance`, `end_distance`; `all`:
+  `matched`, `unmatched_a`, `unmatched_b`), `scar_attribute` (field key: `agreement`,
+  `cohen_kappa` / `fleiss_kappa`, `n_items`), `relation` (`all`: same), `curve` (pairs:
+  `mean_distance`, `hausdorff`; `all`: counts), `plane` (pairs: `normal_angle_deg` 0–90,
+  `center_distance`), `region` (type: `iou`, `dice` by area; scar region pairs likewise),
+  `region_type` (`all`: `agreement`, kappa, `area` typed by both), `landmark` (name:
+  `distance`), `semilandmark` (`<set>_<k>`: `distance`), `measurement` (`length`, `width`,
+  `thickness`, `area_<type>`, `cortex_ratio`, manual labels: `difference` = b − a). Empty values
+  are undefined (e.g. κ when only one category occurs).
+* `<specimen>_agreement_summary.csv`: `specimen_id,item_type,metric,annotator_a,annotator_b,n,mean,sd,min,max`
+  — the long table grouped by item type, metric and pair.
+
+Matching: arrows by the mean distance of their two ends, curves (same type) by their mean
+distance, both with the Hungarian method and a distance limit (default a tenth of the model's
+diagonal); planes by method and angle; scars known only by their regions through the scar
+regions' largest overlaps; landmarks by name; semilandmarks by set label and number; manual
+measurements by label and type. Kappas: Cohen for two observers, Fleiss for all of them on
+the scars of the first that every other has matched (relations: pairs of those scars that
+someone related; regions: triangles typed by all, weighted by area).
+
 The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio`.
 
 Enumerated fields are written as their codes, which are the same in every interface language.

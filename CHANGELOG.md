@@ -69,6 +69,14 @@
   3D Slicer `.fcsv`, `<specimen>_landmarks.csv` and the sliding definition
   `<specimen>_sliders.csv` (geomorph `curves`: before, slider, after) — all with the same point
   numbers. Landmarks can be drawn in figures.
+- Compare mode: read the project files of other observers (or repeat sessions) of the same model
+  next to the open one; each is drawn in its own colour. Arrows and curves are matched by distance
+  (Hungarian method, with an adjustable limit), planes by method, landmarks by name,
+  semilandmarks by set and number, regions per triangle. Results: direction angles and endpoint
+  distances, unmatched counts, mean and Hausdorff curve distances, plane angles and centre
+  distances, IoU and Dice of region types and scar regions, agreement and Cohen's / Fleiss' κ for
+  scar attributes, region types and relations, landmark distances and measurement differences.
+  Exports: `<specimen>_agreement.csv` (long table) and `<specimen>_agreement_summary.csv`.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

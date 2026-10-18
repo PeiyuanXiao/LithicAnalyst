@@ -130,7 +130,8 @@ test('takes distance, along-surface and angle measurements; undo, redo, export a
   await expect(page.locator('#measure-list .measure-row')).toHaveCount(3);
   // measurements are not shown, nor deleted, in the annotate mode
   await page.locator('#measure-list .measure-row', { hasText: 'M1' }).click();
-  // measure → present → annotate
+  // measure → present → compare → annotate
+  await page.keyboard.press('m');
   await page.keyboard.press('m');
   await page.keyboard.press('m');
   await expect(page.locator('#app-mode-annotate')).toHaveAttribute('aria-checked', 'true');

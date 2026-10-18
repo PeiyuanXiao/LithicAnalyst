@@ -1,6 +1,7 @@
 import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
 import type { RegionResult, RegionTotals } from '../compute/regions';
+import type { AgreementRow, SummaryRow } from '../compute/agreement';
 import type { AutoMeasurements } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -236,4 +237,18 @@ export function seriesCsv(state: Readonly<ProjectState>, opts: CsvOptions): stri
       .forEach((id, k) => rows.push([csvCell(state.specimen.id), csvCell(q.label), String(i + 1), csvCell(label.get(id)), q.ordered ? String(k + 1) : ''].join(',')));
   });
   return (opts.excelBom ? '﻿' : '') + [['specimen_id', 'series_id', 'series_order', 'scar_id', 'order_in_series'].join(','), ...rows].join('\n') + '\n';
+}
+
+/** Observer agreement, one row per value (long format); `value` is empty when undefined (e.g. κ with one category). */
+export function agreementCsv(specimenId: string, rows: readonly AgreementRow[], opts: CsvOptions): string {
+  const header = 'specimen_id,item_type,item_key,annotator_a,annotator_b,metric,value';
+  const body = rows.map((r) => [csvCell(specimenId), r.itemType, csvCell(r.itemKey), csvCell(r.a), csvCell(r.b), r.metric, fmt(r.value)].join(','));
+  return (opts.excelBom ? '\uFEFF' : '') + [header, ...body].join('\n') + '\n';
+}
+
+/** The agreement table summarised by item type, metric and pair of observers. */
+export function agreementSummaryCsv(specimenId: string, rows: readonly SummaryRow[], opts: CsvOptions): string {
+  const header = 'specimen_id,item_type,metric,annotator_a,annotator_b,n,mean,sd,min,max';
+  const body = rows.map((r) => [csvCell(specimenId), r.itemType, r.metric, csvCell(r.a), csvCell(r.b), String(r.n), fmt(r.mean), fmt(r.sd), fmt(r.min), fmt(r.max)].join(','));
+  return (opts.excelBom ? '\uFEFF' : '') + [header, ...body].join('\n') + '\n';
 }

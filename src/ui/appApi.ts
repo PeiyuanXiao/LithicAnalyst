@@ -13,8 +13,8 @@ import type { Feedback } from './feedback';
 
 export type ViewportBackground = 'light' | 'dark';
 
-/** Work modes; each shows only its own tools and sidebar sections ("compare" joins in 5.1). */
-export const APP_MODES = ['annotate', 'measure', 'present'] as const;
+/** Work modes; each shows only its own tools and sidebar sections. */
+export const APP_MODES = ['annotate', 'measure', 'present', 'compare'] as const;
 export type AppMode = (typeof APP_MODES)[number];
 
 export interface DisplaySettings {
@@ -106,6 +106,17 @@ export interface AppApi {
   skipName(): void;
   stopNames(): void;
   exportLandmarks(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): void;
+  /** Compare mode: the open project first, then the project files read for comparison. */
+  observerList(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }>;
+  addObserverFiles(): void;
+  setObserverIncluded(id: string, included: boolean): void;
+  removeObserver(id: string): void;
+  /** Largest distance for matching arrows and curves, in the specimen unit. */
+  compareGate(): number;
+  setCompareGate(v: number): void;
+  agreementResult(): { rows: import('../compute/agreement').AgreementRow[]; summary: import('../compute/agreement').SummaryRow[] } | null;
+  agreementBusy(): boolean;
+  exportAgreement(kind: 'long' | 'summary'): void;
   saveProject(): void;
   openProject(): void;
 }

@@ -82,7 +82,7 @@ Curves were added this way; use them as the worked example.
 ## Work modes
 
 The top bar switches between work modes (`AppMode` in `ui/appApi.ts`: annotate, measure,
-present; compare comes with roadmap 5.1). A mode owns its tools and sidebar sections:
+present, compare). A mode owns its tools and sidebar sections:
 `App.updateToolbar` shows the toolbar of the current mode, and `SECTIONS` in `ui/sidebar.ts`
 lists which modes show each section. Outside the annotate mode the select tool only navigates
 (`ToolContext.editable()`), and keys that change annotations are ignored. Switching modes
@@ -164,6 +164,19 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   `render/landmarkLayer.ts` draws them with their names, and the semilandmarks. Names carried
   over from the last specimen are kept in local preferences keyed by mesh checksum
   (`App.previousNames`); the queue itself is session state, not project data.
+
+## Compare mode
+
+* Observers are the open project plus project files of the same mesh (SHA-256), read with
+  `parseProjectFile`; they live in the app only (`App.observers`), never in a project file.
+* Each observer's arrows, curves and landmarks are drawn by its own `ArrowLayer`, `CurveLayer`
+  and `LandmarkLayer` (`fixedColor`); the open project's normal layers step aside meanwhile.
+* `App.updateAgreement` gathers what needs the mesh — fitted planes, length / width / thickness
+  along each observer's frame, and the region type of every triangle (`partitionFor` with the
+  observer's curves, cached by curves and seeds) — and hands it to `compute/agreement.ts`:
+  `assign` (Hungarian method with a distance limit), `cohenKappa`, `fleissKappa`, `icc21`,
+  `curveDistance`, `compareObservers` (the long table) and `summarize`. It reruns, debounced,
+  after any change while the mode is shown.
 
 ## Cortex sphere
 

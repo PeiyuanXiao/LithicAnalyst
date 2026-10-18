@@ -40,6 +40,7 @@ test('draws a section across the model, cuts it open, and exports the section dr
   expect(await page.evaluate(() => window.lithicanalyst.clipping())).toBe(0);
   await page.keyboard.press('m');
   await page.keyboard.press('m');
+  await page.keyboard.press('m');
   expect(await page.evaluate(() => window.lithicanalyst.clipping())).toBe(1);
 
   // the section drawing alone: the box's cross-section, 40 × 10 mm, hatched, with a scale bar

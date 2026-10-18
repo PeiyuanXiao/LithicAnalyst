@@ -54,6 +54,8 @@ export class LandmarkLayer {
   private semi: Dot[] = [];
   private readonly preview = new Dot();
   onLabelClick: (id: string) => void = () => {};
+  /** Draw every point in this colour (another observer's annotations). */
+  fixedColor: string | null = null;
 
   constructor(private readonly viewer: Viewer) {
     this.group.name = 'landmarks';
@@ -91,7 +93,7 @@ export class LandmarkLayer {
         this.fixed.set(l.id, v);
       }
       const isSel = l.id === selected;
-      const color = isSel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.fixed;
+      const color = isSel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.fixed;
       v.point = l.point;
       v.dot.set(l.point, isSel ? r * 1.25 : r, color, ghost);
       v.label.visible = labels;
@@ -114,7 +116,7 @@ export class LandmarkLayer {
     }
     this.semi.forEach((d, i) => {
       d.root.visible = i < pts.length;
-      if (i < pts.length) d.set(pts[i].p, r * 0.75, pts[i].sel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.semi, ghost);
+      if (i < pts.length) d.set(pts[i].p, r * 0.75, pts[i].sel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.semi, ghost);
     });
     this.viewer.requestRender();
   }
