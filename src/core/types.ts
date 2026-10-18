@@ -218,6 +218,33 @@ export interface Sequence {
   modifiedAt: string;
 }
 
+/** A fixed landmark: a surface point with a free name. The list order is the export order. */
+export interface Landmark {
+  id: string;
+  /** Name or meaning, e.g. "LM1" or "apex". */
+  name: string;
+  point: Vec3;
+  createdAt: string;
+  modifiedAt: string;
+}
+
+/**
+ * Curve semilandmarks: `count` points at equal arc length along a curve,
+ * between two fixed landmarks when given (their nearest points on the curve).
+ * Only the inputs are stored; the points are derived and follow the curve.
+ */
+export interface SemilandmarkSet {
+  id: string;
+  /** "SL1", "SL2", … */
+  label: string;
+  curveId: string;
+  count: number;
+  startLandmarkId: string | null;
+  endLandmarkId: string | null;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -230,6 +257,9 @@ export interface ProjectState {
   relations: Relation[];
   /** Earliest first. */
   sequences: Sequence[];
+  /** In export order. */
+  landmarks: Landmark[];
+  semilandmarks: SemilandmarkSet[];
   /** Sphere fitted to the cortex: cortex regions left out, and whether the sphere is drawn. */
   nodule: { exclude: string[]; show: boolean };
   /**
@@ -252,6 +282,10 @@ export interface ProjectState {
   nextRegionNumber: number;
   /** Next number used for sequence labels (Q1, Q2, …). */
   nextSequenceNumber: number;
+  /** Next number used for default landmark names (LM1, LM2, …). */
+  nextLandmarkNumber: number;
+  /** Next number used for semilandmark set labels (SL1, SL2, …). */
+  nextSemilandmarkNumber: number;
   createdAt: string;
   modifiedAt: string;
 }

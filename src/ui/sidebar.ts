@@ -1,4 +1,10 @@
 import {
+  addSemilandmarkSet,
+  deleteLandmark,
+  deleteSemilandmarkSet,
+  renameLandmark,
+  reorderLandmark,
+  updateSemilandmarkSet,
   addSequence,
   deleteRelation,
   deleteSequence,
@@ -42,13 +48,14 @@ import { SECTION_COLORS } from '../render/sectionLayer';
 import { regionColorOf } from '../render/regionLayer';
 import { relationProblems, type RelationProblem } from '../compute/relations';
 import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
+import { LANDMARK_COLORS } from '../render/landmarkLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -709,7 +716,7 @@ function figureSection(api: AppApi): Section {
     format: (v) => `${v}°`,
     onInput: (v) => api.setFigure((f) => (f.lightElevation = v)),
   });
-  const overlay = (id: string, key: 'arrows' | 'curves' | 'planes' | 'regions' | 'scaleBar', label: string) =>
+  const overlay = (id: string, key: 'arrows' | 'curves' | 'planes' | 'regions' | 'landmarks' | 'scaleBar', label: string) =>
     checkbox(id, label, api.figure.overlays[key], (on) => api.setFigure((f) => (f.overlays[key] = on)));
   const scaleBarEl = overlay('fig-scalebar', 'scaleBar', t('figure.scaleBar'));
   const overlays = h(
@@ -719,6 +726,7 @@ function figureSection(api: AppApi): Section {
     overlay('fig-curves', 'curves', t('figure.curves')),
     overlay('fig-planes', 'planes', t('figure.planes')),
     overlay('fig-regions', 'regions', t('figure.regions')),
+    overlay('fig-landmarks', 'landmarks', t('figure.landmarks')),
     scaleBarEl,
   );
   const scale = segmented('fig-scale', t('figure.scale'), [
@@ -969,6 +977,176 @@ function relationsSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+function landmarksSection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('landmarks', t('sec.landmarks'), badge);
+  const names = h('div', { class: 'checks-row', id: 'landmark-names' });
+  const list = h('ol', { class: 'arrow-list', id: 'landmark-list', role: 'listbox', 'aria-label': t('sec.landmarks') });
+  const inspector = h('div', { class: 'inspector', id: 'landmark-inspector' });
+  const addSet = h('button', { type: 'button', class: 'icon-btn', id: 'semilandmark-add', title: t('semi.add'), 'aria-label': t('semi.add'), onclick: () => {
+    const st = api.store.state;
+    const sel = api.selection.id;
+    const curve = (sel && api.store.curve(sel)) || st.curves[0];
+    if (curve) api.selection.set(addSemilandmarkSet(api.store, curve.id).id);
+  } }) as HTMLButtonElement;
+  addSet.append(icon(ICONS.plus));
+  const setList = h('ol', { class: 'arrow-list', id: 'semilandmark-list', role: 'listbox', 'aria-label': t('semi.title') });
+  const setInspector = h('div', { class: 'inspector', id: 'semilandmark-inspector' });
+  body.append(names, list, inspector, h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('semi.title')), addSet), setList, setInspector);
+
+  let dragId: string | null = null;
+  let builtFor: string | null = null;
+  let nameInput: HTMLInputElement | null = null;
+  let setBuiltFor: string | null = null;
+  let countInput: HTMLInputElement | null = null;
+
+  const select = (id: string, label: string, options: Array<[string, string]>, value: string, onChange: (v: string) => void) => {
+    const sel = h('select', { id, class: 'ctl-select' }, ...options.map(([v, l]) => h('option', { value: v }, l))) as HTMLSelectElement;
+    sel.value = value;
+    sel.addEventListener('change', () => onChange(sel.value));
+    return h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: id }, label), sel);
+  };
+
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'landmarks', 'curves', 'selection', 'mesh'].includes(kind)) return;
+    const st = api.store.state;
+    const sel = api.selection.id;
+    const table = api.landmarkTable();
+    badge.textContent = String(st.landmarks.length);
+
+    // names carried over from the last specimen
+    clear(names);
+    const queue = api.nameQueue();
+    if (queue) {
+      names.append(
+        h('span', { class: 'ctl-label' }, t('landmark.next')),
+        h('span', { class: 'mono landmark-next', id: 'landmark-next-name' }, queue.next ?? '–'),
+        h('span', { class: 'btn-row' },
+          h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-skip-name', disabled: !queue.next, onclick: () => api.skipName() }, t('landmark.skip')),
+          h('button', { type: 'button', class: 'icon-btn', id: 'landmark-stop-names', title: t('landmark.stopNames'), 'aria-label': t('landmark.stopNames'), onclick: () => api.stopNames() }, icon(ICONS.close))),
+      );
+    } else {
+      names.append(h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-reuse-names', disabled: !api.hasMesh() || !api.previousNames().length, onclick: () => api.reuseNames() }, t('landmark.reuseNames')));
+    }
+
+    // fixed landmarks, in export order (drag to reorder)
+    clear(list);
+    list.hidden = st.landmarks.length === 0;
+    st.landmarks.forEach((l, i) => {
+      const li = h(
+        'li',
+        { class: 'arrow-row landmark-row', role: 'option', 'aria-selected': String(l.id === sel), 'data-id': l.id, draggable: 'true', onclick: () => api.selection.set(l.id) },
+        h('span', { class: 'chip chip-dot', style: `--chip:${l.id === sel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.fixed}` }),
+        h('span', { class: 'arrow-id mono' }, String(i + 1)),
+        h('span', { class: 'arrow-meta' }, l.name),
+      );
+      li.addEventListener('dragstart', (e) => {
+        dragId = l.id;
+        e.dataTransfer?.setData('text/plain', l.id);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      });
+      li.addEventListener('dragover', (e) => {
+        if (!dragId) return;
+        e.preventDefault();
+        li.classList.add('is-drop');
+      });
+      li.addEventListener('dragleave', () => li.classList.remove('is-drop'));
+      li.addEventListener('drop', (e) => {
+        e.preventDefault();
+        li.classList.remove('is-drop');
+        const id = dragId;
+        dragId = null;
+        if (id && id !== l.id) reorderLandmark(api.store, id, i);
+      });
+      li.addEventListener('dragend', () => (dragId = null));
+      list.append(li);
+    });
+
+    const l = sel ? api.store.landmark(sel) : undefined;
+    if (!l) {
+      clear(inspector);
+      builtFor = null;
+      nameInput = null;
+    } else {
+      if (builtFor !== l.id || !nameInput) {
+        clear(inspector);
+        const row = textRow('landmark-name', t('landmark.name'), l.name, (v) => renameLandmark(api.store, l.id, v));
+        nameInput = row.input as HTMLInputElement;
+        inspector.append(row.el, h('div', { class: 'landmark-body' }));
+        builtFor = l.id;
+      }
+      softSet(nameInput, l.name);
+      const holder = inspector.querySelector('.landmark-body') as HTMLElement;
+      clear(holder);
+      const i = st.landmarks.indexOf(l);
+      const p = l.point;
+      holder.append(
+        h('dl', { class: 'meta coords' }, ...metaRow('x, y, z', h('span', { class: 'mono' }, `${fmtNum(p[0])}, ${fmtNum(p[1])}, ${fmtNum(p[2])}`))),
+        h(
+          'div',
+          { class: 'btn-row' },
+          h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-up', disabled: i === 0, onclick: () => reorderLandmark(api.store, l.id, i - 1) }, icon(ICONS.up), t('landmark.up')),
+          h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-down', disabled: i === st.landmarks.length - 1, onclick: () => reorderLandmark(api.store, l.id, i + 1) }, icon(ICONS.down), t('landmark.down')),
+          h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'landmark-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteLandmark(api.store, l.id) }, icon(ICONS.trash), t('arrows.delete')),
+        ),
+      );
+    }
+
+    // curve semilandmarks
+    addSet.disabled = !api.hasMesh() || st.curves.length === 0;
+    clear(setList);
+    setList.hidden = st.semilandmarks.length === 0;
+    for (const q of st.semilandmarks) {
+      const res = table.sets.find((x) => x.id === q.id);
+      const curve = api.store.curve(q.curveId);
+      setList.append(
+        h(
+          'li',
+          { class: 'arrow-row semilandmark-row', role: 'option', 'aria-selected': String(q.id === sel), 'data-id': q.id, onclick: () => api.selection.set(q.id) },
+          h('span', { class: 'chip chip-dot', style: `--chip:${q.id === sel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.semi}` }),
+          h('span', { class: 'arrow-id mono' }, q.label),
+          h('span', { class: 'arrow-meta' }, curve?.label ?? '–'),
+          h('span', { class: 'arrow-len mono' }, res?.valid ? String(q.count) : '–'),
+        ),
+      );
+    }
+    const q = sel ? api.store.semilandmarkSet(sel) : undefined;
+    if (!q) {
+      clear(setInspector);
+      setBuiltFor = null;
+      countInput = null;
+      return;
+    }
+    if (setBuiltFor !== q.id || !countInput) {
+      clear(setInspector);
+      countInput = h('input', { id: 'semilandmark-count', class: 'ctl-text mono', type: 'number', min: 1, max: 500, step: 1 }) as HTMLInputElement;
+      const input = countInput;
+      input.addEventListener('input', () => {
+        const n = Number(input.value);
+        if (Number.isInteger(n) && n >= 1 && n <= 500) updateSemilandmarkSet(api.store, q.id, { count: n });
+      });
+      setInspector.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'semilandmark-count' }, t('semi.count')), input), h('div', { class: 'semi-body' }));
+      setBuiltFor = q.id;
+    }
+    softSet(countInput, String(q.count));
+    const holder = setInspector.querySelector('.semi-body') as HTMLElement;
+    clear(holder);
+    const lms: Array<[string, string]> = [['', t('semi.none')], ...st.landmarks.map((x, i): [string, string] => [x.id, `${i + 1} · ${x.name}`])];
+    holder.append(
+      select('semilandmark-curve', t('semi.curve'), st.curves.map((c): [string, string] => [c.id, c.label]), q.curveId, (v) => updateSemilandmarkSet(api.store, q.id, { curveId: v })),
+      h(
+        'div',
+        { class: 'ctl-grid' },
+        select('semilandmark-start', t('semi.start'), lms, q.startLandmarkId ?? '', (v) => updateSemilandmarkSet(api.store, q.id, { startLandmarkId: v || null })),
+        select('semilandmark-end', t('semi.end'), lms, q.endLandmarkId ?? '', (v) => updateSemilandmarkSet(api.store, q.id, { endLandmarkId: v || null })),
+      ),
+      h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'semilandmark-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSemilandmarkSet(api.store, q.id) }, icon(ICONS.trash), t('arrows.delete'))),
+    );
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
 function noduleSection(api: AppApi): Section {
   const { el, body } = section('nodule', t('sec.nodule'));
   const regions = h('div', { class: 'fig-views', id: 'nodule-regions' });
@@ -1115,14 +1293,20 @@ function exportSection(api: AppApi): Section {
   const regionBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-regions-csv', onclick: () => api.exportRegionsCsv() }, t('export.regions')) as HTMLButtonElement;
   const relationBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-relations-csv', onclick: () => api.exportRelationsCsv() }, t('export.relations')) as HTMLButtonElement;
   const seriesBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-series-csv', onclick: () => api.exportSeriesCsv() }, t('export.series')) as HTMLButtonElement;
+  const lmBtn = (id: string, kind: 'tps' | 'fcsv' | 'csv' | 'sliders', label: string) => h('button', { type: 'button', class: 'btn btn-primary', id, onclick: () => api.exportLandmarks(kind) }, label) as HTMLButtonElement;
+  const lmBtns = [lmBtn('export-landmarks-tps', 'tps', t('export.landmarksTps')), lmBtn('export-landmarks-fcsv', 'fcsv', t('export.landmarksFcsv')), lmBtn('export-landmarks-csv', 'csv', t('export.landmarksCsv'))];
+  const slidersBtn = lmBtn('export-sliders-csv', 'sliders', t('export.sliders'));
   const bom = checkbox('export-bom', t('export.bom'), api.display.excelBom, (v) => api.setDisplay((x) => (x.excelBom = v), 'other'));
   const saveBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-project', onclick: () => api.saveProject() }, icon(ICONS.save), t('export.project')) as HTMLButtonElement;
   const openBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-open-project', onclick: () => api.openProject() }, icon(ICONS.open), t('header.openProject'));
-  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, regionBtn, relationBtn, seriesBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
+  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, regionBtn, relationBtn, seriesBtn, ...lmBtns, slidersBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'curves', 'regions', 'relations', 'sequences'].includes(kind)) return;
+    if (!['all', 'mesh', 'curves', 'regions', 'relations', 'sequences', 'landmarks'].includes(kind)) return;
     csvBtn.disabled = !api.hasMesh();
+    const table = api.landmarkTable();
+    for (const b of lmBtns) b.disabled = !api.hasMesh() || table.rows.length === 0;
+    slidersBtn.disabled = !api.hasMesh() || table.sliders.length === 0;
     relationBtn.disabled = !api.hasMesh() || api.store.state.relations.length === 0;
     seriesBtn.disabled = !api.hasMesh() || !api.store.state.sequences.some((q) => q.scarIds.length);
     curveBtn.disabled = !api.hasMesh() || api.store.state.curves.length === 0;
@@ -1145,6 +1329,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [curvesSection, ['annotate']],
   [(api) => regionsSection(api, (id, type) => api.setRegionType(id, type)), ['annotate']],
   [relationsSection, ['annotate']],
+  [landmarksSection, ['annotate']],
   [measureAutoSection, ['measure']],
   [measureManualSection, ['measure']],
   [planesSection, ['measure']],

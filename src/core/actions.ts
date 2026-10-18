@@ -12,6 +12,7 @@ import {
   DeleteRegionCommand,
   DeleteSectionCommand,
   DeleteScarCommand,
+  SetLandmarksCommand,
   SetNoduleCommand,
   SetRelationsCommand,
   SetSequencesCommand,
@@ -27,8 +28,8 @@ import {
 import type { CurveShape } from './curveGeometry';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
-import type { ProjectStore } from './store';
-import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, Sequence, SpecimenInfo, Vec3 } from './types';
+import { landmarkData, type LandmarkData, type ProjectStore } from './store';
+import type { AttributeValue, Curve, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -490,6 +491,87 @@ export function moveInSequence(store: ProjectStore, scarId: string, step: -1 | 1
     }),
   );
 }
+
+// ---------------------------------------------------------------- landmarks
+
+function changeLandmarks(store: ProjectStore, labelKey: string, change: (d: LandmarkData) => void, mergeKey: string | null = null): void {
+  const before = landmarkData(store.state);
+  const after = structuredClone(before);
+  change(after);
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  store.history.execute(new SetLandmarksCommand(labelKey, before, after, mergeKey));
+}
+
+const touch = <T extends { modifiedAt: string }>(x: T): T => Object.assign(x, { modifiedAt: nowIso() });
+
+/** A new fixed landmark at the end of the list, named `name` or LM1, LM2, … */
+export function addLandmark(store: ProjectStore, point: Vec3, name?: string): Landmark {
+  const n = store.state.nextLandmarkNumber;
+  const t = nowIso();
+  const lm: Landmark = { id: uuid(), name: name ?? `LM${n}`, point: copy(point), createdAt: t, modifiedAt: t };
+  changeLandmarks(store, 'cmd.addLandmark', (d) => {
+    d.landmarks.push(structuredClone(lm));
+    if (name === undefined) d.nextLandmarkNumber = n + 1;
+  });
+  return lm;
+}
+
+export const moveLandmark = (store: ProjectStore, id: string, point: Vec3): void =>
+  changeLandmarks(store, 'cmd.moveLandmark', (d) => {
+    const l = d.landmarks.find((x) => x.id === id);
+    if (l && JSON.stringify(l.point) !== JSON.stringify(point)) touch(l).point = copy(point);
+  });
+
+export const renameLandmark = (store: ProjectStore, id: string, name: string): void =>
+  changeLandmarks(store, 'cmd.renameLandmark', (d) => {
+    const l = d.landmarks.find((x) => x.id === id);
+    if (l && l.name !== name) touch(l).name = name;
+  }, `landmark-name:${id}`);
+
+/** Move a landmark to position `index` of the list (the export order). */
+export const reorderLandmark = (store: ProjectStore, id: string, index: number): void =>
+  changeLandmarks(store, 'cmd.reorderLandmarks', (d) => {
+    const i = d.landmarks.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const [l] = d.landmarks.splice(i, 1);
+    d.landmarks.splice(Math.max(0, Math.min(index, d.landmarks.length)), 0, l);
+  });
+
+/** Delete a landmark; semilandmark sets that ended at it run to the curve's end instead. */
+export const deleteLandmark = (store: ProjectStore, id: string): void =>
+  changeLandmarks(store, 'cmd.deleteLandmark', (d) => {
+    d.landmarks = d.landmarks.filter((x) => x.id !== id);
+    for (const q of d.semilandmarks) {
+      if (q.startLandmarkId === id) touch(q).startLandmarkId = null;
+      if (q.endLandmarkId === id) touch(q).endLandmarkId = null;
+    }
+  });
+
+/** New curve semilandmarks on a curve (10 points by default). */
+export function addSemilandmarkSet(store: ProjectStore, curveId: string, count = 10): SemilandmarkSet {
+  const n = store.state.nextSemilandmarkNumber;
+  const t = nowIso();
+  const set: SemilandmarkSet = { id: uuid(), label: `SL${n}`, curveId, count, startLandmarkId: null, endLandmarkId: null, createdAt: t, modifiedAt: t };
+  changeLandmarks(store, 'cmd.addSemilandmarks', (d) => {
+    d.semilandmarks.push(structuredClone(set));
+    d.nextSemilandmarkNumber = n + 1;
+  });
+  return set;
+}
+
+export function updateSemilandmarkSet(store: ProjectStore, id: string, patch: Partial<Pick<SemilandmarkSet, 'curveId' | 'count' | 'startLandmarkId' | 'endLandmarkId'>>): void {
+  const count = patch.count;
+  if (count !== undefined && !(Number.isInteger(count) && count >= 1)) return;
+  changeLandmarks(store, 'cmd.editSemilandmarks', (d) => {
+    const q = d.semilandmarks.find((x) => x.id === id);
+    if (q && Object.entries(patch).some(([k, v]) => q[k as keyof typeof patch] !== v)) Object.assign(touch(q), patch);
+  }, 'count' in patch ? `semi-count:${id}` : null);
+}
+
+export const deleteSemilandmarkSet = (store: ProjectStore, id: string): void =>
+  changeLandmarks(store, 'cmd.deleteSemilandmarks', (d) => {
+    d.semilandmarks = d.semilandmarks.filter((x) => x.id !== id);
+  });
 
 /** Split the volume by a plane or a closed curve (null: no split); `upHint` orients a curve's normal. */
 export function setSplit(store: ProjectStore, split: ProjectState['split']): void {

@@ -9,7 +9,7 @@ import type { LightRig, LightSettings } from './lighting';
  * Figures for publication: standard orthographic views of the specimen in its
  * frame, laid out by the European convention (ISO first-angle projection),
  * at a stated physical scale. The model's shading is rendered off screen; the
- * overlays (arrows, curves, plane sections), the outline and the scale bar are
+ * overlays (arrows, curves, plane sections, landmarks), the outline and the scale bar are
  * drawn as vectors, leaving out what the model hides.
  */
 
@@ -20,7 +20,7 @@ export interface FigureSettings {
   views: FigureView[];
   /** Height of the raking light above the page (degrees); it comes from the upper left. */
   lightElevation: number;
-  overlays: { arrows: boolean; curves: boolean; planes: boolean; regions: boolean; scaleBar: boolean };
+  overlays: { arrows: boolean; curves: boolean; planes: boolean; regions: boolean; landmarks: boolean; scaleBar: boolean };
   /** Paper size / real size. */
   scale: number;
   dpi: number;
@@ -29,7 +29,7 @@ export interface FigureSettings {
 export const DEFAULT_FIGURE: FigureSettings = {
   views: ['front', 'left'],
   lightElevation: 35,
-  overlays: { arrows: true, curves: true, planes: false, regions: true, scaleBar: true },
+  overlays: { arrows: true, curves: true, planes: false, regions: true, landmarks: true, scaleBar: true },
   scale: 1,
   dpi: 600,
 };
@@ -45,6 +45,8 @@ export interface FigureOverlays {
   arrows: Array<{ start: Vec3; end: Vec3; startNormal: Vec3; endNormal: Vec3; color: string }>;
   curves: Array<{ points: Vec3[]; closed: boolean; color: string }>;
   planes: Array<{ lines: Array<{ points: Vec3[]; closed: boolean }>; color: string }>;
+  /** Fixed landmarks (`fixed`) and semilandmarks, drawn as dots where they are seen. */
+  landmarks: Array<{ point: Vec3; color: string; fixed: boolean }>;
   /** Section drawings placed to the right of the views. */
   sections: SectionDrawing[];
 }
@@ -135,6 +137,7 @@ interface RenderedView extends FigureLayoutView {
   outline: Array<Array<[number, number]>>;
   arrows: Array<{ runs: Array<Array<[number, number]>>; head: [number, number, number, number] | null; color: string }>;
   lines: Array<{ runs: Array<Array<[number, number]>>; color: string; kind: 'curve' | 'plane' }>;
+  dots: Array<{ at: [number, number]; color: string; fixed: boolean }>;
 }
 
 const vadd = (a: Vec3, b: Vec3, s = 1): Vec3 => [a[0] + s * b[0], a[1] + s * b[1], a[2] + s * b[2]];
@@ -338,15 +341,16 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
     const lines: RenderedView['lines'] = [];
     if (settings.overlays.curves) for (const c of overlays.curves) lines.push({ runs: runs(c.points, c.closed), color: c.color, kind: 'curve' });
     if (settings.overlays.planes) for (const pl of overlays.planes) for (const l of pl.lines) lines.push({ runs: runs(l.points, l.closed), color: pl.color, kind: 'plane' });
+    const dots = settings.overlays.landmarks ? overlays.landmarks.filter((l) => visible(l.point)).map((l) => ({ at: toPx(l.point), color: l.color, fixed: l.fixed })) : [];
 
     // outline from the coverage of the rendered model
     const alpha = new Uint8Array(s.w * s.h);
     for (let i = 0; i < alpha.length; i++) alpha[i] = image.data[4 * i + 3];
     const outline = traceOutlines(alpha, s.w, s.h).map((l) => simplifyLoop(l, 0.35));
-    return { ...lv, image, outline, arrows, lines };
+    return { ...lv, image, outline, arrows, lines, dots };
   });
 
-  const stroke = { arrow: mmToPx(0.35), line: mmToPx(0.3), outline: mmToPx(0.25), head: mmToPx(2.2) };
+  const stroke = { arrow: mmToPx(0.35), line: mmToPx(0.3), outline: mmToPx(0.25), head: mmToPx(2.2), dot: mmToPx(0.9) };
   const drawn = sectionsInPixels(overlays.sections, layout, pxPerUnit);
   return {
     layout,
@@ -460,7 +464,11 @@ interface Strokes {
   line: number;
   outline: number;
   head: number;
+  /** Radius of a fixed landmark (semilandmarks are smaller). */
+  dot: number;
 }
+
+const dotRadius = (d: { fixed: boolean }, stroke: Strokes) => (d.fixed ? stroke.dot : stroke.dot * 0.65);
 
 /** Arrowhead triangle at the tip (x1, y1) of the segment from (x0, y0). */
 function headPoints(seg: [number, number, number, number], size: number): Array<[number, number]> {
@@ -517,6 +525,15 @@ function drawOverlays(g: CanvasRenderingContext2D, v: RenderedView, stroke: Stro
       g.closePath();
       g.fill();
     }
+  }
+  for (const d of v.dots) {
+    g.beginPath();
+    g.arc(d.at[0], d.at[1], dotRadius(d, stroke), 0, 2 * Math.PI);
+    g.fillStyle = d.color;
+    g.fill();
+    g.strokeStyle = '#000';
+    g.lineWidth = stroke.outline * 0.8;
+    g.stroke();
   }
   g.restore();
 }
@@ -591,6 +608,11 @@ async function composeSvg(views: RenderedView[], sections: DrawnSection[], layou
       if (a.head) out.push(`<polygon fill="${esc(a.color)}" stroke="none" points="${pts(headPoints(a.head, stroke.head))}"/>`);
     }
     out.push('</g>');
+    if (v.dots.length) {
+      out.push(`<g class="landmarks" stroke="#000" stroke-width="${f2(stroke.outline * 0.8)}">`);
+      for (const d of v.dots) out.push(`<circle class="${d.fixed ? 'fixed' : 'curve'}" cx="${f2(d.at[0])}" cy="${f2(d.at[1])}" r="${f2(dotRadius(d, stroke))}" fill="${esc(d.color)}"/>`);
+      out.push('</g>');
+    }
     out.push('</g>');
   }
   if (sections.length) {

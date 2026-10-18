@@ -151,6 +151,20 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   regions. Arrows and regions of a selected relation, or of the opened problems, are drawn
   highlighted (`ArrowLayer.setHighlight`, `App.emphasis`).
 
+## Landmarks
+
+* `ProjectState.landmarks` (export order) and `semilandmarks` (sets: curve, count, end
+  landmarks) change together through `SetLandmarksCommand`, which keeps both lists and their
+  counters before and after.
+* `compute/landmarks.ts`: `sampleCurve` (equal arc length between the curve points nearest the
+  end landmarks), `landmarkTable` (every point in export order and the geomorph sliders). The app
+  recomputes the table whenever landmarks or curves change; `io/landmarks.ts` writes TPS, Slicer
+  `.fcsv`, the long CSV and the sliders from it, so all exports share one numbering.
+* `tools/landmarkTool.ts` places (snapping like curve points) and drags landmarks;
+  `render/landmarkLayer.ts` draws them with their names, and the semilandmarks. Names carried
+  over from the last specimen are kept in local preferences keyed by mesh checksum
+  (`App.previousNames`); the queue itself is session state, not project data.
+
 ## Cortex sphere
 
 `compute/sphere.ts` fits a sphere (algebraic start, Gauss–Newton on the geometric residuals,

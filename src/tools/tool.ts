@@ -2,6 +2,7 @@ import type { SnapMode } from '../compute/surfacePath';
 import type { ProjectStore } from '../core/store';
 import type { ArrowLayer } from '../render/arrowLayer';
 import type { CurveLayer } from '../render/curveLayer';
+import type { LandmarkLayer } from '../render/landmarkLayer';
 import type { MeasureLayer } from '../render/measureLayer';
 import type { SurfaceHit, Viewer } from '../render/viewer';
 import type { Selection } from './selection';
@@ -13,6 +14,7 @@ export interface ToolContext {
   arrows: ArrowLayer;
   curves: CurveLayer;
   measures: MeasureLayer;
+  landmarks: LandmarkLayer;
   selection: Selection;
   /** Path search and snapping on the current mesh (null before a mesh is loaded). */
   snap: () => SurfaceSnap | null;

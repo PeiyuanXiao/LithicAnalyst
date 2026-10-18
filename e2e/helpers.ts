@@ -40,6 +40,8 @@ export interface LithicApi {
   harrisSvg(): string;
   highlighted(): string[];
   relationPending(): string | null;
+  landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
+  exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;
   setMode(m: 'annotate' | 'measure' | 'present'): void;
   projectJson(): ProjectFile;

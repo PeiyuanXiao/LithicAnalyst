@@ -13,7 +13,7 @@ export interface CsvOptions {
   excelBom: boolean;
 }
 
-const fmt = (n: number): string => {
+export const fmt = (n: number): string => {
   if (!Number.isFinite(n)) return '';
   const r = Math.round(n * 1e6) / 1e6;
   return Object.is(r, -0) ? '0' : String(r);

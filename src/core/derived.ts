@@ -1,6 +1,7 @@
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
+import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
 import { relationResults, type RelationResults } from '../compute/relations';
 import type { SphereFit } from '../compute/sphere';
 import type { VolumeSplit } from '../compute/split';
@@ -54,6 +55,8 @@ export interface DerivedResults {
   split: VolumeSplit | null;
   /** Checks of the relations and sequences (scar ids), and the direct relations. */
   relations: RelationResults;
+  /** Every landmark in export order (fixed, then each set's semilandmarks), the sliders, and the sets' points. */
+  landmarks: LandmarkTable;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -92,5 +95,6 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     nodule: mesh?.nodule ?? null,
     split: mesh?.split ?? null,
     relations: relationResults(state),
+    landmarks: landmarkTable(state),
   };
 }

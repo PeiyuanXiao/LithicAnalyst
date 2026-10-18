@@ -5,7 +5,7 @@ import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compu
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addPlane, addRegion, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, updateSpecimen } from '../core/actions';
+import { addLandmark, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -29,6 +29,10 @@ import { checkRelations, harrisLayout, relationInputs, relationProblems, type Ha
 import { harrisSvg, type HarrisStyle } from '../render/harris';
 import { sequenceColors } from '../render/sequenceColor';
 import { RelationTool, type ScarPick } from '../tools/relationTool';
+import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
+import { landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
+import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
+import { LandmarkTool } from '../tools/landmarkTool';
 import type { HitProvider } from '../tools/tool';
 import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
@@ -178,6 +182,10 @@ export class App implements AppApi {
   problemsOpen = false;
   private focusedProblem: number | null = null;
   private harrisEl: HTMLElement | null = null;
+  private landmarkLayer: LandmarkLayer | null = null;
+  private landmarks: LandmarkTable = { rows: [], sliders: [], sets: [] };
+  /** Landmark names carried over from the last specimen, and those skipped. */
+  private names: { list: string[]; skipped: Set<string> } | null = null;
   private harrisBody: HTMLElement | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
@@ -265,6 +273,8 @@ export class App implements AppApi {
     this.planesLayer = new PlaneLayer(viewer);
     this.sectionLayer = new SectionLayer(viewer);
     this.regionLayer = new RegionLayer(viewer.scene);
+    this.landmarkLayer = new LandmarkLayer(viewer);
+    this.landmarkLayer.onLabelClick = (id) => this.selection.set(id);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -274,6 +284,7 @@ export class App implements AppApi {
         this.arrows?.updateOcclusion();
         this.curves?.updateOcclusion();
         this.measures?.updateOcclusion();
+        this.landmarkLayer?.updateOcclusion();
       }
     });
     viewer.onCameraChange(() => {
@@ -286,6 +297,7 @@ export class App implements AppApi {
       arrows: this.arrows,
       curves: this.curves,
       measures: this.measures,
+      landmarks: this.landmarkLayer,
       selection: this.selection,
       snap: () => this.surfaceSnap,
       snapMode: () => this.display.curveSnap,
@@ -300,6 +312,7 @@ export class App implements AppApi {
     for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
+    this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p)));
     this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b) => void this.askRelation(a, b)));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
@@ -382,6 +395,7 @@ export class App implements AppApi {
       { value: 'curve', label: `${t('mode.curve')}  P` },
       { value: 'region', label: `${t('tool.region')}  R` },
       { value: 'relation', label: `${t('tool.relation')}  B` },
+      { value: 'landmark', label: `${t('tool.landmark')}  K` },
     ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
     this.modeSeg.el.classList.add('seg-mode');
     this.snapSeg = segmented('snap', null, SNAP_MODES.map((m) => ({ value: m, label: t(`snap.${m}`) })), this.display.curveSnap, (v) =>
@@ -410,7 +424,7 @@ export class App implements AppApi {
     if (this.modeSeg) this.modeSeg.el.hidden = !annotate;
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
     if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
-    if (this.snapEl) this.snapEl.hidden = !annotate || this.tools?.activeId !== 'curve';
+    if (this.snapEl) this.snapEl.hidden = !annotate || !['curve', 'landmark'].includes(this.tools?.activeId ?? '');
   }
 
   private buildEmptyState(): void {
@@ -496,8 +510,11 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel))
+    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel) && !this.store.landmark(sel) && !this.store.semilandmarkSet(sel))
       this.selection.set(null);
+    if (['landmarks', 'curves', 'reset'].includes(c.kind)) this.landmarks = landmarkTable(this.store.state);
+    if (c.kind === 'landmarks') this.rememberLandmarkNames();
+    if (c.kind === 'reset') this.names = null;
     if (['scars', 'relations', 'sequences', 'reset'].includes(c.kind)) {
       // the problem list closes once there is nothing in it
       const n = relationProblems(this.relationChecks()).length;
@@ -513,8 +530,9 @@ export class App implements AppApi {
     if (c.kind === 'nodule') this.updateNodule();
     if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', nodule: 'nodule', split: 'split', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
+    if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
       this.sidebar.refresh('curves');
@@ -534,6 +552,7 @@ export class App implements AppApi {
     this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
+    this.landmarkLayer?.sync(this.store.state.landmarks, this.landmarks.sets, this.selection.id, this.display.arrows.labels, this.display.arrows.showHidden);
     const mesh = this.store.state.mesh;
     this.sectionLayer?.sync(this.store.state.sections, (id) => this.cuts.get(id)?.lines ?? null, this.selection.id, this.mode === 'present');
     this.applyClipping();
@@ -865,6 +884,10 @@ export class App implements AppApi {
         const lines = this.cuts.get(p.id)?.lines;
         return lines ? [{ lines, color: planeColor(p.label) }] : [];
       }),
+      landmarks: [
+        ...st.landmarks.map((l) => ({ point: l.point, color: LANDMARK_COLORS.fixed, fixed: true })),
+        ...this.landmarks.sets.flatMap((q) => q.points.map((p) => ({ point: p, color: LANDMARK_COLORS.semi, fixed: false }))),
+      ],
       sections: only ? this.sectionDrawings([only]) : this.sectionDrawings(st.sections.filter((x) => x.inFigure)),
     });
     this.applyClipping();
@@ -1072,6 +1095,91 @@ export class App implements AppApi {
 
   towardViewer(): Vec3 {
     return this.viewer?.towardViewer() ?? [0, 0, 1];
+  }
+
+  // ------------------------------------------------------------ landmarks
+
+  landmarkTable(): LandmarkTable {
+    return this.landmarks;
+  }
+
+  /** Landmark tool: a new landmark, named from the carried-over list while it lasts. */
+  private placeLandmark(p: Vec3): void {
+    const lm = addLandmark(this.store, p, this.nextName() ?? undefined);
+    this.selection.set(lm.id);
+  }
+
+  private nextName(): string | null {
+    const q = this.names;
+    if (!q) return null;
+    const used = new Set(this.store.state.landmarks.map((l) => l.name));
+    return q.list.find((n) => !used.has(n) && !q.skipped.has(n)) ?? null;
+  }
+
+  nameQueue(): { next: string | null } | null {
+    return this.names ? { next: this.nextName() } : null;
+  }
+
+  /**
+   * The names of the last specimen that had landmarks. The current one's names
+   * are kept under 'landmarkNames' with its mesh checksum; when another mesh
+   * gets landmarks, they move to 'landmarkNamesPrev'.
+   */
+  previousNames(): string[] {
+    const sha = this.store.state.mesh?.sha256;
+    const cur = readPref<{ sha: string; names: string[] } | null>('landmarkNames', null);
+    if (cur && cur.sha !== sha && cur.names.length) return cur.names;
+    return readPref<string[]>('landmarkNamesPrev', []);
+  }
+
+  private rememberLandmarkNames(): void {
+    const sha = this.store.state.mesh?.sha256;
+    if (!sha) return;
+    const names = this.store.state.landmarks.map((l) => l.name);
+    const cur = readPref<{ sha: string; names: string[] } | null>('landmarkNames', null);
+    if (cur?.sha === sha) writePref('landmarkNames', { sha, names });
+    else if (names.length) {
+      if (cur?.names.length) writePref('landmarkNamesPrev', cur.names);
+      writePref('landmarkNames', { sha, names });
+    }
+  }
+
+  reuseNames(): void {
+    const list = this.previousNames();
+    this.names = list.length ? { list: [...list], skipped: new Set() } : null;
+    this.sidebar.refresh('landmarks');
+  }
+
+  skipName(): void {
+    const n = this.nextName();
+    if (n && this.names) this.names.skipped.add(n);
+    this.sidebar.refresh('landmarks');
+  }
+
+  stopNames(): void {
+    this.names = null;
+    this.sidebar.refresh('landmarks');
+  }
+
+  private landmarkExport(kind: 'tps' | 'fcsv' | 'csv' | 'sliders', bom: boolean): { text: string; name: string; mime: string } {
+    const st = this.store.state;
+    const tb = this.landmarks;
+    switch (kind) {
+      case 'tps':
+        return { text: landmarksTps(st, tb), name: `${this.stem()}_landmarks.tps`, mime: 'text/plain' };
+      case 'fcsv':
+        return { text: landmarksFcsv(tb), name: `${this.stem()}_landmarks.fcsv`, mime: 'text/plain' };
+      case 'csv':
+        return { text: landmarksCsv(st, tb, { excelBom: bom }), name: `${this.stem()}_landmarks.csv`, mime: 'text/csv' };
+      default:
+        return { text: slidersCsv(tb), name: `${this.stem()}_sliders.csv`, mime: 'text/csv' };
+    }
+  }
+
+  exportLandmarks(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): void {
+    if (!this.hasMesh() || !this.landmarks.rows.length) return;
+    const f = this.landmarkExport(kind, this.display.excelBom);
+    void this.save(f.name, f.text, f.mime);
   }
 
   // ------------------------------------------------------------ relations and sequences
@@ -1435,6 +1543,8 @@ export class App implements AppApi {
     if (this.store.region(sel)) deleteRegion(this.store, sel);
     else if (this.store.relation(sel)) deleteRelation(this.store, sel);
     else if (this.store.sequence(sel)) deleteSequence(this.store, sel);
+    else if (this.store.landmark(sel)) deleteLandmark(this.store, sel);
+    else if (this.store.semilandmarkSet(sel)) deleteSemilandmarkSet(this.store, sel);
     else if (this.store.curve(sel)) deleteCurve(this.store, sel);
     else if (this.store.scar(sel)) deleteScar(this.store, sel);
   }
@@ -1488,6 +1598,7 @@ export class App implements AppApi {
     this.meshView?.dispose();
     this.arrows?.clearAll();
     this.curves?.clearAll();
+    this.landmarkLayer?.clearAll();
     this.measures?.clearAll();
     this.planesLayer?.clearAll();
     this.sectionLayer?.clearAll();
@@ -1756,6 +1867,9 @@ export class App implements AppApi {
         case 'KeyB':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('relation');
           return;
+        case 'KeyK':
+          if (this.hasMesh() && this.mode === 'annotate') this.setTool('landmark');
+          return;
         case 'KeyX':
           if (this.hasMesh() && this.mode === 'present') this.setTool('section');
           return;
@@ -1770,7 +1884,7 @@ export class App implements AppApi {
           this.setTool('select');
           return;
         case 'KeyS':
-          if (this.tools?.activeId === 'curve') this.cycleSnap();
+          if (this.tools?.activeId === 'curve' || this.tools?.activeId === 'landmark') this.cycleSnap();
           return;
         case 'Enter':
         case 'NumpadEnter':
@@ -1854,6 +1968,7 @@ export class App implements AppApi {
       ['P', t('help.k.curve')],
       ['R', t('help.k.region')],
       ['B', t('help.k.relation')],
+      ['K', t('help.k.landmark')],
       ['V', t('help.k.select')],
       ['S', t('help.k.snap')],
       ['Shift', t('help.k.shift')],
@@ -1934,6 +2049,8 @@ export class App implements AppApi {
       exportRegionsCsvText: () => regionsCsv(this.store.state, this.regions?.results ?? [], { excelBom: false }),
       exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
       exportRelationsCsvText: () => relationsCsv(this.store.state, { excelBom: false }),
+      landmarkTable: () => this.landmarks,
+      exportLandmarksText: (kind: 'tps' | 'fcsv' | 'csv' | 'sliders') => this.landmarkExport(kind, false).text,
       exportSeriesCsvText: () => seriesCsv(this.store.state, { excelBom: false }),
       relationChecks: () => this.relationChecks(),
       harris: () => this.harrisLayoutNow(),

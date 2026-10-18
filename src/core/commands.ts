@@ -1,5 +1,5 @@
 import type { Curve, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
-import type { ProjectStore } from './store';
+import type { LandmarkData, ProjectStore } from './store';
 
 /**
  * Every change to project data goes through a Command. That single rule gives
@@ -451,6 +451,32 @@ export class SetSequencesCommand implements Command {
   }
   merge(next: Command): boolean {
     if (!(next instanceof SetSequencesCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
+  }
+}
+
+/** Replace the landmarks and semilandmark sets (with their counters); typing a name merges. */
+export class SetLandmarksCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: LandmarkData,
+    private after: LandmarkData,
+    private readonly mergeKey: string | null = null,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setLandmarkData(structuredClone(this.after));
+    store.notify({ kind: 'landmarks' });
+  }
+  revert(store: ProjectStore): void {
+    store._setLandmarkData(structuredClone(this.before));
+    store.notify({ kind: 'landmarks' });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetLandmarksCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);

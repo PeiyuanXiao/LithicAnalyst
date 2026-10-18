@@ -34,6 +34,8 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.regions` | array | surface regions as seeds (`{ id, label, seed, type, scarId }`) |
 | `annotations.relations` | array | stratigraphic relations between scars (`{ id, a, b, kind }`), see below |
 | `annotations.sequences` | array | removal sequences, earliest first (`{ id, label, scarIds, ordered }`), see below |
+| `annotations.landmarks` | array | fixed landmarks in export order (`{ id, name, point }`) |
+| `annotations.semilandmarks` | array | curve semilandmark sets (`{ id, label, curveId, count, startLandmarkId, endLandmarkId }`), see below |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
 | `split` | `{ source, id, upHint }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
@@ -45,9 +47,11 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `nextSectionNumber` | integer | next section label (`X{n}`) |
 | `nextRegionNumber` | integer | next region label (`R{n}`) |
 | `nextSequenceNumber` | integer | next sequence label (`Q{n}`) |
+| `nextLandmarkNumber` | integer | next default landmark name (`LM{n}`) |
+| `nextSemilandmarkNumber` | integer | next semilandmark set label (`SL{n}`) |
 
-Readers should ignore keys they do not know. Future annotation layers (landmarks) will be added
-next to `scars` and `curves` inside `annotations`.
+Readers should ignore keys they do not know. Future annotation layers will be added next to
+`scars` and `curves` inside `annotations`.
 
 ## Specimen
 
@@ -126,6 +130,11 @@ fitted planes, fitted spheres, volumes ….
   sequences). `count` = cycles + conflicts + 1 when some scars are unassigned. `direct`: the
   relations left after the transitive reduction (relations in a cycle are kept) — the lines of
   the Harris matrix.
+* `landmarks`: every landmark point in export order, `{ rows, sliders, sets }`. `rows`:
+  `{ index, name, kind, setId, point }` — the fixed landmarks (list order, `kind: "fixed"`), then
+  each set's semilandmarks (`kind: "curve"`, named `<set>_<k>`); `index` counts from 1.
+  `sliders`: `[before, slider, after]` by `index` (geomorph's `curves` matrix). `sets`:
+  `{ id, label, curveId, valid, points }` (`valid` false, no points, when the curve is missing).
 * `planes`: each fitted plane as computed from its inputs: `{ id, label, method, valid, center,
   normal, matrix, inputCount }`. `valid` is false when the inputs are not enough (then `center`,
   `normal` and `matrix` are null). `matrix` is row-major 4×4 and maps original coordinates to the
@@ -159,6 +168,26 @@ fitted planes, fitted spheres, volumes ….
 * Sequences are listed earliest first. A scar is in one sequence at most; within an `ordered`
   sequence `scarIds` runs from the earliest scar, otherwise their order means nothing.
 * Deleting a scar removes its relations and takes it out of its sequence.
+
+## Landmarks
+
+```json
+{ "id": "…", "name": "apex", "point": [12.1, -3.4, 8.8], "createdAt": "…", "modifiedAt": "…" }
+{ "id": "…", "label": "SL1", "curveId": "…", "count": 10, "startLandmarkId": "…", "endLandmarkId": null, "createdAt": "…", "modifiedAt": "…" }
+```
+
+* Fixed landmarks: a surface point (snapped onto a ridge or valley vertex when the snap setting
+  says so) and a free name. Their order in the list is the export order.
+* Curve semilandmarks: `count` points at equal arc length along the curve's traced points. With a
+  start and / or end landmark, the stretch runs between the points of the curve nearest to them,
+  which are left out (they are fixed landmarks); the first and last semilandmarks slide against
+  them. Without them, an open curve runs to its ends (included; with one landmark, to the end
+  farther from it), and those end points do not slide; a closed curve goes once round from its
+  first point and its points slide round the loop; with one landmark, once round from it; with two,
+  from the start to the end in the direction the curve was drawn. The points follow the curve and
+  the landmarks whenever they change. Deleting a landmark clears it from the sets.
+* Sliding is done in R (`geomorph::gpagen(curves = …)`, `Morpho::procSym`); the app only writes
+  the definition.
 
 ## Fitted plane
 
@@ -343,6 +372,18 @@ empty when the sequence is not ordered):
 specimen_id,series_id,series_order,scar_id,order_in_series
 ```
 
+Landmarks — all four files list the same points in the same order (fixed landmarks in list order,
+then each semilandmark set), numbered from 1:
+
+* `<specimen>_landmarks.tps`: `LM3=<n>`, one `x y z` line per point, `ID=<specimen>`.
+* `<specimen>_landmarks.fcsv`: 3D Slicer markups (`# Markups fiducial file version = 4.11`,
+  `# CoordinateSystem = LPS`), label = name, description = set label; coordinates as in the mesh
+  file (Slicer reads model files as LPS by default).
+* `<specimen>_landmarks.csv`: `specimen_id,index,name,kind,set_id,x,y,z` (`kind` is `fixed` or
+  `curve`).
+* `<specimen>_sliders.csv`: `before,slider,after`, one row per sliding semilandmark, by `index`
+  (geomorph's `curves` matrix: `as.matrix(read.csv(…))`).
+
 The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio`.
 
 Enumerated fields are written as their codes, which are the same in every interface language.
@@ -359,7 +400,7 @@ when reading, and saving writes format 2.
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
 | no `derived` | `derived` (computed results) |
-| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber`, `annotations.relations`, `annotations.sequences`, `nextSequenceNumber` |
+| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber`, `annotations.relations`, `annotations.sequences`, `nextSequenceNumber`, `annotations.landmarks`, `annotations.semilandmarks`, `nextLandmarkNumber`, `nextSemilandmarkNumber` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.

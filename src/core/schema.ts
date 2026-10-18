@@ -3,7 +3,7 @@ import { computeDerived, type DerivedResults, type MeshResults } from './derived
 import { defaultAttributes, defaultCurveAttributes } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, Curve, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -22,7 +22,7 @@ export interface ProjectFile {
   savedAt: string;
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
-  annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[]; regions: Region[]; relations: Relation[]; sequences: Sequence[] };
+  annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[]; regions: Region[]; relations: Relation[]; sequences: Sequence[]; landmarks: Landmark[]; semilandmarks: SemilandmarkSet[] };
   nodule: ProjectState['nodule'];
   split: ProjectState['split'];
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
@@ -34,6 +34,8 @@ export interface ProjectFile {
   nextSectionNumber: number;
   nextRegionNumber: number;
   nextSequenceNumber: number;
+  nextLandmarkNumber: number;
+  nextSemilandmarkNumber: number;
   createdAt: string;
   modifiedAt: string;
 }
@@ -47,7 +49,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     savedAt: nowIso(),
     specimen: structuredClone(state.specimen),
     mesh: state.mesh ? structuredClone(state.mesh) : null,
-    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections), regions: structuredClone(state.regions), relations: structuredClone(state.relations), sequences: structuredClone(state.sequences) },
+    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections), regions: structuredClone(state.regions), relations: structuredClone(state.relations), sequences: structuredClone(state.sequences), landmarks: structuredClone(state.landmarks), semilandmarks: structuredClone(state.semilandmarks) },
     nodule: structuredClone(state.nodule),
     split: structuredClone(state.split),
     derived: computeDerived(state, mesh),
@@ -58,6 +60,8 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     nextSectionNumber: state.nextSectionNumber,
     nextRegionNumber: state.nextRegionNumber,
     nextSequenceNumber: state.nextSequenceNumber,
+    nextLandmarkNumber: state.nextLandmarkNumber,
+    nextSemilandmarkNumber: state.nextSemilandmarkNumber,
     createdAt: state.createdAt,
     modifiedAt: state.modifiedAt,
   };
@@ -284,6 +288,34 @@ function parseSequences(raw: unknown, scarIds: Set<string>): Sequence[] {
   });
 }
 
+function parseLandmark(raw: unknown, i: number): Landmark {
+  if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Landmark ${i + 1} is not an object.`);
+  const r = raw as Record<string, unknown>;
+  if (!isFiniteVec(r.point)) throw new ProjectFileError(`Landmark ${i + 1} needs a numeric "point" [x, y, z].`);
+  const t = nowIso();
+  return { id: str(r.id) || uuid(), name: str(r.name, `LM${i + 1}`), point: [r.point[0], r.point[1], r.point[2]], createdAt: str(r.createdAt, t), modifiedAt: str(r.modifiedAt, t) };
+}
+
+/** A set whose curve is missing stays (it has no points); references to unknown landmarks are dropped. */
+function parseSemilandmarkSet(raw: unknown, i: number, landmarkIds: Set<string>): SemilandmarkSet {
+  if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Semilandmark set ${i + 1} is not an object.`);
+  const r = raw as Record<string, unknown>;
+  if (typeof r.curveId !== 'string') throw new ProjectFileError(`Semilandmark set ${i + 1} needs a "curveId".`);
+  const count = typeof r.count === 'number' && Number.isInteger(r.count) && r.count >= 1 ? r.count : 10;
+  const lm = (v: unknown) => (typeof v === 'string' && landmarkIds.has(v) ? v : null);
+  const t = nowIso();
+  return {
+    id: str(r.id) || uuid(),
+    label: str(r.label, `SL${i + 1}`),
+    curveId: r.curveId,
+    count,
+    startLandmarkId: lm(r.startLandmarkId),
+    endLandmarkId: lm(r.endLandmarkId),
+    createdAt: str(r.createdAt, t),
+    modifiedAt: str(r.modifiedAt, t),
+  };
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -314,6 +346,9 @@ export function parseProjectFile(input: unknown): ProjectState {
   const scarIds = new Set(scars.map((s) => s.id));
   const relations = parseRelations(ann?.relations, scarIds);
   const sequences = parseSequences(ann?.sequences, scarIds);
+  const landmarks = (Array.isArray(ann?.landmarks) ? (ann!.landmarks as unknown[]) : []).map((l, i) => parseLandmark(l, i));
+  const landmarkIds = new Set(landmarks.map((l) => l.id));
+  const semilandmarks = (Array.isArray(ann?.semilandmarks) ? (ann!.semilandmarks as unknown[]) : []).map((q, i) => parseSemilandmarkSet(q, i, landmarkIds));
   const sp = (raw.specimen ?? {}) as Record<string, unknown>;
   const specimen: SpecimenInfo = {
     id: str(sp.id),
@@ -333,6 +368,8 @@ export function parseProjectFile(input: unknown): ProjectState {
     regions,
     relations,
     sequences,
+    landmarks,
+    semilandmarks,
     nodule: (() => {
       const nd = (raw.nodule ?? {}) as Record<string, unknown>;
       return { exclude: Array.isArray(nd.exclude) ? nd.exclude.filter((x): x is string => typeof x === 'string') : [], show: nd.show === true };
@@ -349,6 +386,8 @@ export function parseProjectFile(input: unknown): ProjectState {
     nextSectionNumber: Math.max(positiveInt(raw.nextSectionNumber), maxLabelNumber(sections.map((s) => s.label), 'X') + 1),
     nextRegionNumber: Math.max(positiveInt(raw.nextRegionNumber), maxLabelNumber(regions.map((r) => r.label), 'R') + 1),
     nextSequenceNumber: Math.max(positiveInt(raw.nextSequenceNumber), maxLabelNumber(sequences.map((q) => q.label), 'Q') + 1),
+    nextLandmarkNumber: Math.max(positiveInt(raw.nextLandmarkNumber), maxLabelNumber(landmarks.map((l) => l.name), 'LM') + 1),
+    nextSemilandmarkNumber: Math.max(positiveInt(raw.nextSemilandmarkNumber), maxLabelNumber(semilandmarks.map((q) => q.label), 'SL') + 1),
     createdAt: str(raw.createdAt, nowIso()),
     modifiedAt: str(raw.modifiedAt, nowIso()),
   };

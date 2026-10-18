@@ -125,9 +125,8 @@ export class SelectTool implements Tool {
       return;
     }
     if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) <= CLICK_PX && e.button === 0) {
-      const a = this.ctx.arrows.pickNearest(e.clientX, e.clientY);
-      const c = this.ctx.curves.pickNearest(e.clientX, e.clientY);
-      const pick = !a ? c : !c ? a : c.dist < a.dist ? c : a;
+      const picks = [this.ctx.arrows.pickNearest(e.clientX, e.clientY), this.ctx.curves.pickNearest(e.clientX, e.clientY), this.ctx.landmarks.pickNearest(e.clientX, e.clientY)];
+      const pick = picks.reduce<{ id: string; dist: number } | null>((best, p) => (p && (!best || p.dist < best.dist) ? p : best), null);
       this.ctx.selection.set(pick?.id ?? null);
     }
     this.down = null;

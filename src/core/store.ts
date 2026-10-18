@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, Sequence, SpecimenInfo } from './types';
+import type { Curve, Landmark, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'nodule' | 'split' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -23,6 +23,8 @@ export function emptyProject(): ProjectState {
     regions: [],
     relations: [],
     sequences: [],
+    landmarks: [],
+    semilandmarks: [],
     nodule: { exclude: [], show: false },
     split: null,
     nextLabelNumber: 1,
@@ -32,10 +34,18 @@ export function emptyProject(): ProjectState {
     nextSectionNumber: 1,
     nextRegionNumber: 1,
     nextSequenceNumber: 1,
+    nextLandmarkNumber: 1,
+    nextSemilandmarkNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
 }
+
+/** Landmarks, semilandmark sets and their label counters: changed together by SetLandmarksCommand. */
+export type LandmarkData = Pick<ProjectState, 'landmarks' | 'semilandmarks' | 'nextLandmarkNumber' | 'nextSemilandmarkNumber'>;
+
+export const landmarkData = (s: Readonly<ProjectState>): LandmarkData =>
+  structuredClone({ landmarks: s.landmarks, semilandmarks: s.semilandmarks, nextLandmarkNumber: s.nextLandmarkNumber, nextSemilandmarkNumber: s.nextSemilandmarkNumber });
 
 export const vectorLength = (v: ScarVector): number => distance(v.start, v.end);
 
@@ -98,6 +108,14 @@ export class ProjectStore {
 
   sequence(id: string): Sequence | undefined {
     return this._state.sequences.find((q) => q.id === id);
+  }
+
+  landmark(id: string): Landmark | undefined {
+    return this._state.landmarks.find((l) => l.id === id);
+  }
+
+  semilandmarkSet(id: string): SemilandmarkSet | undefined {
+    return this._state.semilandmarks.find((l) => l.id === id);
   }
 
   /** Replace the whole project (new mesh, loaded project file). Clears history. */
@@ -249,6 +267,10 @@ export class ProjectStore {
 
   _setNextSequenceNumber(n: number): void {
     this._state.nextSequenceNumber = n;
+  }
+
+  _setLandmarkData(d: LandmarkData): void {
+    Object.assign(this._state, d);
   }
 
   _setSplit(s: ProjectState['split']): void {

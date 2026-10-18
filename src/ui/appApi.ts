@@ -96,6 +96,16 @@ export interface AppApi {
   problemFocus(): number | null;
   exportRelationsCsv(): void;
   exportSeriesCsv(): void;
+  /** Landmarks in export order, sliders and semilandmark points (follows the curves). */
+  landmarkTable(): import('../compute/landmarks').LandmarkTable;
+  /** Landmark names carried over from the last specimen: the next one to use (null when used up), or null when not in use. */
+  nameQueue(): { next: string | null } | null;
+  /** The landmark names of the last specimen (empty when there are none). */
+  previousNames(): string[];
+  reuseNames(): void;
+  skipName(): void;
+  stopNames(): void;
+  exportLandmarks(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): void;
   saveProject(): void;
   openProject(): void;
 }

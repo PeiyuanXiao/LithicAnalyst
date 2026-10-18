@@ -60,6 +60,15 @@
   framed) follows every change, selects scars on click and exports to SVG. "By sequence" colours
   arrows and scar regions by sequence, light to dark from the earliest scar. Exports:
   `<specimen>_relations.csv` and `<specimen>_series.csv`. Deleting a scar removes its relations.
+- Landmarks (annotate mode, K): click the surface to place a fixed landmark (snapped onto a nearby
+  ridge or valley as the snap setting says; Shift places it exactly), drag it to move it, name it
+  freely; the list order is the export order (drag rows or use the arrows). Optionally reuse the
+  names of the last specimen: they are applied in turn as points are placed, and can be skipped.
+  Curve semilandmarks: N points at equal arc length along a curve, optionally between a start and
+  an end landmark, kept up to date when the curve or the landmarks change. Exports: TPS (LM3),
+  3D Slicer `.fcsv`, `<specimen>_landmarks.csv` and the sliding definition
+  `<specimen>_sliders.csv` (geomorph `curves`: before, slider, after) — all with the same point
+  numbers. Landmarks can be drawn in figures.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from
