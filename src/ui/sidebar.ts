@@ -51,7 +51,7 @@ import { LANDMARK_COLORS } from '../render/landmarkLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
-import { clear, h, icon, ICONS } from './dom';
+import { clear, h, icon, ICONS, revealInList } from './dom';
 import { t, tl } from './i18n';
 
 export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
@@ -151,7 +151,7 @@ function arrowsSection(api: AppApi): Section {
         h('span', { class: 'arrow-len mono' }, a.vector ? `${fmtNum(vectorLength(a.vector), 1)}${unit ? ` ${unit}` : ''}` : '–'),
       );
       list.append(li);
-      if (isSel) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest' }));
+      if (isSel) requestAnimationFrame(() => revealInList(list, li));
     }
   };
 
@@ -277,7 +277,7 @@ function curvesSection(api: AppApi): Section {
         h('span', { class: 'arrow-len mono' }, `${fmtNum(curveLength(c), 1)}${unit ? ` ${unit}` : ''}`),
       );
       list.append(li);
-      if (isSel) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest' }));
+      if (isSel) requestAnimationFrame(() => revealInList(list, li));
     }
   };
 
@@ -498,7 +498,7 @@ function measureManualSection(api: AppApi): Section {
     const sel = api.selection.id;
     for (const m of st.measurements) {
       const isSel = m.id === sel;
-      list.append(
+      const li = list.appendChild(
         h(
           'li',
           { class: 'arrow-row measure-row', role: 'option', 'aria-selected': String(isSel), 'data-id': m.id, onclick: () => api.selection.set(m.id) },
@@ -508,6 +508,7 @@ function measureManualSection(api: AppApi): Section {
           h('span', { class: 'arrow-len mono' }, api.formatMeasurement(m)),
         ),
       );
+      if (isSel) requestAnimationFrame(() => revealInList(list, li));
     }
     const selected = !!(sel && api.store.measurement(sel));
     actions.hidden = !selected;
@@ -1161,17 +1162,21 @@ function splitSection(api: AppApi): Section {
     else if (sp) setSplit(api.store, { ...sp, upHint: [-sp.upHint[0], -sp.upHint[1], -sp.upHint[2]] });
   } }, t('split.flip')) as HTMLButtonElement;
   const meta = h('dl', { class: 'meta' });
-  body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), select), h('div', { class: 'btn-row' }, flip), meta);
+  const flipRow = h('div', { class: 'btn-row' }, flip);
+  body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), select), flipRow, meta);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'split', 'planes', 'curves', 'mesh', 'specimen', 'measure'].includes(kind)) return;
     const st = api.store.state;
     const options: Array<[string, string]> = [['', t('split.none')]];
     for (const p of api.planeResults()) if (p.valid) options.push([`plane:${p.id}`, p.label]);
     for (const c of st.curves) if (c.closed) options.push([`curve:${c.id}`, c.label]);
+    // a split whose plane or curve can no longer split stays listed, so it can be seen and cleared
+    const current = st.split ? `${st.split.source}:${st.split.id}` : '';
+    if (st.split && !options.some(([v]) => v === current)) options.push([current, (st.split.source === 'plane' ? api.store.plane(st.split.id) : api.store.curve(st.split.id))?.label ?? '–']);
     clear(select);
     for (const [value, label] of options) select.append(h('option', { value }, label));
-    select.value = st.split ? `${st.split.source}:${st.split.id}` : '';
-    flip.disabled = !st.split;
+    select.value = current;
+    flipRow.hidden = !st.split;
     clear(meta);
     const u = st.specimen.unit;
     const closed = api.meshClosed();
@@ -1186,7 +1191,7 @@ function splitSection(api: AppApi): Section {
   };
   refresh('all');
   // a split needs a closed curve or a plane
-  return { el, refresh, visible: () => api.store.state.curves.some((c) => c.closed) || api.planeResults().some((p) => p.valid) };
+  return { el, refresh, visible: () => !!api.store.state.split || api.store.state.curves.some((c) => c.closed) || api.planeResults().some((p) => p.valid) };
 }
 
 function sectionsSection(api: AppApi): Section {
@@ -1395,6 +1400,11 @@ function agreementSection(api: AppApi): Section {
         if (group === 'arrow' || group === 'curve') {
           const m = value(group, 'all', 'matched') ?? 0, ua = value(group, 'all', 'unmatched_a') ?? 0, ub = value(group, 'all', 'unmatched_b') ?? 0;
           pairing = t('agree.pairing', { m, n: m + ua, a, ua, b, ub });
+        } else if (group === 'region') {
+          // scar regions are paired; region types are compared over the area both observers typed
+          const n = new Set(rows.filter((r) => r.itemType === 'region' && !REGION_KEYS.includes(r.itemKey)).map((r) => r.itemKey)).size;
+          const area = value('region_type', 'all', 'area');
+          pairing = [n ? t('agree.paired', { n }) : '', area !== undefined ? `${t('agree.metric.area')} ${fmtNum(area, 3)} ${unitOf('area', 'region_type', 'all')}`.trim() : ''].filter(Boolean).join(' · ');
         } else {
           const n = rows.find((r) => r.metric === 'n_items')?.value ?? new Set(rows.filter((r) => r.itemKey !== 'all').map((r) => r.itemKey)).size;
           pairing = t('agree.paired', { n });
@@ -1404,7 +1414,7 @@ function agreementSection(api: AppApi): Section {
         const perKey = group === 'scar_attribute' || group === 'region' || group === 'measurement';
         const seen = new Map<string, { type: string; key: string; metric: string; values: number[] }>();
         for (const r of rows) {
-          if (['matched', 'unmatched_a', 'unmatched_b', 'n_items'].includes(r.metric)) continue;
+          if (['matched', 'unmatched_a', 'unmatched_b', 'n_items'].includes(r.metric) || (r.itemType === 'region_type' && r.metric === 'area')) continue;
           const keyed = perKey && (r.itemType !== 'region' || REGION_KEYS.includes(r.itemKey) || r.itemKey === 'all');
           const id = `${r.itemType}\u0000${keyed ? r.itemKey : '*'}\u0000${r.metric}`;
           const g = seen.get(id) ?? seen.set(id, { type: r.itemType, key: keyed ? r.itemKey : '*', metric: r.metric, values: [] }).get(id)!;
@@ -1436,7 +1446,7 @@ function agreementSection(api: AppApi): Section {
             'tbody',
             { 'data-group': group },
             h('tr', { class: 'agree-group' }, h('th', { colspan: 3 }, `${t(`agree.group.${group}`)} · ${who}`)),
-            h('tr', { class: 'agree-pairing' }, h('td', { colspan: 3 }, pairing)),
+            pairing ? h('tr', { class: 'agree-pairing' }, h('td', { colspan: 3 }, pairing)) : null,
             ...lines,
           ),
         );
@@ -1445,7 +1455,8 @@ function agreementSection(api: AppApi): Section {
     table.append(h('table', { class: 'agree-table' }, ...sections));
   };
   refresh('all');
-  return { el, refresh };
+  // nothing to compare before a second observer
+  return { el, refresh, visible: () => api.observerList().filter((o) => o.included).length >= 2 };
 }
 
 const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present', 'compare'];
@@ -1475,7 +1486,7 @@ export interface Sidebar {
   refresh: (kind: RefreshKind) => void;
   /** The display settings, for the panel over the view. */
   displayEl: HTMLElement;
-  /** A tool was chosen: open its section and fold the others (choosing Select changes nothing). */
+  /** A tool was chosen: open its section and fold the others but the folder's (choosing Select changes nothing). */
   focusTool: (tool: string) => void;
 }
 
@@ -1522,13 +1533,15 @@ export function buildSidebar(api: AppApi): Sidebar {
     'div',
     { class: 'sidebar-empty', id: 'sidebar-empty' },
     h('button', { type: 'button', class: 'btn btn-primary btn-block', id: 'sidebar-open-model', onclick: () => api.openModel() }, icon(ICONS.cube), t('header.openMesh')),
+    h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'sidebar-open-project', onclick: () => api.openProject() }, icon(ICONS.project), t('header.openProject')),
     h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'sidebar-open-folder', onclick: () => void api.openFolder() }, icon(ICONS.open), t('header.openFolder')),
   );
   el.prepend(empty);
   el.append(foot);
   const showMode = () => {
     const has = api.hasMesh();
-    for (const s of sections) s.el.hidden = !has || !s.modes.includes(api.mode) || (!!s.visible && !s.visible());
+    // the folder's list stays while a folder is open, also when none of its models opened
+    for (const s of sections) s.el.hidden = (!has && s.el.id !== 'sec-workspace') || !s.modes.includes(api.mode) || (!!s.visible && !s.visible());
     empty.hidden = has;
     // data exports of the mode (figures and sections export from their own sections)
     foot.hidden = !has || api.mode === 'present';
@@ -1542,13 +1555,18 @@ export function buildSidebar(api: AppApi): Sidebar {
   /** Bring the selected object's section and its inspector into view. */
   const focusSelection = () => {
     const target = selectionTarget(api);
-    if (!target) return;
+    // the relation tool's first scar is picked in the relations section
+    if (!target || api.relationPending()) return;
     const sec = shown().find((d) => d.id === `sec-${target[0]}`);
     if (!sec) return;
     setOpen(sec, true);
     requestAnimationFrame(() => {
-      const part = sec.querySelector(target[1]);
-      if (!part || el.scrollHeight <= el.clientHeight) return;
+      const part = sec.querySelector<HTMLElement>(target[1]);
+      if (!part) return;
+      const list = part.parentElement;
+      if (list?.classList.contains('arrow-list')) revealInList(list, part);
+      // only a sidebar that scrolls on its own (in the narrow layout that would scroll the 3D view away)
+      if (el.scrollHeight <= el.clientHeight || !/auto|scroll/.test(getComputedStyle(el).overflowY)) return;
       el.scrollTop += part.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
     });
   };
@@ -1570,7 +1588,7 @@ export function buildSidebar(api: AppApi): Sidebar {
     focusTool: (tool) => {
       const target = TOOL_SECTIONS[tool];
       if (!target) return;
-      for (const d of shown()) setOpen(d, d.id === `sec-${target}`);
+      for (const d of shown()) if (d.id !== 'sec-workspace') setOpen(d, d.id === `sec-${target}`);
     },
   };
 }

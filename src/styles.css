@@ -439,7 +439,10 @@ kbd {
   position: absolute;
   top: 12px;
   left: max(12px, env(safe-area-inset-left, 0px));
+  /* clear of the display button at the top right */
+  max-width: calc(100% - 160px);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 4px;
@@ -1933,6 +1936,14 @@ textarea.ctl-text {
   }
   .seg-app-mode {
     grid-area: modes;
+  }
+  .vp-toolbar {
+    max-width: calc(100% - 24px);
+  }
+  .spec-panel {
+    left: auto;
+    right: 0;
+    max-width: calc(100vw - 32px);
   }
   .vp-display {
     top: auto;

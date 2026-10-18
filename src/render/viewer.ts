@@ -104,13 +104,13 @@ export class Viewer {
     return () => this.cameraListeners.delete(fn);
   }
 
-  /** Called every animation frame before rendering (cheap work only). */
   /** Called after each render, once the labels are in place. */
   onAfterRender(fn: () => void): () => void {
     this.renderListeners.add(fn);
     return () => this.renderListeners.delete(fn);
   }
 
+  /** Called every animation frame before rendering (cheap work only). */
   onFrame(fn: () => void): () => void {
     this.frameListeners.add(fn);
     return () => this.frameListeners.delete(fn);

@@ -16,12 +16,13 @@ export class RelationTool implements Tool {
   readonly id = 'relation';
   private down: { x: number; y: number } | null = null;
   private first: string | null = null;
+  private firstAt = { x: 0, y: 0 };
 
   constructor(
     private readonly ctx: ToolContext,
     private readonly scarAt: (clientX: number, clientY: number, hit: HitProvider) => ScarPick | null,
-    /** `at`: where the second scar was clicked (client coordinates). */
-    private readonly onPair: (a: string, b: string, at: { x: number; y: number }) => void,
+    /** `at`: where the second scar was clicked, `from` the first (client coordinates). */
+    private readonly onPair: (a: string, b: string, at: { x: number; y: number }, from: { x: number; y: number }) => void,
   ) {}
 
   activate(): void {
@@ -48,6 +49,7 @@ export class RelationTool implements Tool {
     if (!p) return;
     if (!this.first || this.first === p.scarId) {
       this.first = p.scarId;
+      this.firstAt = { x: e.clientX, y: e.clientY };
       this.ctx.selection.set(p.selectId);
       this.ctx.changed();
       return;
@@ -55,7 +57,7 @@ export class RelationTool implements Tool {
     const a = this.first;
     this.first = null;
     this.ctx.changed();
-    this.onPair(a, p.scarId, { x: e.clientX, y: e.clientY });
+    this.onPair(a, p.scarId, { x: e.clientX, y: e.clientY }, this.firstAt);
   }
 
   cancel(): boolean {

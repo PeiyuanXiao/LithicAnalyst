@@ -73,3 +73,10 @@ export const ICONS = {
   sliders: 'M4 6h9|M17 6h3|M15 4v4|M4 12h3|M11 12h9|M9 10v4|M4 18h11|M19 18h1|M17 16v4',
   download: 'M12 4v11|M7 10l5 5 5-5|M5 19h14',
 };
+
+/** Scroll a list box, and nothing around it, so that one of its rows is in view. */
+export function revealInList(list: HTMLElement, row: HTMLElement): void {
+  const l = list.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (r.top < l.top) list.scrollTop -= l.top - r.top;
+  else if (r.bottom > l.bottom) list.scrollTop += Math.min(r.bottom - l.bottom, r.top - l.top);
+}

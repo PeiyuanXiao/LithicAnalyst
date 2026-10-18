@@ -60,7 +60,7 @@ import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type DisplayAspect, type DisplaySettings } from './appApi';
 import { segmented, softSet, textRow } from './controls';
-import { Popovers } from './popover';
+import { Popovers, onViewport } from './popover';
 import { clear, h, icon, ICONS } from './dom';
 import { Feedback } from './feedback';
 import { getLang, onLangChange, setLang, t } from './i18n';
@@ -348,6 +348,8 @@ export class App implements AppApi {
         this.curves?.updateOcclusion();
         this.measures?.updateOcclusion();
         this.landmarkLayer?.updateOcclusion();
+        // labels behind the surface give way in the layout: lay them out again
+        viewer.requestRender();
       }
     });
     viewer.onCameraChange(() => {
@@ -387,7 +389,7 @@ export class App implements AppApi {
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
     this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p)));
-    this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at) => void this.askRelation(a, b, at)));
+    this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => void this.askRelation(a, b, at, from)));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -533,7 +535,18 @@ export class App implements AppApi {
   /** The display settings: a button at the top right of the view and its panel. */
   private buildDisplayControl(): void {
     const panel = h('div', { class: 'popover display-panel', id: 'display-panel', hidden: true }, this.sidebar.displayEl);
-    const button = h('button', { type: 'button', class: 'btn btn-quiet vp-btn', id: 'btn-display', 'aria-expanded': 'false', title: t('sec.display'), onclick: () => this.popovers.toggle(button, panel) }, icon(ICONS.sliders), h('span', { class: 'btn-text' }, t('sec.display')));
+    // the panel scrolls within the view, whichever way it opens
+    const fit = () => {
+      if (panel.hidden) return;
+      panel.style.maxHeight = '';
+      const vp = this.viewportEl.getBoundingClientRect(), b = button.getBoundingClientRect(), r = panel.getBoundingClientRect();
+      const room = r.top >= b.bottom ? vp.bottom - r.top - 12 : b.top - vp.top - 18;
+      if (r.height > room) panel.style.maxHeight = `${Math.max(120, room)}px`;
+    };
+    const button = h('button', { type: 'button', class: 'btn btn-quiet vp-btn', id: 'btn-display', 'aria-expanded': 'false', title: t('sec.display'), onclick: () => {
+      this.popovers.toggle(button, panel);
+      fit();
+    } }, icon(ICONS.sliders), h('span', { class: 'btn-text' }, t('sec.display')));
     const el = h('div', { class: 'viewport-ui vp-display' }, button, panel);
     this.popovers.close();
     if (this.displayCtl) this.displayCtl.replaceWith(el);
@@ -542,9 +555,12 @@ export class App implements AppApi {
     el.hidden = !this.hasMesh();
   }
 
+  private resizerEl: HTMLElement | null = null;
+
   /** Drag the sidebar's left edge to change its width (remembered). */
   private buildSidebarResizer(main: HTMLElement): void {
-    const apply = (w: number) => main.style.setProperty('--sidebar-w', `${w}px`);
+    // a narrow window keeps room for the 3D view whatever width was chosen
+    const apply = (w: number) => main.style.setProperty('--sidebar-w', `min(${w}px, max(300px, 100vw - 480px))`);
     const saved = readPref<number>('sidebarWidth', 0);
     if (saved >= 300 && saved <= 640) apply(saved);
     const handle = h('div', { class: 'sidebar-resizer', role: 'separator', 'aria-orientation': 'vertical', title: t('sidebar.resize') });
@@ -569,6 +585,7 @@ export class App implements AppApi {
     handle.addEventListener('pointerup', end);
     handle.addEventListener('pointercancel', end);
     main.append(handle);
+    this.resizerEl = handle;
   }
 
   private buildToolbar(): void {
@@ -624,8 +641,12 @@ export class App implements AppApi {
     this.header.replaceWith(newHeader);
     this.header = newHeader;
     const newSidebar = buildSidebar(this);
+    const scroll = this.sidebar.el.scrollTop;
     this.sidebar.el.replaceWith(newSidebar.el);
     this.sidebar = newSidebar;
+    if (this.tools?.activeId) newSidebar.focusTool(this.tools.activeId);
+    newSidebar.el.scrollTop = scroll;
+    if (this.resizerEl) this.resizerEl.title = t('sidebar.resize');
     this.buildToolbar();
     this.buildEmptyState();
     this.buildHarrisPanel();
@@ -1575,7 +1596,8 @@ export class App implements AppApi {
         csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
       ];
     if (this.mode === 'compare') {
-      const a = this.agreement;
+      // not while it is being recomputed (the previous result would be written)
+      const a = this.agreementBusyFlag || this.agreementStale ? null : this.agreement;
       const id = st.specimen.id || stem;
       return [
         csv('agreement', t('export.agreement'), 'agreement.csv', !!a, () => agreementCsv(id, a?.rows ?? [], opts)),
@@ -1731,6 +1753,11 @@ export class App implements AppApi {
     return this.agreementFocused?.key ?? null;
   }
 
+  relationPending(): boolean {
+    const tool = this.tools?.activeTool;
+    return tool instanceof RelationTool && tool.pending() !== null;
+  }
+
   /** Show the pair of items that differ most in a metric, each in its observer's drawing (again: clear). */
   focusAgreement(itemType: string, metric: string, a: string, b: string): void {
     const key = `${itemType}|${metric}|${a}|${b}`;
@@ -1754,7 +1781,7 @@ export class App implements AppApi {
               ? st.curves.find((x) => x.label === k)?.id
               : itemType === 'landmark'
                 ? st.landmarks.find((x) => x.name === k)?.id
-                : st.semilandmarks.find((x) => x.label === k.replace(/_\d+$/, ''))?.id;
+                : semilandmarkPoint(st, k);
         if (id) items.set(o.id, id);
       }
       this.agreementFocused = { key, items };
@@ -2018,7 +2045,7 @@ export class App implements AppApi {
   }
 
   /** Relation tool: ask, next to the click, how two scars relate, and record it. */
-  private async askRelation(a: string, b: string, at: { x: number; y: number }): Promise<void> {
+  private async askRelation(a: string, b: string, at: { x: number; y: number }, from: { x: number; y: number }): Promise<void> {
     const A = this.store.scar(a)?.label ?? '', B = this.store.scar(b)?.label ?? '';
     const old = relationBetween(this.store.state, a, b);
     const current = !old ? null : old.kind === 'indeterminate' ? 'ind' : old.a === a ? 'ab' : 'ba';
@@ -2028,7 +2055,7 @@ export class App implements AppApi {
       { id: 'ind', key: '3', label: t('relation.indeterminate') },
     ];
     if (old) options.push({ id: 'delete', key: 'Del', label: t('arrows.delete') });
-    const choice = await this.relationPopover(`${A} · ${B}`, options, current, at, [...this.scarScreenPoints(a), ...this.scarScreenPoints(b)]);
+    const choice = await this.relationPopover(`${A} · ${B}`, options, current, at, [from, ...this.scarScreenPoints(a), ...this.scarScreenPoints(b)]);
     if (!this.store.scar(a) || !this.store.scar(b)) return;
     if (choice === 'delete' && old) {
       deleteRelation(this.store, old.id);
@@ -2039,13 +2066,17 @@ export class App implements AppApi {
     this.selection.set(rel?.id ?? null);
   }
 
-  /** Where a scar shows on screen: its arrow (both ends and the middle), or its regions' seeds. */
+  /** Where a scar shows on screen: points along its arrow, or its regions' seeds. */
   private scarScreenPoints(id: string): Array<{ x: number; y: number }> {
     const v = this.viewer;
     const s = this.store.scar(id);
     if (!v || !s) return [];
-    const pts: Vec3[] = s.vector
-      ? [s.vector.start, s.vector.end, [(s.vector.start[0] + s.vector.end[0]) / 2, (s.vector.start[1] + s.vector.end[1]) / 2, (s.vector.start[2] + s.vector.end[2]) / 2]]
+    const vec = s.vector;
+    const pts: Vec3[] = vec
+      ? Array.from({ length: 9 }, (_, i): Vec3 => {
+          const f = i / 8, [a, b] = [vec.start, vec.end];
+          return [a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2])];
+        })
       : this.store.state.regions.filter((r) => r.scarId === id).map((r) => r.seed);
     return pts.map((p) => v.project(new THREE.Vector3(p[0], p[1], p[2]))).filter((p) => p.visible);
   }
@@ -2070,23 +2101,32 @@ export class App implements AppApi {
       const area = this.viewportEl.getBoundingClientRect();
       const w = el.offsetWidth, hgt = el.offsetHeight, gap = 14, margin = 8;
       const cx = at.x - area.left, cy = at.y - area.top;
+      // [x, y, 1 when it had to be pushed into the view]
       const spots = [
         [cx + gap, cy + gap],
         [cx - gap - w, cy + gap],
         [cx + gap, cy - gap - hgt],
         [cx - gap - w, cy - gap - hgt],
-      ].map(([x, y]) => [Math.max(margin, Math.min(area.width - w - margin, x)), Math.max(margin, Math.min(area.height - hgt - margin, y))]);
-      const covered = ([x, y]: number[]) =>
-        avoid.filter((p) => p.x - area.left > x - margin && p.x - area.left < x + w + margin && p.y - area.top > y - margin && p.y - area.top < y + hgt + margin).length +
-        (cx > x - margin && cx < x + w + margin && cy > y - margin && cy < y + hgt + margin ? 1 : 0);
-      const best = spots.reduce((b, p) => (covered(p) < covered(b) ? p : b), spots[0]);
+      ].map(([x, y]) => {
+        const fx = Math.max(margin, Math.min(area.width - w - margin, x)), fy = Math.max(margin, Math.min(area.height - hgt - margin, y));
+        return [fx, fy, fx !== x || fy !== y ? 1 : 0];
+      });
+      const inside = (px: number, py: number, [x, y]: number[], pad: number) => px > x - pad && px < x + w + pad && py > y - pad && py < y + hgt + pad;
+      // the clicked point counts most, then the scars; a spot that fits as it is beats one pushed into the view
+      const cost = (s: number[]) =>
+        (inside(cx, cy, s, gap) ? 100 : 0) + avoid.filter((p) => inside(p.x - area.left, p.y - area.top, s, margin)).length + 0.5 * s[2];
+      const best = spots.reduce((b, p) => (cost(p) < cost(b) ? p : b), spots[0]);
       el.style.left = `${best[0]}px`;
       el.style.top = `${best[1]}px`;
       el.style.visibility = '';
       const keys: Record<string, string> = { Digit1: 'ab', Numpad1: 'ab', Digit2: 'ba', Numpad2: 'ba', Digit3: 'ind', Numpad3: 'ind' };
       const onKey = (e: KeyboardEvent) => {
         let choice: string | null | undefined = keys[e.code];
-        if (e.key === 'Delete' || e.key === 'Backspace') choice = options.some((o) => o.id === 'delete') ? 'delete' : undefined;
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          if (!options.some((o) => o.id === 'delete')) return;
+          choice = 'delete';
+        }
         if (e.key === 'Escape') choice = null;
         if (choice === undefined) return;
         e.preventDefault();
@@ -2094,7 +2134,9 @@ export class App implements AppApi {
         finish(choice);
       };
       const onDown = (e: PointerEvent) => {
-        if (!el.contains(e.target as Node)) finish(null);
+        if (el.contains(e.target as Node)) return;
+        finish(null);
+        if (onViewport(e.target as Node)) e.stopPropagation();
       };
       const finish = (choice: string | null) => {
         el.remove();
@@ -2130,15 +2172,22 @@ export class App implements AppApi {
     );
     const grip = h('div', { class: 'harris-grip', 'aria-hidden': 'true' });
     const el = h('div', { class: 'viewport-ui harris-panel', id: 'harris-panel', hidden: true }, head, body, grip);
+    // the remembered place and size, fitted into the view as it is now (the pref keeps what was chosen)
     const apply = () => {
+      const W = this.viewportEl.clientWidth, H = this.viewportEl.clientHeight;
+      const fits = W > 0 && H > 0;
+      const w = geo.w && fits ? Math.min(geo.w, W) : geo.w;
+      const hgt = geo.h && fits ? Math.min(geo.h, H) : geo.h;
       if (geo.x !== undefined && geo.y !== undefined) {
-        el.style.left = `${geo.x}px`;
-        el.style.top = `${geo.y}px`;
+        const x = fits ? Math.max(0, Math.min(geo.x, W - (w || el.offsetWidth || 200))) : geo.x;
+        const y = fits ? Math.max(0, Math.min(geo.y, H - (hgt && !geo.collapsed ? hgt : 36))) : geo.y;
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
         el.style.bottom = 'auto';
       }
-      if (geo.w && geo.h) {
-        el.style.width = `${geo.w}px`;
-        el.style.height = geo.collapsed ? '' : `${geo.h}px`;
+      if (w && hgt) {
+        el.style.width = `${w}px`;
+        el.style.height = geo.collapsed ? '' : `${hgt}px`;
         el.style.maxWidth = el.style.maxHeight = 'none';
       }
       el.classList.toggle('is-collapsed', !!geo.collapsed);
@@ -2183,13 +2232,19 @@ export class App implements AppApi {
       geo.collapsed = false;
       apply();
     });
-    apply();
     if (this.harrisEl) this.harrisEl.replaceWith(el);
-    else this.viewportEl.append(el);
+    else {
+      this.viewportEl.append(el);
+      new ResizeObserver(() => this.harrisFit?.()).observe(this.viewportEl);
+    }
+    apply();
     this.harrisEl = el;
     this.harrisBody = body;
+    this.harrisFit = apply;
     this.updateHarris();
   }
+
+  private harrisFit: (() => void) | null = null;
 
   private harrisLayoutNow(): HarrisLayout {
     const { scarIds, edges, sequences } = relationInputs(this.store.state);
@@ -2206,8 +2261,10 @@ export class App implements AppApi {
     const el = this.harrisEl, body = this.harrisBody;
     if (!el || !body) return;
     const shown = this.display.harris && this.mode === 'annotate' && this.hasMesh();
+    const wasShown = !el.hidden;
     el.hidden = !shown;
     if (!shown) return;
+    if (!wasShown) this.harrisFit?.();
     body.innerHTML = this.store.state.scars.length ? harrisSvg(this.harrisLayoutNow(), this.harrisStyle(this.selectedScar())) : '';
   }
 
@@ -2729,7 +2786,8 @@ export class App implements AppApi {
 
   private wireKeyboard(): void {
     window.addEventListener('keydown', (e) => {
-      if (document.querySelector('.modal-backdrop')) return;
+      // the relation popover takes the keyboard as a dialog would
+      if (document.querySelector('.modal-backdrop') || this.relationPop) return;
       if (e.key === 'Escape' && this.popovers.close()) {
         e.preventDefault();
         return;
@@ -2911,6 +2969,7 @@ export class App implements AppApi {
           ['P', t('help.k.curve')],
           ['R', t('help.k.region')],
           ['B', t('help.k.relation')],
+          ['1 / 2 / 3 · Delete', t('help.k.relationPick')],
           ['K', t('help.k.landmark')],
           ['S', t('help.k.snap')],
           ['Shift', t('help.k.shift')],
@@ -2920,7 +2979,13 @@ export class App implements AppApi {
           ['] / [', t('help.k.next')],
         ],
       ],
-      [t('appMode.measure'), [['D / G / N', t('help.k.measure')]]],
+      [
+        t('appMode.measure'),
+        [
+          ['D / G / N', t('help.k.measure')],
+          ['Backspace', t('help.k.measureBack')],
+        ],
+      ],
       [t('appMode.present'), [['X', t('help.k.section')]]],
     ];
     const mouse: Array<[string, string]> = [
@@ -3028,4 +3093,11 @@ export class App implements AppApi {
     };
     (window as unknown as { lithicanalyst: typeof api }).lithicanalyst = api;
   }
+}
+
+/** A semilandmark row key (`<set label>_<number>`) as the landmark layer's point id (`<set id>#<index>`). */
+function semilandmarkPoint(st: Readonly<ProjectState>, key: string): string | undefined {
+  const m = /^(.*)_(\d+)$/.exec(key);
+  const set = m ? st.semilandmarks.find((x) => x.label === m[1]) : undefined;
+  return set && m ? `${set.id}#${Number(m[2]) - 1}` : undefined;
 }

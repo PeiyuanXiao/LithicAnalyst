@@ -377,6 +377,7 @@ export class ArrowLayer {
 
   /** Arrow under the cursor with its distance in pixels. */
   pickNearest(clientX: number, clientY: number, maxPx = 9): { id: string; dist: number } | null {
+    if (!this.group.visible) return null;
     let best: string | null = null;
     let bestD = maxPx;
     for (const [id, v] of this.visuals) {

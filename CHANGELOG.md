@@ -6,7 +6,7 @@
   in a small panel), a File menu (open model, project or folder), Save, and the mode switch in
   the middle; the main button is File until a model is open, then Save. Display settings are a
   panel over the view (Display button). The sidebar follows the tools: choosing a tool opens its
-  section and folds the others, selecting an object opens its section and scrolls to it; empty
+  section and folds the others (the folder's stays), selecting an object opens its section and scrolls to it; empty
   and unusable sections are trimmed; it can be resized from its left edge. Each mode's data
   files are exported from one Export dialog (several files in one ZIP); file names and columns
   are unchanged. The shortcuts dialog is grouped by mode; saving without an annotator shows a

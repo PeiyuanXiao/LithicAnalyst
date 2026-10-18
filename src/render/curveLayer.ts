@@ -403,6 +403,7 @@ export class CurveLayer {
 
   /** Curve under the cursor, in screen space, with its distance in pixels. */
   pickNearest(clientX: number, clientY: number, maxPx = 8): { id: string; dist: number } | null {
+    if (!this.group.visible) return null;
     const rect = this.viewer.renderer.domElement.getBoundingClientRect();
     const cam = this.viewer.camera;
     const v = new THREE.Vector3();

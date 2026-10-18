@@ -125,4 +125,6 @@ export interface AppApi {
   openFolder(): Promise<void>;
   /** The export dialog of the current mode's data files. */
   openExport(): void;
+  /** The relation tool has its first scar and waits for the second. */
+  relationPending(): boolean;
 }

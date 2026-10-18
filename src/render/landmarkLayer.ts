@@ -73,7 +73,7 @@ export class LandmarkLayer {
     return this.viewer.diagonal * 0.007;
   }
 
-  /** `selected`: a landmark id, or a set id (its points are highlighted). */
+  /** `selected`: a landmark id, a set id (its points are highlighted) or `<set id>#<point index>` (one point). */
   sync(landmarks: readonly Landmark[], sets: readonly SemilandmarkResult[], selected: string | null, labels: boolean, ghost: boolean): void {
     const r = this.radius;
     const seen = new Set<string>();
@@ -113,7 +113,7 @@ export class LandmarkLayer {
       this.group.remove(v.dot.root);
       this.fixed.delete(id);
     }
-    const pts = sets.flatMap((q) => q.points.map((p) => ({ p, sel: q.id === selected })));
+    const pts = sets.flatMap((q) => q.points.map((p, i) => ({ p, sel: q.id === selected || `${q.id}#${i}` === selected })));
     while (this.semi.length < pts.length) {
       const d = new Dot();
       this.semi.push(d);
@@ -135,6 +135,7 @@ export class LandmarkLayer {
 
   /** The fixed landmark nearest the cursor, within `maxPx`. */
   pickNearest(clientX: number, clientY: number, maxPx = 10): { id: string; dist: number } | null {
+    if (!this.group.visible) return null;
     let best: { id: string; dist: number } | null = null;
     for (const [id, v] of this.fixed) {
       if (!v.dot.root.visible) continue;
