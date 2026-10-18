@@ -20,6 +20,7 @@ git pull                 # 先拉取最新版本
 npm run dev              # 打开终端里显示的地址，改代码后页面自动刷新
 # …修改代码…
 npm test                 # 单元测试
+npm run e2e              # 端到端测试（构建后在 Chromium 里操作；第一次先运行 npx playwright install chromium）
 npm run build            # 类型检查 + 生成 dist/index.html
 git add -A
 git commit -m "简短说明这次改了什么"

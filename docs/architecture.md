@@ -32,6 +32,25 @@ analysis  outside this repository (R, Python, …) reads the CSV or the project 
 6. **Interface text lives in `ui/strings.ts`** with Chinese and English for every key. Keep
    the interface lean: labels and controls, no explanatory paragraphs.
 
+## Mesh geometry
+
+`compute/meshGeometry.ts` holds whole-mesh geometry on typed arrays, each function with
+known-answer tests (boxes, icospheres, open and non-manifold meshes in
+`tests/meshGeometry.test.ts`):
+
+* `surfaceArea`, `signedVolume` (divergence theorem; meaningful only for closed meshes);
+* `buildEdges` (undirected edges with triangle counts) and `meshTopology`: boundary edges,
+  boundary loops, non-manifold edges, connected pieces, `closed`;
+* `vertexPca` (every vertex counted once) and `areaWeightedPca` (the surface itself, exact
+  second moments of each triangle);
+* `fitPlane`: total least-squares plane of a point set (direction of least variance);
+* `intersectPlane`: the section of the mesh by a plane, as polylines;
+* `partitionFaces`: connected regions of triangles separated by a set of mesh edges.
+
+`compute/linalg.ts` has the symmetric 3×3 eigen solver they share. On a 2-million-triangle
+scan the slowest of these (`buildEdges`) takes a few hundred milliseconds, so callers run them
+off the interaction path (after loading, in idle time or a worker), never per pointer move.
+
 ## Curves and snapping
 
 * `compute/surfacePath.ts` (pure): feature strength per vertex from signed mean curvature
@@ -52,13 +71,175 @@ Curves were added this way; use them as the worked example.
 1. `core/types.ts`: add the item type (e.g. `Landmark { id, label, point, normal, attributes }`)
    and a list under `ProjectState`.
 2. `core/commands.ts` + `core/actions.ts`: add/delete/update commands, mirroring the scar
-   vector ones.
+   ones.
 3. `core/schema.ts`: serialise under `annotations.landmarks`; old files simply lack the key.
    Bump `formatVersion` only if old readers would misread the file.
 4. `render/`: a layer class that draws the items from state (see `ArrowLayer.sync`).
 5. `tools/`: a tool that creates and edits them; register it in `ui/app.ts`.
 6. `ui/sidebar.ts`: a section listing the items; `io/csv.ts`: an exporter.
 7. Tests for the commands, the format round trip and the exporter.
+
+## Work modes
+
+The top bar switches between work modes (`AppMode` in `ui/appApi.ts`: annotate, measure,
+present, compare). A mode owns its tools and sidebar sections:
+`App.updateToolbar` shows the toolbar of the current mode, and `SECTIONS` in `ui/sidebar.ts`
+lists which modes show each section. Outside the annotate mode the select tool only navigates
+(`ToolContext.editable()`), and keys that change annotations are ignored. Switching modes
+keeps the selection and the undo history.
+
+## Measurements
+
+* `compute/measure.ts` measures a mesh once after loading (`surfaceMeasuresSteps`: area, volume,
+  closedness, area-weighted principal axes) and derives length, width and thickness from the
+  specimen frame or the principal axes (`autoMeasurementsSteps`). The app keeps the result and
+  recomputes the dimensions when `specimen.frame` changes; `serializeProject` stores it under
+  `derived.measurements`.
+* Long computations are generators (`compute/steps.ts`): `runSync` runs them at once (tests),
+  `runSliced` in slices of ~12 ms between frames, so a large scan never freezes the interface.
+* Manual measurements are annotations (`ProjectState.measurements`, commands like the others).
+  `tools/measureTool.ts` takes the points (three registered tools: distance, geodesic, angle);
+  a geodesic is a `PathSearch` over mesh edges, pulled taut with `relaxPath` and kept on the
+  surface (`SurfaceSnap.hug`). `render/measureLayer.ts` draws them (only in the measure mode).
+
+## Specimen frame
+
+`core/frame.ts` builds and changes the frame matrix (from a view direction and an up vector,
+turning on the page, taking the vertical from a direction). The present mode sets it through
+`App.setFrameFromView / setFrameFromPlane / setFrameVertical / turnFrame`; each button press is
+one undo step, a fine-turn drag is one. `App.viewFrame` puts the camera on the frame (looking
+along −Z, +Y up); nothing transforms the model or stored coordinates.
+
+## Figures
+
+`render/figure.ts` renders the standard views off screen with an orthographic camera per view
+(the main scene with the annotation overlay hidden, the key light set to the upper left of the
+page), into transparent render targets at the exact pixel scale. Annotations are projected into
+each view as 2D polylines; a point counts as hidden when a ray from it toward the camera hits the
+mesh. Arrows are drawn only in views their surface faces. The outline comes from the coverage of
+the rendered image (`compute/contour.ts`, marching squares + simplification). PNG files get a
+pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
+
+## Surface regions
+
+* `compute/regions.ts`: `polylineEdges` turns a curve into mesh edges; `regionsSteps`
+  partitions the triangles across them (in slices) and sums the areas; `resolveRegions` finds
+  each seed's piece, flags two seeds in one piece and totals the areas by type.
+* The app repartitions when curves change and re-resolves when regions or scars change. Seeds
+  are located with the BVH (closest triangle). `render/regionLayer.ts` paints the pieces with
+  one mesh each, sharing the scan's vertex buffer; it sits in the scene (not the annotation
+  overlay), so figures can include the colours.
+* `addRegion` / `setRegionType` create a scar without a direction in the same undo step when a
+  scar region has no arrow, and remove it again when it is no longer used (`CompoundCommand`).
+* The curve tool snaps points onto existing curves (T-junctions) so curves can close regions.
+
+## Relations and sequences
+
+* `ProjectState.relations` (one per pair of scars, `a_cuts_b` or `indeterminate`) and
+  `ProjectState.sequences` (earliest first) change through `SetRelationsCommand` /
+  `SetSequencesCommand`, which keep the whole list before and after (the lists are short).
+  `deleteScar` takes the scar out of both in the same undo step.
+* `compute/relations.ts` is pure and works on ids: `checkRelations` (cycles by Tarjan's strongly
+  connected components, contradictions with the order of the sequences and within ordered
+  ones, scars in no sequence), `directRelations` (transitive reduction) and `harrisLayout`
+  (rows by the longest chain of earlier scars, columns grouped by sequence). The app recomputes
+  them on every change (cheap) and stores the checks under `derived.relations`.
+* `tools/relationTool.ts`: two clicks on scars (an arrow, else the scar region under the click),
+  then a dialog. `render/harris.ts` draws the matrix as SVG (shown in a viewport panel and
+  exported as is); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
+  light (earliest) to dark (latest), used by the `sequence` colour mode for arrows and scar
+  regions. Arrows and regions of a selected relation, or of the opened problems, are drawn
+  highlighted (`ArrowLayer.setHighlight`, `App.emphasis`).
+
+## Landmarks
+
+* `ProjectState.landmarks` (export order) and `semilandmarks` (sets: curve, count, end
+  landmarks) change together through `SetLandmarksCommand`, which keeps both lists and their
+  counters before and after.
+* `compute/landmarks.ts`: `sampleCurve` (equal arc length between the curve points nearest the
+  end landmarks), `landmarkTable` (every point in export order and the geomorph sliders). The app
+  recomputes the table whenever landmarks or curves change; `io/landmarks.ts` writes TPS, Slicer
+  `.fcsv`, the long CSV and the sliders from it, so all exports share one numbering.
+* `tools/landmarkTool.ts` places (snapping like curve points) and drags landmarks;
+  `render/landmarkLayer.ts` draws them with their names, and the semilandmarks. Names carried
+  over from the last specimen are kept in local preferences keyed by mesh checksum
+  (`App.previousNames`); the queue itself is session state, not project data.
+
+## Workspace and batch runs
+
+* `io/workspace.ts`: a folder of models and project files — writable through the File System
+  Access API (`showDirectoryPicker`, Chrome / Edge, not inside frames), otherwise read-only from
+  a directory upload (`<input webkitdirectory>`); only the files at the top of the folder count.
+* The open model's project is written next to it (`<model>.lithicanalyst.json`, debounced like
+  the autosave) and read back when the model is opened again; the browser's autosave still
+  wins when it holds later edits of the same project.
+* Batch measurements (`App.batchMeasure`) read, measure and drop one model at a time without
+  the viewer (`centredMesh`, `surfaceMeasuresSteps`), take each model's project files by
+  checksum, and merge the per-specimen CSVs by kind (`io/batch.ts`); with two or more
+  observers per model it adds ICC(2,1) per measure. Batch figures open each model in the viewer,
+  wait until regions and sections are computed (`App.settled`) and render the figure with the
+  current settings. Results go into the folder, or are downloaded from a read-only one.
+
+## Compare mode
+
+* Observers are the open project plus project files of the same mesh (SHA-256), read with
+  `parseProjectFile`; they live in the app only (`App.observers`), never in a project file.
+* Each observer's arrows, curves and landmarks are drawn by its own `ArrowLayer`, `CurveLayer`
+  and `LandmarkLayer` (`fixedColor`); the open project's normal layers step aside meanwhile.
+* `App.updateAgreement` gathers what needs the mesh — fitted planes, length / width / thickness
+  along each observer's frame, and the region type of every triangle (`partitionFor` with the
+  observer's curves, cached by curves and seeds) — and hands it to `compute/agreement.ts`:
+  `assign` (Hungarian method with a distance limit), `cohenKappa`, `fleissKappa`, `icc21`,
+  `curveDistance`, `compareObservers` (the long table) and `summarize`. It reruns, debounced,
+  after any change while the mode is shown.
+
+## Cortex sphere
+
+`compute/sphere.ts` fits a sphere (algebraic start, Gauss–Newton on the geometric residuals,
+relative to the centroid). The app refits whenever the regions or `ProjectState.nodule` (which
+cortex regions are left out, whether the sphere is drawn) change, using the vertices of the
+chosen cortex pieces, and keeps the result for `derived.nodule` and the measurement CSV.
+
+## Volume split
+
+`compute/split.ts`: `splitByPlaneSteps` sums signed tetrahedra from a point on the plane over the
+triangles (clipped at the plane) on its upper side; `splitByLoopSteps` partitions along a closed
+chain of mesh edges and sums each side from the chain's centre. In both, the cap closing each
+part has zero volume relative to that reference point, so no cap is built. The app recomputes
+when the split, the planes or the curves change.
+
+## Sections
+
+A `Section` (display only) is the plane through a line drawn on screen and the eye
+(`tools/sectionTool.ts`). The app cuts the model with it in slices (`App.cutModel`, shared with
+the planes) and, in the present mode only, clips the mesh material to the kept side
+(`SectionLayer.clipPlanes`); `render/sectionLayer.ts` draws the outline and the cut face (loops
+nested and triangulated in the plane, solid or hatched). Figures render the views without
+clipping and add the section drawings (`sectionLoops2D`) to the right of the views.
+
+## Fitted planes
+
+* A `Plane` stores only its inputs (method, completeness filter, curves, `upHint`);
+  `compute/planes.ts` (`computePlane`) derives centre, normal and frame matrix from them. The
+  app recomputes all planes on every change of scars, curves or planes (cheap), and stores the
+  results under `derived.planes` when saving.
+* The `all_vertices` plane and the plane frames use the vertex PCA computed with the other
+  mesh measurements. Sections of the model by each plane (`intersectPlaneSteps`, using the
+  edge table kept from that pass) run in slices and are cached per plane position.
+* `render/planeLayer.ts` draws discs, sections and normals in the measure and present modes.
+
+## Data model
+
+* **Scars are objects of their own** (`ProjectState.scars`). The direction arrow is optional
+  (`scar.vector`, `null` for a scar known only by its area); the arrow layer, the arrow CSV and
+  the endpoint handles only see scars that have one (`hasVector`).
+* **Derived results** (`core/derived.ts`) are computed from the annotations and recomputed when
+  their inputs change. `serializeProject` writes the latest values under `derived` for external
+  readers; `parseProjectFile` ignores them. Later features add their results there.
+* **Orientation is metadata.** `specimen.frame` is a matrix from original to specimen
+  coordinates; nothing transforms stored coordinates.
+* The project file format and its migrations live in `core/schema.ts`
+  (`docs/project-format.md`); format 1 files are converted when read.
 
 ## Data flow
 
@@ -85,3 +266,11 @@ host such as GitHub Pages) and `dist/artifact.html` (the same app without the do
 skeleton, for hosts that wrap pages themselves). In the claude.ai artifact viewer plain
 downloads are blocked, so `io/saveFile.ts` uses the viewer's `downloads` capability there
 and falls back to a copy dialog.
+
+## Tests
+
+* `tests/` (vitest, `npm test`): `core/`, `compute/` and `io/` in Node, checked against known answers.
+* `e2e/` (Playwright, `npm run e2e`): drives the built `dist/index.html` in Chromium (WebGL on
+  SwiftShader when there is no GPU). Test models are generated by `e2e/fixtures/meshes.ts`; the
+  tests read the project state and map model coordinates to screen positions through
+  `window.lithicanalyst` (end of `ui/app.ts`). Add methods there when a new feature needs them.

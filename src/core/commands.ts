@@ -1,5 +1,5 @@
-import type { Curve, ScarVector, SpecimenInfo } from './types';
-import type { ProjectStore } from './store';
+import type { Curve, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
+import type { LandmarkData, ProjectStore } from './store';
 
 /**
  * Every change to project data goes through a Command. That single rule gives
@@ -84,66 +84,66 @@ export class CommandHistory {
   }
 }
 
-const cloneArrow = (a: ScarVector): ScarVector => structuredClone(a);
+const cloneScar = (a: Scar): Scar => structuredClone(a);
 
-export class AddArrowCommand implements Command {
+export class AddScarCommand implements Command {
   readonly labelKey = 'cmd.addArrow';
   readonly createdAt = Date.now();
   private prevNext = 0;
-  constructor(private readonly arrow: ScarVector, private readonly labelNumber: number | null) {}
+  constructor(private readonly scar: Scar, private readonly labelNumber: number | null) {}
   apply(store: ProjectStore): void {
     this.prevNext = store.state.nextLabelNumber;
-    store._insertArrow(cloneArrow(this.arrow));
+    store._insertScar(cloneScar(this.scar));
     if (this.labelNumber !== null) store._setNextLabelNumber(Math.max(this.prevNext, this.labelNumber + 1));
-    store.notify({ kind: 'arrows', ids: [this.arrow.id] });
+    store.notify({ kind: 'scars', ids: [this.scar.id] });
   }
   revert(store: ProjectStore): void {
-    store._removeArrow(this.arrow.id);
+    store._removeScar(this.scar.id);
     store._setNextLabelNumber(this.prevNext);
-    store.notify({ kind: 'arrows', ids: [this.arrow.id] });
+    store.notify({ kind: 'scars', ids: [this.scar.id] });
   }
 }
 
-export class DeleteArrowCommand implements Command {
+export class DeleteScarCommand implements Command {
   readonly labelKey = 'cmd.deleteArrow';
   readonly createdAt = Date.now();
-  private removed: { arrow: ScarVector; index: number } | null = null;
+  private removed: { scar: Scar; index: number } | null = null;
   constructor(private readonly id: string) {}
   apply(store: ProjectStore): void {
-    this.removed = store._removeArrow(this.id);
-    store.notify({ kind: 'arrows', ids: [this.id] });
+    this.removed = store._removeScar(this.id);
+    store.notify({ kind: 'scars', ids: [this.id] });
   }
   revert(store: ProjectStore): void {
-    if (this.removed) store._insertArrow(cloneArrow(this.removed.arrow), this.removed.index);
-    store.notify({ kind: 'arrows', ids: [this.id] });
+    if (this.removed) store._insertScar(cloneScar(this.removed.scar), this.removed.index);
+    store.notify({ kind: 'scars', ids: [this.id] });
   }
 }
 
-export class UpdateArrowCommand implements Command {
+export class UpdateScarCommand implements Command {
   readonly createdAt = Date.now();
-  private after: ScarVector;
+  private after: Scar;
   constructor(
     readonly labelKey: string,
-    private readonly before: ScarVector,
-    after: ScarVector,
+    private readonly before: Scar,
+    after: Scar,
     /** Commands with the same mergeKey issued within a short window collapse into one undo step. */
     private readonly mergeKey: string | null = null,
   ) {
-    this.after = cloneArrow(after);
+    this.after = cloneScar(after);
   }
   apply(store: ProjectStore): void {
-    store._putArrow(cloneArrow(this.after));
-    store.notify({ kind: 'arrows', ids: [this.after.id] });
+    store._putScar(cloneScar(this.after));
+    store.notify({ kind: 'scars', ids: [this.after.id] });
   }
   revert(store: ProjectStore): void {
-    store._putArrow(cloneArrow(this.before));
-    store.notify({ kind: 'arrows', ids: [this.before.id] });
+    store._putScar(cloneScar(this.before));
+    store.notify({ kind: 'scars', ids: [this.before.id] });
   }
   merge(next: Command): boolean {
-    if (!(next instanceof UpdateArrowCommand)) return false;
+    if (!(next instanceof UpdateScarCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
-    this.after = cloneArrow(next.after);
+    this.after = cloneScar(next.after);
     return true;
   }
 }
@@ -211,6 +211,313 @@ export class UpdateCurveCommand implements Command {
   }
 }
 
+export class AddMeasurementCommand implements Command {
+  readonly labelKey = 'cmd.addMeasurement';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly measurement: Measurement, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextMeasureNumber;
+    store._insertMeasurement(structuredClone(this.measurement));
+    store._setNextMeasureNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'measurements', ids: [this.measurement.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removeMeasurement(this.measurement.id);
+    store._setNextMeasureNumber(this.prevNext);
+    store.notify({ kind: 'measurements', ids: [this.measurement.id] });
+  }
+}
+
+export class DeleteMeasurementCommand implements Command {
+  readonly labelKey = 'cmd.deleteMeasurement';
+  readonly createdAt = Date.now();
+  private removed: { measurement: Measurement; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removeMeasurement(this.id);
+    store.notify({ kind: 'measurements', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertMeasurement(structuredClone(this.removed.measurement), this.removed.index);
+    store.notify({ kind: 'measurements', ids: [this.id] });
+  }
+}
+
+export class AddPlaneCommand implements Command {
+  readonly labelKey = 'cmd.addPlane';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly plane: Plane, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextPlaneNumber;
+    store._insertPlane(structuredClone(this.plane));
+    store._setNextPlaneNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'planes', ids: [this.plane.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removePlane(this.plane.id);
+    store._setNextPlaneNumber(this.prevNext);
+    store.notify({ kind: 'planes', ids: [this.plane.id] });
+  }
+}
+
+export class DeletePlaneCommand implements Command {
+  readonly labelKey = 'cmd.deletePlane';
+  readonly createdAt = Date.now();
+  private removed: { plane: Plane; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removePlane(this.id);
+    store.notify({ kind: 'planes', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertPlane(structuredClone(this.removed.plane), this.removed.index);
+    store.notify({ kind: 'planes', ids: [this.id] });
+  }
+}
+
+export class UpdatePlaneCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: Plane,
+    private readonly after: Plane,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._putPlane(structuredClone(this.after));
+    store.notify({ kind: 'planes', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putPlane(structuredClone(this.before));
+    store.notify({ kind: 'planes', ids: [this.before.id] });
+  }
+}
+
+export class AddSectionCommand implements Command {
+  readonly labelKey = 'cmd.addSection';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly section: Section, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextSectionNumber;
+    store._insertSection(structuredClone(this.section));
+    store._setNextSectionNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'sections', ids: [this.section.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removeSection(this.section.id);
+    store._setNextSectionNumber(this.prevNext);
+    store.notify({ kind: 'sections', ids: [this.section.id] });
+  }
+}
+
+export class DeleteSectionCommand implements Command {
+  readonly labelKey = 'cmd.deleteSection';
+  readonly createdAt = Date.now();
+  private removed: { section: Section; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removeSection(this.id);
+    store.notify({ kind: 'sections', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertSection(structuredClone(this.removed.section), this.removed.index);
+    store.notify({ kind: 'sections', ids: [this.id] });
+  }
+}
+
+export class UpdateSectionCommand implements Command {
+  readonly labelKey = 'cmd.editSection';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: Section,
+    private readonly after: Section,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._putSection(structuredClone(this.after));
+    store.notify({ kind: 'sections', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putSection(structuredClone(this.before));
+    store.notify({ kind: 'sections', ids: [this.before.id] });
+  }
+}
+
+/** Several commands as one undo step (e.g. a region and the scar created with it). */
+export class CompoundCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly parts: Command[],
+  ) {}
+  apply(store: ProjectStore): void {
+    for (const c of this.parts) c.apply(store);
+  }
+  revert(store: ProjectStore): void {
+    for (const c of [...this.parts].reverse()) c.revert(store);
+  }
+}
+
+export class AddRegionCommand implements Command {
+  readonly labelKey = 'cmd.addRegion';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly region: Region, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextRegionNumber;
+    store._insertRegion(structuredClone(this.region));
+    store._setNextRegionNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'regions', ids: [this.region.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removeRegion(this.region.id);
+    store._setNextRegionNumber(this.prevNext);
+    store.notify({ kind: 'regions', ids: [this.region.id] });
+  }
+}
+
+export class DeleteRegionCommand implements Command {
+  readonly labelKey = 'cmd.deleteRegion';
+  readonly createdAt = Date.now();
+  private removed: { region: Region; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removeRegion(this.id);
+    store.notify({ kind: 'regions', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertRegion(structuredClone(this.removed.region), this.removed.index);
+    store.notify({ kind: 'regions', ids: [this.id] });
+  }
+}
+
+export class UpdateRegionCommand implements Command {
+  readonly labelKey = 'cmd.editRegion';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: Region,
+    private readonly after: Region,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._putRegion(structuredClone(this.after));
+    store.notify({ kind: 'regions', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putRegion(structuredClone(this.before));
+    store.notify({ kind: 'regions', ids: [this.before.id] });
+  }
+}
+
+/** Replace the relations (they are few; the whole list is kept before and after). */
+export class SetRelationsCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: Relation[],
+    private readonly after: Relation[],
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setRelations(structuredClone(this.after));
+    store.notify({ kind: 'relations' });
+  }
+  revert(store: ProjectStore): void {
+    store._setRelations(structuredClone(this.before));
+    store.notify({ kind: 'relations' });
+  }
+}
+
+/** Replace the sequences; `next` is the label counter after the change (null: unchanged). */
+export class SetSequencesCommand implements Command {
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(
+    readonly labelKey: string,
+    private readonly before: Sequence[],
+    private after: Sequence[],
+    private readonly next: number | null = null,
+    private readonly mergeKey: string | null = null,
+  ) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextSequenceNumber;
+    store._setSequences(structuredClone(this.after));
+    if (this.next !== null) store._setNextSequenceNumber(Math.max(this.prevNext, this.next));
+    store.notify({ kind: 'sequences' });
+  }
+  revert(store: ProjectStore): void {
+    store._setSequences(structuredClone(this.before));
+    store._setNextSequenceNumber(this.prevNext);
+    store.notify({ kind: 'sequences' });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetSequencesCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
+  }
+}
+
+/** Replace the landmarks and semilandmark sets (with their counters); typing a name merges. */
+export class SetLandmarksCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: LandmarkData,
+    private after: LandmarkData,
+    private readonly mergeKey: string | null = null,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setLandmarkData(structuredClone(this.after));
+    store.notify({ kind: 'landmarks' });
+  }
+  revert(store: ProjectStore): void {
+    store._setLandmarkData(structuredClone(this.before));
+    store.notify({ kind: 'landmarks' });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetLandmarksCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
+  }
+}
+
+export class SetSplitCommand implements Command {
+  readonly labelKey = 'cmd.editSplit';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: ProjectState['split'],
+    private readonly after: ProjectState['split'],
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setSplit(structuredClone(this.after));
+    store.notify({ kind: 'split' });
+  }
+  revert(store: ProjectStore): void {
+    store._setSplit(structuredClone(this.before));
+    store.notify({ kind: 'split' });
+  }
+}
+
+export class SetNoduleCommand implements Command {
+  readonly labelKey = 'cmd.editNodule';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: ProjectState['nodule'],
+    private readonly after: ProjectState['nodule'],
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setNodule(structuredClone(this.after));
+    store.notify({ kind: 'nodule' });
+  }
+  revert(store: ProjectStore): void {
+    store._setNodule(structuredClone(this.before));
+    store.notify({ kind: 'nodule' });
+  }
+}
+
 export class SetSpecimenCommand implements Command {
   readonly labelKey = 'cmd.editSpecimen';
   readonly createdAt = Date.now();
@@ -220,21 +527,21 @@ export class SetSpecimenCommand implements Command {
     after: SpecimenInfo,
     private readonly mergeKey: string | null = null,
   ) {
-    this.after = { ...after };
+    this.after = structuredClone(after);
   }
   apply(store: ProjectStore): void {
-    store._setSpecimen({ ...this.after });
+    store._setSpecimen(structuredClone(this.after));
     store.notify({ kind: 'specimen' });
   }
   revert(store: ProjectStore): void {
-    store._setSpecimen({ ...this.before });
+    store._setSpecimen(structuredClone(this.before));
     store.notify({ kind: 'specimen' });
   }
   merge(next: Command): boolean {
     if (!(next instanceof SetSpecimenCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
-    this.after = { ...next.after };
+    this.after = structuredClone(next.after);
     return true;
   }
 }

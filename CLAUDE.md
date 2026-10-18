@@ -11,6 +11,7 @@
     npm ci              # 安装依赖（Node ≥ 20，CI 用 22）
     npm run dev         # 开发服务器
     npm test            # 单元测试（vitest，tests/）
+    npm run e2e         # 端到端测试（Playwright，e2e/；先构建，再在 Chromium 里打开 dist/index.html）
     npm run typecheck   # 类型检查
     npm run build       # 类型检查 + 生成 dist/index.html、dist/artifact.html（dist/ 不提交）
 

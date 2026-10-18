@@ -2,6 +2,8 @@ import type { SnapMode } from '../compute/surfacePath';
 import type { ProjectStore } from '../core/store';
 import type { ArrowLayer } from '../render/arrowLayer';
 import type { CurveLayer } from '../render/curveLayer';
+import type { LandmarkLayer } from '../render/landmarkLayer';
+import type { MeasureLayer } from '../render/measureLayer';
 import type { SurfaceHit, Viewer } from '../render/viewer';
 import type { Selection } from './selection';
 import type { SurfaceSnap } from './surfaceSnap';
@@ -11,6 +13,8 @@ export interface ToolContext {
   store: ProjectStore;
   arrows: ArrowLayer;
   curves: CurveLayer;
+  measures: MeasureLayer;
+  landmarks: LandmarkLayer;
   selection: Selection;
   /** Path search and snapping on the current mesh (null before a mesh is loaded). */
   snap: () => SurfaceSnap | null;
@@ -20,6 +24,8 @@ export interface ToolContext {
   notify: (key: string, tone?: 'info' | 'warn') => void;
   /** Tool state changed (status hint, cursor). */
   changed: () => void;
+  /** Annotations may be edited (false outside the annotate mode). */
+  editable: () => boolean;
 }
 
 /** Lazily computed surface hit for the current pointer event (one ray cast at most). */

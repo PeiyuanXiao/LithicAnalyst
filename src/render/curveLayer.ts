@@ -23,8 +23,8 @@ export const CURVE_COLORS = {
 
 export const curveColor = (c: Curve): string => CURVE_COLORS.types[String(c.attributes.type)] ?? CURVE_COLORS.types.other;
 
-const WIDTH = 2.6;
-const WIDTH_SELECTED = 3.4;
+export const WIDTH = 2.6;
+export const WIDTH_SELECTED = 3.4;
 const HALO = 2.6;
 
 /**
@@ -57,7 +57,7 @@ function lineMaterial(color: string, width: number, opts: { ghost?: boolean; opa
 }
 
 /** One curve on screen: dark halo + coloured core (+ faint copy through the surface) and a label. */
-class CurveVisual {
+export class CurveVisual {
   readonly root = new THREE.Group();
   readonly label: CSS2DObject | null = null;
   private geometry: LineGeometry | null = null;
@@ -163,7 +163,7 @@ class CurveVisual {
 }
 
 /** Screen-size round handles for curve anchors, always drawn on top; hidden ones are left out. */
-class AnchorDots {
+export class AnchorDots {
   readonly points: THREE.Points;
   private readonly material: THREE.ShaderMaterial;
   private world: Vec3[] = [];
@@ -277,6 +277,9 @@ export class CurveLayer {
     this.group.updateMatrixWorld(true);
   }
 
+  /** Draw every curve in this colour (another observer's annotations), instead of by type. */
+  fixedColor: string | null = null;
+
   sync(state: Readonly<ProjectState>, selected: string | null, display: ArrowDisplay, showHandles: boolean): void {
     this.last = { state, selected, display, handles: showHandles };
     const seen = new Set<string>();
@@ -292,7 +295,7 @@ export class CurveLayer {
       const isSel = c.id === selected;
       const pts = this.override?.id === c.id ? this.override.points : c.points;
       v.setPoints(pts, c.closed, this.origin);
-      const color = isSel ? CURVE_COLORS.selected : curveColor(c);
+      const color = isSel ? CURVE_COLORS.selected : this.fixedColor ?? curveColor(c);
       v.style(color, isSel ? WIDTH_SELECTED : WIDTH, display.showHidden);
       v.setLabel(display.labels ? c.label : null, color, isSel);
     }

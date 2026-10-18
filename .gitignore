@@ -10,3 +10,7 @@ Thumbs.db
 .RData
 .Ruserdata
 *.Rproj
+
+# Playwright
+test-results/
+playwright-report/
