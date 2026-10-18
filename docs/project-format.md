@@ -409,6 +409,16 @@ measurements by label and type. Kappas: Cohen for two observers, Fleiss for all 
 the scars of the first that every other has matched (relations: pairs of those scars that
 someone related; regions: triangles typed by all, weighted by area).
 
+Batch runs (a folder): the project of a model is kept next to it as `<model>.lithicanalyst.json`;
+other project files in the folder belong to a model by `mesh.sha256`. Merged outputs are named
+after the folder: `<folder>_<kind>.csv` with the same columns as the per-specimen files (one
+measurement row per model, from its own project file, or from the first project file of the
+model), `<folder>_landmarks.tps` (one block per specimen), and — with several observers per
+model, told apart by `specimen.annotator` — `<folder>_icc.csv`: `measure,n_specimens,n_raters,icc`
+(ICC(2,1), two-way random, absolute agreement, single rater; over the specimens every observer
+measured; measures: length, width, thickness along each observer's frame, cortex_ratio,
+nodule_radius, volume_ratio from the stored derived results, and manual measurements by label).
+
 The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio`.
 
 Enumerated fields are written as their codes, which are the same in every interface language.

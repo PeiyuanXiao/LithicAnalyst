@@ -77,6 +77,14 @@
   distances, IoU and Dice of region types and scar regions, agreement and Cohen's / Fleiss' κ for
   scar attributes, region types and relations, landmark distances and measurement differences.
   Exports: `<specimen>_agreement.csv` (long table) and `<specimen>_agreement_summary.csv`.
+- Folders: open a folder of models (Open folder); step through them (PageUp / PageDown or the
+  list). In Chrome and Edge each model's project is saved next to it
+  (`<model>.lithicanalyst.json`) and read back; other browsers read the folder only, and files
+  are downloaded. Measure all: the automatic measurements of every model with the derived
+  results of its project, every CSV kind merged into one file per kind (and one TPS), plus the
+  ICC(2,1) per measure when the folder holds several observers' project files per model.
+  Figures for all: the same figure settings for every model (PNG or SVG). One model at a time,
+  with progress and cancel.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

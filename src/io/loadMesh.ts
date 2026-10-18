@@ -127,8 +127,12 @@ export interface RawMesh {
   sha256: string;
 }
 
-export function buildLoadedMesh(raw: RawMesh): LoadedMesh {
-  // The BVH build reorders the index in place, so never hand it the caller's array.
+/**
+ * The mesh as the app measures it: positions relative to the bounding-box
+ * centre (float precision for large coordinates) and the triangles without
+ * degenerate ones (a copy: the BVH build reorders the index in place).
+ */
+export function centredMesh(raw: RawMesh): { positions: Float32Array; index: Uint32Array; offset: Vec3; min: Vec3; max: Vec3 } {
   const cleaned = removeDegenerateTriangles(raw.index);
   const index = cleaned === raw.index ? cleaned.slice() : cleaned;
   const n = raw.positions.length / 3;
@@ -152,6 +156,12 @@ export function buildLoadedMesh(raw: RawMesh): LoadedMesh {
     local[3 * i + 1] = raw.positions[3 * i + 1] - offset[1];
     local[3 * i + 2] = raw.positions[3 * i + 2] - offset[2];
   }
+  return { positions: local, index, offset, min, max };
+}
+
+export function buildLoadedMesh(raw: RawMesh): LoadedMesh {
+  const { positions: local, index, offset, min, max } = centredMesh(raw);
+  const n = local.length / 3;
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(local, 3));

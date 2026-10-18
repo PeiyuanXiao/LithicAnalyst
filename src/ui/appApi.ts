@@ -117,6 +117,14 @@ export interface AppApi {
   agreementResult(): { rows: import('../compute/agreement').AgreementRow[]; summary: import('../compute/agreement').SummaryRow[] } | null;
   agreementBusy(): boolean;
   exportAgreement(kind: 'long' | 'summary'): void;
+  /** The open folder: its models and which one is open (−1: none of them). */
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number } | null;
+  openWorkspaceMesh(i: number): Promise<void>;
+  stepWorkspace(step: number): void;
+  batchInfo(): { kind: 'measure' | 'figures'; done: number; total: number } | null;
+  runBatch(kind: 'measure' | 'figures'): void;
+  cancelBatch(): void;
+  batchFormat: 'png' | 'svg';
   saveProject(): void;
   openProject(): void;
 }

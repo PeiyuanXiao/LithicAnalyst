@@ -165,6 +165,21 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   over from the last specimen are kept in local preferences keyed by mesh checksum
   (`App.previousNames`); the queue itself is session state, not project data.
 
+## Workspace and batch runs
+
+* `io/workspace.ts`: a folder of models and project files — writable through the File System
+  Access API (`showDirectoryPicker`, Chrome / Edge, not inside frames), otherwise read-only from
+  a directory upload (`<input webkitdirectory>`); only the files at the top of the folder count.
+* The open model's project is written next to it (`<model>.lithicanalyst.json`, debounced like
+  the autosave) and read back when the model is opened again; the browser's autosave still
+  wins when it holds later edits of the same project.
+* Batch measurements (`App.batchMeasure`) read, measure and drop one model at a time without
+  the viewer (`centredMesh`, `surfaceMeasuresSteps`), take each model's project files by
+  checksum, and merge the per-specimen CSVs by kind (`io/batch.ts`); with two or more
+  observers per model it adds ICC(2,1) per measure. Batch figures open each model in the viewer,
+  wait until regions and sections are computed (`App.settled`) and render the figure with the
+  current settings. Results go into the folder, or are downloaded from a read-only one.
+
 ## Compare mode
 
 * Observers are the open project plus project files of the same mesh (SHA-256), read with

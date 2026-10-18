@@ -15,7 +15,9 @@ import { emptyProject, ProjectStore, type Change } from '../core/store';
 import type { Curve, Measurement, ProjectState, RegionType, Section, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
-import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
+import { buildLoadedMesh, centredMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
+import { folderPicker, projectNameFor, workspaceFromFiles, workspaceFromHandle, type Workspace } from '../io/workspace';
+import { batchOutputs, type BatchSpecimen } from '../io/batch';
 import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
 import { ArrowLayer, arrowColor, ARROW_COLORS, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
@@ -216,6 +218,12 @@ export class App implements AppApi {
   private faceAreas: Float32Array | null = null;
   /** Largest distance for matching arrows and curves (null: a tenth of the model's diagonal). */
   private gate: number | null = null;
+  private workspace: Workspace | null = null;
+  /** The workspace model that is open (−1: none, or a model opened from elsewhere). */
+  private wsIndex = -1;
+  private folderSaveTimer = 0;
+  private batch: { kind: 'measure' | 'figures'; done: number; total: number; cancelled: boolean } | null = null;
+  batchFormat: 'png' | 'svg' = 'png';
   private harrisBody: HTMLElement | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
@@ -260,6 +268,7 @@ export class App implements AppApi {
   private readonly meshInput: HTMLInputElement;
   private readonly projectInput: HTMLInputElement;
   private readonly compareInput: HTMLInputElement;
+  private readonly folderInput: HTMLInputElement;
 
   constructor(private readonly root: HTMLElement) {
     document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en';
@@ -272,6 +281,7 @@ export class App implements AppApi {
     this.meshInput = h('input', { type: 'file', accept: '.ply,.stl,.obj', hidden: true, id: 'file-mesh' }) as HTMLInputElement;
     this.projectInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true, id: 'file-project' }) as HTMLInputElement;
     this.compareInput = h('input', { type: 'file', accept: '.json,application/json', multiple: true, hidden: true, id: 'file-compare' }) as HTMLInputElement;
+    this.folderInput = h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, id: 'file-folder' }) as HTMLInputElement;
     this.feedback = new Feedback(this.appEl);
     this.sidebar = buildSidebar(this);
   }
@@ -283,7 +293,12 @@ export class App implements AppApi {
     this.header = this.buildHeader();
     const main = h('main', { class: 'workspace' }, this.viewportEl, this.sidebar.el);
     this.appEl.prepend(this.header, main);
-    this.appEl.append(this.meshInput, this.projectInput, this.compareInput);
+    this.appEl.append(this.meshInput, this.projectInput, this.compareInput, this.folderInput);
+    this.folderInput.addEventListener('change', () => {
+      const ws = workspaceFromFiles([...(this.folderInput.files ?? [])]);
+      this.folderInput.value = '';
+      if (ws) void this.useWorkspace(ws);
+    });
     this.compareInput.addEventListener('change', () => {
       const files = [...(this.compareInput.files ?? [])];
       this.compareInput.value = '';
@@ -414,6 +429,7 @@ export class App implements AppApi {
         { class: 'top-actions', 'aria-label': 'File' },
         btn('btn-open', ICONS.open, t('header.openMesh'), () => this.meshInput.click(), 'btn-primary', 'PLY · STL · OBJ'),
         btn('btn-open-project', ICONS.open, t('header.openProject'), () => this.openProject()),
+        btn('btn-open-folder', ICONS.open, t('header.openFolder'), () => void this.openFolder()),
         this.saveBtn,
         h('span', { class: 'hdr-sep', 'aria-hidden': 'true' }),
         this.undoBtn,
@@ -579,7 +595,10 @@ export class App implements AppApi {
       this.updateAuto();
       this.sidebar.refresh('figure');
     }
-    if (c.kind !== 'reset') this.scheduleAutosave();
+    if (c.kind !== 'reset') {
+      this.scheduleAutosave();
+      this.scheduleFolderSave();
+    }
     this.scheduleAgreement();
     this.queueCoords();
   }
@@ -1140,6 +1159,244 @@ export class App implements AppApi {
 
   towardViewer(): Vec3 {
     return this.viewer?.towardViewer() ?? [0, 0, 1];
+  }
+
+  // ------------------------------------------------------------ workspace
+
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number } | null {
+    const ws = this.workspace;
+    return ws ? { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex } : null;
+  }
+
+  /** Open a folder of models: writable through the File System Access API, else read from a directory upload. */
+  async openFolder(): Promise<void> {
+    if (this.batch) return;
+    const pick = folderPicker();
+    if (pick) {
+      try {
+        await this.useWorkspace(await workspaceFromHandle(await pick()));
+        return;
+      } catch (e) {
+        if ((e as DOMException)?.name === 'AbortError') return;
+        // not allowed here (e.g. inside a frame): read the folder instead
+      }
+    }
+    this.folderInput.click();
+  }
+
+  private async useWorkspace(ws: Workspace): Promise<void> {
+    await this.flushFolderSave();
+    if (!ws.meshes.length) {
+      this.feedback.toast(t('workspace.empty', { name: ws.name }), 'warn');
+      return;
+    }
+    this.workspace = ws;
+    this.wsIndex = -1;
+    this.sidebar.refresh('workspace');
+    await this.openWorkspaceMesh(0);
+  }
+
+  /** The project files of the folder written for this model (by its checksum), each read once per call. */
+  private async folderProjects(sha: string): Promise<Array<{ name: string; state: ProjectState; derived: Record<string, unknown> }>> {
+    const ws = this.workspace;
+    if (!ws) return [];
+    const out: Array<{ name: string; state: ProjectState; derived: Record<string, unknown> }> = [];
+    for (const name of ws.projects) {
+      try {
+        const raw = JSON.parse(await (await ws.read(name)).text());
+        if (raw?.mesh?.sha256 !== sha) continue;
+        out.push({ name, state: parseProjectFile(raw), derived: (raw.derived ?? {}) as Record<string, unknown> });
+      } catch {
+        // not a project file of this app
+      }
+    }
+    return out;
+  }
+
+  /** Open model `i` of the workspace with the project kept next to it. */
+  async openWorkspaceMesh(i: number, quiet = false): Promise<void> {
+    const ws = this.workspace;
+    if (!ws || i < 0 || i >= ws.meshes.length) return;
+    await this.flushFolderSave();
+    const name = ws.meshes[i];
+    let project: ProjectState | null = null;
+    if (ws.projects.includes(projectNameFor(name))) {
+      try {
+        project = parseProjectFile(JSON.parse(await (await ws.read(projectNameFor(name))).text()));
+      } catch (e) {
+        this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
+      }
+    }
+    this.wsIndex = i;
+    await this.openMeshFile(await ws.read(name), { project, quiet });
+    if (this.store.state.mesh?.fileName !== name) this.wsIndex = -1;
+    this.sidebar.refresh('workspace');
+  }
+
+  stepWorkspace(step: number): void {
+    const ws = this.workspace;
+    if (!ws || this.batch) return;
+    const i = Math.max(0, Math.min(ws.meshes.length - 1, (this.wsIndex < 0 ? 0 : this.wsIndex) + step));
+    if (i !== this.wsIndex) void this.openWorkspaceMesh(i);
+  }
+
+  /** Writable workspace: keep the project file next to the open model up to date. */
+  private scheduleFolderSave(): void {
+    if (!this.workspace?.writable || this.wsIndex < 0) return;
+    clearTimeout(this.folderSaveTimer);
+    this.folderSaveTimer = window.setTimeout(() => void this.flushFolderSave(), 800);
+  }
+
+  private async flushFolderSave(): Promise<void> {
+    if (!this.folderSaveTimer) return;
+    clearTimeout(this.folderSaveTimer);
+    this.folderSaveTimer = 0;
+    const ws = this.workspace;
+    const st = this.store.state;
+    if (!ws?.writable || this.wsIndex < 0 || st.mesh?.fileName !== ws.meshes[this.wsIndex]) return;
+    try {
+      await ws.write(projectNameFor(ws.meshes[this.wsIndex]), JSON.stringify(serializeProject(st, __APP_VERSION__, this.meshResults()), null, 2));
+    } catch (e) {
+      this.feedback.toast(t('workspace.saveFailed', { msg: (e as Error).message }), 'error');
+    }
+  }
+
+  batchInfo(): { kind: 'measure' | 'figures'; done: number; total: number } | null {
+    return this.batch;
+  }
+
+  cancelBatch(): void {
+    if (this.batch) this.batch.cancelled = true;
+  }
+
+  /** Write a batch output into the folder, or download it when the folder is read-only. */
+  private async putFile(name: string, data: string | Uint8Array, mime: string): Promise<void> {
+    const ws = this.workspace;
+    if (ws?.writable) await ws.write(name, data);
+    else if (typeof data === 'string') await this.save(name, data, mime);
+    else await saveFile(name, data, mime);
+  }
+
+  runBatch(kind: 'measure' | 'figures'): void {
+    if (this.batch || !this.workspace) return;
+    void (kind === 'measure' ? this.batchMeasure() : this.batchFigures());
+  }
+
+  /** Automatic measurements of every model, with the derived results of its projects, merged by kind. */
+  private async batchMeasure(): Promise<void> {
+    const ws = this.workspace!;
+    await this.flushFolderSave();
+    const batch = (this.batch = { kind: 'measure' as const, done: 0, total: ws.meshes.length, cancelled: false });
+    this.sidebar.refresh('workspace');
+    const specimens: BatchSpecimen[] = [];
+    try {
+      for (const name of ws.meshes) {
+        if (batch.cancelled) break;
+        const raw = await readMeshFile(await ws.read(name));
+        const mesh = centredMesh(raw);
+        const base = await runSliced(surfaceMeasuresSteps(mesh.positions, mesh.index));
+        const axes = { ...base.vertices, mean: [base.vertices.mean[0] + mesh.offset[0], base.vertices.mean[1] + mesh.offset[1], base.vertices.mean[2] + mesh.offset[2]] as Vec3 };
+        const projects = await this.folderProjects(raw.sha256);
+        const open = this.store.state.mesh?.sha256 === raw.sha256;
+        const primary = projects.find((p) => p.name === projectNameFor(name)) ?? projects[0] ?? null;
+        let state: ProjectState;
+        let derived: Record<string, unknown>;
+        if (open) {
+          // the open model: its current annotations and results
+          state = structuredClone(this.store.state) as ProjectState;
+          derived = { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split };
+        } else if (primary) {
+          state = primary.state;
+          derived = primary.derived;
+        } else {
+          state = emptyProject();
+          state.specimen.id = name.replace(/\.[^.]+$/, '');
+          derived = {};
+        }
+        const observers = new Map<string, Record<string, number>>();
+        for (const p of projects) {
+          const st = open && p === primary ? state : p.state;
+          const who = st.specimen.annotator || p.name;
+          if (observers.has(who)) continue;
+          const a = autoMeasurements(mesh.positions, base, st.specimen.frame);
+          const d = open && p === primary ? derived : p.derived;
+          const values: Record<string, number> = { length: a.length, width: a.width, thickness: a.thickness };
+          const totals = d.regionTotals as { cortexRatio?: number } | null | undefined;
+          if (typeof totals?.cortexRatio === 'number') values.cortex_ratio = totals.cortexRatio;
+          const nod = d.nodule as { radius?: number } | null | undefined;
+          if (typeof nod?.radius === 'number') values.nodule_radius = nod.radius;
+          const sp = d.split as { ratio?: number | null } | null | undefined;
+          if (typeof sp?.ratio === 'number') values.volume_ratio = sp.ratio;
+          for (const m of st.measurements) values[m.label] = measurementValue(m);
+          observers.set(who, values);
+        }
+        specimens.push({
+          state,
+          auto: autoMeasurements(mesh.positions, base, state.specimen.frame),
+          planes: state.planes.map((p) => computePlane(p, state, axes)),
+          regions: (derived.regions as BatchSpecimen['regions']) ?? [],
+          regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
+          nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
+          split: (derived.split as BatchSpecimen['split']) ?? null,
+          observers,
+        });
+        batch.done++;
+        this.sidebar.refresh('workspace');
+        await nextFrame();
+      }
+      if (!batch.cancelled) {
+        const stem = fileStem(ws.name, 'batch');
+        for (const f of batchOutputs(specimens, { excelBom: this.display.excelBom })) await this.putFile(`${stem}_${f.suffix}`, f.text, f.suffix.endsWith('.csv') ? 'text/csv' : 'text/plain');
+        this.feedback.toast(t('workspace.batchDone', { n: specimens.length }));
+      }
+    } catch (e) {
+      this.feedback.toast((e as Error).message, 'error');
+    } finally {
+      this.batch = null;
+      this.sidebar.refresh('workspace');
+    }
+  }
+
+  /** Wait until what a figure shows is computed (measurements, regions, sections). */
+  private async settled(): Promise<void> {
+    const t0 = performance.now();
+    while (performance.now() - t0 < 120_000) {
+      const st = this.store.state;
+      const cutsDone = (ids: string[]) => ids.every((id) => this.cuts.get(id)?.lines !== undefined);
+      const planes = this.figure.overlays.planes ? this.planes.filter((p) => p.valid && this.store.plane(p.id)?.visible).map((p) => p.id) : [];
+      const ready = !!this.measureBase && (!st.regions.length || !!this.regions) && cutsDone(planes) && cutsDone(st.sections.filter((x) => x.inFigure).map((x) => x.id));
+      if (ready) return;
+      await nextFrame();
+    }
+  }
+
+  /** The figure of every model, with the same presentation settings. */
+  private async batchFigures(): Promise<void> {
+    const ws = this.workspace!;
+    const start = this.wsIndex;
+    const format = this.batchFormat;
+    const batch = (this.batch = { kind: 'figures' as const, done: 0, total: ws.meshes.length, cancelled: false });
+    this.sidebar.refresh('workspace');
+    try {
+      for (let i = 0; i < ws.meshes.length; i++) {
+        if (batch.cancelled) break;
+        await this.openWorkspaceMesh(i, true);
+        await this.settled();
+        await nextFrame();
+        const fig = this.makeFigure();
+        if (fig) await this.putFile(`${this.stem()}_figure.${format}`, format === 'png' ? await fig.png() : await fig.svg(), format === 'png' ? 'image/png' : 'image/svg+xml');
+        batch.done++;
+        this.sidebar.refresh('workspace');
+      }
+      if (!batch.cancelled) this.feedback.toast(t('workspace.batchDone', { n: batch.done }));
+    } catch (e) {
+      const msg = e instanceof FigureError && e.code === 'tooLarge' ? t('figure.tooLarge', { msg: e.message }) : (e as Error).message;
+      this.feedback.toast(msg, 'error');
+    } finally {
+      this.batch = null;
+      if (start >= 0) await this.openWorkspaceMesh(start, true);
+      this.sidebar.refresh('workspace');
+    }
   }
 
   // ------------------------------------------------------------ compare mode
@@ -1938,7 +2195,8 @@ export class App implements AppApi {
     if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state) }));
   }
 
-  private async openMeshFile(file: File): Promise<void> {
+  /** `project`: the project file kept next to the model in a workspace; `quiet`: no questions (batch runs). */
+  private async openMeshFile(file: File, opts: { project?: ProjectState | null; quiet?: boolean } = {}): Promise<void> {
     if (!this.viewer) return;
     const host = this.viewportEl;
     try {
@@ -1951,8 +2209,8 @@ export class App implements AppApi {
       const loaded = buildLoadedMesh(raw);
       this.installMesh(loaded);
       this.feedback.busy(null);
-      this.feedback.toast(t('toast.loaded', { name: file.name }));
-      await this.afterMeshLoaded(loaded);
+      if (!opts.quiet) this.feedback.toast(t('toast.loaded', { name: file.name }));
+      await this.afterMeshLoaded(loaded, opts);
     } catch (e) {
       this.feedback.busy(null);
       const err = e as Error;
@@ -1965,14 +2223,25 @@ export class App implements AppApi {
     }
   }
 
-  private async afterMeshLoaded(loaded: LoadedMesh): Promise<void> {
+  private async afterMeshLoaded(loaded: LoadedMesh, opts: { project?: ProjectState | null; quiet?: boolean } = {}): Promise<void> {
     const pending = this.pendingProject;
     this.pendingProject = null;
     if (pending && pending.mesh?.sha256 === loaded.info.sha256) {
       this.applyProject(pending);
       return;
     }
+    const kept = opts.project && opts.project.mesh?.sha256 === loaded.info.sha256 ? opts.project : null;
+    if (opts.quiet) {
+      if (kept) this.applyProject(kept, null);
+      return;
+    }
     const entry = readAutosave(loaded.info.sha256);
+    // the project next to the model wins, unless the browser holds later edits of it
+    const later = (entry?.file as { modifiedAt?: string } | undefined)?.modifiedAt ?? '';
+    if (kept && !(later > kept.modifiedAt)) {
+      this.applyProject(kept, null);
+      return;
+    }
     if (!entry) return;
     let saved: ProjectState;
     try {
@@ -2191,6 +2460,13 @@ export class App implements AppApi {
         case 'KeyH':
           this.viewer?.fitView();
           return;
+        case 'PageDown':
+        case 'PageUp':
+          if (this.workspace) {
+            e.preventDefault();
+            this.stepWorkspace(e.code === 'PageDown' ? 1 : -1);
+          }
+          return;
         case 'KeyC':
           if (this.lastHover) {
             this.viewer?.setRotationCenter(this.lastHover.point);
@@ -2263,6 +2539,7 @@ export class App implements AppApi {
       ['] / [', t('help.k.next')],
       ['Ctrl+Z / Ctrl+Shift+Z', t('help.k.undo')],
       ['Ctrl+S', t('help.k.save')],
+      ['PageUp / PageDown', t('help.k.workspace')],
       ['H', t('help.k.fit')],
       ['C', t('help.k.centre')],
       ['L', t('help.k.light')],
@@ -2337,6 +2614,8 @@ export class App implements AppApi {
       agreement: () => this.agreement,
       agreementBusy: () => this.agreementBusyFlag,
       observers: () => this.observerList(),
+      workspace: () => this.workspaceInfo(),
+      batch: () => this.batchInfo(),
       exportLandmarksText: (kind: 'tps' | 'fcsv' | 'csv' | 'sliders') => this.landmarkExport(kind, false).text,
       exportSeriesCsvText: () => seriesCsv(this.store.state, { excelBom: false }),
       relationChecks: () => this.relationChecks(),

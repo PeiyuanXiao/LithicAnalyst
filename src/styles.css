@@ -1497,3 +1497,49 @@ textarea.ctl-text {
 .agree-metric {
   color: var(--ink-2);
 }
+
+/* ------------------------------------------------------------ workspace */
+
+.workspace-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.workspace-nav {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-nav .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.batch-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--step--1);
+}
+
+.batch-row[hidden] {
+  display: none;
+}
+
+.batch-row progress {
+  width: 100%;
+  accent-color: var(--accent);
+}

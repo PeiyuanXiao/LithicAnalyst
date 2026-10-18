@@ -55,11 +55,13 @@ import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } 
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'compare' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
   refresh: (kind: RefreshKind) => void;
+  /** Shown only while this holds (besides the work mode). */
+  visible?: () => boolean;
 }
 
 export const fmtNum = (n: number, digits = 3): string => {
@@ -1317,6 +1319,51 @@ function exportSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+// ---------------------------------------------------------------- workspace
+
+function workspaceSection(api: AppApi): Section {
+  const { el, body } = section('workspace', t('sec.workspace'));
+  const name = h('div', { class: 'checks-row' });
+  const select = h('select', { id: 'workspace-mesh', class: 'ctl-select', 'aria-label': t('sec.workspace') }) as HTMLSelectElement;
+  select.addEventListener('change', () => void api.openWorkspaceMesh(Number(select.value)));
+  const prev = h('button', { type: 'button', class: 'icon-btn', id: 'workspace-prev', title: `${t('workspace.prev')} (PageUp)`, 'aria-label': t('workspace.prev'), onclick: () => api.stepWorkspace(-1) }, icon(ICONS.up)) as HTMLButtonElement;
+  const next = h('button', { type: 'button', class: 'icon-btn', id: 'workspace-next', title: `${t('workspace.next')} (PageDown)`, 'aria-label': t('workspace.next'), onclick: () => api.stepWorkspace(1) }, icon(ICONS.down)) as HTMLButtonElement;
+  const measure = h('button', { type: 'button', class: 'btn btn-primary', id: 'batch-measure', onclick: () => api.runBatch('measure') }, t('workspace.batchMeasure')) as HTMLButtonElement;
+  const figures = h('button', { type: 'button', class: 'btn btn-primary', id: 'batch-figures', onclick: () => api.runBatch('figures') }, t('workspace.batchFigures')) as HTMLButtonElement;
+  const format = segmented('batch-format', null, [
+    { value: 'png', label: 'PNG' },
+    { value: 'svg', label: 'SVG' },
+  ], api.batchFormat, (v) => (api.batchFormat = v as 'png' | 'svg'));
+  const bar = h('progress', { id: 'batch-progress', max: 1, value: 0 }) as HTMLProgressElement;
+  const barText = h('span', { class: 'mono', id: 'batch-status' });
+  const cancel = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'batch-cancel', onclick: () => api.cancelBatch() }, t('dlg.cancel'));
+  const progress = h('div', { class: 'batch-row' }, barText, bar, cancel);
+  body.append(name, h('div', { class: 'workspace-nav' }, prev, select, next), h('div', { class: 'btn-row' }, measure, figures, format.el), progress);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'workspace', 'mesh'].includes(kind)) return;
+    const ws = api.workspaceInfo();
+    if (!ws) return;
+    clear(name);
+    name.append(h('span', { class: 'workspace-name', id: 'workspace-name' }, ws.name), ws.writable ? h('span') : h('span', { class: 'tag', id: 'workspace-readonly' }, t('workspace.readOnly')));
+    clear(select);
+    ws.meshes.forEach((m, i) => select.append(h('option', { value: String(i) }, `${i + 1} / ${ws.meshes.length} · ${m}`)));
+    if (ws.index < 0) select.append(h('option', { value: '-1' }, '–'));
+    select.value = String(ws.index);
+    const b = api.batchInfo();
+    prev.disabled = !!b || ws.index <= 0;
+    next.disabled = !!b || ws.index >= ws.meshes.length - 1;
+    select.disabled = measure.disabled = figures.disabled = !!b;
+    progress.hidden = !b;
+    if (b) {
+      bar.max = b.total;
+      bar.value = b.done;
+      barText.textContent = `${t(b.kind === 'measure' ? 'workspace.batchMeasure' : 'workspace.batchFigures')} ${b.done} / ${b.total}`;
+    }
+  };
+  refresh('all');
+  return { el, refresh, visible: () => !!api.workspaceInfo() };
+}
+
 // ---------------------------------------------------------------- compare
 
 function observersSection(api: AppApi): Section {
@@ -1389,6 +1436,7 @@ const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present', 'compare'];
 
 /** The sidebar sections, in order, and the work modes that show them. */
 const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
+  [workspaceSection, ALL_MODES],
   [specimenSection, ALL_MODES],
   [orientationSection, ['present']],
   [sectionsSection, ['present']],
@@ -1420,13 +1468,13 @@ export function buildSidebar(api: AppApi): Sidebar {
   const sections = SECTIONS.map(([make, modes]) => ({ ...make(api), modes }));
   el.append(...sections.map((s) => s.el));
   const showMode = () => {
-    for (const s of sections) s.el.hidden = !s.modes.includes(api.mode);
+    for (const s of sections) s.el.hidden = !s.modes.includes(api.mode) || (!!s.visible && !s.visible());
   };
   showMode();
   return {
     el,
     refresh: (kind) => {
-      if (kind === 'mode' || kind === 'all') showMode();
+      if (kind === 'mode' || kind === 'all' || kind === 'workspace') showMode();
       if (kind === 'mode') {
         for (const s of sections) s.refresh('figure');
         return;
