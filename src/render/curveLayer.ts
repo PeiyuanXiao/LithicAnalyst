@@ -130,7 +130,13 @@ export class CurveVisual {
       core.transparent = opacity < 1;
       core.needsUpdate = true;
     }
-    (this.halo.material as LineMaterial).linewidth = width + HALO;
+    const halo = this.halo.material as LineMaterial;
+    halo.linewidth = width + HALO;
+    if (halo.opacity !== opacity) {
+      halo.opacity = opacity;
+      halo.transparent = opacity < 1;
+      halo.needsUpdate = true;
+    }
     const ghost = this.ghost.material as LineMaterial;
     ghost.color.set(color);
     ghost.linewidth = width;
@@ -279,6 +285,8 @@ export class CurveLayer {
 
   /** Draw every curve in this colour (another observer's annotations), instead of by type. */
   fixedColor: string | null = null;
+  /** Draw the curves faded (they are not what the current work mode is about). */
+  dimmed = false;
 
   sync(state: Readonly<ProjectState>, selected: string | null, display: ArrowDisplay, showHandles: boolean): void {
     this.last = { state, selected, display, handles: showHandles };
@@ -296,7 +304,8 @@ export class CurveLayer {
       const pts = this.override?.id === c.id ? this.override.points : c.points;
       v.setPoints(pts, c.closed, this.origin);
       const color = isSel ? CURVE_COLORS.selected : this.fixedColor ?? curveColor(c);
-      v.style(color, isSel ? WIDTH_SELECTED : WIDTH, display.showHidden);
+      const dim = this.dimmed && !isSel;
+      v.style(color, isSel ? WIDTH_SELECTED : WIDTH, display.showHidden && !dim, dim ? 0.3 : 1);
       v.setLabel(display.labels ? c.label : null, color, isSel);
     }
     for (const [id, v] of this.visuals) {
@@ -394,6 +403,7 @@ export class CurveLayer {
 
   /** Curve under the cursor, in screen space, with its distance in pixels. */
   pickNearest(clientX: number, clientY: number, maxPx = 8): { id: string; dist: number } | null {
+    if (!this.group.visible) return null;
     const rect = this.viewer.renderer.domElement.getBoundingClientRect();
     const cam = this.viewer.camera;
     const v = new THREE.Vector3();

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Interface: the top bar holds the specimen ID and unit (annotator, notes and the model file
+  in a small panel), a File menu (open model, project or folder), Save, and the mode switch in
+  the middle; the main button is File until a model is open, then Save. Display settings are a
+  panel over the view (Display button). The sidebar follows the tools: choosing a tool opens its
+  section and folds the others (the folder's stays), selecting an object opens its section and scrolls to it; empty
+  and unusable sections are trimmed; it can be resized from its left edge. Each mode's data
+  files are exported from one Export dialog (several files in one ZIP); file names and columns
+  are unchanged. The shortcuts dialog is grouped by mode; saving without an annotator shows a
+  reminder.
+- View: measure mode fades the annotations; present mode hides labels and shows the layers
+  the figure shows; labels that would overlap move apart or hide; fitted-plane discs are barely
+  visible unless selected; region colours keep the relief visible (figures unchanged).
+- Relations are chosen in a small popover next to the click (1 / 2 / 3, Delete, Esc). The
+  Harris matrix panel can be moved, resized and folded, stays above the labels, and lists
+  scars without "cuts" relations apart. The agreement table is grouped by object, with
+  pairing counts, named metrics and units; a click shows the most different pair in 3D.
+- The IBM Plex fonts are bundled into the HTML file (no requests to Google Fonts).
 - Curves (P): trace edges, ridges and scar outlines on the surface. Each click adds a point that
   snaps onto a nearby ridge or valley, and the line between points follows that feature (S: ridge /
   valley / off; hold Shift to place a point without snapping). Traced stretches are pulled taut along

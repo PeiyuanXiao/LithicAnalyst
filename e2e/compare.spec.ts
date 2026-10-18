@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, spherePly, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop } from './helpers';
+import { counts, curveClick, download, dragArrow, expect, exportAvailable, exportFile, loadMesh, openApp, parseCsv, setAnnotator, state, test, toScreen, viewFromTop } from './helpers';
 
 const agreement = (page: Page) => page.evaluate(() => window.lithicanalyst.agreement());
 const value = async (page: Page, itemType: string, itemKey: string, metric: string) =>
@@ -16,8 +16,7 @@ test('compares the open project with other observers\' files of the same model',
   await openApp(page);
   await loadMesh(page, boxPly());
   await viewFromTop(page);
-  await page.locator('#specimen-annotator').fill('Ann');
-  await page.keyboard.press('Escape');
+  await setAnnotator(page, 'Ann');
   // a closed rectangle on the top face with a scar region in it, an arrow inside, and a landmark
   await page.keyboard.press('p');
   for (const p of [boxPoint(-10, -5, 5), boxPoint(10, -5, 5), boxPoint(10, 5, 5), boxPoint(-10, 5, 5)]) await curveClick(page, await toScreen(page, p), { shift: true });
@@ -54,7 +53,7 @@ test('compares the open project with other observers\' files of the same model',
   await page.locator('#app-mode-compare').click();
   await expect(page.locator('#sec-observers')).toBeVisible();
   await expect(page.locator('#observer-list .observer-row')).toHaveCount(1);
-  await expect(page.locator('#export-agreement-csv')).toBeDisabled();
+  expect(await exportAvailable(page, 'agreement')).toBe(false);
   await addFiles(page, [{ name: 'bo.lithicanalyst.json', text: JSON.stringify(other) }, { name: 'elsewhere.lithicanalyst.json', text: JSON.stringify(wrongModel) }]);
   await expect(page.locator('.toast-warn')).toContainText('elsewhere.lithicanalyst.json');
   await expect(page.locator('#observer-list .observer-row')).toHaveCount(2);
@@ -77,11 +76,11 @@ test('compares the open project with other observers\' files of the same model',
   expect(await value(page, 'measurement', 'area_cortex', 'difference')).toBeCloseTo(200, 2);
   await expect(page.locator('#agreement-table tbody tr[data-item="arrow"][data-metric="angle_deg"]')).toHaveCount(1);
 
-  const long = await download(page, () => page.locator('#export-agreement-csv').click());
+  const long = await exportFile(page, 'agreement');
   expect(long.name).toBe('box_agreement.csv');
   expect(long.text.split('\n')[0]).toBe('specimen_id,item_type,item_key,annotator_a,annotator_b,metric,value');
   expect(parseCsv(long.text).find((r) => r.item_type === 'landmark')).toMatchObject({ specimen_id: 'box', item_key: 'LM1', annotator_a: 'Ann', annotator_b: 'Bo', metric: 'distance' });
-  const summary = await download(page, () => page.locator('#export-agreement-summary').click());
+  const summary = await exportFile(page, 'agreement-summary');
   expect(summary.name).toBe('box_agreement_summary.csv');
   expect(summary.text.split('\n')[0]).toBe('specimen_id,item_type,metric,annotator_a,annotator_b,n,mean,sd,min,max');
   const angle = parseCsv(summary.text).find((r) => r.item_type === 'arrow' && r.metric === 'angle_deg')!;

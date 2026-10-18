@@ -52,10 +52,6 @@ export interface AppApi {
   curvatureBusy(): boolean;
   focusArrow(id: string): void;
   focusCurve(id: string): void;
-  exportCsv(): void;
-  exportCurvesCsv(): void;
-  exportMeasurementsCsv(): void;
-  exportManualMeasurementsCsv(): void;
   /** Null while the mesh is being measured (or without a mesh). */
   autoMeasurements(): AutoMeasurements | null;
   measuringBusy(): boolean;
@@ -63,7 +59,6 @@ export interface AppApi {
   planeResults(): PlaneResult[];
   addPlane(): void;
   viewAlongPlane(id: string): void;
-  exportPlanesCsv(): void;
   /** Specimen frame: front view from the current view or a plane's normal; vertical from an arrow; turn on the page. */
   setFrameFromView(): void;
   setFrameFromPlane(id: string): void;
@@ -80,7 +75,6 @@ export interface AppApi {
   exportSection(id: string, format: 'png' | 'svg'): void;
   /** Surface regions as found on the mesh (null before it is partitioned). */
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null;
-  exportRegionsCsv(): void;
   setRegionType(id: string, type: string): void;
   volumeSplit(): import('../compute/split').VolumeSplit | null;
   /** Null before the mesh is measured. */
@@ -94,8 +88,6 @@ export interface AppApi {
   readonly problemsOpen: boolean;
   setProblems(open: boolean, focus?: number | null): void;
   problemFocus(): number | null;
-  exportRelationsCsv(): void;
-  exportSeriesCsv(): void;
   /** Landmarks in export order, sliders and semilandmark points (follows the curves). */
   landmarkTable(): import('../compute/landmarks').LandmarkTable;
   /** Landmark names carried over from the last specimen: the next one to use (null when used up), or null when not in use. */
@@ -105,7 +97,6 @@ export interface AppApi {
   reuseNames(): void;
   skipName(): void;
   stopNames(): void;
-  exportLandmarks(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): void;
   /** Compare mode: the open project first, then the project files read for comparison. */
   observerList(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }>;
   addObserverFiles(): void;
@@ -116,7 +107,10 @@ export interface AppApi {
   setCompareGate(v: number): void;
   agreementResult(): { rows: import('../compute/agreement').AgreementRow[]; summary: import('../compute/agreement').SummaryRow[] } | null;
   agreementBusy(): boolean;
-  exportAgreement(kind: 'long' | 'summary'): void;
+  /** Show in 3D the pair of items that differ most in a metric (a row of the table); again to clear. */
+  focusAgreement(itemType: string, metric: string, a: string, b: string): void;
+  /** The row whose pair is shown (`type|metric|a|b`), or null. */
+  agreementFocus(): string | null;
   /** The open folder: its models and which one is open (−1: none of them). */
   workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number } | null;
   openWorkspaceMesh(i: number): Promise<void>;
@@ -127,4 +121,10 @@ export interface AppApi {
   batchFormat: 'png' | 'svg';
   saveProject(): void;
   openProject(): void;
+  openModel(): void;
+  openFolder(): Promise<void>;
+  /** The export dialog of the current mode's data files. */
+  openExport(): void;
+  /** The relation tool has its first scar and waits for the second. */
+  relationPending(): boolean;
 }

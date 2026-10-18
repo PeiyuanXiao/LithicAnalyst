@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { boxPly, boxPoint, spherePly } from './fixtures/meshes';
-import { dragArrow, expect, openApp, parseCsv, state, test, viewFromTop } from './helpers';
+import { dragArrow, expect, fileMenu, openApp, openSection, parseCsv, setAnnotator, state, test, viewFromTop } from './helpers';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 const meshName = (page: Page) => page.evaluate(() => window.lithicanalyst.state().mesh?.fileName ?? null);
@@ -34,7 +34,7 @@ test('a read-only folder: models in turn with their projects, batch results down
   await openApp(page);
   await expect(page.locator('#sec-workspace')).toBeHidden();
   const chooser = page.waitForEvent('filechooser');
-  await page.locator('#btn-open-folder').click();
+  await fileMenu(page, '#btn-open-folder');
   await (await chooser).setFiles(dir);
   await expect.poll(() => meshName(page)).toBe('box.ply');
   await expect(page.locator('#sec-workspace')).toBeVisible();
@@ -124,17 +124,17 @@ test('a writable folder: projects saved next to the models, batch figures and me
   const folderNames = () => page.evaluate(() => [...(window as unknown as { __folder: Map<string, Uint8Array> }).__folder.keys()].sort());
 
   await openApp(page);
-  await page.locator('#btn-open-folder').click();
+  await fileMenu(page, '#btn-open-folder');
   await expect.poll(() => meshName(page)).toBe('box.ply');
   await expect(page.locator('#workspace-readonly')).toHaveCount(0);
   await viewFromTop(page);
-  await page.locator('#specimen-annotator').fill('Ann');
-  await page.keyboard.press('Escape');
+  await setAnnotator(page, 'Ann');
   await page.keyboard.press('a');
   await dragArrow(page, boxPoint(-10, 0, 5), boxPoint(10, 3, 5));
   // saved next to the model
   await expect.poll(async () => JSON.parse((await folderText('box.lithicanalyst.json')) ?? '{}').annotations?.scars?.length).toBe(1);
 
+  await openSection(page, 'workspace');
   await page.locator('#workspace-next').click();
   await expect.poll(() => meshName(page)).toBe('nodule.ply');
   expect((await state(page)).specimen.annotator).toBe('Ann');

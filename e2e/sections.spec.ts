@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { BOX, boxPly, boxPoint } from './fixtures/meshes';
-import { download, expect, loadMesh, nextFrames, openApp, state, test, toScreen } from './helpers';
+import { download, expect, loadMesh, nextFrames, openApp, openSection, state, test, toScreen } from './helpers';
 
 /** Drag a line across the box (seen from above) along y = const. */
 async function drawSection(page: Page, y: number): Promise<void> {
@@ -44,6 +44,7 @@ test('draws a section across the model, cuts it open, and exports the section dr
   expect(await page.evaluate(() => window.lithicanalyst.clipping())).toBe(1);
 
   // the section drawing alone: the box's cross-section, 40 × 10 mm, hatched, with a scale bar
+  await openSection(page, 'figure');
   await page.locator('#fig-dpi-300').click();
   await page.locator('#fig-scale-1').click();
   const px = 300 / 25.4;

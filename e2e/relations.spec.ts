@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
+import { counts, curveClick, displayPanel, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
 
 const pending = (page: Page) => page.evaluate(() => window.lithicanalyst.relationPending());
 const highlighted = async (page: Page) => (await page.evaluate(() => window.lithicanalyst.highlighted())).sort();
@@ -18,8 +18,8 @@ async function relate(page: Page, a: Vec3, b: Vec3, choice: 'ab' | 'ba' | 'ind' 
   await click(page, a);
   await expect.poll(() => pending(page)).not.toBeNull();
   await click(page, b);
-  await page.locator(`.modal [data-choice="${choice}"]`).click();
-  await expect(page.locator('.modal')).toHaveCount(0);
+  await page.locator(`#relation-pop [data-choice="${choice}"]`).click();
+  await expect(page.locator('#relation-pop')).toHaveCount(0);
 }
 
 const scarRow = (page: Page, label: string) => page.locator('#scar-list .arrow-row').filter({ has: page.locator('.arrow-id', { hasText: new RegExp(`^${label}$`) }) });
@@ -100,8 +100,10 @@ test('records relations by clicking arrows, checks them against the sequences li
   await page.locator('#relation-kind-ind').click();
   expect((await state(page)).relations[1]).toMatchObject({ a: s3, b: s2, kind: 'indeterminate' });
   await expect(page.locator('#harris-body line')).toHaveCount(1);
+  // S3 has no "cuts" relation left: it stands apart, in the unrelated column
+  expect((await page.evaluate(() => window.lithicanalyst.harris())).unrelated).toEqual([s3]);
   y = await nodes(page);
-  expect(y.S3).toBe(y.S1);
+  expect(Object.keys(y).sort()).toEqual(['S1', 'S2', 'S3']);
   await page.locator('#relation-kind-ab').click();
   await expect(page.locator('#harris-body line')).toHaveCount(2);
 
@@ -143,19 +145,21 @@ test('records relations by clicking arrows, checks them against the sequences li
   await expect(page.locator('#harris-body .hm-box')).toHaveCount(2);
 
   // colour by sequence: Q1 members light to dark, Q2 another hue
+  await displayPanel(page);
   await page.locator('#arrow-color').selectOption('sequence');
+  await page.keyboard.press('Escape');
   const chip = (label: string) => scarRow(page, label).locator('.chip').getAttribute('style');
   await page.keyboard.press('Escape');
   expect(new Set([await chip('S1'), await chip('S2'), await chip('S3')]).size).toBe(3);
 
   // exports
-  const rel = await download(page, () => page.locator('#export-relations-csv').click());
+  const rel = await exportFile(page, 'relations');
   expect(rel.name).toBe('box_relations.csv');
   expect(parseCsv(rel.text).map((r) => [r.specimen_id, r.scar_a, r.scar_b, r.relation])).toEqual([
     ['box', 'S2', 'S1', 'a_cuts_b'],
     ['box', 'S3', 'S2', 'a_cuts_b'],
   ]);
-  const ser = await download(page, () => page.locator('#export-series-csv').click());
+  const ser = await exportFile(page, 'series');
   expect(ser.name).toBe('box_series.csv');
   expect(ser.text).toBe('specimen_id,series_id,series_order,scar_id,order_in_series\nbox,Q1,1,S1,1\nbox,Q1,1,S2,2\nbox,Q2,2,S3,\n');
   const svg = await download(page, () => page.locator('#harris-svg').click());
@@ -183,7 +187,7 @@ test('records relations by clicking arrows, checks them against the sequences li
   await openApp(fresh);
   await loadMesh(fresh, ply);
   const chooser = fresh.waitForEvent('filechooser');
-  await fresh.locator('#btn-open-project').click();
+  await fileMenu(fresh, '#btn-open-project');
   await (await chooser).setFiles({ name: saved.name, mimeType: 'application/json', buffer: Buffer.from(saved.text) });
   await waitForMesh(fresh, 'box.ply');
   await expect.poll(async () => (await state(fresh)).sequences).toEqual(st.sequences);
@@ -223,7 +227,7 @@ test('picks a scar known only by its region, and selects the region from the mat
   await click(page, boxPoint(15, -8, 5));
   expect(await pending(page)).toBe(area);
   await click(page, onArrow(8));
-  await page.locator('.modal [data-choice="ba"]').click();
+  await page.locator('#relation-pop [data-choice="ba"]').click();
   st = await state(page);
   expect(st.relations.map((r) => [r.a, r.b, r.kind])).toEqual([[arrow, area, 'a_cuts_b']]);
 

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, roofPly, type Vec3 } from './fixtures/meshes';
-import { download, expect, loadMesh, measureDraftLength, nextFrames, openApp, parseCsv, state, test, toScreen, waitForMesh } from './helpers';
+import { download, expect, exportAvailable, exportFile, fileMenu, loadMesh, measureDraftLength, nextFrames, openApp, parseCsv, state, test, toScreen, waitForMesh } from './helpers';
 
 const MEASUREMENTS_HEADER =
   'specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio';
@@ -47,7 +47,7 @@ test('measures the size and shape of a closed model and exports them', async ({ 
   await page.locator('#specimen-unit').selectOption('cm');
   await expect(page.locator('#auto-area')).toHaveText('2800.00 cm²');
 
-  const csv = await download(page, () => page.locator('#export-measurements-csv').click());
+  const csv = await exportFile(page, 'measurements');
   expect(csv.name).toBe('box_measurements.csv');
   expect(csv.text.split('\n')[0]).toBe(MEASUREMENTS_HEADER);
   const [row] = parseCsv(csv.text);
@@ -79,7 +79,7 @@ test('takes distance, along-surface and angle measurements; undo, redo, export a
   await loadMesh(page, ply);
   await measureMode(page);
   await expect(page.locator('#measure-tool-measure-distance')).toBeVisible();
-  await expect(page.locator('#export-manual-csv')).toBeDisabled();
+  expect(await exportAvailable(page, 'manual')).toBe(false);
   await viewTopFront(page);
 
   // straight distance across the top face
@@ -141,7 +141,7 @@ test('takes distance, along-surface and angle measurements; undo, redo, export a
   await page.keyboard.press('m');
 
   st = await state(page);
-  const csv = await download(page, () => page.locator('#export-manual-csv').click());
+  const csv = await exportFile(page, 'manual');
   expect(csv.name).toBe('box_manual_measurements.csv');
   expect(csv.text.split('\n')[0]).toBe(MANUAL_HEADER);
   const rows = parseCsv(csv.text);
@@ -165,7 +165,7 @@ test('takes distance, along-surface and angle measurements; undo, redo, export a
   await openApp(fresh);
   await loadMesh(fresh, ply);
   const chooser = fresh.waitForEvent('filechooser');
-  await fresh.locator('#btn-open-project').click();
+  await fileMenu(fresh, '#btn-open-project');
   await (await chooser).setFiles({ name: saved.name, mimeType: 'application/json', buffer: Buffer.from(saved.text) });
   await waitForMesh(fresh, 'box.ply');
   await expect.poll(async () => (await state(fresh)).measurements).toEqual(st.measurements);

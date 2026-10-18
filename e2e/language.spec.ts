@@ -1,5 +1,5 @@
 import { roofPly, roofPoint } from './fixtures/meshes';
-import { download, dragArrow, expect, loadMesh, openApp, test, viewFromTop } from './helpers';
+import { dragArrow, expect, exportFile, loadMesh, openApp, test, viewFromTop } from './helpers';
 
 test.describe('in a Chinese browser', () => {
   test.use({ locale: 'zh-CN' });
@@ -18,7 +18,7 @@ test.describe('in a Chinese browser', () => {
     await expect(page.locator('#sec-arrows .panel-title')).toHaveText('片疤箭头');
     await expect(page.locator('#mode-draw')).toContainText('画箭头');
     await expect(page.locator('#field-completeness-bulb_truncated')).toContainText('可见负向打击泡+尾端缺失');
-    const zhCsv = await download(page, () => page.locator('#export-csv').click());
+    const zhCsv = await exportFile(page, 'scar-vectors');
 
     await page.locator('#btn-lang').click();
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
@@ -32,7 +32,7 @@ test.describe('in a Chinese browser', () => {
     await expect(page.locator('#field-completeness-bulb_truncated')).toHaveAttribute('aria-checked', 'true');
 
     // exported codes do not depend on the interface language
-    const enCsv = await download(page, () => page.locator('#export-csv').click());
+    const enCsv = await exportFile(page, 'scar-vectors');
     expect(enCsv.text).toBe(zhCsv.text);
     expect(enCsv.text).toContain(',bulb_truncated,certain,,mm');
 

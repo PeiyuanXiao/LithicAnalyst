@@ -12,12 +12,13 @@ import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, numberKeyField, REGION_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import type { Curve, Measurement, ProjectState, RegionType, Section, Vec3 } from '../core/types';
+import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, centredMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { folderPicker, projectNameFor, workspaceFromFiles, workspaceFromHandle, type Workspace } from '../io/workspace';
 import { batchOutputs, type BatchSpecimen } from '../io/batch';
+import { zipStored } from '../io/zip';
 import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
 import { ArrowLayer, arrowColor, ARROW_COLORS, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
@@ -34,6 +35,7 @@ import { RelationTool, type ScarPick } from '../tools/relationTool';
 import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
 import { landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
+import { declutterLabels } from '../render/labelLayout';
 import { LandmarkTool } from '../tools/landmarkTool';
 import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLabels, type ObserverData, type SummaryRow } from '../compute/agreement';
 import { uuid } from '../core/ids';
@@ -57,9 +59,10 @@ import { SurfaceSnap } from '../tools/surfaceSnap';
 import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type DisplayAspect, type DisplaySettings } from './appApi';
-import { segmented } from './controls';
+import { segmented, softSet, textRow } from './controls';
+import { Popovers, onViewport } from './popover';
 import { clear, h, icon, ICONS } from './dom';
-import { Feedback, type ChoiceButton } from './feedback';
+import { Feedback } from './feedback';
 import { getLang, onLangChange, setLang, t } from './i18n';
 import { buildSidebar, fmtNum, type RefreshKind, type Sidebar } from './sidebar';
 
@@ -218,6 +221,8 @@ export class App implements AppApi {
   private faceAreas: Float32Array | null = null;
   /** Largest distance for matching arrows and curves (null: a tenth of the model's diagonal). */
   private gate: number | null = null;
+  /** The agreement row shown in 3D and the item it shows for each observer (by observer id). */
+  private agreementFocused: { key: string; items: Map<string, string> } | null = null;
   private workspace: Workspace | null = null;
   /** The workspace model that is open (−1: none, or a model opened from elsewhere). */
   private wsIndex = -1;
@@ -255,6 +260,11 @@ export class App implements AppApi {
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
   private saveBtn!: HTMLButtonElement;
+  private fileBtn!: HTMLButtonElement;
+  private specimenBar!: HTMLElement;
+  private specimenRefs: { id: HTMLInputElement; unit: HTMLSelectElement; annotator: HTMLInputElement | HTMLTextAreaElement; notes: HTMLInputElement | HTMLTextAreaElement; meta: HTMLElement } | null = null;
+  private readonly popovers = new Popovers();
+  private displayCtl: HTMLElement | null = null;
   private appModeSeg: ReturnType<typeof segmented> | null = null;
   private modeSeg: ReturnType<typeof segmented> | null = null;
   private snapSeg: ReturnType<typeof segmented> | null = null;
@@ -292,6 +302,7 @@ export class App implements AppApi {
     initHostDownloads();
     this.header = this.buildHeader();
     const main = h('main', { class: 'workspace' }, this.viewportEl, this.sidebar.el);
+    this.buildSidebarResizer(main);
     this.appEl.prepend(this.header, main);
     this.appEl.append(this.meshInput, this.projectInput, this.compareInput, this.folderInput);
     this.folderInput.addEventListener('change', () => {
@@ -337,10 +348,23 @@ export class App implements AppApi {
         this.curves?.updateOcclusion();
         this.measures?.updateOcclusion();
         this.landmarkLayer?.updateOcclusion();
+        // labels behind the surface give way in the layout: lay them out again
+        viewer.requestRender();
       }
     });
     viewer.onCameraChange(() => {
       this.occlusionDirty = true;
+    });
+    // labels that would cover each other move apart (a few times a second while the view moves)
+    let lastDeclutter = 0, declutterTimer = 0;
+    viewer.onAfterRender(() => {
+      clearTimeout(declutterTimer);
+      const run = () => {
+        lastDeclutter = performance.now();
+        declutterLabels(viewer.labelRenderer.domElement);
+      };
+      if (performance.now() - lastDeclutter > 80) run();
+      else declutterTimer = window.setTimeout(run, 90);
     });
 
     const ctx: ToolContext = {
@@ -365,7 +389,7 @@ export class App implements AppApi {
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
     this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p)));
-    this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b) => void this.askRelation(a, b)));
+    this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => void this.askRelation(a, b, at, from)));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -381,6 +405,8 @@ export class App implements AppApi {
     this.buildToolbar();
     this.buildEmptyState();
     this.buildHarrisPanel();
+    this.buildDisplayControl();
+    this.updateSpecimenBar();
     this.setTool('select');
 
     this.store.subscribe((c) => this.onStoreChange(c));
@@ -413,7 +439,24 @@ export class App implements AppApi {
       h('button', { type: 'button', id, class: `btn ${kind} hdr-btn`, onclick, title: title ?? label }, icon(iconPath), h('span', { class: 'btn-text' }, label)) as HTMLButtonElement;
     this.undoBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-undo', 'aria-label': t('header.undo'), onclick: () => this.undo() }, icon(ICONS.undo)) as HTMLButtonElement;
     this.redoBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-redo', 'aria-label': t('header.redo'), onclick: () => this.redo() }, icon(ICONS.redo)) as HTMLButtonElement;
-    this.saveBtn = btn('btn-save-project', ICONS.save, t('header.saveProject'), () => this.saveProject(), 'btn-quiet', `${t('header.saveProject')} (Ctrl+S)`);
+    this.saveBtn = btn('btn-save-project', ICONS.save, t('header.save'), () => this.saveProject(), 'btn-quiet', `${t('header.saveProject')} (Ctrl+S)`);
+    // opening things: one menu
+    const menu = h('div', { class: 'popover menu', id: 'file-menu', role: 'menu', hidden: true });
+    this.fileBtn = h(
+      'button',
+      { type: 'button', id: 'btn-file', class: 'btn btn-quiet hdr-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: t('header.file'), onclick: () => this.popovers.toggle(this.fileBtn, menu) },
+      icon(ICONS.file),
+      h('span', { class: 'btn-text' }, t('header.file')),
+      icon(ICONS.chevron),
+    ) as HTMLButtonElement;
+    const item = (id: string, iconPath: string, label: string, hint: string, run: () => void) =>
+      h('button', { type: 'button', id, class: 'menu-item', role: 'menuitem', title: hint, onclick: () => (this.popovers.close(), run()) }, icon(iconPath), h('span', {}, label));
+    menu.append(
+      item('btn-open', ICONS.cube, t('header.openMesh'), 'PLY · STL · OBJ', () => this.meshInput.click()),
+      item('btn-open-project', ICONS.project, t('header.openProject'), t('header.openProject'), () => this.openProject()),
+      item('btn-open-folder', ICONS.open, t('header.openFolder'), t('header.openFolder'), () => void this.openFolder()),
+    );
+    this.specimenBar = this.buildSpecimenBar();
     this.appModeSeg = segmented('app-mode', null, APP_MODES.map((m) => ({ value: m, label: t(`appMode.${m}`), title: `${t(`appMode.${m}`)} (M)` })), this.mode, (v) =>
       this.setMode(v as AppMode),
     );
@@ -422,22 +465,127 @@ export class App implements AppApi {
     return h(
       'header',
       { class: 'topbar' },
-      h('div', { class: 'brand' }, h('span', { class: 'brand-name' }, 'LithicAnalyst'), h('span', { class: 'brand-ver mono' }, `v${__APP_VERSION__}`)),
+      h(
+        'div',
+        { class: 'topbar-left' },
+        h('div', { class: 'brand' }, h('span', { class: 'brand-name' }, 'LithicAnalyst'), h('span', { class: 'brand-ver mono' }, `v${__APP_VERSION__}`)),
+        this.specimenBar,
+      ),
       this.appModeSeg.el,
       h(
         'nav',
         { class: 'top-actions', 'aria-label': 'File' },
-        btn('btn-open', ICONS.open, t('header.openMesh'), () => this.meshInput.click(), 'btn-primary', 'PLY · STL · OBJ'),
-        btn('btn-open-project', ICONS.open, t('header.openProject'), () => this.openProject()),
-        btn('btn-open-folder', ICONS.open, t('header.openFolder'), () => void this.openFolder()),
+        h('div', { class: 'menu-wrap' }, this.fileBtn, menu),
         this.saveBtn,
         h('span', { class: 'hdr-sep', 'aria-hidden': 'true' }),
         this.undoBtn,
         this.redoBtn,
-        h('button', { type: 'button', class: 'btn btn-quiet hdr-btn', id: 'btn-lang', onclick: () => setLang(getLang() === 'zh' ? 'en' : 'zh') }, icon(ICONS.lang), h('span', { class: 'btn-text' }, t('header.otherLang'))),
+        h('button', { type: 'button', class: 'btn btn-quiet hdr-btn', id: 'btn-lang', title: t('header.otherLang'), onclick: () => setLang(getLang() === 'zh' ? 'en' : 'zh') }, icon(ICONS.lang), h('span', { class: 'btn-text' }, t('header.otherLang'))),
         h('button', { type: 'button', class: 'icon-btn', id: 'btn-help', title: `${t('header.help')} (?)`, 'aria-label': t('header.help'), onclick: () => this.showHelp() }, icon(ICONS.help)),
       ),
     );
+  }
+
+  /** Specimen ID and unit in the top bar; annotator, notes and the model file in a small panel. */
+  private buildSpecimenBar(): HTMLElement {
+    const id = h('input', { id: 'specimen-id', class: 'ctl-text mono spec-id', type: 'text', 'aria-label': t('field.specimenId'), title: t('field.specimenId'), autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+    id.addEventListener('input', () => updateSpecimen(this.store, { id: id.value }));
+    const unit = h(
+      'select',
+      { id: 'specimen-unit', class: 'ctl-select spec-unit', 'aria-label': t('field.unit'), title: t('field.unit') },
+      ...['mm', 'cm', 'm', 'in'].map((u) => h('option', { value: u }, u)),
+      h('option', { value: '' }, t('unit.unknown')),
+    ) as HTMLSelectElement;
+    unit.addEventListener('change', () => {
+      updateSpecimen(this.store, { unit: unit.value });
+      writePref('unit', unit.value);
+    });
+    const annotator = textRow('specimen-annotator', t('field.annotator'), '', (v) => {
+      updateSpecimen(this.store, { annotator: v });
+      writePref('annotator', v);
+    });
+    const notes = textRow('specimen-notes', t('field.notes'), '', (v) => updateSpecimen(this.store, { notes: v }), { multiline: true });
+    const meta = h('dl', { class: 'meta', id: 'specimen-meta' });
+    const panel = h('div', { class: 'popover spec-panel', id: 'specimen-panel', hidden: true }, annotator.el, notes.el, meta);
+    const more = h('button', { type: 'button', class: 'icon-btn', id: 'specimen-more', 'aria-expanded': 'false', title: t('sec.specimen'), 'aria-label': t('sec.specimen'), onclick: () => this.popovers.toggle(more, panel) }, icon(ICONS.chevron));
+    this.specimenRefs = { id, unit, annotator: annotator.input, notes: notes.input, meta };
+    return h('div', { class: 'spec-bar', id: 'specimen-bar' }, id, unit, h('div', { class: 'menu-wrap' }, more, panel));
+  }
+
+  private updateSpecimenBar(): void {
+    const r = this.specimenRefs;
+    if (!r) return;
+    const st = this.store.state;
+    this.specimenBar.hidden = !st.mesh;
+    softSet(r.id, st.specimen.id);
+    if (r.unit.value !== st.specimen.unit) r.unit.value = st.specimen.unit;
+    softSet(r.annotator, st.specimen.annotator);
+    softSet(r.notes, st.specimen.notes);
+    clear(r.meta);
+    const m = st.mesh;
+    if (m)
+      r.meta.append(
+        h('dt', {}, t('mesh.file')),
+        h('dd', { title: `SHA-256 ${m.sha256}` }, m.fileName),
+        h('dt', {}, t('mesh.size')),
+        h('dd', {}, t('status.mesh', { v: m.vertexCount.toLocaleString('en-US'), t: m.triangleCount.toLocaleString('en-US') })),
+      );
+  }
+
+  /** The display settings: a button at the top right of the view and its panel. */
+  private buildDisplayControl(): void {
+    const panel = h('div', { class: 'popover display-panel', id: 'display-panel', hidden: true }, this.sidebar.displayEl);
+    // the panel scrolls within the view, whichever way it opens
+    const fit = () => {
+      if (panel.hidden) return;
+      panel.style.maxHeight = '';
+      const vp = this.viewportEl.getBoundingClientRect(), b = button.getBoundingClientRect(), r = panel.getBoundingClientRect();
+      const room = r.top >= b.bottom ? vp.bottom - r.top - 12 : b.top - vp.top - 18;
+      if (r.height > room) panel.style.maxHeight = `${Math.max(120, room)}px`;
+    };
+    const button = h('button', { type: 'button', class: 'btn btn-quiet vp-btn', id: 'btn-display', 'aria-expanded': 'false', title: t('sec.display'), onclick: () => {
+      this.popovers.toggle(button, panel);
+      fit();
+    } }, icon(ICONS.sliders), h('span', { class: 'btn-text' }, t('sec.display')));
+    const el = h('div', { class: 'viewport-ui vp-display' }, button, panel);
+    this.popovers.close();
+    if (this.displayCtl) this.displayCtl.replaceWith(el);
+    else this.viewportEl.append(el);
+    this.displayCtl = el;
+    el.hidden = !this.hasMesh();
+  }
+
+  private resizerEl: HTMLElement | null = null;
+
+  /** Drag the sidebar's left edge to change its width (remembered). */
+  private buildSidebarResizer(main: HTMLElement): void {
+    // a narrow window keeps room for the 3D view whatever width was chosen
+    const apply = (w: number) => main.style.setProperty('--sidebar-w', `min(${w}px, max(300px, 100vw - 480px))`);
+    const saved = readPref<number>('sidebarWidth', 0);
+    if (saved >= 300 && saved <= 640) apply(saved);
+    const handle = h('div', { class: 'sidebar-resizer', role: 'separator', 'aria-orientation': 'vertical', title: t('sidebar.resize') });
+    let width = 0;
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      handle.classList.add('is-dragging');
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!handle.hasPointerCapture(e.pointerId)) return;
+      width = Math.round(Math.max(300, Math.min(640, main.getBoundingClientRect().right - e.clientX)));
+      apply(width);
+    });
+    const end = (e: PointerEvent) => {
+      if (!handle.hasPointerCapture(e.pointerId)) return;
+      handle.releasePointerCapture(e.pointerId);
+      handle.classList.remove('is-dragging');
+      if (width) writePref('sidebarWidth', width);
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+    main.append(handle);
+    this.resizerEl = handle;
   }
 
   private buildToolbar(): void {
@@ -483,7 +631,7 @@ export class App implements AppApi {
   private buildEmptyState(): void {
     clear(this.emptyEl);
     this.emptyEl.append(
-      h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.open), t('header.openMesh')),
+      h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.cube), t('header.openMesh')),
       h('span', { class: 'vp-empty-formats mono' }, 'PLY · STL · OBJ'),
     );
   }
@@ -493,11 +641,17 @@ export class App implements AppApi {
     this.header.replaceWith(newHeader);
     this.header = newHeader;
     const newSidebar = buildSidebar(this);
+    const scroll = this.sidebar.el.scrollTop;
     this.sidebar.el.replaceWith(newSidebar.el);
     this.sidebar = newSidebar;
+    if (this.tools?.activeId) newSidebar.focusTool(this.tools.activeId);
+    newSidebar.el.scrollTop = scroll;
+    if (this.resizerEl) this.resizerEl.title = t('sidebar.resize');
     this.buildToolbar();
     this.buildEmptyState();
     this.buildHarrisPanel();
+    this.buildDisplayControl();
+    this.updateSpecimenBar();
     this.updateUndoButtons();
     this.updateMeshDependentUi();
     this.updateCursor();
@@ -517,6 +671,13 @@ export class App implements AppApi {
     this.emptyEl.hidden = has;
     this.toolbarEl.hidden = !has;
     this.saveBtn.disabled = !has;
+    // the main action: opening something until a model is open, then saving
+    this.fileBtn.classList.toggle('btn-primary', !has);
+    this.fileBtn.classList.toggle('btn-quiet', has);
+    this.saveBtn.classList.toggle('btn-primary', has);
+    this.saveBtn.classList.toggle('btn-quiet', !has);
+    if (this.displayCtl) this.displayCtl.hidden = !has;
+    this.updateSpecimenBar();
     this.sidebar.refresh('mesh');
     this.updateHarris();
   }
@@ -592,6 +753,7 @@ export class App implements AppApi {
       this.sidebar.refresh('measurements');
     }
     if (c.kind === 'specimen' || c.kind === 'reset') {
+      this.updateSpecimenBar();
       this.updateAuto();
       this.sidebar.refresh('figure');
     }
@@ -605,6 +767,11 @@ export class App implements AppApi {
 
   private syncAnnotations(): void {
     const handles = this.tools?.activeId === 'select' && this.mode === 'annotate';
+    // the measure mode is about measurements: annotations are drawn faded there
+    const dim = this.mode === 'measure';
+    if (this.arrows) this.arrows.dimmed = dim;
+    if (this.curves) this.curves.dimmed = dim;
+    if (this.landmarkLayer) this.landmarkLayer.dimmed = dim;
     this.arrows?.setHighlight(this.emphasis());
     this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
@@ -617,15 +784,31 @@ export class App implements AppApi {
       this.store.state.planes,
       this.planes,
       this.selection.id,
-      this.mode === 'measure' || this.mode === 'present',
+      this.mode === 'measure' || (this.mode === 'present' && this.figure.overlays.planes),
       mesh ? { min: mesh.bboxMin, max: mesh.bboxMax } : null,
       (id) => this.cuts.get(id)?.lines ?? null,
     );
     this.syncCompare();
+    this.applyLayerVisibility();
     this.occlusionDirty = true;
   }
 
+  /**
+   * Which annotation layers the view shows: the present mode follows the figure's overlay
+   * switches; the compare mode draws each observer's annotations instead of the open project's.
+   */
+  private applyLayerVisibility(): void {
+    const f = this.figure.overlays;
+    const shown = (inFigure: boolean) => (this.mode === 'present' ? inFigure : this.mode !== 'compare');
+    if (this.arrows) this.arrows.group.visible = shown(f.arrows);
+    if (this.curves) this.curves.group.visible = shown(f.curves);
+    if (this.landmarkLayer) this.landmarkLayer.group.visible = shown(f.landmarks);
+    if (this.regionLayer) this.regionLayer.group.visible = shown(f.regions);
+    this.viewer?.requestRender();
+  }
+
   setTool(id: string): void {
+    if (id !== this.tools?.activeId) this.sidebar.focusTool(id);
     this.tools?.setActive(id);
     this.syncAnnotations();
     this.updateCursor();
@@ -635,6 +818,7 @@ export class App implements AppApi {
   setMode(mode: AppMode): void {
     if (mode === this.mode) return;
     // tools belong to their mode; an unfinished curve is kept (as on Esc)
+    this.relationPop?.close();
     this.setTool('select');
     this.mode = mode;
     writePref('mode', mode);
@@ -781,18 +965,6 @@ export class App implements AppApi {
     return fileStem(st.specimen.id || (st.mesh ? st.mesh.fileName.replace(/\.[^.]+$/, '') : ''), 'specimen');
   }
 
-  exportCsv(): void {
-    if (!this.hasMesh()) return;
-    const csv = scarVectorCsv(this.store.state, { excelBom: this.display.excelBom });
-    void this.save(`${this.stem()}_scar_vectors.csv`, csv, 'text/csv');
-  }
-
-  exportCurvesCsv(): void {
-    if (!this.hasMesh() || !this.store.state.curves.length) return;
-    const csv = curveCsv(this.store.state, { excelBom: this.display.excelBom });
-    void this.save(`${this.stem()}_curves.csv`, csv, 'text/csv');
-  }
-
   /** "12.345 mm" or "37.2°". */
   formatMeasurement(m: Measurement): string {
     const v = measurementValue(m);
@@ -821,11 +993,6 @@ export class App implements AppApi {
     if (!r?.valid || !this.viewer) return;
     const m = r.matrix!;
     this.viewer.viewFrom(r.normal!, [m[4], m[5], m[6]], r.center!);
-  }
-
-  exportPlanesCsv(): void {
-    if (!this.hasMesh() || !this.planes.length) return;
-    void this.save(`${this.stem()}_planes.csv`, planesCsv(this.store.state, this.planes, { excelBom: this.display.excelBom }), 'text/csv');
   }
 
   /** Centre of the model's bounding box: the origin of specimen coordinates. */
@@ -888,6 +1055,8 @@ export class App implements AppApi {
     change(this.figure);
     writePref('figure', this.figure);
     this.sidebar.refresh('figure');
+    // the present mode shows what the figure will show
+    this.syncAnnotations();
   }
 
   private figureContext(): FigureContext | null {
@@ -933,24 +1102,28 @@ export class App implements AppApi {
     const visiblePlanes = st.planes.filter((p) => p.visible);
     const settings = only ? { ...this.figure, views: [] } : this.figure;
     this.applyClipping(false);
-    const fig = renderFigure(ctx, frame, st.specimen.unit, settings, {
-      arrows: (() => {
-        const seq = this.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
-        return st.scars.flatMap((s) => (s.vector ? [{ ...s.vector, color: arrowColor(s, this.display.arrows.colorMode, seq) }] : []));
-      })(),
-      curves: st.curves.map((c) => ({ points: c.points, closed: c.closed, color: curveColor(c) })),
-      planes: visiblePlanes.flatMap((p) => {
-        const lines = this.cuts.get(p.id)?.lines;
-        return lines ? [{ lines, color: planeColor(p.label) }] : [];
-      }),
-      landmarks: [
-        ...st.landmarks.map((l) => ({ point: l.point, color: LANDMARK_COLORS.fixed, fixed: true })),
-        ...this.landmarks.sets.flatMap((q) => q.points.map((p) => ({ point: p, color: LANDMARK_COLORS.semi, fixed: false }))),
-      ],
-      sections: only ? this.sectionDrawings([only]) : this.sectionDrawings(st.sections.filter((x) => x.inFigure)),
-    });
-    this.applyClipping();
-    return fig;
+    this.regionLayer?.useFigureStyle(true);
+    try {
+      return renderFigure(ctx, frame, st.specimen.unit, settings, {
+        arrows: (() => {
+          const seq = this.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
+          return st.scars.flatMap((s) => (s.vector ? [{ ...s.vector, color: arrowColor(s, this.display.arrows.colorMode, seq) }] : []));
+        })(),
+        curves: st.curves.map((c) => ({ points: c.points, closed: c.closed, color: curveColor(c) })),
+        planes: visiblePlanes.flatMap((p) => {
+          const lines = this.cuts.get(p.id)?.lines;
+          return lines ? [{ lines, color: planeColor(p.label) }] : [];
+        }),
+        landmarks: [
+          ...st.landmarks.map((l) => ({ point: l.point, color: LANDMARK_COLORS.fixed, fixed: true })),
+          ...this.landmarks.sets.flatMap((q) => q.points.map((p) => ({ point: p, color: LANDMARK_COLORS.semi, fixed: false }))),
+        ],
+        sections: only ? this.sectionDrawings([only]) : this.sectionDrawings(st.sections.filter((x) => x.inFigure)),
+      });
+    } finally {
+      this.regionLayer?.useFigureStyle(false);
+      this.applyClipping();
+    }
   }
 
   private sectionDrawings(list: Section[]): SectionDrawing[] {
@@ -1055,11 +1228,6 @@ export class App implements AppApi {
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
     return this.regions;
-  }
-
-  exportRegionsCsv(): void {
-    if (!this.hasMesh() || !this.regions?.results.length) return;
-    void this.save(`${this.stem()}_regions.csv`, regionsCsv(this.store.state, this.regions.results, { excelBom: this.display.excelBom }), 'text/csv');
   }
 
   /** The triangle closest to a point (original coordinates), or −1. */
@@ -1399,6 +1567,87 @@ export class App implements AppApi {
     }
   }
 
+  // ------------------------------------------------------------ export
+
+  /** The data files the current mode exports (figures and sections have their own buttons). */
+  private exportables(bom: boolean): Array<{ key: string; label: string; name: string; available: boolean; text: () => string }> {
+    const st = this.store.state;
+    const stem = this.stem();
+    const opts = { excelBom: bom };
+    const csv = (key: string, label: string, suffix: string, available: boolean, text: () => string) => ({ key, label, name: `${stem}_${suffix}`, available, text });
+    if (this.mode === 'annotate') {
+      const lm = this.landmarks;
+      return [
+        csv('scar-vectors', t('export.csv'), 'scar_vectors.csv', st.scars.some(hasVector), () => scarVectorCsv(st, opts)),
+        csv('curves', t('export.curvesCsv'), 'curves.csv', st.curves.length > 0, () => curveCsv(st, opts)),
+        csv('regions', t('export.regions'), 'regions.csv', !!this.regions?.results.length, () => regionsCsv(st, this.regions?.results ?? [], opts)),
+        csv('relations', t('export.relations'), 'relations.csv', st.relations.length > 0, () => relationsCsv(st, opts)),
+        csv('series', t('export.series'), 'series.csv', st.sequences.some((q) => q.scarIds.length), () => seriesCsv(st, opts)),
+        csv('landmarks-tps', t('export.landmarksTps'), 'landmarks.tps', lm.rows.length > 0, () => landmarksTps(st, lm)),
+        csv('landmarks-fcsv', t('export.landmarksFcsv'), 'landmarks.fcsv', lm.rows.length > 0, () => landmarksFcsv(lm)),
+        csv('landmarks-csv', t('export.landmarksCsv'), 'landmarks.csv', lm.rows.length > 0, () => landmarksCsv(st, lm, opts)),
+        csv('sliders', t('export.sliders'), 'sliders.csv', lm.sliders.length > 0, () => slidersCsv(lm)),
+      ];
+    }
+    if (this.mode === 'measure')
+      return [
+        csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split)),
+        csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
+        csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
+      ];
+    if (this.mode === 'compare') {
+      // not while it is being recomputed (the previous result would be written)
+      const a = this.agreementBusyFlag || this.agreementStale ? null : this.agreement;
+      const id = st.specimen.id || stem;
+      return [
+        csv('agreement', t('export.agreement'), 'agreement.csv', !!a, () => agreementCsv(id, a?.rows ?? [], opts)),
+        csv('agreement-summary', t('export.agreementSummary'), 'agreement_summary.csv', !!a, () => agreementSummaryCsv(id, a?.summary ?? [], opts)),
+      ];
+    }
+    return [];
+  }
+
+  /** Pick the files to export; several go into one ZIP archive. */
+  openExport(): void {
+    if (!this.hasMesh()) return;
+    const files = this.exportables(false);
+    if (!files.length) return;
+    const boxes = files.map((f) =>
+      h('input', { type: 'checkbox', id: `export-file-${f.key}`, 'data-key': f.key, checked: f.available, disabled: !f.available }) as HTMLInputElement,
+    );
+    const bom = h('input', { type: 'checkbox', id: 'export-bom', checked: this.display.excelBom }) as HTMLInputElement;
+    const body = h(
+      'div',
+      { class: 'export-list' },
+      ...files.map((f, i) => h('label', { class: `ctl-check export-item${f.available ? '' : ' is-empty'}`, for: boxes[i].id }, boxes[i], h('span', {}, f.label), h('span', { class: 'mono export-name' }, f.name))),
+      h('hr', { class: 'rule' }),
+      h('label', { class: 'ctl-check', for: 'export-bom' }, bom, h('span', {}, t('export.bom'))),
+    );
+    void this.feedback
+      .choose(t('export.title'), body, [
+        { id: 'cancel', label: t('dlg.cancel') },
+        { id: 'export', label: t('export.run'), kind: 'primary' },
+      ])
+      .then(async (choice) => {
+        if (choice !== 'export') return;
+        if (bom.checked !== this.display.excelBom) this.setDisplay((d) => (d.excelBom = bom.checked), 'other');
+        const chosen = this.exportables(bom.checked).filter((f, i) => f.available && boxes[i].checked);
+        if (!chosen.length) return;
+        if (chosen.length === 1) {
+          const f = chosen[0];
+          await this.save(f.name, f.text(), f.name.endsWith('.csv') ? 'text/csv' : 'text/plain');
+          return;
+        }
+        const enc = new TextEncoder();
+        const name = `${this.stem()}_export.zip`;
+        const outcome = await saveFile(name, zipStored(chosen.map((f) => ({ name: f.name, data: enc.encode(f.text()) }))), 'application/zip');
+        if (outcome === 'saved') this.feedback.toast(t('toast.saved', { name }));
+        else if (outcome === 'declined') this.feedback.toast(t('toast.declined'));
+        else if (outcome === 'busy') this.feedback.toast(t('toast.busy'), 'warn');
+        else this.feedback.toast(t('export.zipFailed'), 'error');
+      });
+  }
+
   // ------------------------------------------------------------ compare mode
 
   observerList(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }> {
@@ -1500,11 +1749,51 @@ export class App implements AppApi {
     return this.agreementBusyFlag;
   }
 
+  agreementFocus(): string | null {
+    return this.agreementFocused?.key ?? null;
+  }
+
+  relationPending(): boolean {
+    const tool = this.tools?.activeTool;
+    return tool instanceof RelationTool && tool.pending() !== null;
+  }
+
+  /** Show the pair of items that differ most in a metric, each in its observer's drawing (again: clear). */
+  focusAgreement(itemType: string, metric: string, a: string, b: string): void {
+    const key = `${itemType}|${metric}|${a}|${b}`;
+    const rows = (this.agreement?.rows ?? []).filter((r) => r.itemType === itemType && r.metric === metric && r.a === a && r.b === b && r.itemKey !== 'all' && Number.isFinite(r.value));
+    if (this.agreementFocused?.key === key || !rows.length) {
+      this.agreementFocused = null;
+    } else {
+      const worst = rows.reduce((m, r) => (Math.abs(r.value) > Math.abs(m.value) ? r : m), rows[0]);
+      const labels = this.observerLabels();
+      const byLabel = (label: string) => this.observers.find((o) => labels.get(o.id) === label);
+      const items = new Map<string, string>();
+      const [ka, kb] = itemType === 'arrow' || itemType === 'curve' ? worst.itemKey.split('|') : [worst.itemKey, worst.itemKey];
+      for (const [label, k] of [[a, ka], [b, kb]] as const) {
+        const o = byLabel(label);
+        const st = o ? (o.state ?? this.store.state) : null;
+        if (!o || !st) continue;
+        const id =
+          itemType === 'arrow'
+            ? st.scars.find((x) => x.label === k && x.vector)?.id
+            : itemType === 'curve'
+              ? st.curves.find((x) => x.label === k)?.id
+              : itemType === 'landmark'
+                ? st.landmarks.find((x) => x.name === k)?.id
+                : semilandmarkPoint(st, k);
+        if (id) items.set(o.id, id);
+      }
+      this.agreementFocused = { key, items };
+    }
+    this.syncCompare();
+    this.sidebar.refresh('compare');
+  }
+
   /** Each observer's annotations in its colour (compare mode); the open project's own layers step aside. */
   private syncCompare(): void {
     const viewer = this.viewer;
     const show = this.mode === 'compare';
-    for (const g of [this.arrows?.group, this.curves?.group, this.landmarkLayer?.group, this.regionLayer?.group]) if (g) g.visible = !show;
     if (!viewer) return;
     for (const o of this.observers) {
       if (!(show && o.included && this.hasMesh())) {
@@ -1518,9 +1807,12 @@ export class App implements AppApi {
         o.layers = { arrows, curves, landmarks };
       }
       const st = o.state ?? this.store.state;
-      o.layers.arrows.sync(st, null, this.display.arrows, false);
-      o.layers.curves.sync(st, null, this.display.arrows, false);
-      o.layers.landmarks.sync(st.landmarks, (o.state ? o.table : this.landmarks)?.sets ?? [], null, this.display.arrows.labels, this.display.arrows.showHidden);
+      const focus = this.agreementFocused?.items.get(o.id) ?? null;
+      // only the open project's labels: the others would stack on top of them
+      const display = { ...this.display.arrows, labels: this.display.arrows.labels && !o.state };
+      o.layers.arrows.sync(st, focus, display, false);
+      o.layers.curves.sync(st, focus, display, false);
+      o.layers.landmarks.sync(st.landmarks, (o.state ? o.table : this.landmarks)?.sets ?? [], focus, display.labels, this.display.arrows.showHidden);
     }
   }
 
@@ -1622,18 +1914,11 @@ export class App implements AppApi {
     const rows = compareObservers(data, { gate: this.compareGate(), faceArea: areas });
     if (token !== this.agreementToken) return;
     this.agreement = { rows, summary: summarize(rows) };
+    this.agreementFocused = null;
+    this.syncCompare();
     this.agreementBusyFlag = false;
     this.agreementStale = false;
     this.sidebar.refresh('compare');
-  }
-
-  exportAgreement(kind: 'long' | 'summary'): void {
-    const a = this.agreement;
-    if (!a || !this.hasMesh()) return;
-    const id = this.store.state.specimen.id || this.stem();
-    const opts = { excelBom: this.display.excelBom };
-    if (kind === 'long') void this.save(`${this.stem()}_agreement.csv`, agreementCsv(id, a.rows, opts), 'text/csv');
-    else void this.save(`${this.stem()}_agreement_summary.csv`, agreementSummaryCsv(id, a.summary, opts), 'text/csv');
   }
 
   // ------------------------------------------------------------ landmarks
@@ -1715,12 +2000,6 @@ export class App implements AppApi {
     }
   }
 
-  exportLandmarks(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): void {
-    if (!this.hasMesh() || !this.landmarks.rows.length) return;
-    const f = this.landmarkExport(kind, this.display.excelBom);
-    void this.save(f.name, f.text, f.mime);
-  }
-
   // ------------------------------------------------------------ relations and sequences
 
   relationChecks(): RelationChecks {
@@ -1765,19 +2044,18 @@ export class App implements AppApi {
     return r?.scarId && this.store.scar(r.scarId) ? { scarId: r.scarId, selectId: r.id } : null;
   }
 
-  /** Relation tool: ask how two scars relate, and record it. */
-  private async askRelation(a: string, b: string): Promise<void> {
+  /** Relation tool: ask, next to the click, how two scars relate, and record it. */
+  private async askRelation(a: string, b: string, at: { x: number; y: number }, from: { x: number; y: number }): Promise<void> {
     const A = this.store.scar(a)?.label ?? '', B = this.store.scar(b)?.label ?? '';
     const old = relationBetween(this.store.state, a, b);
     const current = !old ? null : old.kind === 'indeterminate' ? 'ind' : old.a === a ? 'ab' : 'ba';
-    const kind = (id: string): ChoiceButton['kind'] => (id === current ? 'primary' : 'quiet');
-    const buttons: ChoiceButton[] = [
-      { id: 'ab', label: t('relation.cuts', { a: A, b: B }), kind: kind('ab') },
-      { id: 'ba', label: t('relation.cuts', { a: B, b: A }), kind: kind('ba') },
-      { id: 'ind', label: t('relation.indeterminate'), kind: kind('ind') },
+    const options: Array<{ id: string; key: string; label: string }> = [
+      { id: 'ab', key: '1', label: t('relation.cuts', { a: A, b: B }) },
+      { id: 'ba', key: '2', label: t('relation.cuts', { a: B, b: A }) },
+      { id: 'ind', key: '3', label: t('relation.indeterminate') },
     ];
-    if (old) buttons.push({ id: 'delete', label: t('arrows.delete'), kind: 'danger' });
-    const choice = await this.feedback.choose(`${A} · ${B}`, '', buttons);
+    if (old) options.push({ id: 'delete', key: 'Del', label: t('arrows.delete') });
+    const choice = await this.relationPopover(`${A} · ${B}`, options, current, at, [from, ...this.scarScreenPoints(a), ...this.scarScreenPoints(b)]);
     if (!this.store.scar(a) || !this.store.scar(b)) return;
     if (choice === 'delete' && old) {
       deleteRelation(this.store, old.id);
@@ -1788,34 +2066,189 @@ export class App implements AppApi {
     this.selection.set(rel?.id ?? null);
   }
 
+  /** Where a scar shows on screen: points along its arrow, or its regions' seeds. */
+  private scarScreenPoints(id: string): Array<{ x: number; y: number }> {
+    const v = this.viewer;
+    const s = this.store.scar(id);
+    if (!v || !s) return [];
+    const vec = s.vector;
+    const pts: Vec3[] = vec
+      ? Array.from({ length: 9 }, (_, i): Vec3 => {
+          const f = i / 8, [a, b] = [vec.start, vec.end];
+          return [a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2])];
+        })
+      : this.store.state.regions.filter((r) => r.scarId === id).map((r) => r.seed);
+    return pts.map((p) => v.project(new THREE.Vector3(p[0], p[1], p[2]))).filter((p) => p.visible);
+  }
+
+  private relationPop: { close: () => void } | null = null;
+
+  /**
+   * A small popover next to `at` (client coordinates) with numbered choices;
+   * it goes to whichever side of the click leaves `avoid` (the two scars) in view.
+   * 1 / 2 / 3, Delete and Esc work from the keyboard; a press elsewhere cancels.
+   */
+  private relationPopover(title: string, options: Array<{ id: string; key: string; label: string }>, current: string | null, at: { x: number; y: number }, avoid: Array<{ x: number; y: number }>): Promise<string | null> {
+    this.relationPop?.close();
+    return new Promise((resolve) => {
+      const buttons = options.map((o) =>
+        h('button', { type: 'button', class: `btn btn-sm ${o.id === 'delete' ? 'btn-danger' : o.id === current ? 'btn-primary' : 'btn-quiet'}`, 'data-choice': o.id, onclick: () => finish(o.id) }, h('kbd', {}, o.key), h('span', {}, o.label)),
+      );
+      const el = h('div', { class: 'viewport-ui relation-pop', id: 'relation-pop', role: 'dialog', 'aria-label': title }, h('div', { class: 'relation-pop-title mono' }, title), ...buttons);
+      el.style.visibility = 'hidden';
+      this.viewportEl.append(el);
+      // place it: the first side of the click that fits in the view and covers neither scar
+      const area = this.viewportEl.getBoundingClientRect();
+      const w = el.offsetWidth, hgt = el.offsetHeight, gap = 14, margin = 8;
+      const cx = at.x - area.left, cy = at.y - area.top;
+      // [x, y, 1 when it had to be pushed into the view]
+      const spots = [
+        [cx + gap, cy + gap],
+        [cx - gap - w, cy + gap],
+        [cx + gap, cy - gap - hgt],
+        [cx - gap - w, cy - gap - hgt],
+      ].map(([x, y]) => {
+        const fx = Math.max(margin, Math.min(area.width - w - margin, x)), fy = Math.max(margin, Math.min(area.height - hgt - margin, y));
+        return [fx, fy, fx !== x || fy !== y ? 1 : 0];
+      });
+      const inside = (px: number, py: number, [x, y]: number[], pad: number) => px > x - pad && px < x + w + pad && py > y - pad && py < y + hgt + pad;
+      // the clicked point counts most, then the scars; a spot that fits as it is beats one pushed into the view
+      const cost = (s: number[]) =>
+        (inside(cx, cy, s, gap) ? 100 : 0) + avoid.filter((p) => inside(p.x - area.left, p.y - area.top, s, margin)).length + 0.5 * s[2];
+      const best = spots.reduce((b, p) => (cost(p) < cost(b) ? p : b), spots[0]);
+      el.style.left = `${best[0]}px`;
+      el.style.top = `${best[1]}px`;
+      el.style.visibility = '';
+      const keys: Record<string, string> = { Digit1: 'ab', Numpad1: 'ab', Digit2: 'ba', Numpad2: 'ba', Digit3: 'ind', Numpad3: 'ind' };
+      const onKey = (e: KeyboardEvent) => {
+        let choice: string | null | undefined = keys[e.code];
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          if (!options.some((o) => o.id === 'delete')) return;
+          choice = 'delete';
+        }
+        if (e.key === 'Escape') choice = null;
+        if (choice === undefined) return;
+        e.preventDefault();
+        e.stopPropagation();
+        finish(choice);
+      };
+      const onDown = (e: PointerEvent) => {
+        if (el.contains(e.target as Node)) return;
+        finish(null);
+        if (onViewport(e.target as Node)) e.stopPropagation();
+      };
+      const finish = (choice: string | null) => {
+        el.remove();
+        document.removeEventListener('keydown', onKey, true);
+        document.removeEventListener('pointerdown', onDown, true);
+        if (this.relationPop === handle) this.relationPop = null;
+        resolve(choice);
+      };
+      const handle = { close: () => finish(null) };
+      this.relationPop = handle;
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('pointerdown', onDown, true);
+    });
+  }
+
+  /** The Harris matrix panel: move it by its title bar, size it from its corner, fold it to one line (all remembered). */
   private buildHarrisPanel(): void {
     const body = h('div', { class: 'harris-body', id: 'harris-body' });
     body.addEventListener('click', (e) => {
       const id = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
       if (id) this.selectScar(id);
     });
-    const el = h(
+    type Geometry = { x?: number; y?: number; w?: number; h?: number; collapsed?: boolean };
+    const geo: Geometry = { ...readPref<Geometry>('harrisPanel', {}) };
+    const fold = h('button', { type: 'button', class: 'icon-btn harris-fold', id: 'harris-fold', 'aria-label': t('harris.fold'), title: t('harris.fold') }, icon(ICONS.chevron)) as HTMLButtonElement;
+    const head = h(
       'div',
-      { class: 'viewport-ui harris-panel', id: 'harris-panel', hidden: true },
-      h(
-        'div',
-        { class: 'harris-head' },
-        h('span', { class: 'harris-title' }, t('harris.title')),
-        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'harris-svg', onclick: () => this.exportHarrisSvg() }, 'SVG'),
-        h('button', { type: 'button', class: 'icon-btn', id: 'harris-close', 'aria-label': t('dlg.close'), onclick: () => this.setDisplay((d) => (d.harris = false), 'harris') }, icon(ICONS.close)),
-      ),
-      body,
+      { class: 'harris-head' },
+      h('span', { class: 'harris-title' }, t('harris.title')),
+      h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'harris-svg', onclick: () => this.exportHarrisSvg() }, 'SVG'),
+      fold,
+      h('button', { type: 'button', class: 'icon-btn', id: 'harris-close', 'aria-label': t('dlg.close'), onclick: () => this.setDisplay((d) => (d.harris = false), 'harris') }, icon(ICONS.close)),
     );
+    const grip = h('div', { class: 'harris-grip', 'aria-hidden': 'true' });
+    const el = h('div', { class: 'viewport-ui harris-panel', id: 'harris-panel', hidden: true }, head, body, grip);
+    // the remembered place and size, fitted into the view as it is now (the pref keeps what was chosen)
+    const apply = () => {
+      const W = this.viewportEl.clientWidth, H = this.viewportEl.clientHeight;
+      const fits = W > 0 && H > 0;
+      const w = geo.w && fits ? Math.min(geo.w, W) : geo.w;
+      const hgt = geo.h && fits ? Math.min(geo.h, H) : geo.h;
+      if (geo.x !== undefined && geo.y !== undefined) {
+        const x = fits ? Math.max(0, Math.min(geo.x, W - (w || el.offsetWidth || 200))) : geo.x;
+        const y = fits ? Math.max(0, Math.min(geo.y, H - (hgt && !geo.collapsed ? hgt : 36))) : geo.y;
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.style.bottom = 'auto';
+      }
+      if (w && hgt) {
+        el.style.width = `${w}px`;
+        el.style.height = geo.collapsed ? '' : `${hgt}px`;
+        el.style.maxWidth = el.style.maxHeight = 'none';
+      }
+      el.classList.toggle('is-collapsed', !!geo.collapsed);
+      fold.setAttribute('aria-expanded', String(!geo.collapsed));
+    };
+    const save = () => writePref('harrisPanel', geo);
+    fold.addEventListener('click', () => {
+      geo.collapsed = !geo.collapsed;
+      apply();
+      save();
+    });
+    // drag with the title bar, size with the corner; kept inside the view
+    const drag = (handle: HTMLElement, move: (dx: number, dy: number, start: DOMRect, area: DOMRect) => void) => {
+      let from: { x: number; y: number; rect: DOMRect; area: DOMRect } | null = null;
+      handle.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || (e.target as Element).closest('button')) return;
+        e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        from = { x: e.clientX, y: e.clientY, rect: el.getBoundingClientRect(), area: this.viewportEl.getBoundingClientRect() };
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (from) move(e.clientX - from.x, e.clientY - from.y, from.rect, from.area);
+      });
+      const end = () => {
+        if (!from) return;
+        from = null;
+        save();
+      };
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    };
+    drag(head, (dx, dy, r, area) => {
+      geo.x = Math.round(Math.max(0, Math.min(area.width - r.width, r.left - area.left + dx)));
+      geo.y = Math.round(Math.max(0, Math.min(area.height - r.height, r.top - area.top + dy)));
+      apply();
+    });
+    drag(grip, (dx, dy, r, area) => {
+      geo.x ??= Math.round(r.left - area.left);
+      geo.y ??= Math.round(r.top - area.top);
+      geo.w = Math.round(Math.max(200, Math.min(area.width - geo.x, r.width + dx)));
+      geo.h = Math.round(Math.max(120, Math.min(area.height - geo.y, r.height + dy)));
+      geo.collapsed = false;
+      apply();
+    });
     if (this.harrisEl) this.harrisEl.replaceWith(el);
-    else this.viewportEl.append(el);
+    else {
+      this.viewportEl.append(el);
+      new ResizeObserver(() => this.harrisFit?.()).observe(this.viewportEl);
+    }
+    apply();
     this.harrisEl = el;
     this.harrisBody = body;
+    this.harrisFit = apply;
     this.updateHarris();
   }
 
+  private harrisFit: (() => void) | null = null;
+
   private harrisLayoutNow(): HarrisLayout {
     const { scarIds, edges, sequences } = relationInputs(this.store.state);
-    return harrisLayout(scarIds, edges, sequences, checkRelations(scarIds, edges, sequences));
+    return harrisLayout(scarIds, edges, sequences, checkRelations(scarIds, edges, sequences), undefined, t('harris.unrelated'));
   }
 
   private harrisStyle(selected: string | null): HarrisStyle {
@@ -1828,8 +2261,10 @@ export class App implements AppApi {
     const el = this.harrisEl, body = this.harrisBody;
     if (!el || !body) return;
     const shown = this.display.harris && this.mode === 'annotate' && this.hasMesh();
+    const wasShown = !el.hidden;
     el.hidden = !shown;
     if (!shown) return;
+    if (!wasShown) this.harrisFit?.();
     body.innerHTML = this.store.state.scars.length ? harrisSvg(this.harrisLayoutNow(), this.harrisStyle(this.selectedScar())) : '';
   }
 
@@ -1852,16 +2287,6 @@ export class App implements AppApi {
   exportHarrisSvg(): void {
     if (!this.hasMesh() || !this.store.state.scars.length) return;
     void this.save(`${this.stem()}_harris.svg`, harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null)), 'image/svg+xml');
-  }
-
-  exportRelationsCsv(): void {
-    if (!this.hasMesh() || !this.store.state.relations.length) return;
-    void this.save(`${this.stem()}_relations.csv`, relationsCsv(this.store.state, { excelBom: this.display.excelBom }), 'text/csv');
-  }
-
-  exportSeriesCsv(): void {
-    if (!this.hasMesh() || !this.store.state.sequences.length) return;
-    void this.save(`${this.stem()}_series.csv`, seriesCsv(this.store.state, { excelBom: this.display.excelBom }), 'text/csv');
   }
 
   volumeSplit(): VolumeSplit | null {
@@ -1972,6 +2397,7 @@ export class App implements AppApi {
     if (!layer) return;
     const results = this.regions?.results ?? [];
     const st = this.store.state;
+    layer.dimmed = this.mode === 'measure';
     const seq = this.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
     const em = this.emphasis();
     const paints = this.display.regions
@@ -2002,18 +2428,6 @@ export class App implements AppApi {
 
   measuringBusy(): boolean {
     return this.hasMesh() && !this.measureBase;
-  }
-
-  exportMeasurementsCsv(): void {
-    if (!this.hasMesh() || !this.auto) return;
-    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom }, this.regions?.totals ?? null, this.nodule, this.split);
-    void this.save(`${this.stem()}_measurements.csv`, csv, 'text/csv');
-  }
-
-  exportManualMeasurementsCsv(): void {
-    if (!this.hasMesh() || !this.store.state.measurements.length) return;
-    const csv = manualMeasurementsCsv(this.store.state, { excelBom: this.display.excelBom });
-    void this.save(`${this.stem()}_manual_measurements.csv`, csv, 'text/csv');
   }
 
   /** Measure the mesh in slices after it is shown (area, volume, closedness, principal axes). */
@@ -2050,12 +2464,18 @@ export class App implements AppApi {
 
   saveProject(): void {
     if (!this.hasMesh()) return;
+    // agreement analysis tells observers apart by their name
+    if (!this.store.state.specimen.annotator.trim()) this.feedback.toast(t('toast.noAnnotator'), 'info', 5000);
     const file = serializeProject(this.store.state, __APP_VERSION__, this.meshResults());
     void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json');
   }
 
   openProject(): void {
     this.projectInput.click();
+  }
+
+  openModel(): void {
+    this.meshInput.click();
   }
 
   private async save(name: string, text: string, mime: string): Promise<void> {
@@ -2366,7 +2786,12 @@ export class App implements AppApi {
 
   private wireKeyboard(): void {
     window.addEventListener('keydown', (e) => {
-      if (document.querySelector('.modal-backdrop')) return;
+      // the relation popover takes the keyboard as a dialog would
+      if (document.querySelector('.modal-backdrop') || this.relationPop) return;
+      if (e.key === 'Escape' && this.popovers.close()) {
+        e.preventDefault();
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (mod && key === 's') {
@@ -2520,31 +2945,48 @@ export class App implements AppApi {
 
   private showHelp(): void {
     const count = Math.max(numberKeyField(SCAR_FIELDS)?.options?.length ?? 0, numberKeyField(CURVE_FIELDS)?.options?.length ?? 0) || 5;
-    const rows: Array<[string, string]> = [
-      ['M', t('help.k.mode')],
-      ['A', t('help.k.draw')],
-      ['D / G / N', t('help.k.measure')],
-      ['X', t('help.k.section')],
-      ['P', t('help.k.curve')],
-      ['R', t('help.k.region')],
-      ['B', t('help.k.relation')],
-      ['K', t('help.k.landmark')],
-      ['V', t('help.k.select')],
-      ['S', t('help.k.snap')],
-      ['Shift', t('help.k.shift')],
-      ['Enter', t('help.k.finish')],
-      ['Backspace', t('help.k.back')],
-      [`1 – ${count}`, t('help.k.complete')],
-      ['Delete', t('help.k.delete')],
-      ['] / [', t('help.k.next')],
-      ['Ctrl+Z / Ctrl+Shift+Z', t('help.k.undo')],
-      ['Ctrl+S', t('help.k.save')],
-      ['PageUp / PageDown', t('help.k.workspace')],
-      ['H', t('help.k.fit')],
-      ['C', t('help.k.centre')],
-      ['L', t('help.k.light')],
-      ['Space', t('help.k.space')],
-      ['Esc', t('help.k.esc')],
+    const groups: Array<[string, Array<[string, string]>]> = [
+      [
+        t('help.group.general'),
+        [
+          ['M', t('help.k.mode')],
+          ['V', t('help.k.select')],
+          ['Delete', t('help.k.delete')],
+          ['Ctrl+Z / Ctrl+Shift+Z', t('help.k.undo')],
+          ['Ctrl+S', t('help.k.save')],
+          ['PageUp / PageDown', t('help.k.workspace')],
+          ['H', t('help.k.fit')],
+          ['C', t('help.k.centre')],
+          ['L', t('help.k.light')],
+          ['Space', t('help.k.space')],
+          ['Esc', t('help.k.esc')],
+        ],
+      ],
+      [
+        t('appMode.annotate'),
+        [
+          ['A', t('help.k.draw')],
+          ['P', t('help.k.curve')],
+          ['R', t('help.k.region')],
+          ['B', t('help.k.relation')],
+          ['1 / 2 / 3 · Delete', t('help.k.relationPick')],
+          ['K', t('help.k.landmark')],
+          ['S', t('help.k.snap')],
+          ['Shift', t('help.k.shift')],
+          ['Enter', t('help.k.finish')],
+          ['Backspace', t('help.k.back')],
+          [`1 – ${count}`, t('help.k.complete')],
+          ['] / [', t('help.k.next')],
+        ],
+      ],
+      [
+        t('appMode.measure'),
+        [
+          ['D / G / N', t('help.k.measure')],
+          ['Backspace', t('help.k.measureBack')],
+        ],
+      ],
+      [t('appMode.present'), [['X', t('help.k.section')]]],
     ];
     const mouse: Array<[string, string]> = [
       [t('help.m.rotate'), t('help.m.rotateKeys')],
@@ -2556,7 +2998,10 @@ export class App implements AppApi {
     const body = h(
       'div',
       { class: 'help' },
-      h('dl', { class: 'help-keys' }, ...rows.flatMap(([k, v]) => [h('dt', {}, h('kbd', {}, k)), h('dd', {}, v)])),
+      ...groups.flatMap(([title, rows]) => [
+        h('h3', { class: 'help-group' }, title),
+        h('dl', { class: 'help-keys' }, ...rows.flatMap(([k, v]) => [h('dt', {}, h('kbd', {}, k)), h('dd', {}, v)])),
+      ]),
       h('hr', { class: 'rule' }),
       h('dl', { class: 'help-keys' }, ...mouse.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
     );
@@ -2648,4 +3093,11 @@ export class App implements AppApi {
     };
     (window as unknown as { lithicanalyst: typeof api }).lithicanalyst = api;
   }
+}
+
+/** A semilandmark row key (`<set label>_<number>`) as the landmark layer's point id (`<set id>#<index>`). */
+function semilandmarkPoint(st: Readonly<ProjectState>, key: string): string | undefined {
+  const m = /^(.*)_(\d+)$/.exec(key);
+  const set = m ? st.semilandmarks.find((x) => x.label === m[1]) : undefined;
+  return set && m ? `${set.id}#${Number(m[2]) - 1}` : undefined;
 }

@@ -58,6 +58,18 @@ function solidMaterial(color: string): THREE.MeshStandardMaterial {
   return m;
 }
 
+const dimCache = new Map<string, THREE.MeshBasicMaterial>();
+
+/** Faded arrows (annotations in the measure mode). */
+function dimMaterial(color: string): THREE.MeshBasicMaterial {
+  let m = dimCache.get(color);
+  if (!m) {
+    m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, depthWrite: false });
+    dimCache.set(color, m);
+  }
+  return m;
+}
+
 function ghostMaterial(color: string): THREE.MeshBasicMaterial {
   let m = ghostCache.get(color);
   if (!m) {
@@ -109,6 +121,7 @@ class ArrowVisual {
     ghostOn: boolean,
     labelText: string | null,
     selected: boolean,
+    dim = false,
   ): void {
     this.shownStart.copy(start);
     this.shownEnd.copy(end);
@@ -129,11 +142,11 @@ class ArrowVisual {
     };
     set(this.parts);
     set(this.ghostParts);
-    const sm = solidMaterial(color);
+    const sm = dim ? dimMaterial(color) : solidMaterial(color);
     const gm = ghostMaterial(color);
     for (const p of this.parts) p.material = sm;
     for (const p of this.ghostParts) p.material = gm;
-    this.ghost.visible = ghostOn;
+    this.ghost.visible = ghostOn && !dim;
     if (this.label) {
       this.label.visible = labelText !== null;
       if (labelText !== null) {
@@ -210,6 +223,8 @@ export class ArrowLayer {
   private highlight: { ids: ReadonlySet<string>; color: string } | null = null;
   /** Draw every arrow in this colour (another observer's annotations), instead of the colour mode. */
   fixedColor: string | null = null;
+  /** Draw the arrows faded (they are not what the current work mode is about). */
+  dimmed = false;
   onLabelClick: (id: string) => void = () => {};
 
   constructor(private readonly viewer: Viewer) {
@@ -277,7 +292,7 @@ export class ArrowLayer {
       const isSel = a.id === selected;
       const isHl = !isSel && !!hl?.ids.has(a.id);
       const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : this.fixedColor ?? arrowColor(a, display.colorMode, seq);
-      v.update(s, e, toV(sn), isSel || isHl ? radius * 1.15 : radius, color, display.showHidden, display.labels ? a.label : null, isSel);
+      v.update(s, e, toV(sn), isSel || isHl ? radius * 1.15 : radius, color, display.showHidden, display.labels ? a.label : null, isSel, this.dimmed && !isSel);
     }
     for (const [id, v] of this.visuals) {
       if (!seen.has(id)) {
@@ -362,6 +377,7 @@ export class ArrowLayer {
 
   /** Arrow under the cursor with its distance in pixels. */
   pickNearest(clientX: number, clientY: number, maxPx = 9): { id: string; dist: number } | null {
+    if (!this.group.visible) return null;
     let best: string | null = null;
     let bestD = maxPx;
     for (const [id, v] of this.visuals) {

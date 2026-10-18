@@ -88,6 +88,28 @@ lists which modes show each section. Outside the annotate mode the select tool o
 (`ToolContext.editable()`), and keys that change annotations are ignored. Switching modes
 keeps the selection and the undo history.
 
+* **Layers per mode** (`App.syncAnnotations`, `App.applyLayerVisibility`): the measure mode draws
+  the annotation layers faded (`dimmed` on the arrow, curve, landmark and region layers; labels
+  by CSS); the present mode shows the layers the figure's overlay switches show, without
+  labels; the compare mode draws each observer's annotations instead of the open project's.
+* **Sidebar** (`buildSidebar`): choosing a tool opens its section and folds the others but the
+  folder's (`TOOL_SECTIONS`; these changes are not remembered, only the user's own); selecting an
+  object opens its section and scrolls its inspector to the top (lists scroll only themselves;
+  the narrow layout, where the whole work area scrolls, is left alone). Sections that cannot be
+  used are hidden (`Section.visible`); without a model only the open buttons are shown, and the
+  folder's list while a folder is open. The data exports
+  of a mode are one dialog (`App.openExport`, files from `App.exportables`; several files go
+  into a stored ZIP, `io/zip.ts`).
+* **Top bar**: specimen ID and unit, with annotator, notes and the model file in a panel; the
+  File menu; the mode switch in the middle; Save. Menus and small panels (`ui/popover.ts`)
+  close on a press outside or Esc. The display settings are a panel over the view
+  (`Sidebar.displayEl`, mounted by `App.buildDisplayControl`); the sidebar's left edge resizes
+  it (`sidebarWidth` preference).
+* **Labels**: after each render `render/labelLayout.ts` moves labels that would cover each
+  other apart by priority (selected first, hidden-behind-the-surface last) and hides those
+  without a free place. `.viewport-labels` is its own stacking context, below every panel over
+  the view.
+
 ## Measurements
 
 * `compute/measure.ts` measures a mesh once after loading (`surfaceMeasuresSteps`: area, volume,
@@ -142,10 +164,14 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
 * `compute/relations.ts` is pure and works on ids: `checkRelations` (cycles by Tarjan's strongly
   connected components, contradictions with the order of the sequences and within ordered
   ones, scars in no sequence), `directRelations` (transitive reduction) and `harrisLayout`
-  (rows by the longest chain of earlier scars, columns grouped by sequence). The app recomputes
-  them on every change (cheap) and stores the checks under `derived.relations`.
-* `tools/relationTool.ts`: two clicks on scars (an arrow, else the scar region under the click),
-  then a dialog. `render/harris.ts` draws the matrix as SVG (shown in a viewport panel and
+  (rows by the longest chain of earlier scars, columns grouped by sequence; scars without a
+  "cuts" relation go to a last column of their own, `unrelated`). The app recomputes them on
+  every change (cheap) and stores the checks under `derived.relations`.
+* `tools/relationTool.ts`: two clicks on scars (an arrow, else the scar region under the click);
+  `App.relationPopover` then offers the choices next to the second click, on the side that
+  leaves both scars and the first click in view, and takes the keyboard while open (1 / 2 / 3,
+  Delete, Esc). `render/harris.ts` draws the matrix as SVG (shown in a viewport panel that can be
+  moved, resized and folded, its place kept in the `harrisPanel` pref and fitted into the view;
   exported as is); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
   light (earliest) to dark (latest), used by the `sequence` colour mode for arrows and scar
   regions. Arrows and regions of a selected relation, or of the opened problems, are drawn
@@ -185,7 +211,11 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
 * Observers are the open project plus project files of the same mesh (SHA-256), read with
   `parseProjectFile`; they live in the app only (`App.observers`), never in a project file.
 * Each observer's arrows, curves and landmarks are drawn by its own `ArrowLayer`, `CurveLayer`
-  and `LandmarkLayer` (`fixedColor`); the open project's normal layers step aside meanwhile.
+  and `LandmarkLayer` (`fixedColor`; labels only for the open project); the open project's
+  normal layers step aside meanwhile.
+* The sidebar groups the long table by object and observer pair. A click on a row of arrows,
+  curves, landmarks or semilandmarks calls `App.focusAgreement`, which finds the pair (or point)
+  with the largest value of that metric and draws it selected in both observers' layers.
 * `App.updateAgreement` gathers what needs the mesh — fitted planes, length / width / thickness
   along each observer's frame, and the region type of every triangle (`partitionFor` with the
   observer's curves, cached by curves and seeds) — and hands it to `compute/agreement.ts`:
@@ -260,6 +290,10 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   its own copy.
 
 ## Hosting
+
+The IBM Plex fonts (SIL OFL 1.1) come from `@fontsource`: `src/fonts.css` declares only the Latin
+subset of the weights the interface uses, and the build inlines them, so the page requests
+no font server. Chinese text uses the system fonts.
 
 `npm run build` writes `dist/index.html` (complete page, works from `file://` and any static
 host such as GitHub Pages) and `dist/artifact.html` (the same app without the document

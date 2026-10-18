@@ -66,4 +66,17 @@ export const ICONS = {
   plus: 'M12 5v14|M5 12h14',
   up: 'M12 19V5|M6 11l6-6 6 6',
   down: 'M12 5v14|M6 13l6 6 6-6',
+  file: 'M6 3h8l4 4v14H6z|M14 3v4h4',
+  project: 'M6 3h8l4 4v14H6z|M14 3v4h4|M9 12h6|M9 16h6',
+  cube: 'M12 3l8 4.5v9L12 21l-8-4.5v-9z|M4 7.5l8 4.5 8-4.5|M12 12v9',
+  chevron: 'M6 9l6 6 6-6',
+  sliders: 'M4 6h9|M17 6h3|M15 4v4|M4 12h3|M11 12h9|M9 10v4|M4 18h11|M19 18h1|M17 16v4',
+  download: 'M12 4v11|M7 10l5 5 5-5|M5 19h14',
 };
+
+/** Scroll a list box, and nothing around it, so that one of its rows is in view. */
+export function revealInList(list: HTMLElement, row: HTMLElement): void {
+  const l = list.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (r.top < l.top) list.scrollTop -= l.top - r.top;
+  else if (r.bottom > l.bottom) list.scrollTop += Math.min(r.bottom - l.bottom, r.top - l.top);
+}

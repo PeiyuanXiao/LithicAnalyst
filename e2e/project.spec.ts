@@ -1,12 +1,12 @@
 import type { Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { roofPly, roofPoint } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, loadMesh, openApp, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
+import { counts, curveClick, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, openSection, setAnnotator, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
 
 /** One arrow and one curve, with fields and specimen details filled in. */
 async function annotate(page: Page): Promise<void> {
   await viewFromTop(page);
-  await page.locator('#specimen-annotator').fill('Observer 甲');
+  await setAnnotator(page, 'Observer 甲');
   await page.locator('#specimen-unit').selectOption('cm');
   // the unit list keeps the focus (and the keys): use the toolbar
   await page.locator('#mode-draw').click();
@@ -50,12 +50,13 @@ test('saves the project file and reads it back, here and in a fresh browser', as
 
   // change things, then open the saved file over them
   await page.keyboard.press('Delete');
+  await openSection(page, 'arrows');
   await page.locator('#sec-arrows .arrow-row').click();
   await page.keyboard.press('Delete');
-  await page.locator('#specimen-annotator').fill('someone else');
+  await setAnnotator(page, 'someone else');
   expect(await counts(page)).toEqual({ arrows: 0, curves: 0 });
   const chooser = page.waitForEvent('filechooser');
-  await page.locator('#btn-open-project').click();
+  await fileMenu(page, '#btn-open-project');
   await (await chooser).setFiles({ name: saved.name, mimeType: 'application/json', buffer: Buffer.from(saved.text) });
   await expect.poll(() => content(page)).toEqual(before);
   await expect(page.locator('#specimen-annotator')).toHaveValue('Observer 甲');
@@ -67,7 +68,7 @@ test('saves the project file and reads it back, here and in a fresh browser', as
   fresh.on('pageerror', (e) => errors.push(e.message));
   await openApp(fresh);
   const projectChooser = fresh.waitForEvent('filechooser');
-  await fresh.locator('#export-open-project').click();
+  await fileMenu(fresh, '#btn-open-project');
   await (await projectChooser).setFiles({ name: saved.name, mimeType: 'application/json', buffer: Buffer.from(saved.text) });
   const dialog = fresh.getByRole('dialog');
   await expect(dialog).toContainText('roof.ply');
@@ -100,7 +101,7 @@ test('offers to restore the autosave when the model is opened again', async ({ p
   await page.reload();
   await page.waitForFunction(() => !!window.lithicanalyst);
   const chooser = page.waitForEvent('filechooser');
-  await page.locator('#btn-open').click();
+  await fileMenu(page, '#btn-open');
   await (await chooser).setFiles(ply);
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Restore your last session?');
@@ -141,14 +142,14 @@ test('opens a project file from 0.1.0 (format 1) and saves it as format 2', asyn
   await openApp(page);
   await loadMesh(page, ply);
   const chooser = page.waitForEvent('filechooser');
-  await page.locator('#btn-open-project').click();
+  await fileMenu(page, '#btn-open-project');
   await (await chooser).setFiles({ name: 'old.lithicanalyst.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(v1)) });
   await expect.poll(async () => (await state(page)).scars.length).toBe(1);
   const scar = (await state(page)).scars[0];
   expect(scar).toMatchObject({ id: 'old-arrow-1', label: 'S7', vector: { start, end }, attributes: { completeness: 'point_truncated', note: 'old' } });
   await expect(page.locator('#sec-arrows .arrow-row')).toHaveCount(1);
 
-  const csv = await download(page, () => page.locator('#export-csv').click());
+  const csv = await exportFile(page, 'scar-vectors');
   expect(csv.text.split('\n')[1]).toMatch(/^roof,S7,1186,-340,/);
 
   const saved = JSON.parse((await download(page, () => page.locator('#btn-save-project').click())).text);
