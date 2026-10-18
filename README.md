@@ -9,7 +9,8 @@
 - 画箭头：按下–拖动–松开，或单击起点、再单击终点；自动编号、自动保存、可撤销、可拖动端点修改。
 - 每条箭头记录完整性（5 类）、方向可信度和备注。
 - 画曲线：单击放点，点会吸附到附近的棱脊（凸）或凹谷（凹），点与点之间的线沿该特征自动走；也可关闭吸附。双击、Enter 或 Esc 完成，单击第一个点闭合；选择模式下可拖动点修改。
-- 每条曲线记录类型（刃缘 / 棱脊 / 片疤边界 / 其他）和备注。
+- 每条曲线记录类型（刃缘 / 棱脊 / 片疤边界 / 其他）和备注。曲线端点可吸附到已有曲线上（T 形交接），几条曲线能围成封闭区域。
+- 表面区域（R）：曲线把表面分成若干块，曲线一变就重算；点击一块定类型（1 片疤、2 石皮、3 节理面、4 破损），以点击处为种子保存，重算后由包含种子的那块继承；片疤区域自动关联起点落在其中的箭头，否则新建一个无方向的片疤；两个种子落进同一块时提示冲突。计算各区域面积、各类型总面积和石皮比。
 - 界面分「标注 / 测量 / 展示」三种模式，每种只显示自己的工具和侧栏。
 - 测量模式：打开模型即自动算长、宽、厚（标本坐标系或面积加权主轴）、表面积、体积（仅封闭模型）、Surface-to-Volume Ratio、Wadell 球度；手动测量两点直线距离、沿表面距离、三点角度（编号 M1、M2……，可撤销，存入项目文件）。
 - 拟合平面（测量模式）：全部顶点（Lin et al. 2024）、片疤方向（Xiao et al. 2026）、片疤起点（可按完整性筛选）、曲线；输入一变就重算；显示半透明圆盘、与模型的交线和法向，可翻转、沿法向观察、逐个显示 / 隐藏。
@@ -31,7 +32,7 @@
 
 ## 快捷键 / Shortcuts
 
-M 切换模式（标注 / 测量 / 展示）· A 画箭头 · P 画曲线 · D / G / N 测距离 / 沿表面 / 角度 · X 画截面 · V 选择 · S 吸附：凸 / 凹 / 关 · 按住 Shift 放点时不吸附 · Enter 完成曲线 · Backspace 删除上一个点 ·
+M 切换模式（标注 / 测量 / 展示）· A 画箭头 · P 画曲线 · R 表面区域 · D / G / N 测距离 / 沿表面 / 角度 · X 画截面 · V 选择 · S 吸附：凸 / 凹 / 关 · 按住 Shift 放点时不吸附 · Enter 完成曲线 · Backspace 删除上一个点 ·
 1–5 完整性 / 曲线类型 · Delete 删除 · [ ] 上一条 / 下一条 · Ctrl+Z / Ctrl+Shift+Z 撤销 / 重做 ·
 Ctrl+S 保存项目 · H 全视图 · C 光标处设为旋转中心 · 按住 L 调光 · 按住空格用左键旋转 · Esc 取消 / 完成曲线
 
@@ -52,7 +53,7 @@ specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note
 测量 CSV（每件一行；体积相关的值在模型不封闭时留空）：
 
 ```
-specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed
+specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio
 ```
 
 手动测量 CSV（每条一行；用不到的点留空，角度单位为 `deg`）：
@@ -66,6 +67,14 @@ specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p
 ```
 specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_z,m00,m01,…,m33
 ```
+
+表面区域 CSV（每个区域一行；scar_id 为所属片疤编号，面积单位为坐标单位²）：
+
+```
+specimen_id,region_id,type,scar_id,area,unit
+```
+
+测量 CSV 另有 `area_scar,area_cortex,area_joint,area_damage,cortex_ratio` 五列。
 
 ## License
 

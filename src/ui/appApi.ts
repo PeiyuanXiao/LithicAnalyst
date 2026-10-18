@@ -1,6 +1,7 @@
 import type { SnapMode } from '../compute/surfacePath';
 import type { PlaneResult } from '../compute/planes';
 import type { FigureLayout, FigureSettings } from '../render/figure';
+import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AutoMeasurements } from '../core/derived';
 import type { ProjectStore } from '../core/store';
 import type { Measurement } from '../core/types';
@@ -29,10 +30,12 @@ export interface DisplaySettings {
   arrows: ArrowDisplay;
   /** What traced curves are drawn toward. */
   curveSnap: SnapMode;
+  /** Colour the surface regions. */
+  regions: boolean;
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'background' | 'arrows' | 'snap' | 'other';
+export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'background' | 'arrows' | 'snap' | 'regions' | 'other';
 
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
@@ -73,6 +76,10 @@ export interface AppApi {
   figureLayout(): FigureLayout | null;
   exportFigure(format: 'png' | 'svg'): void;
   exportSection(id: string, format: 'png' | 'svg'): void;
+  /** Surface regions as found on the mesh (null before it is partitioned). */
+  regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null;
+  exportRegionsCsv(): void;
+  setRegionType(id: string, type: string): void;
   saveProject(): void;
   openProject(): void;
 }

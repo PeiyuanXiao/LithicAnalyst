@@ -24,6 +24,9 @@ export interface LithicApi {
   cameraUp(): Vec3 | null;
   sectionFigure(id: string, format: 'png' | 'svg'): Promise<{ layout: import('../src/render/figure').FigureLayout; data: string } | null>;
   clipping(): number;
+  regions(): { results: import('../src/compute/regions').RegionResult[]; totals: import('../src/compute/regions').RegionTotals } | null;
+  regionCount(): number | null;
+  exportRegionsCsvText(): string;
   figure(format: 'png' | 'svg'): Promise<{ layout: import('../src/render/figure').FigureLayout; data: string } | null>;
   autoMeasurements(): import('../src/core/derived').AutoMeasurements | null;
   exportMeasurementsCsvText(): string;

@@ -156,5 +156,5 @@ test('opens a project file from 0.1.0 (format 1) and saves it as format 2', asyn
   expect(saved.annotations.scarVectors).toBeUndefined();
   expect(saved.annotations.scars).toEqual([scar]);
   expect(saved.specimen.frame).toBeNull();
-  expect(saved.derived).toEqual({ measurements: expect.objectContaining({ closed: false, volume: null }), manualMeasurements: [], planes: [] });
+  expect(saved.derived).toMatchObject({ measurements: { closed: false, volume: null }, manualMeasurements: [], planes: [], regions: [] });
 });

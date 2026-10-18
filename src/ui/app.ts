@@ -5,16 +5,16 @@ import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compu
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addPlane, deleteCurve, deleteMeasurement, deletePlane, deleteScar, deleteSection, setCurveAttribute, setScarAttribute, updateSpecimen } from '../core/actions';
+import { addPlane, addRegion, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteScar, deleteSection, setCurveAttribute, setRegionType, setScarAttribute, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
-import { CURVE_FIELDS, numberKeyField, SCAR_FIELDS } from '../core/fields';
+import { CURVE_FIELDS, numberKeyField, REGION_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import type { Measurement, ProjectState, Section, Vec3 } from '../core/types';
+import type { Measurement, ProjectState, RegionType, Section, Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, scarVectorCsv } from '../io/csv';
+import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, scarVectorCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
 import { ArrowLayer, arrowColor, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
@@ -23,6 +23,9 @@ import { MeasureLayer } from '../render/measureLayer';
 import { PlaneLayer, planeColor } from '../render/planeLayer';
 import { SectionLayer, sectionLoops2D } from '../render/sectionLayer';
 import { SectionTool } from '../tools/sectionTool';
+import { ClickTool } from '../tools/clickTool';
+import { RegionLayer, regionColor } from '../render/regionLayer';
+import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
 import { curveColor } from '../render/curveLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
@@ -54,6 +57,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   background: 'light',
   arrows: { ...DEFAULT_ARROW_DISPLAY },
   curveSnap: 'ridge',
+  regions: true,
   excelBom: false,
 };
 
@@ -148,6 +152,13 @@ export class App implements AppApi {
   /** Where the model is cut by each plane and each section, keyed by their id; `key` is the plane it was cut by. */
   private cuts = new Map<string, { key: string; lines: Polyline[] | null }>();
   private sectionLayer: SectionLayer | null = null;
+  private regionLayer: RegionLayer | null = null;
+  /** Pieces of surface between the curves, and the regions found in them. */
+  private partition: Partition | null = null;
+  private partitionToken = 0;
+  private regions: { results: RegionResult[]; totals: RegionTotals } | null = null;
+  private seedComponent: number[] = [];
+  private conflictKey = '';
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
@@ -233,6 +244,7 @@ export class App implements AppApi {
     this.measures.onLabelClick = (id) => this.selection.set(id);
     this.planesLayer = new PlaneLayer(viewer);
     this.sectionLayer = new SectionLayer(viewer);
+    this.regionLayer = new RegionLayer(viewer.scene);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -267,6 +279,7 @@ export class App implements AppApi {
     this.tools.register(new DrawCurveTool(ctx));
     for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
+    this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -287,6 +300,7 @@ export class App implements AppApi {
     this.store.history.onChange(() => this.updateUndoButtons());
     this.selection.onChange(() => {
       this.syncAnnotations();
+      if (this.store.region(this.selection.id ?? '') || this.regions?.results.length) this.paintRegions();
       this.sidebar.refresh('selection');
       this.updateCursor();
     });
@@ -343,6 +357,7 @@ export class App implements AppApi {
       { value: 'select', label: `${t('mode.select')}  V` },
       { value: 'draw', label: `${t('mode.draw')}  A` },
       { value: 'curve', label: `${t('mode.curve')}  P` },
+      { value: 'region', label: `${t('tool.region')}  R` },
     ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
     this.modeSeg.el.classList.add('seg-mode');
     this.snapSeg = segmented('snap', null, SNAP_MODES.map((m) => ({ value: m, label: t(`snap.${m}`) })), this.display.curveSnap, (v) =>
@@ -455,11 +470,13 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel)) this.selection.set(null);
+    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel)) this.selection.set(null);
     if (c.kind !== 'measurements' && c.kind !== 'specimen') this.updatePlanes();
     if (c.kind === 'sections' || c.kind === 'reset') this.updateSections();
+    if (c.kind === 'curves' || c.kind === 'reset') this.updatePartition();
+    else if (c.kind === 'regions' || c.kind === 'scars') this.resolveRegionsNow();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
@@ -561,6 +578,10 @@ export class App implements AppApi {
       case 'snap':
         this.snapSeg?.set(this.display.curveSnap);
         this.refreshCurveTool();
+        break;
+      case 'regions':
+        this.paintRegions();
+        this.sidebar.refresh('display');
         break;
       default:
         break;
@@ -755,6 +776,7 @@ export class App implements AppApi {
       overlay: v.overlay,
       mesh: v.mesh,
       lights: this.lights,
+      regions: this.regionLayer?.group,
       positions: loaded.geometry.getAttribute('position').array as Float32Array,
       offset: loaded.offset,
       diagonal: loaded.diagonal,
@@ -899,7 +921,124 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes() };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions };
+  }
+
+  regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
+    return this.regions;
+  }
+
+  exportRegionsCsv(): void {
+    if (!this.hasMesh() || !this.regions?.results.length) return;
+    void this.save(`${this.stem()}_regions.csv`, regionsCsv(this.store.state, this.regions.results, { excelBom: this.display.excelBom }), 'text/csv');
+  }
+
+  /** The triangle closest to a point (original coordinates), or −1. */
+  private faceAt(p: Vec3): number {
+    const loaded = this.loaded;
+    const bvh = loaded?.geometry.boundsTree as unknown as { closestPointToPoint(q: THREE.Vector3, target: object): { faceIndex: number } | null } | undefined;
+    if (!loaded || !bvh) return -1;
+    const o = loaded.offset;
+    return bvh.closestPointToPoint(new THREE.Vector3(p[0] - o[0], p[1] - o[1], p[2] - o[2]), {})?.faceIndex ?? -1;
+  }
+
+  private componentAt(p: Vec3): number {
+    const f = this.faceAt(p);
+    return this.partition && f >= 0 ? this.partition.region[f] : -1;
+  }
+
+  /** A scar whose arrow starts in this piece of surface and has no region yet. */
+  private scarStartingIn(component: number): string | null {
+    const st = this.store.state;
+    const taken = new Set(st.regions.map((r) => r.scarId));
+    return st.scars.find((s) => s.vector && !taken.has(s.id) && this.componentAt(s.vector.start) === component)?.id ?? null;
+  }
+
+  /** Region tool: select the region under the click, or start one there (a scar by default). */
+  private clickRegion(point: THREE.Vector3, face: number): void {
+    const part = this.partition;
+    if (!part || face < 0) return;
+    const c = part.region[face];
+    const i = this.seedComponent.findIndex((x) => x === c);
+    const existing = i >= 0 ? this.store.state.regions[i] : undefined;
+    if (existing) {
+      this.selection.set(existing.id);
+      return;
+    }
+    const r = addRegion(this.store, [point.x, point.y, point.z], 'scar', this.scarStartingIn(c));
+    this.selection.set(r.id);
+  }
+
+  setRegionType(id: string, type: string): void {
+    this.setRegionTypeFor(id, type as RegionType);
+  }
+
+  private setRegionTypeFor(id: string, type: RegionType): void {
+    const r = this.store.region(id);
+    if (!r) return;
+    setRegionType(this.store, id, type, type === 'scar' ? this.scarStartingIn(this.componentAt(r.seed)) : null);
+  }
+
+  /** Split the surface along the curves (in slices), then find the regions again. */
+  private updatePartition(): void {
+    const base = this.measureBase;
+    const loaded = this.loaded;
+    const snap = this.surfaceSnap;
+    const token = ++this.partitionToken;
+    if (!base || !loaded || !snap) return;
+    void snap.prepare('off').then(() => {
+      if (token !== this.partitionToken || this.loaded !== loaded) return;
+      const search = snap.search(3);
+      const barrier: number[] = [];
+      for (const c of this.store.state.curves)
+        barrier.push(
+          ...polylineEdges(c.points, c.closed, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
+            if (!search) return null;
+            search.start(a, null);
+            return search.reach(b) ? search.path(b) : null;
+          }),
+        );
+      const g = loaded.geometry;
+      return runSliced(regionsSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, barrier)).then((part) => {
+        if (token !== this.partitionToken || this.loaded !== loaded) return;
+        this.partition = part;
+        this.resolveRegionsNow();
+      });
+    });
+  }
+
+  /** Which piece each region's seed falls in; areas, totals and conflicts; repaint. */
+  private resolveRegionsNow(): void {
+    const part = this.partition;
+    const base = this.measureBase;
+    if (!part || !base) return;
+    const st = this.store.state;
+    this.seedComponent = st.regions.map((r) => this.componentAt(r.seed));
+    this.regions = resolveRegions(st.regions, this.seedComponent, part, base.surfaceArea);
+    const conflicts = this.regions.results.filter((r) => r.conflict).map((r) => r.id).join(',');
+    if (conflicts && conflicts !== this.conflictKey) this.feedback.toast(t('toast.regionConflict'), 'warn', 4000);
+    this.conflictKey = conflicts;
+    this.paintRegions();
+    this.sidebar.refresh('regions');
+  }
+
+  private paintRegions(): void {
+    const loaded = this.loaded;
+    const layer = this.regionLayer;
+    if (!layer) return;
+    const results = this.regions?.results ?? [];
+    const st = this.store.state;
+    const paints = this.display.regions
+      ? results.flatMap((r, i) => {
+          const c = this.seedComponent[i];
+          if (c < 0 || this.seedComponent.indexOf(c) !== i) return [];
+          const scar = r.scarId ? st.scars.find((s) => s.id === r.scarId)?.label ?? null : null;
+          return [{ component: c, color: regionColor(r.type, scar), selected: r.id === this.selection.id }];
+        })
+      : [];
+    const g = loaded?.geometry;
+    layer.sync((g?.getAttribute('position') as THREE.BufferAttribute) ?? null, g?.index?.array ?? null, this.partition?.region ?? null, paints, loaded?.offset ?? [0, 0, 0]);
+    this.viewer?.requestRender();
   }
 
   /** Recompute the planes from their inputs, then their sections of the model (in slices). */
@@ -921,7 +1060,7 @@ export class App implements AppApi {
 
   exportMeasurementsCsv(): void {
     if (!this.hasMesh() || !this.auto) return;
-    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom });
+    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom }, this.regions?.totals ?? null);
     void this.save(`${this.stem()}_measurements.csv`, csv, 'text/csv');
   }
 
@@ -944,6 +1083,7 @@ export class App implements AppApi {
       this.updateAuto();
       this.updatePlanes();
       this.updateSections();
+      this.updatePartition();
       this.syncAnnotations();
     });
   }
@@ -992,7 +1132,8 @@ export class App implements AppApi {
       if (this.store.section(sel)) deleteSection(this.store, sel);
       return;
     }
-    if (this.store.curve(sel)) deleteCurve(this.store, sel);
+    if (this.store.region(sel)) deleteRegion(this.store, sel);
+    else if (this.store.curve(sel)) deleteCurve(this.store, sel);
     else if (this.store.scar(sel)) deleteScar(this.store, sel);
   }
 
@@ -1048,6 +1189,11 @@ export class App implements AppApi {
     this.measures?.clearAll();
     this.planesLayer?.clearAll();
     this.sectionLayer?.clearAll();
+    this.regionLayer?.clear();
+    this.partition = null;
+    this.regions = null;
+    this.seedComponent = [];
+    this.partitionToken++;
     this.cuts.clear();
     this.planes = [];
     this.loaded = loaded;
@@ -1298,6 +1444,9 @@ export class App implements AppApi {
         case 'KeyA':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('draw');
           return;
+        case 'KeyR':
+          if (this.hasMesh() && this.mode === 'annotate') this.setTool('region');
+          return;
         case 'KeyP':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('curve');
           return;
@@ -1365,6 +1514,11 @@ export class App implements AppApi {
       }
       const digit = /^Digit([1-9])$/.exec(e.code) ?? /^Numpad([1-9])$/.exec(e.code);
       if (digit && sel && this.mode === 'annotate') {
+        if (this.store.region(sel)) {
+          const opt = numberKeyField(REGION_FIELDS)?.options?.[Number(digit[1]) - 1];
+          if (opt) this.setRegionTypeFor(sel, opt.value as RegionType);
+          return;
+        }
         const isCurve = !!this.store.curve(sel);
         const f = numberKeyField(isCurve ? CURVE_FIELDS : SCAR_FIELDS);
         const opt = f?.options?.[Number(digit[1]) - 1];
@@ -1392,6 +1546,7 @@ export class App implements AppApi {
       ['D / G / N', t('help.k.measure')],
       ['X', t('help.k.section')],
       ['P', t('help.k.curve')],
+      ['R', t('help.k.region')],
       ['V', t('help.k.select')],
       ['S', t('help.k.snap')],
       ['Shift', t('help.k.shift')],
@@ -1464,7 +1619,10 @@ export class App implements AppApi {
         const bytes = await fig.png();
         return { layout: fig.layout, data: btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join('')) };
       },
-      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }),
+      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null),
+      regions: () => this.regions,
+      regionCount: () => this.partition?.count ?? null,
+      exportRegionsCsvText: () => regionsCsv(this.store.state, this.regions?.results ?? [], { excelBom: false }),
       exportManualMeasurementsCsvText: () => manualMeasurementsCsv(this.store.state, { excelBom: false }),
       /** Points of the measurement being taken (null when no measuring tool is active). */
       measureDraft: (): Vec3[] | null => {

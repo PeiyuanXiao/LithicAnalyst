@@ -20,7 +20,7 @@ export interface FigureSettings {
   views: FigureView[];
   /** Height of the raking light above the page (degrees); it comes from the upper left. */
   lightElevation: number;
-  overlays: { arrows: boolean; curves: boolean; planes: boolean; scaleBar: boolean };
+  overlays: { arrows: boolean; curves: boolean; planes: boolean; regions: boolean; scaleBar: boolean };
   /** Paper size / real size. */
   scale: number;
   dpi: number;
@@ -29,7 +29,7 @@ export interface FigureSettings {
 export const DEFAULT_FIGURE: FigureSettings = {
   views: ['front', 'left'],
   lightElevation: 35,
-  overlays: { arrows: true, curves: true, planes: false, scaleBar: true },
+  overlays: { arrows: true, curves: true, planes: false, regions: true, scaleBar: true },
   scale: 1,
   dpi: 600,
 };
@@ -54,6 +54,8 @@ export interface FigureContext {
   scene: THREE.Scene;
   /** Hidden while rendering (annotations are drawn as vectors instead). */
   overlay: THREE.Object3D;
+  /** Region colours on the surface: rendered with the shading when the figure asks for them. */
+  regions?: THREE.Object3D;
   mesh: THREE.Mesh;
   lights: LightRig;
   /** Mesh vertices relative to `offset` (original = local + offset). */
@@ -286,7 +288,7 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
     cam.top = vdot(centre, up) - cy;
     cam.bottom = cam.top - s.h / pxPerUnit;
     cam.updateProjectionMatrix();
-    const image = renderView(ctx, cam, s.w, s.h, settings.lightElevation, depth);
+    const image = renderView(ctx, cam, s.w, s.h, settings.lightElevation, depth, settings.overlays.regions);
 
     const toPx = (q: Vec3): [number, number] => [(vdot(q, right) - s.h0) * pxPerUnit, (s.v1 - vdot(q, up)) * pxPerUnit];
     const raycaster = new THREE.Raycaster();
@@ -353,7 +355,7 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
   };
 }
 
-function renderView(ctx: FigureContext, cam: THREE.OrthographicCamera, w: number, h: number, elevation: number, depth: number): ImageData {
+function renderView(ctx: FigureContext, cam: THREE.OrthographicCamera, w: number, h: number, elevation: number, depth: number, regions: boolean): ImageData {
   const r = ctx.renderer;
   const target = new THREE.WebGLRenderTarget(w, h, { samples: 4 });
   target.texture.colorSpace = THREE.SRGBColorSpace;
@@ -362,8 +364,10 @@ function renderView(ctx: FigureContext, cam: THREE.OrthographicCamera, w: number
   const prevAlpha = r.getClearAlpha();
   const prevLight: LightSettings = { ...ctx.lights.settings };
   const overlayShown = ctx.overlay.visible;
+  const regionsShown = ctx.regions?.visible ?? false;
   try {
     ctx.overlay.visible = false;
+    if (ctx.regions) ctx.regions.visible = regions;
     ctx.lights.set({ azimuthDeg: 135, elevationDeg: elevation });
     ctx.lights.update(cam, new THREE.Vector3().copy(cam.position).addScaledVector(cam.getWorldDirection(new THREE.Vector3()), depth / 2), depth);
     r.setRenderTarget(target);
@@ -381,6 +385,7 @@ function renderView(ctx: FigureContext, cam: THREE.OrthographicCamera, w: number
     r.setClearColor(prevColor, prevAlpha);
     ctx.lights.set(prevLight);
     ctx.overlay.visible = overlayShown;
+    if (ctx.regions) ctx.regions.visible = regionsShown;
     target.dispose();
   }
 }

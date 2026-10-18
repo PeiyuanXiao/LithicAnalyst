@@ -11,6 +11,8 @@ const CLICK_PX = 4;
 export const SNAP_PX = 12;
 /** A click this close to the first point closes the curve. */
 const CLOSE_PX = 11;
+/** A point this close to an existing curve lands on it (T-junctions close regions). */
+const CURVE_SNAP_PX = 10;
 /** Vertices settled per pointer move while the live segment is computed. */
 const FRAME_BUDGET = 150_000;
 
@@ -151,9 +153,32 @@ export class DrawCurveTool implements Tool {
       const s = this.ctx.viewer.project(vec(first.p));
       if (Math.hypot(s.x - x, s.y - y) <= CLOSE_PX) return { ...first, closing: true };
     }
+    if (mode !== 'off') {
+      const onCurve = this.onExistingCurve(x, y);
+      if (onCurve !== null) return { v: onCurve, p: snap.point(onCurve), closing: false };
+    }
     const v0 = snap.vertexOfHit(h);
     const v = mode === 'off' ? v0 : snap.snap(v0, this.ctx.viewer.worldPerPixel(h.point) * SNAP_PX, mode);
     return { v, p: snap.point(v), closing: false };
+  }
+
+  /** The mesh vertex under the nearest point of an existing curve near (x, y), if any. */
+  private onExistingCurve(x: number, y: number): number | null {
+    const snap = this.ctx.snap();
+    const near = this.ctx.curves.pickNearest(x, y, CURVE_SNAP_PX);
+    const c = near ? this.ctx.store.curve(near.id) : undefined;
+    if (!snap || !c) return null;
+    let best: Vec3 | null = null;
+    let bd = Infinity;
+    for (const p of c.points) {
+      const s = this.ctx.viewer.project(vec(p));
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < bd) {
+        bd = d;
+        best = p;
+      }
+    }
+    return best && bd <= CURVE_SNAP_PX * 1.5 ? snap.nearestVertex(best) : null;
   }
 
   private updateTarget(h: SurfaceHit | null): void {

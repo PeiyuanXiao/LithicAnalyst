@@ -172,6 +172,25 @@ export interface Section {
   modifiedAt: string;
 }
 
+export type RegionType = 'scar' | 'cortex' | 'joint' | 'damage';
+
+/**
+ * A surface region, stored as a seed: the clicked surface point and its type.
+ * The region itself is the piece of surface, bounded by curves, that contains
+ * the seed; it is found again whenever the curves change.
+ */
+export interface Region {
+  id: string;
+  /** "R1", "R2", … */
+  label: string;
+  seed: Vec3;
+  type: RegionType;
+  /** The scar this region belongs to (type scar), or null. */
+  scarId: string | null;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -180,6 +199,7 @@ export interface ProjectState {
   measurements: Measurement[];
   planes: Plane[];
   sections: Section[];
+  regions: Region[];
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */
@@ -190,6 +210,8 @@ export interface ProjectState {
   nextPlaneNumber: number;
   /** Next number used for section labels (X1, X2, …). */
   nextSectionNumber: number;
+  /** Next number used for region labels (R1, R2, …). */
+  nextRegionNumber: number;
   createdAt: string;
   modifiedAt: string;
 }

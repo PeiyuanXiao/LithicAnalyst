@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Scar, ScarVector, Section, SpecimenInfo } from './types';
+import type { Curve, Measurement, MeshInfo, Plane, ProjectState, Region, Scar, ScarVector, Section, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -20,11 +20,13 @@ export function emptyProject(): ProjectState {
     measurements: [],
     planes: [],
     sections: [],
+    regions: [],
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,
     nextPlaneNumber: 1,
     nextSectionNumber: 1,
+    nextRegionNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
@@ -79,6 +81,10 @@ export class ProjectStore {
 
   section(id: string): Section | undefined {
     return this._state.sections.find((s) => s.id === id);
+  }
+
+  region(id: string): Region | undefined {
+    return this._state.regions.find((r) => r.id === id);
   }
 
   /** Replace the whole project (new mesh, loaded project file). Clears history. */
@@ -198,6 +204,30 @@ export class ProjectStore {
 
   _setNextSectionNumber(n: number): void {
     this._state.nextSectionNumber = n;
+  }
+
+  _insertRegion(r: Region, index?: number): void {
+    const list = this._state.regions;
+    if (index === undefined || index < 0 || index > list.length) list.push(r);
+    else list.splice(index, 0, r);
+  }
+
+  _removeRegion(id: string): { region: Region; index: number } | null {
+    const list = this._state.regions;
+    const index = list.findIndex((r) => r.id === id);
+    if (index < 0) return null;
+    const [region] = list.splice(index, 1);
+    return { region, index };
+  }
+
+  _putRegion(r: Region): void {
+    const list = this._state.regions;
+    const index = list.findIndex((x) => x.id === r.id);
+    if (index >= 0) list[index] = r;
+  }
+
+  _setNextRegionNumber(n: number): void {
+    this._state.nextRegionNumber = n;
   }
 
   _setSpecimen(s: SpecimenInfo): void {

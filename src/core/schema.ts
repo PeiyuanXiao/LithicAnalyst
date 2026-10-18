@@ -3,7 +3,7 @@ import { computeDerived, type DerivedResults, type MeshResults } from './derived
 import { defaultAttributes, defaultCurveAttributes } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, Curve, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Scar, ScarVector, Section, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Scar, ScarVector, Section, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -22,7 +22,7 @@ export interface ProjectFile {
   savedAt: string;
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
-  annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[] };
+  annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[]; regions: Region[] };
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
@@ -30,6 +30,7 @@ export interface ProjectFile {
   nextMeasureNumber: number;
   nextPlaneNumber: number;
   nextSectionNumber: number;
+  nextRegionNumber: number;
   createdAt: string;
   modifiedAt: string;
 }
@@ -43,13 +44,14 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     savedAt: nowIso(),
     specimen: structuredClone(state.specimen),
     mesh: state.mesh ? structuredClone(state.mesh) : null,
-    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections) },
+    annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections), regions: structuredClone(state.regions) },
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
     nextMeasureNumber: state.nextMeasureNumber,
     nextPlaneNumber: state.nextPlaneNumber,
     nextSectionNumber: state.nextSectionNumber,
+    nextRegionNumber: state.nextRegionNumber,
     createdAt: state.createdAt,
     modifiedAt: state.modifiedAt,
   };
@@ -224,6 +226,26 @@ function parseSection(raw: unknown, i: number): Section {
   };
 }
 
+const REGION_TYPE_CODES: RegionType[] = ['scar', 'cortex', 'joint', 'damage'];
+
+function parseRegion(raw: unknown, i: number): Region {
+  if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Region ${i + 1} is not an object.`);
+  const r = raw as Record<string, unknown>;
+  if (!isFiniteVec(r.seed)) throw new ProjectFileError(`Region ${i + 1} needs a numeric "seed" [x, y, z].`);
+  const type = r.type as RegionType;
+  if (!REGION_TYPE_CODES.includes(type)) throw new ProjectFileError(`Region ${i + 1}: unknown type "${String(r.type)}".`);
+  const t = nowIso();
+  return {
+    id: str(r.id) || uuid(),
+    label: str(r.label, `R${i + 1}`),
+    seed: [r.seed[0], r.seed[1], r.seed[2]],
+    type,
+    scarId: typeof r.scarId === 'string' ? r.scarId : null,
+    createdAt: str(r.createdAt, t),
+    modifiedAt: str(r.modifiedAt, t),
+  };
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -249,6 +271,8 @@ export function parseProjectFile(input: unknown): ProjectState {
   const planes = planeList.map((p, i) => parsePlane(p, i));
   const sectionList = Array.isArray(ann?.sections) ? (ann!.sections as unknown[]) : [];
   const sections = sectionList.map((s, i) => parseSection(s, i));
+  const regionList = Array.isArray(ann?.regions) ? (ann!.regions as unknown[]) : [];
+  const regions = regionList.map((r, i) => parseRegion(r, i));
   const sp = (raw.specimen ?? {}) as Record<string, unknown>;
   const specimen: SpecimenInfo = {
     id: str(sp.id),
@@ -265,11 +289,13 @@ export function parseProjectFile(input: unknown): ProjectState {
     measurements,
     planes,
     sections,
+    regions,
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
     nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),
     nextPlaneNumber: Math.max(positiveInt(raw.nextPlaneNumber), maxLabelNumber(planes.map((p) => p.label), 'P') + 1),
     nextSectionNumber: Math.max(positiveInt(raw.nextSectionNumber), maxLabelNumber(sections.map((s) => s.label), 'X') + 1),
+    nextRegionNumber: Math.max(positiveInt(raw.nextRegionNumber), maxLabelNumber(regions.map((r) => r.label), 'R') + 1),
     createdAt: str(raw.createdAt, nowIso()),
     modifiedAt: str(raw.modifiedAt, nowIso()),
   };

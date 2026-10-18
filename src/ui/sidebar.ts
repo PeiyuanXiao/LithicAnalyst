@@ -3,6 +3,7 @@ import {
   deleteMeasurement,
   deletePlane,
   deleteSection,
+  deleteRegion,
   deleteScar,
   flipPlane,
   setPlaneCurve,
@@ -17,7 +18,7 @@ import {
   updateSpecimen,
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
-import { CURVE_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
+import { CURVE_FIELDS, REGION_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
 import { vectorLength } from '../core/store';
 import type { AttributeValue, Curve, PlaneMethod, Scar } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
@@ -27,13 +28,14 @@ import { MEASURE_COLORS } from '../render/measureLayer';
 import { planeColor } from '../render/planeLayer';
 import { FIGURE_VIEWS } from '../render/figure';
 import { SECTION_COLORS } from '../render/sectionLayer';
+import { regionColor } from '../render/regionLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, ViewportBackground } from './appApi';
 import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -412,6 +414,7 @@ function displaySection(api: AppApi): Section {
   ], d.arrows.colorMode, (v) => api.setDisplay((x) => (x.arrows.colorMode = v as ArrowColorMode), 'arrows'));
   const labels = checkbox('arrow-labels', t('display.labels'), d.arrows.labels, (v) => api.setDisplay((x) => (x.arrows.labels = v), 'arrows'));
   const hidden = checkbox('arrow-hidden', t('display.hidden'), d.arrows.showHidden, (v) => api.setDisplay((x) => (x.arrows.showHidden = v), 'arrows'));
+  const regions = checkbox('display-regions', t('display.regions'), d.regions, (v) => api.setDisplay((x) => (x.regions = v), 'regions'));
 
   body.append(
     shading.el,
@@ -420,7 +423,7 @@ function displaySection(api: AppApi): Section {
     background.el,
     h('hr', { class: 'rule' }),
     h('div', { class: 'ctl-grid' }, thickness.el, colorMode.el),
-    h('div', { class: 'check-row' }, labels, hidden),
+    h('div', { class: 'check-row' }, labels, hidden, regions),
   );
 
   const refresh = (kind: RefreshKind) => {
@@ -676,7 +679,7 @@ function figureSection(api: AppApi): Section {
     format: (v) => `${v}°`,
     onInput: (v) => api.setFigure((f) => (f.lightElevation = v)),
   });
-  const overlay = (id: string, key: 'arrows' | 'curves' | 'planes' | 'scaleBar', label: string) =>
+  const overlay = (id: string, key: 'arrows' | 'curves' | 'planes' | 'regions' | 'scaleBar', label: string) =>
     checkbox(id, label, api.figure.overlays[key], (on) => api.setFigure((f) => (f.overlays[key] = on)));
   const scaleBarEl = overlay('fig-scalebar', 'scaleBar', t('figure.scaleBar'));
   const overlays = h(
@@ -685,6 +688,7 @@ function figureSection(api: AppApi): Section {
     overlay('fig-arrows', 'arrows', t('figure.arrows')),
     overlay('fig-curves', 'curves', t('figure.curves')),
     overlay('fig-planes', 'planes', t('figure.planes')),
+    overlay('fig-regions', 'regions', t('figure.regions')),
     scaleBarEl,
   );
   const scale = segmented('fig-scale', t('figure.scale'), [
@@ -717,6 +721,61 @@ function figureSection(api: AppApi): Section {
     if (layout) {
       const size = layout.mmPerPx ? `${fmtNum(layout.width * layout.mmPerPx, 0)} × ${fmtNum(layout.height * layout.mmPerPx, 0)} mm · ` : '';
       sizeEl.append(...metaRow(t('figure.size'), h('span', { class: 'mono', id: 'fig-size' }, `${size}${layout.width} × ${layout.height} px`)));
+    }
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+function regionsSection(api: AppApi, setType: (id: string, type: string) => void): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('regions', t('sec.regions'), badge);
+  const list = h('ol', { class: 'arrow-list', id: 'region-list', role: 'listbox', 'aria-label': t('sec.regions') });
+  const inspector = h('div', { class: 'inspector', id: 'region-inspector' });
+  const totals = h('dl', { class: 'meta', id: 'region-totals' });
+  body.append(list, inspector, totals);
+  const typeField = REGION_FIELDS[0];
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'regions', 'selection', 'specimen', 'arrows', 'mesh'].includes(kind)) return;
+    const st = api.store.state;
+    const info = api.regionInfo();
+    const u = st.specimen.unit;
+    const area = (v: number | null) => (v === null ? '–' : `${fmtNum(v, 2)}${u ? ` ${u}²` : ''}`);
+    badge.textContent = String(st.regions.length);
+    list.hidden = st.regions.length === 0;
+    clear(list);
+    const sel = api.selection.id;
+    for (const r of st.regions) {
+      const res = info?.results.find((x) => x.id === r.id);
+      const scar = r.scarId ? st.scars.find((s) => s.id === r.scarId)?.label ?? null : null;
+      const isSel = r.id === sel;
+      const opt = typeField.options!.find((o) => o.value === r.type)!;
+      list.append(
+        h(
+          'li',
+          { class: 'arrow-row region-row', role: 'option', 'aria-selected': String(isSel), 'data-id': r.id, onclick: () => api.selection.set(r.id) },
+          h('span', { class: 'chip', style: `--chip:${regionColor(r.type, scar)}` }),
+          h('span', { class: 'arrow-id mono' }, r.label),
+          h('span', { class: 'arrow-meta' }, `${tl(opt.label)}${scar ? ` · ${scar}` : ''}${res?.conflict ? ` · ${t('region.conflict')}` : ''}`),
+          h('span', { class: 'arrow-len mono' }, area(res?.area ?? null)),
+        ),
+      );
+    }
+    clear(inspector);
+    const r = sel ? api.store.region(sel) : undefined;
+    if (r) {
+      const ctl = optionList('region-type', tl(typeField.label), typeField.options!.map((o, i) => ({ value: o.value, label: tl(o.label), key: String(i + 1) })), r.type, (v) => setType(r.id, v));
+      inspector.append(
+        ctl.el,
+        h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'region-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteRegion(api.store, r.id) }, icon(ICONS.trash), t('arrows.delete'))),
+      );
+    }
+    clear(totals);
+    totals.hidden = !info || st.regions.length === 0;
+    if (info && st.regions.length) {
+      for (const k of ['scar', 'cortex', 'joint', 'damage'] as const)
+        totals.append(h('dt', {}, t(`region.area.${k}`)), h('dd', { class: 'mono', id: `region-total-${k}` }, area(info.totals[k])));
+      totals.append(h('dt', {}, t('region.cortexRatio')), h('dd', { class: 'mono', id: 'region-cortex-ratio' }, fmtNum(info.totals.cortexRatio, 3)));
     }
   };
   refresh('all');
@@ -798,15 +857,17 @@ function exportSection(api: AppApi): Section {
   const { el, body } = section('export', t('sec.export'));
   const csvBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-csv', onclick: () => api.exportCsv() }, t('export.csv')) as HTMLButtonElement;
   const curveBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-curves-csv', onclick: () => api.exportCurvesCsv() }, t('export.curvesCsv')) as HTMLButtonElement;
+  const regionBtn = h('button', { type: 'button', class: 'btn btn-primary', id: 'export-regions-csv', onclick: () => api.exportRegionsCsv() }, t('export.regions')) as HTMLButtonElement;
   const bom = checkbox('export-bom', t('export.bom'), api.display.excelBom, (v) => api.setDisplay((x) => (x.excelBom = v), 'other'));
   const saveBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-project', onclick: () => api.saveProject() }, icon(ICONS.save), t('export.project')) as HTMLButtonElement;
   const openBtn = h('button', { type: 'button', class: 'btn btn-quiet', id: 'export-open-project', onclick: () => api.openProject() }, icon(ICONS.open), t('header.openProject'));
-  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
+  body.append(h('div', { class: 'btn-row' }, csvBtn, curveBtn, regionBtn, bom), h('div', { class: 'btn-row' }, saveBtn, openBtn));
 
   const refresh = (kind: RefreshKind) => {
-    if (kind !== 'all' && kind !== 'mesh' && kind !== 'curves') return;
+    if (kind !== 'all' && kind !== 'mesh' && kind !== 'curves' && kind !== 'regions') return;
     csvBtn.disabled = !api.hasMesh();
     curveBtn.disabled = !api.hasMesh() || api.store.state.curves.length === 0;
+    regionBtn.disabled = !api.hasMesh() || api.store.state.regions.length === 0;
     saveBtn.disabled = !api.hasMesh();
   };
   refresh('all');
@@ -823,6 +884,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [figureSection, ['present']],
   [arrowsSection, ['annotate']],
   [curvesSection, ['annotate']],
+  [(api) => regionsSection(api, (id, type) => api.setRegionType(id, type)), ['annotate']],
   [measureAutoSection, ['measure']],
   [measureManualSection, ['measure']],
   [planesSection, ['measure']],

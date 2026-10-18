@@ -38,6 +38,12 @@
   and the view direction. The model can be cut open on one side, with the cut face solid or
   hatched; the section drawing exports to SVG / PNG on its own or joins the figure, to the right of
   the views. For display only: no measurements come from sections.
+- Surface regions (R): curves split the surface into pieces (curve ends snap onto existing curves,
+  so curves can enclose areas); click a piece and set its type with keys 1–4 (scar, cortex, joint
+  surface, damage). Regions are stored as seeds and follow the curves when they change; a scar
+  region is linked to the arrow that starts in it, or to a new scar without a direction; two
+  seeds in one piece are reported. Region colours (display and figures), areas per region and
+  type, cortex ratio; `<specimen>_regions.csv` and five new columns in the measurement CSV.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

@@ -108,6 +108,26 @@ export const CURVE_FIELDS: FieldDef[] = [
   },
 ];
 
+/** Surface region types: scar (worked), cortex and joint surfaces (unworked), damage. Keys 1–4. */
+export const REGION_FIELDS: FieldDef[] = [
+  {
+    key: 'type',
+    label: { zh: '类型', en: 'Type' },
+    type: 'enum',
+    default: 'scar',
+    numberKeys: true,
+    listSummary: 'always',
+    options: [
+      { value: 'scar', label: { zh: '片疤', en: 'Scar' } },
+      { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
+      { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
+      { value: 'damage', label: { zh: '破损', en: 'Damage' } },
+    ],
+  },
+];
+
+export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage'] as const;
+
 function defaultsOf(fields: FieldDef[]): Record<string, AttributeValue> {
   const out: Record<string, AttributeValue> = {};
   for (const f of fields) out[f.key] = f.default;

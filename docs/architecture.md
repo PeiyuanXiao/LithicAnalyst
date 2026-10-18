@@ -120,6 +120,19 @@ mesh. Arrows are drawn only in views their surface faces. The outline comes from
 the rendered image (`compute/contour.ts`, marching squares + simplification). PNG files get a
 pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
 
+## Surface regions
+
+* `compute/regions.ts`: `polylineEdges` turns a curve into mesh edges; `regionsSteps`
+  partitions the triangles across them (in slices) and sums the areas; `resolveRegions` finds
+  each seed's piece, flags two seeds in one piece and totals the areas by type.
+* The app repartitions when curves change and re-resolves when regions or scars change. Seeds
+  are located with the BVH (closest triangle). `render/regionLayer.ts` paints the pieces with
+  one mesh each, sharing the scan's vertex buffer; it sits in the scene (not the annotation
+  overlay), so figures can include the colours.
+* `addRegion` / `setRegionType` create a scar without a direction in the same undo step when a
+  scar region has no arrow, and remove it again when it is no longer used (`CompoundCommand`).
+* The curve tool snaps points onto existing curves (T-junctions) so curves can close regions.
+
 ## Sections
 
 A `Section` (display only) is the plane through a line drawn on screen and the eye

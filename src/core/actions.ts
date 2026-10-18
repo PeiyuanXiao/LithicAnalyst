@@ -2,16 +2,20 @@ import {
   AddCurveCommand,
   AddMeasurementCommand,
   AddPlaneCommand,
+  AddRegionCommand,
   AddSectionCommand,
   AddScarCommand,
+  CompoundCommand,
   DeleteCurveCommand,
   DeleteMeasurementCommand,
   DeletePlaneCommand,
+  DeleteRegionCommand,
   DeleteSectionCommand,
   DeleteScarCommand,
   SetSpecimenCommand,
   UpdateCurveCommand,
   UpdatePlaneCommand,
+  UpdateRegionCommand,
   UpdateSectionCommand,
   UpdateScarCommand,
 } from './commands';
@@ -19,7 +23,7 @@ import type { CurveShape } from './curveGeometry';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import type { ProjectStore } from './store';
-import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, Scar, ScarWithVector, Section, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, Region, RegionType, Scar, ScarWithVector, Section, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -315,6 +319,71 @@ export function updateSection(store: ProjectStore, id: string, patch: Partial<Pi
   if (JSON.stringify(after) === JSON.stringify(before)) return;
   after.modifiedAt = nowIso();
   store.history.execute(new UpdateSectionCommand(structuredClone(before), after));
+}
+
+// ---------------------------------------------------------------- regions
+
+/** A scar without a direction, for a scar region with no arrow origin in it. */
+function newAreaScar(store: ProjectStore): { scar: Scar; command: AddScarCommand } {
+  const n = store.state.nextLabelNumber;
+  const t = nowIso();
+  const scar: Scar = { id: uuid(), label: labelForNumber(n), vector: null, attributes: defaultAttributes(), createdAt: t, modifiedAt: t };
+  return { scar, command: new AddScarCommand(scar, n) };
+}
+
+/**
+ * A region at `seed`. A scar region is linked to `scarId` (a scar whose arrow
+ * starts in it), or to a new scar without a direction — in the same undo step.
+ */
+export function addRegion(store: ProjectStore, seed: Vec3, type: RegionType, scarId: string | null): Region {
+  const n = store.state.nextRegionNumber;
+  const t = nowIso();
+  const parts = [];
+  let linked = scarId;
+  if (type === 'scar' && !linked) {
+    const s = newAreaScar(store);
+    parts.push(s.command);
+    linked = s.scar.id;
+  }
+  const region: Region = { id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: type === 'scar' ? linked : null, createdAt: t, modifiedAt: t };
+  parts.push(new AddRegionCommand(region, n));
+  store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.addRegion', parts));
+  return region;
+}
+
+/** The scar created for a region (no direction) is removed with it when nothing else uses it. */
+function dropAreaScar(store: ProjectStore, region: Region): DeleteScarCommand | null {
+  const scar = region.scarId ? store.scar(region.scarId) : undefined;
+  if (!scar || scar.vector) return null;
+  if (store.state.regions.some((r) => r.id !== region.id && r.scarId === scar.id)) return null;
+  return new DeleteScarCommand(scar.id);
+}
+
+/** Change a region's type; becoming a scar links it to `scarId` or to a new scar without a direction. */
+export function setRegionType(store: ProjectStore, id: string, type: RegionType, scarId: string | null): void {
+  const before = store.region(id);
+  if (!before || before.type === type) return;
+  const parts = [];
+  let linked = scarId ?? before.scarId;
+  if (type === 'scar' && !linked) {
+    const s = newAreaScar(store);
+    parts.push(s.command);
+    linked = s.scar.id;
+  }
+  const after: Region = { ...structuredClone(before), type, scarId: type === 'scar' ? linked : null, modifiedAt: nowIso() };
+  parts.push(new UpdateRegionCommand(structuredClone(before), after));
+  if (type !== 'scar') {
+    const drop = dropAreaScar(store, before);
+    if (drop) parts.push(drop);
+  }
+  store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editRegion', parts));
+}
+
+export function deleteRegion(store: ProjectStore, id: string): void {
+  const r = store.region(id);
+  if (!r) return;
+  const drop = dropAreaScar(store, r);
+  store.history.execute(drop ? new CompoundCommand('cmd.deleteRegion', [new DeleteRegionCommand(id), drop]) : new DeleteRegionCommand(id));
 }
 
 // ---------------------------------------------------------------- specimen

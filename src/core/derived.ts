@@ -1,5 +1,6 @@
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
+import type { RegionResult, RegionTotals } from '../compute/regions';
 import { measurementUnit, measurementValue } from './measurements';
 import type { MeasureType, ProjectState } from './types';
 
@@ -40,6 +41,10 @@ export interface DerivedResults {
   measurements: AutoMeasurements | null;
   manualMeasurements: ManualMeasurementValue[];
   planes: PlaneResult[];
+  /** Surface regions found from their seeds (empty until the mesh is partitioned). */
+  regions: RegionResult[];
+  /** Areas by region type and the cortex ratio; null until the mesh is partitioned. */
+  regionTotals: RegionTotals | null;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -47,6 +52,7 @@ export interface MeshResults {
   measurements: AutoMeasurements | null;
   /** Principal axes of all vertices, original coordinates. */
   vertices: PrincipalAxes | null;
+  regions?: { results: RegionResult[]; totals: RegionTotals } | null;
 }
 
 /** Volume-based shape indices; null when the volume is unknown. */
@@ -70,5 +76,7 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
       unit: measurementUnit(m, state.specimen.unit),
     })),
     planes: state.planes.map((p) => computePlane(p, state, mesh?.vertices ?? null)),
+    regions: mesh?.regions?.results ?? [],
+    regionTotals: mesh?.regions?.totals ?? null,
   };
 }

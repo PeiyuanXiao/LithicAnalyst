@@ -418,6 +418,10 @@ export function partitionFaces(
   barrier: ArrayLike<number>,
   edges = buildEdges(index, vertexCount),
 ): FacePartition {
+  return runSync(partitionFacesSteps(index, barrier, edges));
+}
+
+export function* partitionFacesSteps(index: ArrayLike<number>, barrier: ArrayLike<number>, edges: EdgeTable): Steps<FacePartition> {
   const blocked = new Uint8Array(edges.v0.length);
   for (let i = 0; i + 1 < barrier.length; i += 2) {
     const e = edgeId(edges, barrier[i], barrier[i + 1]);
@@ -427,6 +431,7 @@ export function partitionFaces(
   const uf = new UnionFind(tris);
   const firstFace = new Int32Array(edges.v0.length).fill(-1);
   for (let s = 0; s < 3 * tris; s++) {
+    if (s % YIELD_EVERY === 0) yield;
     const e = edges.ofSide[s];
     if (blocked[e]) continue;
     const t = Math.floor(s / 3);
@@ -437,6 +442,7 @@ export function partitionFaces(
   const label = new Int32Array(tris).fill(-1);
   let count = 0;
   for (let t = 0; t < tris; t++) {
+    if (t % YIELD_EVERY === 0) yield;
     const r = uf.find(t);
     if (label[r] < 0) label[r] = count++;
     region[t] = label[r];

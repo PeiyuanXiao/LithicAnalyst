@@ -31,6 +31,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.curves` | array | in creation order |
 | `annotations.measurements` | array | manual measurements, in creation order |
 | `annotations.planes` | array | fitted planes (their inputs), in creation order |
+| `annotations.regions` | array | surface regions as seeds (`{ id, label, seed, type, scarId }`) |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
@@ -38,6 +39,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `nextMeasureNumber` | integer | next measurement label (`M{n}`) |
 | `nextPlaneNumber` | integer | next plane label (`P{n}`) |
 | `nextSectionNumber` | integer | next section label (`X{n}`) |
+| `nextRegionNumber` | integer | next region label (`R{n}`) |
 
 Readers should ignore keys they do not know. Future annotation layers (landmarks, surface
 regions, relations) will be added next to `scars` and `curves` inside `annotations`.
@@ -95,12 +97,29 @@ fitted planes, fitted spheres, volumes ….
   π^(1/3) (6V)^(2/3) / A.
 * `manualMeasurements`: the value of each manual measurement (length in the specimen unit, or
   degrees for angles).
+* `regions`: each region as found on the mesh: `{ id, label, type, scarId, area, conflict }`
+  (area in unit², null when the seed is off the mesh; `conflict` when another seed lies in the
+  same piece). `regionTotals`: `{ scar, cortex, joint, damage, cortexRatio }` — areas by type
+  (each piece counted once, for the first region in it) and cortex area / total surface area.
 * `planes`: each fitted plane as computed from its inputs: `{ id, label, method, valid, center,
   normal, matrix, inputCount }`. `valid` is false when the inputs are not enough (then `center`,
   `normal` and `matrix` are null). `matrix` is row-major 4×4 and maps original coordinates to the
   plane frame (origin = centre, +Z = normal, +X = the model's first principal axis of the
   vertices projected onto the plane, or the second when the first is almost along the normal,
   with its largest component positive; +Y = Z × X).
+
+## Surface region
+
+```json
+{ "id": "…", "label": "R1", "seed": [12.1, -3.4, 8.8], "type": "cortex", "scarId": null, "createdAt": "…", "modifiedAt": "…" }
+```
+
+* The curves split the surface into pieces: each curve is turned into mesh edges (each point to
+  its nearest vertex, gaps joined by shortest paths over mesh edges), and triangles are grouped
+  across all other edges. A region is the piece that holds its `seed` (the clicked surface point).
+* `type`: `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`. A scar region links
+  to a scar (`scarId`): the one whose arrow starts in it, or a scar without a direction created
+  with the region.
 
 ## Fitted plane
 
@@ -264,6 +283,14 @@ Fitted planes (`<specimen>_planes.csv`, one row each; numbers empty for an inval
 specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_z,m00,m01,…,m33
 ```
 
+Surface regions (`<specimen>_regions.csv`, one row each):
+
+```
+specimen_id,region_id,type,scar_id,area,unit
+```
+
+The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio`.
+
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.
 The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
@@ -278,7 +305,7 @@ when reading, and saving writes format 2.
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
 | no `derived` | `derived` (computed results) |
-| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber` |
+| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.

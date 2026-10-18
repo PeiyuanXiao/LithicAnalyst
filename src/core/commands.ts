@@ -1,4 +1,4 @@
-import type { Curve, Measurement, Plane, Scar, Section, SpecimenInfo } from './types';
+import type { Curve, Measurement, Plane, Region, Scar, Section, SpecimenInfo } from './types';
 import type { ProjectStore } from './store';
 
 /**
@@ -341,6 +341,71 @@ export class UpdateSectionCommand implements Command {
   revert(store: ProjectStore): void {
     store._putSection(structuredClone(this.before));
     store.notify({ kind: 'sections', ids: [this.before.id] });
+  }
+}
+
+/** Several commands as one undo step (e.g. a region and the scar created with it). */
+export class CompoundCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly parts: Command[],
+  ) {}
+  apply(store: ProjectStore): void {
+    for (const c of this.parts) c.apply(store);
+  }
+  revert(store: ProjectStore): void {
+    for (const c of [...this.parts].reverse()) c.revert(store);
+  }
+}
+
+export class AddRegionCommand implements Command {
+  readonly labelKey = 'cmd.addRegion';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly region: Region, private readonly labelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextRegionNumber;
+    store._insertRegion(structuredClone(this.region));
+    store._setNextRegionNumber(Math.max(this.prevNext, this.labelNumber + 1));
+    store.notify({ kind: 'regions', ids: [this.region.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._removeRegion(this.region.id);
+    store._setNextRegionNumber(this.prevNext);
+    store.notify({ kind: 'regions', ids: [this.region.id] });
+  }
+}
+
+export class DeleteRegionCommand implements Command {
+  readonly labelKey = 'cmd.deleteRegion';
+  readonly createdAt = Date.now();
+  private removed: { region: Region; index: number } | null = null;
+  constructor(private readonly id: string) {}
+  apply(store: ProjectStore): void {
+    this.removed = store._removeRegion(this.id);
+    store.notify({ kind: 'regions', ids: [this.id] });
+  }
+  revert(store: ProjectStore): void {
+    if (this.removed) store._insertRegion(structuredClone(this.removed.region), this.removed.index);
+    store.notify({ kind: 'regions', ids: [this.id] });
+  }
+}
+
+export class UpdateRegionCommand implements Command {
+  readonly labelKey = 'cmd.editRegion';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: Region,
+    private readonly after: Region,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._putRegion(structuredClone(this.after));
+    store.notify({ kind: 'regions', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putRegion(structuredClone(this.before));
+    store.notify({ kind: 'regions', ids: [this.before.id] });
   }
 }
 

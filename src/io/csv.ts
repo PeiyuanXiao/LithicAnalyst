@@ -1,5 +1,6 @@
 import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
+import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AutoMeasurements } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -119,7 +120,7 @@ const cell = (n: number | null): string => (n === null ? '' : fmt(n));
  * specimen unit, the area in unit², the volume in unit³; volume-based values
  * are empty when the mesh is not closed (or not yet measured).
  */
-export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasurements | null, opts: CsvOptions): string {
+export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasurements | null, opts: CsvOptions, regions: RegionTotals | null = null): string {
   const header = [
     'specimen_id',
     'unit',
@@ -132,6 +133,11 @@ export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasure
     'surface_to_volume_ratio',
     'wadell_sphericity',
     'closed',
+    'area_scar',
+    'area_cortex',
+    'area_joint',
+    'area_damage',
+    'cortex_ratio',
   ];
   const row = [
     csvCell(state.specimen.id),
@@ -145,6 +151,11 @@ export function measurementsCsv(state: Readonly<ProjectState>, auto: AutoMeasure
     cell(auto?.surfaceToVolumeRatio ?? null),
     cell(auto?.wadellSphericity ?? null),
     auto ? String(auto.closed) : '',
+    cell(regions?.scar ?? null),
+    cell(regions?.cortex ?? null),
+    cell(regions?.joint ?? null),
+    cell(regions?.damage ?? null),
+    cell(regions?.cortexRatio ?? null),
   ];
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }
@@ -173,4 +184,14 @@ export function planesCsv(state: Readonly<ProjectState>, planes: PlaneResult[], 
     return [csvCell(state.specimen.id), csvCell(p.label), p.method, ...nums].join(',');
   });
   return (opts.excelBom ? '﻿' : '') + [header.join(','), ...rows].join('\n') + '\n';
+}
+
+/** One row per surface region; `scar_id` is the label of the scar it belongs to; area in unit². */
+export function regionsCsv(state: Readonly<ProjectState>, regions: RegionResult[], opts: CsvOptions): string {
+  const header = ['specimen_id', 'region_id', 'type', 'scar_id', 'area', 'unit'];
+  const rows = regions.map((r) => {
+    const scar = r.scarId ? state.scars.find((s) => s.id === r.scarId)?.label ?? '' : '';
+    return [csvCell(state.specimen.id), csvCell(r.label), r.type, csvCell(scar), cell(r.area), csvCell(state.specimen.unit)].join(',');
+  });
+  return (opts.excelBom ? '\uFEFF' : '') + [header.join(','), ...rows].join('\n') + '\n';
 }
