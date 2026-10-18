@@ -6,6 +6,7 @@ import {
   deleteRegion,
   setNoduleRegion,
   setNoduleShown,
+  setSplit,
   deleteScar,
   flipPlane,
   setPlaneCurve,
@@ -37,7 +38,7 @@ import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } 
 import { clear, h, icon, ICONS } from './dom';
 import { t, tl } from './i18n';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'nodule' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -812,6 +813,46 @@ function noduleSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+function splitSection(api: AppApi): Section {
+  const { el, body } = section('split', t('sec.split'));
+  const select = h('select', { id: 'split-source', class: 'ctl-select', 'aria-label': t('split.by') }) as HTMLSelectElement;
+  select.addEventListener('change', () => {
+    const [source, id] = select.value.split(':');
+    setSplit(api.store, source === 'plane' || source === 'curve' ? { source, id, upHint: api.towardViewer() } : null);
+  });
+  const flip = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'split-flip', onclick: () => {
+    const sp = api.store.state.split;
+    if (sp?.source === 'plane') flipPlane(api.store, sp.id);
+    else if (sp) setSplit(api.store, { ...sp, upHint: [-sp.upHint[0], -sp.upHint[1], -sp.upHint[2]] });
+  } }, t('split.flip')) as HTMLButtonElement;
+  const meta = h('dl', { class: 'meta' });
+  body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), select), h('div', { class: 'btn-row' }, flip), meta);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'split', 'planes', 'curves', 'mesh', 'specimen', 'measure'].includes(kind)) return;
+    const st = api.store.state;
+    const options: Array<[string, string]> = [['', t('split.none')]];
+    for (const p of api.planeResults()) if (p.valid) options.push([`plane:${p.id}`, p.label]);
+    for (const c of st.curves) if (c.closed) options.push([`curve:${c.id}`, c.label]);
+    clear(select);
+    for (const [value, label] of options) select.append(h('option', { value }, label));
+    select.value = st.split ? `${st.split.source}:${st.split.id}` : '';
+    flip.disabled = !st.split;
+    clear(meta);
+    const u = st.specimen.unit;
+    const closed = api.meshClosed();
+    if (closed === false) meta.append(...metaRow(t('measure.volume'), t('measure.notClosed')));
+    const v = api.volumeSplit();
+    if (v)
+      meta.append(
+        ...metaRow(t('split.upper'), h('span', { class: 'mono', id: 'split-upper' }, `${fmtNum(v.upper, 2)}${u ? ` ${u}³` : ''}`)),
+        ...metaRow(t('split.lower'), h('span', { class: 'mono', id: 'split-lower' }, `${fmtNum(v.lower, 2)}${u ? ` ${u}³` : ''}`)),
+        ...metaRow(t('split.ratio'), h('span', { class: 'mono', id: 'split-ratio' }, v.ratio === null ? '–' : fmtNum(v.ratio, 3))),
+      );
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
 function sectionsSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('sections', t('sec.sections'), badge);
@@ -919,6 +960,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [measureManualSection, ['measure']],
   [planesSection, ['measure']],
   [noduleSection, ['measure']],
+  [splitSection, ['measure']],
   [displaySection, ALL_MODES],
   [exportSection, ['annotate']],
   [measureExportSection, ['measure']],

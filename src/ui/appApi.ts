@@ -4,7 +4,7 @@ import type { FigureLayout, FigureSettings } from '../render/figure';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AutoMeasurements } from '../core/derived';
 import type { ProjectStore } from '../core/store';
-import type { Measurement } from '../core/types';
+import type { Measurement, Vec3 } from '../core/types';
 import type { ArrowDisplay } from '../render/arrowLayer';
 import type { LightSettings } from '../render/lighting';
 import type { ShadingMode } from '../render/meshView';
@@ -80,6 +80,11 @@ export interface AppApi {
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null;
   exportRegionsCsv(): void;
   setRegionType(id: string, type: string): void;
+  volumeSplit(): import('../compute/split').VolumeSplit | null;
+  /** Null before the mesh is measured. */
+  meshClosed(): boolean | null;
+  /** Direction toward the viewer (for orienting a curve's normal). */
+  towardViewer(): Vec3;
   noduleFit(): (import('../compute/sphere').SphereFit & { regions: string[] }) | null;
   saveProject(): void;
   openProject(): void;

@@ -126,6 +126,7 @@ export function measurementsCsv(
   opts: CsvOptions,
   regions: RegionTotals | null = null,
   nodule: { radius: number; rms: number } | null = null,
+  split: { upper: number; lower: number; ratio: number | null } | null = null,
 ): string {
   const header = [
     'specimen_id',
@@ -146,6 +147,9 @@ export function measurementsCsv(
     'cortex_ratio',
     'nodule_radius',
     'nodule_fit_rms',
+    'volume_upper',
+    'volume_lower',
+    'volume_ratio',
   ];
   const row = [
     csvCell(state.specimen.id),
@@ -166,6 +170,9 @@ export function measurementsCsv(
     cell(regions?.cortexRatio ?? null),
     cell(nodule?.radius ?? null),
     cell(nodule?.rms ?? null),
+    cell(split?.upper ?? null),
+    cell(split?.lower ?? null),
+    cell(split?.ratio ?? null),
   ];
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }

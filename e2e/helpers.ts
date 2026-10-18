@@ -26,6 +26,7 @@ export interface LithicApi {
   clipping(): number;
   regions(): { results: import('../src/compute/regions').RegionResult[]; totals: import('../src/compute/regions').RegionTotals } | null;
   regionCount(): number | null;
+  volumeSplit(): import('../src/compute/split').VolumeSplit | null;
   nodule(): (import('../src/compute/sphere').SphereFit & { regions: string[] }) | null;
   exportRegionsCsvText(): string;
   figure(format: 'png' | 'svg'): Promise<{ layout: import('../src/render/figure').FigureLayout; data: string } | null>;

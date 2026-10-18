@@ -24,6 +24,7 @@ export interface ProjectFile {
   mesh: MeshInfo | null;
   annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[]; regions: Region[] };
   nodule: ProjectState['nodule'];
+  split: ProjectState['split'];
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
@@ -47,6 +48,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     mesh: state.mesh ? structuredClone(state.mesh) : null,
     annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections), regions: structuredClone(state.regions) },
     nodule: structuredClone(state.nodule),
+    split: structuredClone(state.split),
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
@@ -295,6 +297,11 @@ export function parseProjectFile(input: unknown): ProjectState {
     nodule: (() => {
       const nd = (raw.nodule ?? {}) as Record<string, unknown>;
       return { exclude: Array.isArray(nd.exclude) ? nd.exclude.filter((x): x is string => typeof x === 'string') : [], show: nd.show === true };
+    })(),
+    split: (() => {
+      const sp = raw.split as Record<string, unknown> | null | undefined;
+      if (!sp || (sp.source !== 'plane' && sp.source !== 'curve') || typeof sp.id !== 'string') return null;
+      return { source: sp.source, id: sp.id, upHint: isFiniteVec(sp.upHint) ? [sp.upHint[0], sp.upHint[1], sp.upHint[2]] : [0, 0, 1] };
     })(),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),

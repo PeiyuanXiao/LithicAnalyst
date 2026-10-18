@@ -2,6 +2,7 @@ import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { SphereFit } from '../compute/sphere';
+import type { VolumeSplit } from '../compute/split';
 import { measurementUnit, measurementValue } from './measurements';
 import type { MeasureType, ProjectState } from './types';
 
@@ -48,6 +49,8 @@ export interface DerivedResults {
   regionTotals: RegionTotals | null;
   /** Sphere fitted to the chosen cortex regions (null without cortex, or before the mesh is partitioned). */
   nodule: (SphereFit & { regions: string[] }) | null;
+  /** Upper and lower volume (null without a split, a closed mesh, or a valid plane / closed curve). */
+  split: VolumeSplit | null;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -57,6 +60,7 @@ export interface MeshResults {
   vertices: PrincipalAxes | null;
   regions?: { results: RegionResult[]; totals: RegionTotals } | null;
   nodule?: (SphereFit & { regions: string[] }) | null;
+  split?: VolumeSplit | null;
 }
 
 /** Volume-based shape indices; null when the volume is unknown. */
@@ -83,5 +87,6 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     regions: mesh?.regions?.results ?? [],
     regionTotals: mesh?.regions?.totals ?? null,
     nodule: mesh?.nodule ?? null,
+    split: mesh?.split ?? null,
   };
 }

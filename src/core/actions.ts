@@ -13,6 +13,7 @@ import {
   DeleteSectionCommand,
   DeleteScarCommand,
   SetNoduleCommand,
+  SetSplitCommand,
   SetSpecimenCommand,
   UpdateCurveCommand,
   UpdatePlaneCommand,
@@ -24,7 +25,7 @@ import type { CurveShape } from './curveGeometry';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import type { ProjectStore } from './store';
-import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, Region, RegionType, Scar, ScarWithVector, Section, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, Curve, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Scar, ScarWithVector, Section, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -385,6 +386,13 @@ export function deleteRegion(store: ProjectStore, id: string): void {
   if (!r) return;
   const drop = dropAreaScar(store, r);
   store.history.execute(drop ? new CompoundCommand('cmd.deleteRegion', [new DeleteRegionCommand(id), drop]) : new DeleteRegionCommand(id));
+}
+
+/** Split the volume by a plane or a closed curve (null: no split); `upHint` orients a curve's normal. */
+export function setSplit(store: ProjectStore, split: ProjectState['split']): void {
+  const before = store.state.split;
+  if (JSON.stringify(before) === JSON.stringify(split)) return;
+  store.history.execute(new SetSplitCommand(structuredClone(before), structuredClone(split)));
 }
 
 /** Use (or leave out) a cortex region in the nodule sphere fit. */

@@ -409,6 +409,23 @@ export class UpdateRegionCommand implements Command {
   }
 }
 
+export class SetSplitCommand implements Command {
+  readonly labelKey = 'cmd.editSplit';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: ProjectState['split'],
+    private readonly after: ProjectState['split'],
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setSplit(structuredClone(this.after));
+    store.notify({ kind: 'split' });
+  }
+  revert(store: ProjectStore): void {
+    store._setSplit(structuredClone(this.before));
+    store.notify({ kind: 'split' });
+  }
+}
+
 export class SetNoduleCommand implements Command {
   readonly labelKey = 'cmd.editNodule';
   readonly createdAt = Date.now();

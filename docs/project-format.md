@@ -33,6 +33,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.planes` | array | fitted planes (their inputs), in creation order |
 | `annotations.regions` | array | surface regions as seeds (`{ id, label, seed, type, scarId }`) |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
+| `split` | `{ source, id, upHint }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
@@ -105,6 +106,13 @@ fitted planes, fitted spheres, volumes ….
 * `nodule`: the sphere fitted to the chosen cortex regions: `{ center, radius, rms, count, regions }`
   (least squares on their vertices — algebraic fit, then Gauss–Newton on the distances; at most
   about 200 000 vertices, evenly picked), or null.
+* `split`: `{ upper, lower, ratio }` (unit³; ratio = upper / lower), or null. By a plane: each side
+  is closed by the section; with a reference point on the plane the cap adds no volume, so the
+  clipped triangles on each side are summed (divergence theorem). By a closed curve: the curve's
+  mesh edges split the surface in two; each side is closed by a fan from the centre of the curve
+  (no volume with that centre as the reference point). Upper = the side the normal points to
+  (the plane's normal, or the normal of the plane fitted to the curve, oriented by `upHint`).
+  Closed meshes only.
 * `planes`: each fitted plane as computed from its inputs: `{ id, label, method, valid, center,
   normal, matrix, inputCount }`. `valid` is false when the inputs are not enough (then `center`,
   `normal` and `matrix` are null). `matrix` is row-major 4×4 and maps original coordinates to the
@@ -293,7 +301,7 @@ Surface regions (`<specimen>_regions.csv`, one row each):
 specimen_id,region_id,type,scar_id,area,unit
 ```
 
-The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms`.
+The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio`.
 
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.

@@ -202,6 +202,12 @@ export interface ProjectState {
   regions: Region[];
   /** Sphere fitted to the cortex: cortex regions left out, and whether the sphere is drawn. */
   nodule: { exclude: string[]; show: boolean };
+  /**
+   * Upper / lower volume split: by a fitted plane (upper = its normal's side)
+   * or a closed curve (upper = the side its fitted plane's normal points to,
+   * oriented by `upHint`). Null when not used.
+   */
+  split: { source: 'plane' | 'curve'; id: string; upHint: Vec3 } | null;
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */

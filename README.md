@@ -12,6 +12,7 @@
 - 每条曲线记录类型（刃缘 / 棱脊 / 片疤边界 / 其他）和备注。曲线端点可吸附到已有曲线上（T 形交接），几条曲线能围成封闭区域。
 - 表面区域（R）：曲线把表面分成若干块，曲线一变就重算；点击一块定类型（1 片疤、2 石皮、3 节理面、4 破损），以点击处为种子保存，重算后由包含种子的那块继承；片疤区域自动关联起点落在其中的箭头，否则新建一个无方向的片疤；两个种子落进同一块时提示冲突。计算各区域面积、各类型总面积和石皮比。
 - 石皮拟合球（测量模式）：对选定的石皮区域（默认全部）的顶点做球面最小二乘拟合（代数解作初值，再几何迭代精化），给出半径、球心、残差 RMS，可显示线框球。
+- 上下体积切分（测量模式，仅封闭模型）：按一条闭合曲线（如石核边缘）或一个拟合平面把模型分成两部分，分别给出体积；上侧 = 法向所指的一侧，可互换。
 - 界面分「标注 / 测量 / 展示」三种模式，每种只显示自己的工具和侧栏。
 - 测量模式：打开模型即自动算长、宽、厚（标本坐标系或面积加权主轴）、表面积、体积（仅封闭模型）、Surface-to-Volume Ratio、Wadell 球度；手动测量两点直线距离、沿表面距离、三点角度（编号 M1、M2……，可撤销，存入项目文件）。
 - 拟合平面（测量模式）：全部顶点（Lin et al. 2024）、片疤方向（Xiao et al. 2026）、片疤起点（可按完整性筛选）、曲线；输入一变就重算；显示半透明圆盘、与模型的交线和法向，可翻转、沿法向观察、逐个显示 / 隐藏。
@@ -54,7 +55,7 @@ specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note
 测量 CSV（每件一行；体积相关的值在模型不封闭时留空）：
 
 ```
-specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms
+specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio
 ```
 
 手动测量 CSV（每条一行；用不到的点留空，角度单位为 `deg`）：
@@ -75,7 +76,7 @@ specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_
 specimen_id,region_id,type,scar_id,area,unit
 ```
 
-测量 CSV 另有 `area_scar,area_cortex,area_joint,area_damage,cortex_ratio`（表面区域）和 `nodule_radius,nodule_fit_rms`（石皮拟合球）。
+测量 CSV 另有 `area_scar,area_cortex,area_joint,area_damage,cortex_ratio`（表面区域）、`nodule_radius,nodule_fit_rms`（石皮拟合球）和 `volume_upper,volume_lower,volume_ratio`（上下体积切分）。
 
 ## License
 

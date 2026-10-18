@@ -3,7 +3,7 @@ import { boxPly, boxPoint, roofPly, type Vec3 } from './fixtures/meshes';
 import { download, expect, loadMesh, measureDraftLength, nextFrames, openApp, parseCsv, state, test, toScreen, waitForMesh } from './helpers';
 
 const MEASUREMENTS_HEADER =
-  'specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms';
+  'specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio';
 const MANUAL_HEADER = 'specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p3_z';
 
 async function measureMode(page: Page): Promise<void> {

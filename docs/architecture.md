@@ -140,6 +140,14 @@ relative to the centroid). The app refits whenever the regions or `ProjectState.
 cortex regions are left out, whether the sphere is drawn) change, using the vertices of the
 chosen cortex pieces, and keeps the result for `derived.nodule` and the measurement CSV.
 
+## Volume split
+
+`compute/split.ts`: `splitByPlaneSteps` sums signed tetrahedra from a point on the plane over the
+triangles (clipped at the plane) on its upper side; `splitByLoopSteps` partitions along a closed
+chain of mesh edges and sums each side from the chain's centre. In both, the cap closing each
+part has zero volume relative to that reference point, so no cap is built. The app recomputes
+when the split, the planes or the curves change.
+
 ## Sections
 
 A `Section` (display only) is the plane through a line drawn on screen and the eye

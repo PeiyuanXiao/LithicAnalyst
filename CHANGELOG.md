@@ -47,6 +47,9 @@
 - Cortex sphere (measure mode): a least-squares sphere through the vertices of the chosen cortex
   regions (all by default; algebraic start, then geometric refinement): radius, centre, residual
   RMS; optional wireframe sphere; `nodule_radius` and `nodule_fit_rms` in the measurement CSV.
+- Upper / lower volume (measure mode, closed meshes): split by a closed curve (e.g. the edge of a
+  core) or a fitted plane; the upper side is where the normal points (swappable). `volume_upper`,
+  `volume_lower` and `volume_ratio` in the measurement CSV.
 - Project files are saved in format version 2: scars are objects of their own
   (`annotations.scars`) whose direction arrow (`vector`) is optional, the specimen can carry an
   orientation matrix (`specimen.frame`), and computed results go under `derived`. Files from

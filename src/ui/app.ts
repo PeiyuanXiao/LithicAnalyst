@@ -27,6 +27,8 @@ import { ClickTool } from '../tools/clickTool';
 import { RegionLayer, regionColor } from '../render/regionLayer';
 import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
+import { splitByLoopSteps, splitByPlaneSteps, type VolumeSplit } from '../compute/split';
+import { fitPlane } from '../compute/meshGeometry';
 import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
 import { curveColor } from '../render/curveLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
@@ -162,6 +164,8 @@ export class App implements AppApi {
   private conflictKey = '';
   private nodule: (SphereFit & { regions: string[] }) | null = null;
   private noduleMesh: THREE.Mesh | null = null;
+  private split: VolumeSplit | null = null;
+  private splitToken = 0;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
 
@@ -479,8 +483,9 @@ export class App implements AppApi {
     if (c.kind === 'curves' || c.kind === 'reset') this.updatePartition();
     else if (c.kind === 'regions' || c.kind === 'scars') this.resolveRegionsNow();
     if (c.kind === 'nodule') this.updateNodule();
+    if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', nodule: 'nodule', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', nodule: 'nodule', split: 'split', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
@@ -926,7 +931,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -1028,6 +1033,58 @@ export class App implements AppApi {
     this.sidebar.refresh('regions');
   }
 
+  towardViewer(): Vec3 {
+    return this.viewer?.towardViewer() ?? [0, 0, 1];
+  }
+
+  volumeSplit(): VolumeSplit | null {
+    return this.split;
+  }
+
+  meshClosed(): boolean | null {
+    return this.measureBase ? this.measureBase.topology.closed : null;
+  }
+
+  /** Upper / lower volumes by the chosen plane or closed curve (closed meshes only; in slices). */
+  private updateSplit(): void {
+    const token = ++this.splitToken;
+    const sp = this.store.state.split;
+    const base = this.measureBase;
+    const loaded = this.loaded;
+    const snap = this.surfaceSnap;
+    const done = (v: VolumeSplit | null) => {
+      if (token !== this.splitToken) return;
+      this.split = v;
+      this.sidebar.refresh('split');
+    };
+    if (!sp || !base || !loaded || !base.topology.closed) return done(null);
+    const g = loaded.geometry;
+    const pos = g.getAttribute('position').array as Float32Array;
+    const idx = g.index!.array as Uint32Array;
+    const o = loaded.offset;
+    if (sp.source === 'plane') {
+      const r = this.planes.find((p) => p.id === sp.id);
+      if (!r?.valid) return done(null);
+      void runSliced(splitByPlaneSteps(pos, idx, [r.center![0] - o[0], r.center![1] - o[1], r.center![2] - o[2]], r.normal!)).then(done);
+      return;
+    }
+    const c = this.store.curve(sp.id);
+    const fit = c?.closed ? fitPlane(c.points) : null;
+    if (!c || !fit || !snap) return done(null);
+    let normal = fit.normal;
+    if (normal[0] * sp.upHint[0] + normal[1] * sp.upHint[1] + normal[2] * sp.upHint[2] < 0) normal = [-normal[0], -normal[1], -normal[2]];
+    void snap.prepare('off').then(() => {
+      if (token !== this.splitToken) return;
+      const search = snap.search(3);
+      const chain = polylineEdges(c.points, true, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
+        if (!search) return null;
+        search.start(a, null);
+        return search.reach(b) ? search.path(b) : null;
+      });
+      void runSliced(splitByLoopSteps(pos, idx, base.edges, chain, normal)).then(done);
+    });
+  }
+
   noduleFit(): (SphereFit & { regions: string[] }) | null {
     return this.nodule;
   }
@@ -1038,6 +1095,8 @@ export class App implements AppApi {
     const loaded = this.loaded;
     const st = this.store.state;
     this.nodule = null;
+    this.split = null;
+    this.splitToken++;
     if (part && loaded && this.regions) {
       const used = st.regions.filter((r, i) => r.type === 'cortex' && !st.nodule.exclude.includes(r.id) && this.seedComponent[i] >= 0 && this.seedComponent.indexOf(this.seedComponent[i]) === i);
       const comps = new Set(used.map((r) => this.seedComponent[st.regions.indexOf(r)]));
@@ -1118,7 +1177,7 @@ export class App implements AppApi {
 
   exportMeasurementsCsv(): void {
     if (!this.hasMesh() || !this.auto) return;
-    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom }, this.regions?.totals ?? null, this.nodule);
+    const csv = measurementsCsv(this.store.state, this.auto, { excelBom: this.display.excelBom }, this.regions?.totals ?? null, this.nodule, this.split);
     void this.save(`${this.stem()}_measurements.csv`, csv, 'text/csv');
   }
 
@@ -1142,6 +1201,7 @@ export class App implements AppApi {
       this.updatePlanes();
       this.updateSections();
       this.updatePartition();
+      this.updateSplit();
       this.syncAnnotations();
     });
   }
@@ -1678,7 +1738,8 @@ export class App implements AppApi {
         const bytes = await fig.png();
         return { layout: fig.layout, data: btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join('')) };
       },
-      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule),
+      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule, this.split),
+      volumeSplit: () => this.split,
       nodule: () => this.nodule,
       regions: () => this.regions,
       regionCount: () => this.partition?.count ?? null,
