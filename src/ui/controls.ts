@@ -1,4 +1,4 @@
-import { h } from './dom';
+import { h, icon20, ICONS20 } from './dom';
 
 export interface SliderOpts {
   id: string;
@@ -156,4 +156,27 @@ export function textRow(
 /** Set an input's value unless the user is typing in it. */
 export function softSet(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   if (document.activeElement !== input && input.value !== value) input.value = value;
+}
+
+/** "Add …" at the end of a list: a dashed, full-width button with a plus. */
+export function addButton(label: string, onClick: () => void, id?: string): HTMLButtonElement {
+  return h('button', { type: 'button', class: 'add-btn', id, onclick: onClick }, icon20(ICONS20.plus), h('span', {}, label)) as HTMLButtonElement;
+}
+
+/**
+ * A row of a `.num-grid` list: the label, the number (right-aligned, tabular) and its unit
+ * in a column of its own, so the numbers line up. `id` goes on the number; `id-unit` on the unit.
+ */
+export function numRow(label: string, value: string, unit: string, id?: string): HTMLElement[] {
+  return [h('dt', {}, label), h('dd', { class: 'num', id }, value), h('dd', { class: 'unit', id: id ? `${id}-unit` : undefined }, unit)];
+}
+
+/** A row of a `.num-grid` list whose value is not a number (it takes the number and unit columns). */
+export function textValueRow(label: string, value: string, id?: string): [HTMLElement, HTMLElement] {
+  return [h('dt', {}, label), h('dd', { class: 'text', id }, value)];
+}
+
+/** Coordinates in a `.coord-grid`: the label, x, y and z right-aligned in their columns, the unit. */
+export function coordRow(label: string, values: string[], unit: string): HTMLElement[] {
+  return [h('dt', {}, label), ...values.map((v) => h('dd', { class: 'num' }, v)), h('dd', { class: 'unit' }, unit)];
 }

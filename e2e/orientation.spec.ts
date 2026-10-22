@@ -30,7 +30,7 @@ test('sets the specimen frame from the view, a plane and an arrow; turns it; mea
   await page.evaluate(() => window.lithicanalyst.view([0, 0, 1], [0, 1, 0]));
   await nextFrames(page);
   await page.locator('#frame-from-view').click();
-  await expect(page.locator('#frame-status')).toHaveText('view');
+  await expect(page.locator('#frame-status')).toHaveText('Current view');
   let f = (await frame(page))!;
   expect(dot(row(f.matrix, 2), [0, 0, 1])).toBeCloseTo(1, 6);
   expect(dot(row(f.matrix, 1), [0, 1, 0])).toBeCloseTo(1, 6);
@@ -50,11 +50,14 @@ test('sets the specimen frame from the view, a plane and an arrow; turns it; mea
   // front view from the plane; vertical from the arrow (origin at the bottom)
   await page.evaluate(() => window.lithicanalyst.view([1, -1, 0.2], [0, 0, 1]));
   await page.locator('#frame-from-plane').click();
-  await expect(page.locator('#frame-status')).toHaveText('plane:P1');
+  await page.locator('#frame-from-plane-P1').click();
+  await expect(page.locator('#frame-status')).toHaveText('Plane P1');
   f = (await frame(page))!;
   expect(dot(row(f.matrix, 2), [0, 0, 1])).toBeCloseTo(1, 6);
   await page.locator('#frame-vertical').click();
-  await expect(page.locator('#frame-status')).toHaveText('plane:P1; vertical:S1');
+  await page.locator('#frame-vertical-S1').click();
+  await expect(page.locator('#frame-status')).toHaveText('Plane P1 · Arrow S1');
+  expect((await frame(page))!.source).toBe('plane:P1; vertical:S1');
   f = (await frame(page))!;
   expect(dot(row(f.matrix, 1), [1, 0, 0])).toBeCloseTo(1, 6);
 

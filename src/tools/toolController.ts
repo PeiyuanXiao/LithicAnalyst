@@ -23,6 +23,7 @@ export class ToolController {
     container.addEventListener('pointercancel', (e) => this.up(e), opts);
     container.addEventListener('dblclick', (e) => this.dbl(e), opts);
     container.addEventListener('pointerleave', () => {
+      this.active?.pointerLeave?.();
       this.onHover(null);
       if (!this.activePointer) this.ctx.arrows.setHover(null);
       this.ctx.curves.setLive(null);
@@ -113,7 +114,11 @@ export class ToolController {
 
   private move(e: PointerEvent): void {
     if (!this.active) return;
-    if (this.isOnLabel(e) && this.activePointer === null) return;
+    if (this.isOnLabel(e) && this.activePointer === null) {
+      // over a label or a panel: nothing on the surface is under the cursor
+      this.active.pointerLeave?.();
+      return;
+    }
     const hit = this.provider(e);
     if (this.lightHeld) {
       const r = this.container.getBoundingClientRect();

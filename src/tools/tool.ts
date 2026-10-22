@@ -26,6 +26,8 @@ export interface ToolContext {
   changed: () => void;
   /** Annotations may be edited (false outside the annotate mode). */
   editable: () => boolean;
+  /** The item under the select tool's cursor and where the cursor is (null: none); the app shows its name after a pause. */
+  hovered: (item: { id: string; x: number; y: number } | null) => void;
 }
 
 /** Lazily computed surface hit for the current pointer event (one ray cast at most). */
@@ -44,6 +46,10 @@ export interface Tool {
   pointerMove(e: PointerEvent, hit: HitProvider): void;
   pointerUp(e: PointerEvent, hit: HitProvider): void;
   doubleClick?(e: MouseEvent, hit: HitProvider): void;
+  /** The pointer left the view. */
+  pointerLeave?(): void;
+  /** Forget what is under the cursor (the work mode changed). */
+  clearHover?(): void;
   /** Esc. Return true if something was cancelled. */
   cancel(): boolean;
   /** Backspace / Ctrl+Z while the tool has unfinished work: undo its last step. True if handled. */

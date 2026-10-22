@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import type { Measurement, ProjectState, Vec3 } from '../core/types';
-import { AnchorDots, CurveVisual, WIDTH, WIDTH_SELECTED } from './curveLayer';
+import { AnchorDots, CurveVisual, pickPolylines, WIDTH, WIDTH_HOVER, WIDTH_SELECTED } from './curveLayer';
 import type { Viewer } from './viewer';
 
+/** A measurement being taken has the colour of the others; yellow only marks the selected one. */
 export const MEASURE_COLORS = {
   line: '#4cc9f0',
   selected: '#ffc61a',
-  draft: '#ffc61a',
+  draft: '#4cc9f0',
 };
 
 /** The line a measurement is drawn as: straight, the traced path, or the two legs of an angle. */
@@ -21,6 +22,9 @@ export class MeasureLayer {
   private origin: Vec3 = [0, 0, 0];
   private draftPoints: Vec3[] = [];
   private stored: { points: Vec3[]; colors: string[] } = { points: [], colors: [] };
+  private last: { state: Readonly<ProjectState>; selected: string | null; visible: boolean; label: (m: Measurement) => string } | null = null;
+  /** The measurement under the select tool's cursor. */
+  private hovered: string | null = null;
   onLabelClick: (id: string) => void = () => {};
 
   constructor(private readonly viewer: Viewer) {
@@ -38,6 +42,7 @@ export class MeasureLayer {
 
   /** `visible` false hides everything (other work modes); `label` gives the text shown next to each. */
   sync(state: Readonly<ProjectState>, selected: string | null, visible: boolean, label: (m: Measurement) => string): void {
+    this.last = { state, selected, visible, label };
     this.group.visible = visible;
     const seen = new Set<string>();
     const dots: Vec3[] = [];
@@ -53,10 +58,11 @@ export class MeasureLayer {
         this.group.add(v.root);
       }
       const isSel = m.id === selected;
+      const isHov = !isSel && m.id === this.hovered;
       const color = isSel ? MEASURE_COLORS.selected : MEASURE_COLORS.line;
       v.setPoints(shownPoints(m), false, this.origin);
-      v.style(color, isSel ? WIDTH_SELECTED : WIDTH, true);
-      v.setLabel(label(m), color, isSel);
+      v.style(color, isSel ? WIDTH_SELECTED : isHov ? WIDTH_HOVER : WIDTH, true);
+      v.setLabel(label(m), color, isSel, isHov);
       for (const p of m.points) {
         dots.push(p);
         colors.push(color);
@@ -94,6 +100,21 @@ export class MeasureLayer {
     else this.viewer.requestRender();
   }
 
+  /** The measurement under the select tool's cursor (an id of another layer, or null: none). */
+  setHoverItem(id: string | null): void {
+    const own = id !== null && this.visuals.has(id) ? id : null;
+    if (own === this.hovered) return;
+    this.hovered = own;
+    const l = this.last;
+    if (l) this.sync(l.state, l.selected, l.visible, l.label);
+  }
+
+  /** Measurement line under the cursor, in screen space, with its distance in pixels. */
+  pickNearest(clientX: number, clientY: number, maxPx = 8): { id: string; dist: number } | null {
+    if (!this.group.visible) return null;
+    return pickPolylines(this.viewer, this.visuals, clientX, clientY, maxPx);
+  }
+
   /** Re-check which points and labels are hidden behind the surface (after camera moves). */
   updateOcclusion(): void {
     if (!this.group.visible) return;
@@ -110,6 +131,8 @@ export class MeasureLayer {
       this.group.remove(v.root);
     }
     this.visuals.clear();
+    this.last = null;
+    this.hovered = null;
     this.draftPoints = [];
     this.stored = { points: [], colors: [] };
     this.draft.root.visible = false;

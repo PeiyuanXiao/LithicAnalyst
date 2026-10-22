@@ -26,12 +26,18 @@ export const DEFAULT_ARROW_DISPLAY: ArrowDisplay = {
   colorMode: 'uniform',
 };
 
+const UNIFORM = '#e0287d';
+
+/** Yellow (`selected`) means selected and nothing else: an arrow being drawn has the single-colour mode's colour. */
 export const ARROW_COLORS = {
-  uniform: '#e0287d',
+  uniform: UNIFORM,
   selected: '#ffc61a',
-  draft: '#ffc61a',
+  draft: UNIFORM,
   palette: ['#1f9e89', '#3a7fd5', '#7b5cd6', '#c8611f', '#d6336c', '#8a8f98'],
 };
+
+/** A handle under the cursor (dark, so it is not taken for a selection). */
+export const HOT_HANDLE = '#141a18';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const CYL = new THREE.CylinderGeometry(1, 1, 1, 14, 1, false).translate(0, 0.5, 0);
@@ -122,6 +128,7 @@ class ArrowVisual {
     labelText: string | null,
     selected: boolean,
     dim = false,
+    hovered = false,
   ): void {
     this.shownStart.copy(start);
     this.shownEnd.copy(end);
@@ -153,6 +160,7 @@ class ArrowVisual {
         const el = this.label.element;
         if (el.textContent !== labelText) el.textContent = labelText;
         el.classList.toggle('is-selected', selected);
+        el.classList.toggle('is-hover', hovered && !selected);
         el.style.setProperty('--chip', color);
         // anchor slightly above the tail, in world space (root is rotated, so place it on the scene)
         const anchor = start.clone().addScaledVector(startNormal, radius * 3);
@@ -217,7 +225,10 @@ export class ArrowLayer {
   private hover = new THREE.Group();
   private handles: [THREE.Mesh, THREE.Mesh];
   private handleMat = new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, transparent: true, opacity: 0.95 });
-  private handleHotMat = new THREE.MeshBasicMaterial({ color: ARROW_COLORS.selected, depthTest: false, transparent: true, opacity: 1 });
+  private handleHotMat = new THREE.MeshBasicMaterial({ color: HOT_HANDLE, depthTest: false, transparent: true, opacity: 1 });
+  private readonly hoverDot: THREE.MeshBasicMaterial;
+  /** The arrow under the cursor of the select tool (drawn a little thicker). */
+  private hovered: string | null = null;
   private override: EndpointOverride | null = null;
   private last: { state: Readonly<ProjectState>; selected: string | null; display: ArrowDisplay; handles: boolean } | null = null;
   private highlight: { ids: ReadonlySet<string>; color: string } | null = null;
@@ -233,9 +244,9 @@ export class ArrowLayer {
     this.group.add(this.preview.root);
 
     const ringMat = new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
-    const dotMat = new THREE.MeshBasicMaterial({ color: ARROW_COLORS.selected, depthTest: false, transparent: true, side: THREE.DoubleSide });
+    this.hoverDot = new THREE.MeshBasicMaterial({ color: ARROW_COLORS.draft, depthTest: false, transparent: true, side: THREE.DoubleSide });
     const ring = new THREE.Mesh(RING, ringMat);
-    const dot = new THREE.Mesh(DOT, dotMat);
+    const dot = new THREE.Mesh(DOT, this.hoverDot);
     ring.renderOrder = dot.renderOrder = 950;
     this.hover.add(ring, dot);
     this.hover.visible = false;
@@ -291,8 +302,11 @@ export class ArrowLayer {
       const e = toV(end).addScaledVector(toV(en), lift);
       const isSel = a.id === selected;
       const isHl = !isSel && !!hl?.ids.has(a.id);
+      // hovered: between the normal and the selected thickness
+      const isHov = !isSel && !isHl && a.id === this.hovered;
       const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : this.fixedColor ?? arrowColor(a, display.colorMode, seq);
-      v.update(s, e, toV(sn), isSel || isHl ? radius * 1.15 : radius, color, display.showHidden, display.labels ? a.label : null, isSel, this.dimmed && !isSel);
+      const r = isSel || isHl ? radius * 1.15 : isHov ? radius * 1.08 : radius;
+      v.update(s, e, toV(sn), r, color, display.showHidden, display.labels ? a.label : null, isSel, this.dimmed && !isSel, isHov);
     }
     for (const [id, v] of this.visuals) {
       if (!seen.has(id)) {
@@ -307,6 +321,14 @@ export class ArrowLayer {
 
   resync(): void {
     if (this.last) this.sync(this.last.state, this.last.selected, this.last.display, this.last.handles);
+  }
+
+  /** The arrow under the select tool's cursor (an id of another layer, or null: none). */
+  setHoverItem(id: string | null): void {
+    const own = id !== null && this.visuals.has(id) ? id : null;
+    if (own === this.hovered) return;
+    this.hovered = own;
+    this.resync();
   }
 
   /** Draw these scars' arrows in `color` (e.g. scars involved in a problem), from the next sync; null for none. */
@@ -354,7 +376,8 @@ export class ArrowLayer {
     }
   }
 
-  setHover(point: THREE.Vector3 | null, normal?: THREE.Vector3): void {
+  /** The marker under the cursor of a drawing tool, in that tool's colour. */
+  setHover(point: THREE.Vector3 | null, normal?: THREE.Vector3, color: string = ARROW_COLORS.draft): void {
     if (!point || !normal) {
       if (this.hover.visible) {
         this.hover.visible = false;
@@ -362,6 +385,7 @@ export class ArrowLayer {
       }
       return;
     }
+    this.hoverDot.color.set(color);
     const size = this.viewer.diagonal * 0.0065 * (this.last?.display.thickness ?? 1);
     this.hover.position.copy(point).addScaledVector(normal, this.viewer.diagonal * 0.0008);
     this.hover.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
@@ -425,6 +449,7 @@ export class ArrowLayer {
     }
     this.visuals.clear();
     this.override = null;
+    this.hovered = null;
     this.clearPreview();
     this.setHover(null);
     this.last = null;

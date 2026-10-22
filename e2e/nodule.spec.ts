@@ -23,7 +23,8 @@ test('fits a sphere to the cortex and reports its radius', async ({ page }) => {
   expect(fit.rms).toBeLessThan(1e-3);
 
   await page.keyboard.press('m');
-  await expect(page.locator('#nodule-radius')).toHaveText('20.000 mm');
+  await expect(page.locator('#nodule-radius')).toHaveText('20.000');
+  await expect(page.locator('#nodule-radius-unit')).toHaveText('mm');
   await page.locator('#nodule-show').check();
   expect((await state(page)).nodule.show).toBe(true);
   const [row] = parseCsv(await page.evaluate(() => window.lithicanalyst.exportMeasurementsCsvText()));
@@ -35,7 +36,7 @@ test('fits a sphere to the cortex and reports its radius', async ({ page }) => {
   await expect(page.locator('#nodule-radius')).toHaveCount(0);
   expect(await page.evaluate(() => window.lithicanalyst.nodule())).toBeNull();
   await page.keyboard.press('ControlOrMeta+z');
-  await expect(page.locator('#nodule-radius')).toHaveText('20.000 mm');
+  await expect(page.locator('#nodule-radius')).toHaveText('20.000');
 
   const saved = await page.evaluate(() => window.lithicanalyst.projectJson());
   expect(saved.derived.nodule!.radius).toBeCloseTo(20, 3);

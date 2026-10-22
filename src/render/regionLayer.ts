@@ -2,14 +2,15 @@ import * as THREE from 'three';
 import type { Region, RegionType, Scar, Vec3 } from '../core/types';
 import { UNASSIGNED_COLOR } from './sequenceColor';
 
+/** No yellow among them: yellow means selected. */
 export const REGION_COLORS: Record<Exclude<RegionType, 'scar'>, string> = {
-  cortex: '#d9a441',
+  cortex: '#a0673a',
   joint: '#4f9fd6',
   damage: '#9a9a9a',
 };
 
 /** Scar regions are told apart by scar (its number picks the colour). */
-const SCAR_PALETTE = ['#e4572e', '#29a36a', '#8e5cd9', '#e8b10e', '#2b8ac4', '#d84f9b', '#6aa84f', '#c97b2a'];
+const SCAR_PALETTE = ['#e4572e', '#29a36a', '#8e5cd9', '#17a2b8', '#2b8ac4', '#d84f9b', '#6aa84f', '#c97b2a'];
 
 export function regionColor(type: RegionType, scarLabel: string | null): string {
   if (type !== 'scar') return REGION_COLORS[type];

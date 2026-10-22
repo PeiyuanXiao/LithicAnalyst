@@ -96,19 +96,59 @@ keeps the selection and the undo history.
   folder's (`TOOL_SECTIONS`; these changes are not remembered, only the user's own); selecting an
   object opens its section and scrolls its inspector to the top (lists scroll only themselves;
   the narrow layout, where the whole work area scrolls, is left alone). Sections that cannot be
-  used are hidden (`Section.visible`); without a model only the open buttons are shown, and the
-  folder's list while a folder is open. The data exports
+  used are hidden (`Section.visible`); without a model the sidebar is empty but for the folder's
+  list while a folder is open (models open from the File menu or the empty view). The data exports
   of a mode are one dialog (`App.openExport`, files from `App.exportables`; several files go
   into a stored ZIP, `io/zip.ts`).
-* **Top bar**: specimen ID and unit, with annotator, notes and the model file in a panel; the
-  File menu; the mode switch in the middle; Save. Menus and small panels (`ui/popover.ts`)
-  close on a press outside or Esc. The display settings are a panel over the view
+* **Top bar**: the specimen button (ID and unit; its panel holds ID, unit, annotator, notes and
+  the model file); the mode switch in the middle; the File menu, Save, undo and redo, the
+  language menu (`LANGS` in `ui/i18n.ts`), the theme switch and the shortcuts. Menus and small
+  panels (`ui/popover.ts`, one `Popovers` shared through `AppApi.popovers`) close on a press
+  outside or Esc. The display settings are a panel over the view
   (`Sidebar.displayEl`, mounted by `App.buildDisplayControl`); the sidebar's left edge resizes
   it (`sidebarWidth` preference).
 * **Labels**: after each render `render/labelLayout.ts` moves labels that would cover each
   other apart by priority (selected first, hidden-behind-the-surface last) and hides those
   without a free place. `.viewport-labels` is its own stacking context, below every panel over
   the view.
+
+## Shell: theme, icons, tooltips, numbers
+
+* **Theme** (`ui/theme.ts`): `<html data-theme="light|dark">` picks one of the two sets of colour
+  variables in `styles.css`; the choice is kept in `localStorage` (`lithicanalyst:theme`), else the
+  system's `prefers-color-scheme` is followed. An inline script in `index.html` (kept in
+  `artifact.html` by `scripts/make-artifact.mjs`) sets it before the first frame. The WebGL canvas
+  is cleared transparent: the view's background is the container's CSS gradient
+  (`--viewport-bg-top` → `--viewport-bg-bottom`), so it follows the theme without touching the
+  renderer. Figures render into their own transparent targets and are unaffected.
+* **Icons**: `icon()` draws the 24-unit path icons of the top bar and sidebar; `icon20(markup)`
+  draws the 20-unit icons of the view toolbar, the mode switch and the shell from SVG markup
+  (`ICONS20` in `ui/dom.ts`; elements may carry their own fill or stroke width).
+* **Tooltips** (`ui/tooltip.ts`): one shared `tips` instance. `tips.attach(el, content)` shows a
+  name and a key cap below an element after 300 ms of hover (at once on keyboard focus);
+  `tips.showAt(x, y, …)` shows one next to the cursor. Toolbar, mode and top-bar buttons use
+  them instead of `title`.
+* **Hover** (select tool): `SelectTool` picks at most once a frame with the same pick as a click
+  (arrows, curves, landmarks, measurements; BVH rays only) and tells each layer
+  (`setHoverItem`) and the app (`ToolContext.hovered`, which shows "label · kind" after a pause).
+* **Numbers** (`core/format.ts`, no DOM): one number of decimals per kind of quantity
+  (`DIGITS`), counts with thousands separators, "—" for missing values, and the unit of each
+  kind (`quantityUnit`). Lists and tables put the unit in a column of its own (`.num-list` rows
+  share their columns through CSS subgrid; `numRow` / `coordRow` in `ui/controls.ts` build
+  `.num-grid` / `.coord-grid` rows). Exports keep their own formats.
+* **Motion**: popovers, menus, dialogs and tooltips fade in by CSS; `prefers-reduced-motion`
+  turns every animation and transition off (also the camera transitions below).
+
+## Camera transitions
+
+`Viewer.fitView` / `viewFrom` / `viewAll` take `animate`: the camera then moves in 280 ms
+(cubic ease-in-out), the rotation centre and distance interpolated linearly and the orientation
+by quaternion slerp, one step per animation frame in the render loop (rendering stays on
+demand). A press on the view, the wheel, setting the rotation centre or a new move stops it.
+The app animates H, viewing the specimen frame, viewing along a plane, frame changes from the
+orientation panel (not the fine-turn slider, which follows the hand) and focusing an item; it
+does not animate loading a model, stepping through a folder or rendering figures. Only the
+camera moves: no coordinates change.
 
 ## Measurements
 

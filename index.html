@@ -1,11 +1,13 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>LithicAnalyst</title>
     <meta name="claude:viewport-fit-sides" content="cover" />
     <meta name="description" content="LithicAnalyst: open-source 3D annotation of flake scar directions on lithic artefacts." />
+    <!-- the shell's theme before the first frame (the saved choice, else the system's); see src/ui/theme.ts -->
+    <script id="theme-init">(function(){var t;try{t=localStorage.getItem('lithicanalyst:theme')}catch(e){}if(t!=='light'&&t!=='dark')t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-theme',t)})();</script>
   </head>
   <body>
     <div id="app"></div>

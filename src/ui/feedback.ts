@@ -37,8 +37,8 @@ export class Feedback {
     if (text !== null) this.busyText.textContent = text;
   }
 
-  /** Modal dialog; resolves with the chosen button id, or null when dismissed. */
-  choose(title: string, body: Node | string, buttons: ChoiceButton[]): Promise<string | null> {
+  /** Modal dialog; resolves with the chosen button id, or null when dismissed. `wide`: room for two columns. */
+  choose(title: string, body: Node | string, buttons: ChoiceButton[], opts: { wide?: boolean } = {}): Promise<string | null> {
     return new Promise((resolve) => {
       const prevFocus = document.activeElement as HTMLElement | null;
       const close = (value: string | null) => {
@@ -59,7 +59,7 @@ export class Feedback {
       );
       const dialog = h(
         'div',
-        { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
+        { class: `modal${opts.wide ? ' modal-wide' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
         h(
           'div',
           { class: 'modal-head' },

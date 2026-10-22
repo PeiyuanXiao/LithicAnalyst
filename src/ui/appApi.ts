@@ -10,8 +10,7 @@ import type { LightSettings } from '../render/lighting';
 import type { ShadingMode } from '../render/meshView';
 import type { Selection } from '../tools/selection';
 import type { Feedback } from './feedback';
-
-export type ViewportBackground = 'light' | 'dark';
+import type { Popovers } from './popover';
 
 /** Work modes; each shows only its own tools and sidebar sections. */
 export const APP_MODES = ['annotate', 'measure', 'present', 'compare'] as const;
@@ -19,13 +18,11 @@ export type AppMode = (typeof APP_MODES)[number];
 
 export interface DisplaySettings {
   shading: ShadingMode;
+  /** Light direction and height (the fill light keeps its default). */
   light: LightSettings;
-  /** 0 = matte, 1 = glossy. */
-  gloss: number;
   /** Smoothing passes for the curvature map (0–100). */
   curvScale: number;
   curvContrast: number;
-  background: ViewportBackground;
   /** Arrow display; `labels` and `showHidden` apply to curves too. */
   arrows: ArrowDisplay;
   /** What traced curves are drawn toward. */
@@ -37,7 +34,7 @@ export interface DisplaySettings {
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'background' | 'arrows' | 'snap' | 'regions' | 'harris' | 'other';
+export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'other';
 
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
@@ -45,6 +42,8 @@ export interface AppApi {
   readonly selection: Selection;
   readonly display: DisplaySettings;
   readonly feedback: Feedback;
+  /** Menus and small panels: one open at a time. */
+  readonly popovers: Popovers;
   readonly mode: AppMode;
   setDisplay(change: (d: DisplaySettings) => void, aspect: DisplayAspect): void;
   hasMesh(): boolean;
@@ -66,6 +65,7 @@ export interface AppApi {
   /** `base`: the matrix to turn from (fine turning keeps turning the same start). */
   turnFrame(deg: number, base?: number[]): void;
   clearFrame(): void;
+  /** Put the camera on the specimen frame (in a short transition). */
   viewFrame(): void;
   readonly figure: FigureSettings;
   setFigure(change: (f: FigureSettings) => void): void;
@@ -121,7 +121,6 @@ export interface AppApi {
   batchFormat: 'png' | 'svg';
   saveProject(): void;
   openProject(): void;
-  openModel(): void;
   openFolder(): Promise<void>;
   /** The export dialog of the current mode's data files. */
   openExport(): void;

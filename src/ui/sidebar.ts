@@ -35,8 +35,10 @@ import {
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
 import { CURVE_FIELDS, REGION_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
+import { fmtCount, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
+import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
-import type { AttributeValue, Curve, PlaneMethod, Scar } from '../core/types';
+import type { AttributeValue, Curve, Measurement, PlaneMethod, Scar, Vec3 } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
@@ -49,10 +51,11 @@ import { relationProblems, type RelationProblem } from '../compute/relations';
 import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import { LANDMARK_COLORS } from '../render/landmarkLayer';
 import type { ShadingMode } from '../render/meshView';
-import type { AppApi, AppMode, ViewportBackground } from './appApi';
-import { checkbox, optionList, segmented, selectRow, slider, softSet, textRow } from './controls';
+import type { AppApi, AppMode } from './appApi';
+import { addButton, checkbox, coordRow, numRow, optionList, segmented, selectRow, slider, softSet, textRow, textValueRow } from './controls';
 import { clear, h, icon, ICONS, revealInList } from './dom';
 import { t, tl } from './i18n';
+import { tip, tips } from './tooltip';
 
 export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
@@ -63,11 +66,20 @@ interface Section {
   visible?: () => boolean;
 }
 
-export const fmtNum = (n: number, digits = 3): string => {
-  const s = n.toFixed(digits);
-  return /^-0(\.0+)?$/.test(s) ? s.slice(1) : s;
-};
-const fmtInt = (n: number): string => n.toLocaleString('en-US');
+/** A quantity as a number and its unit, for the separate columns of lists and tables. */
+const quantity = (kind: Quantity, v: number | null | undefined, unit: string): [string, string] => [fmtQuantity(kind, v), quantityUnit(kind, unit)];
+
+/** A manual measurement's value and unit. */
+function measurementParts(m: Measurement, unit: string): [string, string] {
+  const v = measurementValue(m);
+  return m.type === 'angle' ? quantity('angle', v, unit) : [fmtQuantity('length', v), measurementUnit(m, unit)];
+}
+
+/** The value and unit cells of a list row (`.num-list`). */
+const valueCells = ([value, unit]: [string, string]) => [h('span', { class: 'arrow-len num' }, value), h('span', { class: 'unit' }, unit)];
+
+/** A point's coordinates, each with the decimals of a coordinate. */
+const coords = (p: Vec3): string[] => [p[0], p[1], p[2]].map((x) => fmtQuantity('coord', x));
 
 function section(id: string, title: string, badge?: HTMLElement): { el: HTMLDetailsElement; body: HTMLElement } {
   const el = h('details', { class: 'panel', id: `sec-${id}` }) as HTMLDetailsElement;
@@ -102,12 +114,12 @@ function listSummary(attributes: Record<string, AttributeValue>, fields: FieldDe
 function arrowsSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('arrows', t('sec.arrows'), badge);
-  const list = h('ol', { class: 'arrow-list', id: 'scar-list', role: 'listbox', 'aria-label': t('sec.arrows') });
+  const list = h('ol', { class: 'arrow-list num-list', id: 'scar-list', role: 'listbox', 'aria-label': t('sec.arrows') });
   const inspector = h('div', { class: 'inspector', id: 'arrow-inspector' });
   body.append(list, inspector);
 
   let builtFor: string | null = null;
-  let refs: { label: HTMLInputElement; setters: Array<(a: Scar) => void>; coords: HTMLElement } | null = null;
+  let refs: { label: HTMLInputElement; setters: Array<(a: Scar) => void>; coords: HTMLElement; length: HTMLElement } | null = null;
 
   /** Which sequence the scar is in (options follow the sequences). */
   const sequenceField = (): { el: HTMLElement; set: (a: Scar) => void } => {
@@ -148,7 +160,7 @@ function arrowsSection(api: AppApi): Section {
         h('span', { class: 'chip', style: `--chip:${color}` }),
         h('span', { class: 'arrow-id mono' }, a.label),
         h('span', { class: 'arrow-meta' }, listSummary(a.attributes)),
-        h('span', { class: 'arrow-len mono' }, a.vector ? `${fmtNum(vectorLength(a.vector), 1)}${unit ? ` ${unit}` : ''}` : '–'),
+        ...valueCells(a.vector ? quantity('length', vectorLength(a.vector), unit) : [MISSING, '']),
       );
       list.append(li);
       if (isSel) requestAnimationFrame(() => revealInList(list, li));
@@ -211,23 +223,24 @@ function arrowsSection(api: AppApi): Section {
         h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteScar(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
       );
       const fields = [...SCAR_FIELDS.map((f) => buildField(f, a)), sequenceField()];
-      const coords = h('dl', { class: 'meta coords' });
-      inspector.append(head, ...fields.map((f) => f.el), coords);
-      refs = { label, setters: fields.map((f) => f.set), coords };
+      const coordsEl = h('dl', { class: 'coord-grid', id: 'arrow-coords' });
+      const lengthEl = h('dl', { class: 'num-grid' });
+      inspector.append(head, ...fields.map((f) => f.el), coordsEl, lengthEl);
+      refs = { label, setters: fields.map((f) => f.set), coords: coordsEl, length: lengthEl };
       builtFor = a.id;
     }
     softSet(refs.label, a.label);
     for (const set of refs.setters) set(a);
     clear(refs.coords);
+    clear(refs.length);
     const u = st.specimen.unit;
-    const p = (v: [number, number, number]) => `${fmtNum(v[0])}, ${fmtNum(v[1])}, ${fmtNum(v[2])}`;
     const v = a.vector;
-    if (v)
-      refs.coords.append(
-        ...metaRow(t('arrows.start'), h('span', { class: 'mono' }, p(v.start))),
-        ...metaRow(t('arrows.end'), h('span', { class: 'mono' }, p(v.end))),
-        ...metaRow(t('arrows.length'), h('span', { class: 'mono' }, `${fmtNum(vectorLength(v))}${u ? ` ${u}` : ''}`)),
-      );
+    refs.coords.hidden = refs.length.hidden = !v;
+    if (v) {
+      const cu = quantityUnit('coord', u);
+      refs.coords.append(...coordRow(t('arrows.start'), coords(v.start), cu), ...coordRow(t('arrows.end'), coords(v.end), cu));
+      refs.length.append(...numRow(t('arrows.length'), ...quantity('length', vectorLength(v), u), 'arrow-length'));
+    }
   };
 
   const refresh = (kind: RefreshKind) => {
@@ -244,7 +257,7 @@ function arrowsSection(api: AppApi): Section {
 function curvesSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('curves', t('sec.curves'), badge);
-  const list = h('ol', { class: 'arrow-list', id: 'curve-list', role: 'listbox', 'aria-label': t('sec.curves') });
+  const list = h('ol', { class: 'arrow-list num-list', id: 'curve-list', role: 'listbox', 'aria-label': t('sec.curves') });
   const inspector = h('div', { class: 'inspector', id: 'curve-inspector' });
   body.append(list, inspector);
 
@@ -274,7 +287,7 @@ function curvesSection(api: AppApi): Section {
         h('span', { class: 'chip chip-line', style: `--chip:${color}` }),
         h('span', { class: 'arrow-id mono' }, c.label),
         h('span', { class: 'arrow-meta' }, listSummary(c.attributes, CURVE_FIELDS)),
-        h('span', { class: 'arrow-len mono' }, `${fmtNum(curveLength(c), 1)}${unit ? ` ${unit}` : ''}`),
+        ...valueCells(quantity('length', curveLength(c), unit)),
       );
       list.append(li);
       if (isSel) requestAnimationFrame(() => revealInList(list, li));
@@ -337,7 +350,7 @@ function curvesSection(api: AppApi): Section {
         h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'curve-insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteCurve(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
       );
       const fields = CURVE_FIELDS.map((f) => buildField(f, c));
-      const meta = h('dl', { class: 'meta coords' });
+      const meta = h('dl', { class: 'num-grid' });
       inspector.append(head, ...fields.map((f) => f.el), meta);
       refs = { label, setters: fields.map((f) => f.set), meta };
       builtFor = c.id;
@@ -346,10 +359,7 @@ function curvesSection(api: AppApi): Section {
     for (const set of refs.setters) set(c);
     clear(refs.meta);
     const u = st.specimen.unit;
-    refs.meta.append(
-      ...metaRow(t('arrows.length'), h('span', { class: 'mono' }, `${fmtNum(curveLength(c))}${u ? ` ${u}` : ''}`)),
-      ...metaRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')),
-    );
+    refs.meta.append(...numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), ...textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
   };
 
   const refresh = (kind: RefreshKind) => {
@@ -393,18 +403,6 @@ function displaySection(api: AppApi): Section {
     id: 'light-el', label: t('display.lightEl'), min: 5, max: 90, step: 1, value: d.light.elevationDeg,
     format: (v) => `${Math.round(v)}°`, onInput: (v) => api.setDisplay((x) => (x.light.elevationDeg = v), 'light'),
   });
-  const fill = slider({
-    id: 'light-fill', label: t('display.fill'), min: 0, max: 1.5, step: 0.05, value: d.light.fillIntensity,
-    format: (v) => v.toFixed(2), onInput: (v) => api.setDisplay((x) => (x.light.fillIntensity = v), 'light'),
-  });
-  const gloss = slider({
-    id: 'gloss', label: t('display.gloss'), min: 0, max: 1, step: 0.05, value: d.gloss,
-    format: (v) => `${Math.round(v * 100)}%`, onInput: (v) => api.setDisplay((x) => (x.gloss = v), 'light'),
-  });
-  const background = segmented('background', t('display.background'), [
-    { value: 'light', label: t('bg.light') },
-    { value: 'dark', label: t('bg.dark') },
-  ], d.background, (v) => api.setDisplay((x) => (x.background = v as ViewportBackground), 'background'));
 
   const thickness = slider({
     id: 'arrow-thickness', label: t('display.arrowSize'), min: 0.4, max: 3, step: 0.1, value: d.arrows.thickness,
@@ -421,12 +419,11 @@ function displaySection(api: AppApi): Section {
   const hidden = checkbox('arrow-hidden', t('display.hidden'), d.arrows.showHidden, (v) => api.setDisplay((x) => (x.arrows.showHidden = v), 'arrows'));
   const regions = checkbox('display-regions', t('display.regions'), d.regions, (v) => api.setDisplay((x) => (x.regions = v), 'regions'));
 
+  // shading; the light; the arrows; what is drawn
   body.append(
     shading.el,
     curvGroup,
-    h('div', { class: 'ctl-grid' }, az.el, elv.el, fill.el, gloss.el),
-    background.el,
-    h('hr', { class: 'rule' }),
+    h('div', { class: 'ctl-grid' }, az.el, elv.el),
     h('div', { class: 'ctl-grid' }, thickness.el, colorMode.el),
     h('div', { class: 'check-row' }, labels, hidden, regions),
   );
@@ -440,7 +437,6 @@ function displaySection(api: AppApi): Section {
     curvBusy.hidden = !api.curvatureBusy();
     az.set(api.display.light.azimuthDeg);
     elv.set(api.display.light.elevationDeg);
-    background.set(api.display.background);
   };
   refresh('all');
   return { el, refresh };
@@ -448,34 +444,28 @@ function displaySection(api: AppApi): Section {
 
 // ---------------------------------------------------------------- measure mode
 
-/** "12.345 mm²" (the unit is left out when it is not stated). */
-const withUnit = (v: number, digits: number, unit: string, power = 1): string =>
-  `${fmtNum(v, digits)}${unit ? ` ${unit}${power === 2 ? '²' : power === 3 ? '³' : ''}` : ''}`;
-
 function measureAutoSection(api: AppApi): Section {
   const { el, body } = section('measure-auto', t('sec.measureAuto'));
-  const meta = h('dl', { class: 'meta measure-auto', id: 'measure-auto' });
+  const meta = h('dl', { class: 'num-grid measure-auto', id: 'measure-auto' });
   body.append(meta);
-  const row = (id: string, term: string, value: string) => [h('dt', {}, term), h('dd', { id: `auto-${id}`, class: 'mono' }, value)];
+  const row = (id: string, term: string, kind: Quantity, v: number | null) => numRow(term, ...quantity(kind, v, api.store.state.specimen.unit), `auto-${id}`);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'measure', 'specimen'].includes(kind)) return;
     clear(meta);
     const m = api.autoMeasurements();
     if (!m) {
-      if (api.measuringBusy()) meta.append(h('dt', {}, t('measure.busy')), h('dd', {}));
+      if (api.measuringBusy()) meta.append(h('dt', {}, t('measure.busy')));
       return;
     }
-    const u = api.store.state.specimen.unit;
-    const open = t('measure.notClosed');
     meta.append(
-      ...row('length', t('measure.length'), withUnit(m.length, 3, u)),
-      ...row('width', t('measure.width'), withUnit(m.width, 3, u)),
-      ...row('thickness', t('measure.thickness'), withUnit(m.thickness, 3, u)),
-      ...row('frame', t('measure.axes'), t(`measure.axes.${m.frame}`)),
-      ...row('area', t('measure.area'), withUnit(m.surfaceArea, 2, u, 2)),
-      ...row('volume', t('measure.volume'), m.volume === null ? open : withUnit(m.volume, 2, u, 3)),
-      ...row('svr', t('measure.svr'), m.surfaceToVolumeRatio === null ? '–' : fmtNum(m.surfaceToVolumeRatio, 3)),
-      ...row('sphericity', t('measure.sphericity'), m.wadellSphericity === null ? '–' : fmtNum(m.wadellSphericity, 3)),
+      ...row('length', t('measure.length'), 'length', m.length),
+      ...row('width', t('measure.width'), 'length', m.width),
+      ...row('thickness', t('measure.thickness'), 'length', m.thickness),
+      ...textValueRow(t('measure.axes'), t(`measure.axes.${m.frame}`), 'auto-frame'),
+      ...row('area', t('measure.area'), 'area', m.surfaceArea),
+      ...(m.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'auto-volume') : row('volume', t('measure.volume'), 'volume', m.volume)),
+      ...row('svr', t('measure.svr'), 'ratio', m.surfaceToVolumeRatio),
+      ...row('sphericity', t('measure.sphericity'), 'ratio', m.wadellSphericity),
     );
   };
   refresh('all');
@@ -485,7 +475,7 @@ function measureAutoSection(api: AppApi): Section {
 function measureManualSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('measure-manual', t('sec.measureManual'), badge);
-  const list = h('ol', { class: 'arrow-list', id: 'measure-list', role: 'listbox', 'aria-label': t('sec.measureManual') });
+  const list = h('ol', { class: 'arrow-list num-list', id: 'measure-list', role: 'listbox', 'aria-label': t('sec.measureManual') });
   const del = h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'measure-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteMeasurement(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')) as HTMLButtonElement;
   const actions = h('div', { class: 'btn-row' }, del);
   body.append(list, actions);
@@ -505,7 +495,7 @@ function measureManualSection(api: AppApi): Section {
           h('span', { class: 'chip chip-line', style: `--chip:${isSel ? MEASURE_COLORS.selected : MEASURE_COLORS.line}` }),
           h('span', { class: 'arrow-id mono' }, m.label),
           h('span', { class: 'arrow-meta' }, t(`measure.type.${m.type}`)),
-          h('span', { class: 'arrow-len mono' }, api.formatMeasurement(m)),
+          ...valueCells(measurementParts(m, st.specimen.unit)),
         ),
       );
       if (isSel) requestAnimationFrame(() => revealInList(list, li));
@@ -522,10 +512,10 @@ const PLANE_METHODS: PlaneMethod[] = ['all_vertices', 'scar_directions', 'scar_s
 function planesSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('planes', t('sec.planes'), badge);
-  const add = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'plane-add', onclick: () => api.addPlane() }, icon(ICONS.plus), t('plane.add')) as HTMLButtonElement;
+  const add = addButton(t('plane.add'), () => api.addPlane(), 'plane-add');
   const list = h('ol', { class: 'arrow-list', id: 'plane-list', role: 'listbox', 'aria-label': t('sec.planes') });
   const inspector = h('div', { class: 'inspector', id: 'plane-inspector' });
-  body.append(list, h('div', { class: 'btn-row' }, add), inspector);
+  body.append(list, add, inspector);
 
   const renderInspector = () => {
     clear(inspector);
@@ -592,18 +582,46 @@ function planesSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+/** Where the specimen frame came from, in words: "Plane P1 · Arrow S1" (stored as `plane:P1; vertical:S1`). */
+function frameSourceText(source: string): string {
+  const part = (s: string): string | null =>
+    s === 'view' ? t('frame.src.view') : s.startsWith('plane:') ? t('frame.src.plane', { label: s.slice(6) }) : s.startsWith('vertical:') ? t('frame.src.vertical', { label: s.slice(9) }) : null;
+  const parts = source.split('; ').map(part);
+  return parts.every((p) => p !== null) ? parts.join(' · ') : t('frame.src.other');
+}
+
 function orientationSection(api: AppApi): Section {
-  const { el, body } = section('orientation', t('sec.orientation'));
-  const status = h('dl', { class: 'meta' });
+  const status = h('span', { class: 'pill', id: 'frame-status' });
+  const { el, body } = section('orientation', t('sec.orientation'), status);
   const btn = (id: string, label: string, onclick: () => void, kind = 'btn-quiet') =>
     h('button', { type: 'button', class: `btn ${kind} btn-sm`, id, onclick }, label) as HTMLButtonElement;
-  const fromView = btn('frame-from-view', t('frame.fromView'), () => api.setFrameFromView(), 'btn-primary');
-  const planeSel = h('select', { id: 'frame-plane', class: 'ctl-select', 'aria-label': t('sec.planes') }) as HTMLSelectElement;
-  const fromPlane = btn('frame-from-plane', t('frame.fromPlane'), () => planeSel.value && api.setFrameFromPlane(planeSel.value));
-  const arrowSel = h('select', { id: 'frame-arrow', class: 'ctl-select', 'aria-label': t('sec.arrows') }) as HTMLSelectElement;
-  const vertical = btn('frame-vertical', t('frame.vertical'), () => arrowSel.value && api.setFrameVertical(arrowSel.value));
-  const ccw = btn('frame-rot-ccw', t('frame.ccw'), () => api.turnFrame(90));
-  const cw = btn('frame-rot-cw', t('frame.cw'), () => api.turnFrame(-90));
+  const fromView = btn('frame-from-view', t('frame.fromView'), () => api.setFrameFromView());
+  /** A button with a menu of items; when unusable it says why (a tooltip) instead of opening. */
+  const menuButton = (id: string, label: string) => {
+    const menu = h('div', { class: 'popover menu menu-left', id: `${id}-menu`, role: 'menu', hidden: true });
+    let reason: string | null = null;
+    const b = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id, 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: () => reason === null && api.popovers.toggle(b, menu) }, h('span', {}, label), icon(ICONS.chevron)) as HTMLButtonElement;
+    tips.attach(b, () => (reason === null ? null : { label: reason }));
+    const set = (items: Array<{ id: string; label: string; color?: string; pick: () => void }>, why: string | null) => {
+      reason = why;
+      b.setAttribute('aria-disabled', String(why !== null));
+      clear(menu);
+      for (const it of items)
+        menu.append(
+          h('button', { type: 'button', class: 'menu-item', role: 'menuitem', id: `${id}-${it.id}`, onclick: () => (api.popovers.close(), it.pick()) }, it.color ? h('span', { class: 'chip', style: `--chip:${it.color}` }) : null, h('span', { class: 'mono' }, it.label)),
+        );
+    };
+    return { el: h('div', { class: 'menu-wrap' }, b, menu), set };
+  };
+  const fromPlane = menuButton('frame-from-plane', t('frame.fromPlane'));
+  const vertical = menuButton('frame-vertical', t('frame.vertical'));
+  const turnBtn = (id: string, ic: string, label: string, deg: number) => {
+    const b = h('button', { type: 'button', class: 'icon-btn', id, 'aria-label': label, onclick: () => api.turnFrame(deg) }, icon(ic)) as HTMLButtonElement;
+    tip(b, label);
+    return b;
+  };
+  const ccw = turnBtn('frame-rot-ccw', ICONS.rotateLeft, t('frame.ccw'), 90);
+  const cw = turnBtn('frame-rot-cw', ICONS.rotateRight, t('frame.cw'), -90);
   // fine turning: keep turning the frame the slider started from, then let the slider go back to 0
   let fineBase: number[] | null = null;
   const fine = slider({
@@ -626,31 +644,38 @@ function orientationSection(api: AppApi): Section {
     fine.set(0);
   });
   const view = btn('frame-view', t('frame.view'), () => api.viewFrame());
-  const clearBtn = btn('frame-clear', t('frame.clear'), () => api.clearFrame(), 'btn-danger');
-  const planeRow = h('div', { class: 'btn-row frame-pick' }, planeSel, fromPlane);
-  const arrowRow = h('div', { class: 'btn-row frame-pick' }, arrowSel, vertical);
-  const turnRow = h('div', { class: 'btn-row' }, ccw, cw);
-  const viewRow = h('div', { class: 'btn-row' }, view, clearBtn);
-  body.append(status, h('div', { class: 'btn-row' }, fromView), planeRow, arrowRow, turnRow, fine.el, viewRow);
-  const options = (sel: HTMLSelectElement, items: Array<[string, string]>) => {
-    const keep = sel.value;
-    clear(sel);
-    for (const [value, label] of items) sel.append(h('option', { value }, label));
-    if (items.some(([v]) => v === keep)) sel.value = keep;
-  };
+  const clearBtn = btn('frame-clear', t('frame.clear'), () => api.clearFrame(), 'btn-text-danger');
+  // front view, vertical, turning: a label column and the controls
+  body.append(
+    h(
+      'div',
+      { class: 'frame-rows' },
+      h('span', { class: 'ctl-label' }, t('frame.front')),
+      h('div', { class: 'btn-row' }, fromView, fromPlane.el),
+      h('span', { class: 'ctl-label' }, t('frame.axis')),
+      h('div', { class: 'btn-row' }, vertical.el),
+      h('span', { class: 'ctl-label' }, t('frame.turn')),
+      h('div', { class: 'frame-turn' }, ccw, cw, fine.el),
+    ),
+    h('div', { class: 'frame-foot' }, view, clearBtn),
+  );
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'specimen', 'planes', 'arrows'].includes(kind)) return;
     const st = api.store.state;
     const f = st.specimen.frame;
-    clear(status);
-    status.append(...metaRow(t('frame.source'), h('span', { class: 'mono', id: 'frame-status' }, f ? f.source : t('frame.none'))));
-    options(planeSel, api.planeResults().filter((p) => p.valid).map((p) => [p.id, p.label]));
-    options(arrowSel, st.scars.filter((s) => s.vector).map((s) => [s.id, s.label]));
+    status.textContent = f ? frameSourceText(f.source) : t('frame.none');
+    status.classList.toggle('pill-set', !!f);
+    const planes = api.planeResults().filter((p) => p.valid);
+    fromPlane.set(
+      planes.map((p) => ({ id: p.label, label: p.label, color: planeColor(p.label), pick: () => api.setFrameFromPlane(p.id) })),
+      planes.length ? null : t('frame.noPlanes'),
+    );
+    const arrows = st.scars.filter((s) => s.vector);
+    vertical.set(
+      arrows.map((s) => ({ id: s.label, label: s.label, pick: () => api.setFrameVertical(s.id) })),
+      !f ? t('frame.needFront') : arrows.length ? null : t('frame.noArrows'),
+    );
     fromView.disabled = !api.hasMesh();
-    planeRow.hidden = planeSel.options.length === 0;
-    arrowRow.hidden = arrowSel.options.length === 0 || !f;
-    turnRow.hidden = viewRow.hidden = fine.el.hidden = !f;
-    vertical.disabled = !f;
     for (const b of [ccw, cw, view, clearBtn]) b.disabled = !f;
     (fine.el.querySelector('input') as HTMLInputElement).disabled = !f;
   };
@@ -701,10 +726,12 @@ function figureSection(api: AppApi): Section {
   const dpi = segmented('fig-dpi', t('figure.dpi'), [300, 600, 1200].map((d) => ({ value: String(d), label: `${d} dpi` })), String(api.figure.dpi), (v) =>
     api.setFigure((f) => (f.dpi = Number(v))),
   );
+  // scale and resolution each on a line of its own, the choices of equal width
+  for (const s of [scale, dpi]) s.el.querySelector('.seg')?.classList.add('seg-equal');
   const sizeEl = h('dl', { class: 'meta' });
   const png = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-png', onclick: () => api.exportFigure('png') }, 'PNG') as HTMLButtonElement;
   const svg = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-svg', onclick: () => api.exportFigure('svg') }, 'SVG') as HTMLButtonElement;
-  body.append(views, light.el, overlays, h('div', { class: 'ctl-grid' }, scale.el, dpi.el), sizeEl, h('div', { class: 'btn-row' }, png, svg));
+  body.append(views, light.el, overlays, scale.el, dpi.el, sizeEl, h('div', { class: 'btn-row' }, png, svg));
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'figure', 'specimen', 'sections'].includes(kind)) return;
     const f = api.figure;
@@ -732,9 +759,9 @@ function figureSection(api: AppApi): Section {
 function regionsSection(api: AppApi, setType: (id: string, type: string) => void): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('regions', t('sec.regions'), badge);
-  const list = h('ol', { class: 'arrow-list', id: 'region-list', role: 'listbox', 'aria-label': t('sec.regions') });
+  const list = h('ol', { class: 'arrow-list num-list', id: 'region-list', role: 'listbox', 'aria-label': t('sec.regions') });
   const inspector = h('div', { class: 'inspector', id: 'region-inspector' });
-  const totals = h('dl', { class: 'meta', id: 'region-totals' });
+  const totals = h('dl', { class: 'num-grid', id: 'region-totals' });
   body.append(list, inspector, totals);
   const typeField = REGION_FIELDS[0];
   const refresh = (kind: RefreshKind) => {
@@ -742,7 +769,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     const st = api.store.state;
     const info = api.regionInfo();
     const u = st.specimen.unit;
-    const area = (v: number | null) => (v === null ? '–' : `${fmtNum(v, 2)}${u ? ` ${u}²` : ''}`);
+    const area = (v: number | null) => quantity('area', v, u);
     badge.textContent = String(st.regions.length);
     list.hidden = st.regions.length === 0;
     clear(list);
@@ -760,7 +787,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
           h('span', { class: 'chip', style: `--chip:${regionColorOf(r, st.scars, seq)}` }),
           h('span', { class: 'arrow-id mono' }, r.label),
           h('span', { class: 'arrow-meta' }, `${tl(opt.label)}${scar ? ` · ${scar}` : ''}${res?.conflict ? ` · ${t('region.conflict')}` : ''}`),
-          h('span', { class: 'arrow-len mono' }, area(res?.area ?? null)),
+          ...valueCells(area(res?.area ?? null)),
         ),
       );
     }
@@ -776,9 +803,8 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     clear(totals);
     totals.hidden = !info || st.regions.length === 0;
     if (info && st.regions.length) {
-      for (const k of ['scar', 'cortex', 'joint', 'damage'] as const)
-        if (info.totals[k] > 0) totals.append(h('dt', {}, t(`region.area.${k}`)), h('dd', { class: 'mono', id: `region-total-${k}` }, area(info.totals[k])));
-      if (info.totals.cortex > 0) totals.append(h('dt', {}, t('region.cortexRatio')), h('dd', { class: 'mono', id: 'region-cortex-ratio' }, fmtNum(info.totals.cortexRatio, 3)));
+      for (const k of ['scar', 'cortex', 'joint', 'damage'] as const) if (info.totals[k] > 0) totals.append(...numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
+      if (info.totals.cortex > 0) totals.append(...numRow(t('region.cortexRatio'), fmtQuantity('ratio', info.totals.cortexRatio), '', 'region-cortex-ratio'));
       totals.hidden = !totals.childElementCount;
     }
   };
@@ -793,8 +819,8 @@ function relationsSection(api: AppApi): Section {
   const problems = h('ol', { class: 'problem-list', id: 'relation-problem-list' });
   const list = h('ol', { class: 'arrow-list', id: 'relation-list', role: 'listbox', 'aria-label': t('sec.relations') });
   const inspector = h('div', { class: 'inspector', id: 'relation-inspector' });
-  const addSeq = h('button', { type: 'button', class: 'icon-btn', id: 'sequence-add', title: t('sequence.add'), 'aria-label': t('sequence.add'), onclick: () => api.selection.set(addSequence(api.store).id) }, icon(ICONS.plus));
-  const seqList = h('ol', { class: 'arrow-list', id: 'sequence-list', role: 'listbox', 'aria-label': t('sequence.title') });
+  const addSeq = addButton(t('sequence.add'), () => api.selection.set(addSequence(api.store).id), 'sequence-add');
+  const seqList = h('ol', { class: 'arrow-list num-list', id: 'sequence-list', role: 'listbox', 'aria-label': t('sequence.title') });
   const seqInspector = h('div', { class: 'inspector', id: 'sequence-inspector' });
   const harris = checkbox('harris-show', t('harris.title'), api.display.harris, (on) => api.setDisplay((d) => (d.harris = on), 'harris'));
   const checksRow = h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('relation.checks')), checks);
@@ -803,8 +829,9 @@ function relationsSection(api: AppApi): Section {
     problems,
     list,
     inspector,
-    h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('sequence.title')), addSeq),
+    h('span', { class: 'ctl-label sub-label' }, t('sequence.title')),
     seqList,
+    addSeq,
     seqInspector,
     harris,
   );
@@ -935,7 +962,7 @@ function relationsSection(api: AppApi): Section {
           h('span', { class: 'chip', style: `--chip:${sequenceSwatch(i)}` }),
           h('span', { class: 'arrow-id mono' }, q.label),
           h('span', { class: 'arrow-meta' }, q.scarIds.map(scarLabel).join(q.ordered ? ' → ' : ' · ')),
-          h('span', { class: 'arrow-len mono' }, String(q.scarIds.length)),
+          ...valueCells([fmtCount(q.scarIds.length), '']),
         ),
       ),
     );
@@ -952,17 +979,16 @@ function landmarksSection(api: AppApi): Section {
   const names = h('div', { class: 'checks-row', id: 'landmark-names' });
   const list = h('ol', { class: 'arrow-list', id: 'landmark-list', role: 'listbox', 'aria-label': t('sec.landmarks') });
   const inspector = h('div', { class: 'inspector', id: 'landmark-inspector' });
-  const addSet = h('button', { type: 'button', class: 'icon-btn', id: 'semilandmark-add', title: t('semi.add'), 'aria-label': t('semi.add'), onclick: () => {
+  const addSet = addButton(t('semi.add'), () => {
     const st = api.store.state;
     const sel = api.selection.id;
     const curve = (sel && api.store.curve(sel)) || st.curves[0];
     if (curve) api.selection.set(addSemilandmarkSet(api.store, curve.id).id);
-  } }) as HTMLButtonElement;
-  addSet.append(icon(ICONS.plus));
-  const setList = h('ol', { class: 'arrow-list', id: 'semilandmark-list', role: 'listbox', 'aria-label': t('semi.title') });
+  }, 'semilandmark-add');
+  const setList = h('ol', { class: 'arrow-list num-list', id: 'semilandmark-list', role: 'listbox', 'aria-label': t('semi.title') });
   const setInspector = h('div', { class: 'inspector', id: 'semilandmark-inspector' });
-  const setHead = h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('semi.title')), addSet);
-  body.append(names, list, inspector, setHead, setList, setInspector);
+  const setHead = h('span', { class: 'ctl-label sub-label' }, t('semi.title'));
+  body.append(names, list, inspector, setHead, setList, addSet, setInspector);
 
   let dragId: string | null = null;
   let builtFor: string | null = null;
@@ -1050,9 +1076,8 @@ function landmarksSection(api: AppApi): Section {
       const holder = inspector.querySelector('.landmark-body') as HTMLElement;
       clear(holder);
       const i = st.landmarks.indexOf(l);
-      const p = l.point;
       holder.append(
-        h('dl', { class: 'meta coords' }, ...metaRow('x, y, z', h('span', { class: 'mono' }, `${fmtNum(p[0])}, ${fmtNum(p[1])}, ${fmtNum(p[2])}`))),
+        h('dl', { class: 'coord-grid', id: 'landmark-coords' }, ...coordRow('x, y, z', coords(l.point), quantityUnit('coord', st.specimen.unit))),
         h(
           'div',
           { class: 'btn-row' },
@@ -1066,7 +1091,7 @@ function landmarksSection(api: AppApi): Section {
     // curve semilandmarks
     addSet.disabled = !api.hasMesh() || st.curves.length === 0;
     // semilandmarks need a curve
-    setHead.hidden = !st.curves.length && !st.semilandmarks.length;
+    setHead.hidden = addSet.hidden = !st.curves.length && !st.semilandmarks.length;
     clear(setList);
     setList.hidden = st.semilandmarks.length === 0;
     for (const q of st.semilandmarks) {
@@ -1078,8 +1103,8 @@ function landmarksSection(api: AppApi): Section {
           { class: 'arrow-row semilandmark-row', role: 'option', 'aria-selected': String(q.id === sel), 'data-id': q.id, onclick: () => api.selection.set(q.id) },
           h('span', { class: 'chip chip-dot', style: `--chip:${q.id === sel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.semi}` }),
           h('span', { class: 'arrow-id mono' }, q.label),
-          h('span', { class: 'arrow-meta' }, curve?.label ?? '–'),
-          h('span', { class: 'arrow-len mono' }, res?.valid ? String(q.count) : '–'),
+          h('span', { class: 'arrow-meta' }, curve?.label ?? MISSING),
+          ...valueCells([res?.valid ? fmtCount(q.count) : MISSING, '']),
         ),
       );
     }
@@ -1123,7 +1148,7 @@ function landmarksSection(api: AppApi): Section {
 function noduleSection(api: AppApi): Section {
   const { el, body } = section('nodule', t('sec.nodule'));
   const regions = h('div', { class: 'fig-views', id: 'nodule-regions' });
-  const meta = h('dl', { class: 'meta' });
+  const meta = h('dl', { class: 'num-grid' });
   const show = checkbox('nodule-show', t('nodule.show'), api.store.state.nodule.show, (on) => setNoduleShown(api.store, on));
   body.append(regions, meta, show);
   const refresh = (kind: RefreshKind) => {
@@ -1137,9 +1162,9 @@ function noduleSection(api: AppApi): Section {
     const u = st.specimen.unit;
     if (f)
       meta.append(
-        ...metaRow(t('nodule.radius'), h('span', { class: 'mono', id: 'nodule-radius' }, `${fmtNum(f.radius, 3)}${u ? ` ${u}` : ''}`)),
-        ...metaRow(t('nodule.rms'), h('span', { class: 'mono', id: 'nodule-rms' }, `${fmtNum(f.rms, 3)}${u ? ` ${u}` : ''}`)),
-        ...metaRow(t('nodule.points'), h('span', { class: 'mono' }, fmtInt(f.count))),
+        ...numRow(t('nodule.radius'), ...quantity('length', f.radius, u), 'nodule-radius'),
+        ...numRow(t('nodule.rms'), ...quantity('length', f.rms, u), 'nodule-rms'),
+        ...numRow(t('nodule.points'), fmtCount(f.count), '', 'nodule-points'),
       );
     (show.querySelector('input') as HTMLInputElement).checked = st.nodule.show;
     (show.querySelector('input') as HTMLInputElement).disabled = !f;
@@ -1161,7 +1186,7 @@ function splitSection(api: AppApi): Section {
     if (sp?.source === 'plane') flipPlane(api.store, sp.id);
     else if (sp) setSplit(api.store, { ...sp, upHint: [-sp.upHint[0], -sp.upHint[1], -sp.upHint[2]] });
   } }, t('split.flip')) as HTMLButtonElement;
-  const meta = h('dl', { class: 'meta' });
+  const meta = h('dl', { class: 'num-grid' });
   const flipRow = h('div', { class: 'btn-row' }, flip);
   body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), select), flipRow, meta);
   const refresh = (kind: RefreshKind) => {
@@ -1180,13 +1205,13 @@ function splitSection(api: AppApi): Section {
     clear(meta);
     const u = st.specimen.unit;
     const closed = api.meshClosed();
-    if (closed === false) meta.append(...metaRow(t('measure.volume'), t('measure.notClosed')));
+    if (closed === false) meta.append(...textValueRow(t('measure.volume'), t('measure.notClosed')));
     const v = api.volumeSplit();
     if (v)
       meta.append(
-        ...metaRow(t('split.upper'), h('span', { class: 'mono', id: 'split-upper' }, `${fmtNum(v.upper, 2)}${u ? ` ${u}³` : ''}`)),
-        ...metaRow(t('split.lower'), h('span', { class: 'mono', id: 'split-lower' }, `${fmtNum(v.lower, 2)}${u ? ` ${u}³` : ''}`)),
-        ...metaRow(t('split.ratio'), h('span', { class: 'mono', id: 'split-ratio' }, v.ratio === null ? '–' : fmtNum(v.ratio, 3))),
+        ...numRow(t('split.upper'), ...quantity('volume', v.upper, u), 'split-upper'),
+        ...numRow(t('split.lower'), ...quantity('volume', v.lower, u), 'split-lower'),
+        ...numRow(t('split.ratio'), fmtQuantity('ratio', v.ratio), '', 'split-ratio'),
       );
   };
   refresh('all');
@@ -1297,11 +1322,11 @@ function workspaceSection(api: AppApi): Section {
 function observersSection(api: AppApi): Section {
   const { el, body } = section('observers', t('sec.observers'));
   const list = h('ol', { class: 'arrow-list', id: 'observer-list', 'aria-label': t('sec.observers') });
-  const add = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'compare-add', onclick: () => api.addObserverFiles() }, icon(ICONS.open), t('compare.add')) as HTMLButtonElement;
+  const add = addButton(t('compare.add'), () => api.addObserverFiles(), 'compare-add');
   const gate = h('input', { id: 'compare-gate', class: 'ctl-text mono', type: 'number', min: 0, step: 'any' }) as HTMLInputElement;
   gate.addEventListener('change', () => api.setCompareGate(Number(gate.value)));
   const unit = h('span', { class: 'gate-unit mono' });
-  body.append(list, h('div', { class: 'btn-row' }, add), h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'compare-gate' }, t('compare.gate')), h('div', { class: 'gate-row' }, gate, unit)));
+  body.append(list, add, h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'compare-gate' }, t('compare.gate')), h('div', { class: 'gate-row' }, gate, unit)));
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'compare', 'mesh', 'specimen'].includes(kind)) return;
     clear(list);
@@ -1349,7 +1374,8 @@ function agreementSection(api: AppApi): Section {
   const { el, body } = section('agreement', t('sec.agreement'));
   const status = h('p', { class: 'agree-status', id: 'agreement-status' });
   const table = h('div', { class: 'agree-wrap', id: 'agreement-table' });
-  body.append(status, table);
+  const none = h('p', { class: 'agree-empty', id: 'agreement-empty', hidden: true }, t('agree.none'));
+  body.append(status, table, none);
   const mean = (v: number[]) => (v.length ? v.reduce((s, x) => s + x, 0) / v.length : NaN);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'compare', 'mesh', 'specimen'].includes(kind)) return;
@@ -1358,19 +1384,22 @@ function agreementSection(api: AppApi): Section {
     status.hidden = !busy;
     const res = api.agreementResult();
     clear(table);
+    none.hidden = true;
     if (!res) return;
     const u = api.store.state.specimen.unit;
-    const unitOf = (metric: string, itemType: string, key: string): string => {
-      if (metric.endsWith('_deg')) return '°';
-      if (metric === 'area' || (itemType === 'measurement' && key.startsWith('area_'))) return u ? `${u}²` : '';
-      if (['start_distance', 'end_distance', 'mean_distance', 'hausdorff', 'center_distance', 'distance'].includes(metric)) return u;
-      if (itemType === 'measurement' && ['length', 'width', 'thickness'].includes(key)) return u;
+    /** What kind of quantity a metric is (its decimals and unit). */
+    const kindOf = (metric: string, itemType: string, key: string): Quantity => {
+      if (metric.endsWith('_deg')) return 'angle';
+      if (metric === 'area' || (itemType === 'measurement' && key.startsWith('area_'))) return 'area';
+      if (['start_distance', 'end_distance', 'mean_distance', 'hausdorff', 'center_distance', 'distance'].includes(metric)) return 'length';
+      if (itemType === 'measurement' && ['length', 'width', 'thickness'].includes(key)) return 'length';
       if (itemType === 'measurement' && key !== 'cortex_ratio') {
         const m = api.store.state.measurements.find((x) => x.label === key);
-        if (m) return m.type === 'angle' ? '°' : u;
+        if (m) return m.type === 'angle' ? 'angle' : 'length';
       }
-      return '';
+      return 'ratio';
     };
+    const unitOf = (metric: string, itemType: string, key: string): string => quantityUnit(kindOf(metric, itemType, key), u);
     const keyName = (itemType: string, key: string): string => {
       if (itemType === 'scar_attribute') {
         const f = SCAR_FIELDS.find((x) => x.key === key);
@@ -1399,12 +1428,14 @@ function agreementSection(api: AppApi): Section {
         let pairing: string;
         if (group === 'arrow' || group === 'curve') {
           const m = value(group, 'all', 'matched') ?? 0, ua = value(group, 'all', 'unmatched_a') ?? 0, ub = value(group, 'all', 'unmatched_b') ?? 0;
+          // neither observer drew any: nothing to show
+          if (m + ua + ub === 0) continue;
           pairing = t('agree.pairing', { m, n: m + ua, a, ua, b, ub });
         } else if (group === 'region') {
           // scar regions are paired; region types are compared over the area both observers typed
           const n = new Set(rows.filter((r) => r.itemType === 'region' && !REGION_KEYS.includes(r.itemKey)).map((r) => r.itemKey)).size;
           const area = value('region_type', 'all', 'area');
-          pairing = [n ? t('agree.paired', { n }) : '', area !== undefined ? `${t('agree.metric.area')} ${fmtNum(area, 3)} ${unitOf('area', 'region_type', 'all')}`.trim() : ''].filter(Boolean).join(' · ');
+          pairing = [n ? t('agree.paired', { n }) : '', area !== undefined ? `${t('agree.metric.area')} ${fmtQuantity('area', area)} ${unitOf('area', 'region_type', 'all')}`.trim() : ''].filter(Boolean).join(' · ');
         } else {
           const n = rows.find((r) => r.metric === 'n_items')?.value ?? new Set(rows.filter((r) => r.itemKey !== 'all').map((r) => r.itemKey)).size;
           pairing = t('agree.paired', { n });
@@ -1425,19 +1456,19 @@ function agreementSection(api: AppApi): Section {
           const v = mean(g.values);
           const clickable = AGREE_PAIRS.has(g.type) && g.values.length > 0;
           const rowKey = `${g.type}|${g.metric}|${a}|${b}`;
-          const unit = unitOf(g.metric, g.type, g.key);
+          const q = kindOf(g.metric, g.type, g.key);
           const tr = h(
             'tr',
             {
               'data-item': g.type,
               'data-metric': g.metric,
               class: `${clickable ? 'is-clickable' : ''}${focus === rowKey ? ' is-focused' : ''}`,
-              title: g.values.length > 1 ? `n = ${g.values.length} · max ${fmtNum(Math.max(...g.values), 3)}` : undefined,
+              title: g.values.length > 1 ? `n = ${g.values.length} · max ${fmtQuantity(q, Math.max(...g.values))}` : undefined,
               onclick: clickable ? () => api.focusAgreement(g.type, g.metric, a, b) : undefined,
             },
             h('td', {}, name),
-            h('td', { class: 'mono num' }, Number.isFinite(v) ? fmtNum(v, 3) : '–'),
-            h('td', { class: 'agree-unit' }, unit),
+            h('td', { class: 'num' }, fmtQuantity(q, v)),
+            h('td', { class: 'agree-unit' }, quantityUnit(q, u)),
           );
           lines.push(tr);
         }
@@ -1452,7 +1483,9 @@ function agreementSection(api: AppApi): Section {
         );
       }
     }
-    table.append(h('table', { class: 'agree-table' }, ...sections));
+    if (sections.length) table.append(h('table', { class: 'agree-table' }, ...sections));
+    // every group was empty for both observers
+    else none.hidden = false;
   };
   refresh('all');
   // nothing to compare before a second observer
@@ -1528,21 +1561,12 @@ export function buildSidebar(api: AppApi): Sidebar {
   const display = displaySection(api);
   const exportBtn = h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'btn-export', onclick: () => api.openExport() }, icon(ICONS.download), t('export.button'));
   const foot = h('div', { class: 'sidebar-foot' }, exportBtn);
-  // before a model is open, only the ways to open one
-  const empty = h(
-    'div',
-    { class: 'sidebar-empty', id: 'sidebar-empty' },
-    h('button', { type: 'button', class: 'btn btn-primary btn-block', id: 'sidebar-open-model', onclick: () => api.openModel() }, icon(ICONS.cube), t('header.openMesh')),
-    h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'sidebar-open-project', onclick: () => api.openProject() }, icon(ICONS.project), t('header.openProject')),
-    h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'sidebar-open-folder', onclick: () => void api.openFolder() }, icon(ICONS.open), t('header.openFolder')),
-  );
-  el.prepend(empty);
   el.append(foot);
+  // before a model is open the sidebar is empty (the view offers the ways to open one)
   const showMode = () => {
     const has = api.hasMesh();
     // the folder's list stays while a folder is open, also when none of its models opened
     for (const s of sections) s.el.hidden = (!has && s.el.id !== 'sec-workspace') || !s.modes.includes(api.mode) || (!!s.visible && !s.visible());
-    empty.hidden = has;
     // data exports of the mode (figures and sections export from their own sections)
     foot.hidden = !has || api.mode === 'present';
   };

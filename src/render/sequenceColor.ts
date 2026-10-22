@@ -1,7 +1,7 @@
 import type { Sequence } from '../core/types';
 
-/** Hue of each sequence, in sequence order. */
-const SEQUENCE_HUES = [212, 8, 142, 272, 42, 322, 182, 24];
+/** Hue of each sequence, in sequence order (no yellow: it means selected). */
+const SEQUENCE_HUES = [212, 8, 142, 272, 96, 322, 182, 24];
 export const UNASSIGNED_COLOR = '#8a8f98';
 
 function hslHex(h: number, s: number, l: number): string {

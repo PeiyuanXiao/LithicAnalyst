@@ -3,6 +3,7 @@ import type { SnapMode } from '../compute/surfacePath';
 import { addCurve } from '../core/actions';
 import { assembleCurve } from '../core/curveGeometry';
 import type { Vec3 } from '../core/types';
+import { draftCurveColor } from '../render/curveLayer';
 import type { SurfaceHit } from '../render/viewer';
 import type { HitProvider, Tool, ToolContext } from './tool';
 
@@ -193,7 +194,7 @@ export class DrawCurveTool implements Tool {
     }
     const mode = this.mode(ptr.shift);
     if (!snap.ready(mode)) {
-      this.ctx.arrows.setHover(h.point, h.normal);
+      this.ctx.arrows.setHover(h.point, h.normal, draftCurveColor());
       void snap.prepare(mode).then((ok) => {
         if (ok) this.refresh();
       });
@@ -203,7 +204,7 @@ export class DrawCurveTool implements Tool {
     if (!this.target) return;
     // a click here would close the curve: light up its first point
     this.ctx.curves.highlightAnchor(this.target.closing ? 0 : null);
-    this.ctx.arrows.setHover(vec(this.target.p), this.viewNormal(snap.normal(this.target.v), this.target.p));
+    this.ctx.arrows.setHover(vec(this.target.p), this.viewNormal(snap.normal(this.target.v), this.target.p), draftCurveColor());
     this.updateLive();
   }
 

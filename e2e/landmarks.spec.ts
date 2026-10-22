@@ -93,7 +93,7 @@ test('places, names, orders and moves landmarks; semilandmarks follow; exports a
   await openSection(page, 'curves');
   await page.locator('#curve-list .curve-row').first().click();
   await page.keyboard.press('Delete');
-  await expect(page.locator('#semilandmark-list .arrow-len')).toHaveText('–');
+  await expect(page.locator('#semilandmark-list .arrow-len')).toHaveText('—');
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('#semilandmark-list .arrow-len')).toHaveText('4');
 

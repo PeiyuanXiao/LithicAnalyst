@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Appearance: light and dark shells, switched from the top bar (moon / sun) and remembered; the
+  first visit follows the system setting. Warm stone neutrals with an amber accent; yellow now
+  only marks the selection (items being drawn take their layer's colour; plane P3, a scar-region,
+  a sequence and an observer colour that were yellow changed, and cortex is brown). The 3D view
+  has a neutral grey background, slightly darker at the top, that follows the theme (figures
+  unchanged: PNGs keep their transparent background), and corner marks.
+- The interface starts in English; the language menu in the top bar (English, 中文) switches
+  and remembers the choice.
+- Tools and modes are icon buttons (the current tool shows its name; tooltips give name and
+  key); in windows narrower than 1200 px the modes show icons only. The specimen is one button in
+  the top bar (ID and unit; its panel holds ID, unit, annotator, notes, model file and mesh size).
+  Models, folders and projects open from the File menu or the empty view only.
+- Display panel: shading, light direction and height, arrow thickness and colour, and three
+  switches (background, fill light and gloss are gone; the last two keep their defaults).
+- Orientation panel: rows for front view (current view, or a plane from a menu), vertical (an
+  arrow from a menu), turning (±90° buttons and fine turn), with the source as a translated tag.
+- "Add" entries are dashed buttons at the end of their lists. The compare mode hides groups
+  neither observer has anything in. The shortcuts dialog has two columns and fits on one screen.
+- Camera moves (H, view specimen, view along a plane, turning the frame, focusing an item) take a
+  short transition; any press, wheel or key that moves the view stops it. The select tool shows
+  what a click would select (a little thicker, a pointer, and its label and kind after a pause).
+  Panels, menus and dialogs fade in. Nothing moves when the system asks for reduced motion.
+- Plane sections on the model are thinner. Numbers are right-aligned with their units in a
+  column of their own; each kind of quantity has one number of decimals (lengths and
+  coordinates 3, areas and volumes 2, angles 1, ratios 3), missing values show "—". Exports are
+  unchanged.
 - Interface: the top bar holds the specimen ID and unit (annotator, notes and the model file
   in a small panel), a File menu (open model, project or folder), Save, and the mode switch in
   the middle; the main button is File until a model is open, then Save. Display settings are a

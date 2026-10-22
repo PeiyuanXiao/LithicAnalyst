@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, roofPly, type Vec3 } from './fixtures/meshes';
-import { download, expect, exportAvailable, exportFile, fileMenu, loadMesh, measureDraftLength, nextFrames, openApp, parseCsv, state, test, toScreen, waitForMesh } from './helpers';
+import { download, expect, exportAvailable, exportFile, fileMenu, loadMesh, measureDraftLength, nextFrames, openApp, parseCsv, setUnit, state, test, toScreen, waitForMesh } from './helpers';
 
 const MEASUREMENTS_HEADER =
   'specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio';
@@ -33,19 +33,25 @@ test('measures the size and shape of a closed model and exports them', async ({ 
   await openApp(page);
   await loadMesh(page, boxPly());
   await measureMode(page);
-  await expect(page.locator('#auto-length')).toHaveText('40.000 mm');
-  await expect(page.locator('#auto-width')).toHaveText('20.000 mm');
-  await expect(page.locator('#auto-thickness')).toHaveText('10.000 mm');
+  // numbers and units in columns of their own
+  await expect(page.locator('#auto-length')).toHaveText('40.000');
+  await expect(page.locator('#auto-length-unit')).toHaveText('mm');
+  await expect(page.locator('#auto-width')).toHaveText('20.000');
+  await expect(page.locator('#auto-thickness')).toHaveText('10.000');
   await expect(page.locator('#auto-frame')).toHaveText('Principal axes');
-  await expect(page.locator('#auto-area')).toHaveText('2800.00 mm²');
-  await expect(page.locator('#auto-volume')).toHaveText('8000.00 mm³');
+  await expect(page.locator('#auto-area')).toHaveText('2800.00');
+  await expect(page.locator('#auto-area-unit')).toHaveText('mm²');
+  await expect(page.locator('#auto-volume')).toHaveText('8000.00');
+  await expect(page.locator('#auto-volume-unit')).toHaveText('mm³');
   await expect(page.locator('#auto-svr')).toHaveText('7.000');
+  await expect(page.locator('#auto-svr-unit')).toHaveText('');
   const psi = (Math.cbrt(Math.PI) * Math.pow(48000, 2 / 3)) / 2800;
   await expect(page.locator('#auto-sphericity')).toHaveText(psi.toFixed(3));
 
   // the unit is only a declaration: values stay, the unit label follows
-  await page.locator('#specimen-unit').selectOption('cm');
-  await expect(page.locator('#auto-area')).toHaveText('2800.00 cm²');
+  await setUnit(page, 'cm');
+  await expect(page.locator('#auto-area')).toHaveText('2800.00');
+  await expect(page.locator('#auto-area-unit')).toHaveText('cm²');
 
   const csv = await exportFile(page, 'measurements');
   expect(csv.name).toBe('box_measurements.csv');
@@ -66,8 +72,8 @@ test('leaves the volume empty when the model is not closed', async ({ page }) =>
   await loadMesh(page, roofPly());
   await measureMode(page);
   await expect(page.locator('#auto-volume')).toHaveText('Not closed');
-  await expect(page.locator('#auto-svr')).toHaveText('–');
-  await expect(page.locator('#auto-sphericity')).toHaveText('–');
+  await expect(page.locator('#auto-svr')).toHaveText('—');
+  await expect(page.locator('#auto-sphericity')).toHaveText('—');
   const [row] = parseCsv(await page.evaluate(() => window.lithicanalyst.exportMeasurementsCsvText()));
   expect(row).toMatchObject({ volume: '', surface_to_volume_ratio: '', wadell_sphericity: '', closed: 'false' });
   expect(Number(row.surface_area)).toBeGreaterThan(0);
@@ -116,7 +122,7 @@ test('takes distance, along-surface and angle measurements; undo, redo, export a
   // relaxing gets within a few hundredths of the straight line
   expect(Math.abs(g - Math.sqrt(1000))).toBeLessThan(0.1);
   expect(a).toBeCloseTo(90, 0);
-  await expect(page.locator('#measure-list .arrow-len').nth(2)).toHaveText(/°$/);
+  await expect(page.locator('#measure-list .unit').nth(2)).toHaveText('°');
   await expect(page.locator('.measure-label', { hasText: 'M2' })).toBeVisible();
 
   // the last one is selected: delete it, then undo and redo

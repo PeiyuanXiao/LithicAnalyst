@@ -72,6 +72,47 @@ export const ICONS = {
   chevron: 'M6 9l6 6 6-6',
   sliders: 'M4 6h9|M17 6h3|M15 4v4|M4 12h3|M11 12h9|M9 10v4|M4 18h11|M19 18h1|M17 16v4',
   download: 'M12 4v11|M7 10l5 5 5-5|M5 19h14',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  rotateLeft: 'M4 4v5h5|M4.6 9A8 8 0 1 1 6 16.5',
+  rotateRight: 'M20 4v5h-5|M19.4 9A8 8 0 1 0 18 16.5',
+};
+
+/** Inline SVG icon on the 20 × 20 grid from SVG markup (stroked; elements may carry their own fill). */
+export function icon20(markup: string): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 20 20');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.6');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', 'icon20');
+  svg.innerHTML = markup;
+  return svg;
+}
+
+/** Icons of the view toolbar, the mode switch and the shell (20 × 20 grid). */
+export const ICONS20 = {
+  select: '<path d="M5 3 L15 10.5 L10.2 11.4 L12.6 16.6 L10.8 17.4 L8.4 12.2 L5 15.2 Z"/>',
+  arrow: '<circle cx="4.5" cy="15.5" r="2"/><path d="M6 14 L15.5 4.5"/><path d="M10 4.5 H15.5 V10"/>',
+  curve: '<path d="M3 15 C6 4 11 17 17 5"/><rect x="1.8" y="13.8" width="2.4" height="2.4" fill="currentColor"/><rect x="15.8" y="3.8" width="2.4" height="2.4" fill="currentColor"/><rect x="8.8" y="8.8" width="2.4" height="2.4" fill="currentColor"/>',
+  region: '<path d="M4 7 C4 3.5 9 2.5 12 4.5 C15.5 6.5 17.5 9 15.5 13 C13.5 17 7 17.5 5 14.5 C3.5 12 4 10 4 7 Z" fill="currentColor" fill-opacity="0.25"/>',
+  relation: '<path d="M8 6.5 H3 V15.5 H12 V12.5"/><path d="M8 3.5 H17 V12.5 H8 Z" fill="currentColor" fill-opacity="0.3"/>',
+  landmark: '<circle cx="10" cy="10" r="5.5"/><path d="M10 1.5 V5 M10 15 V18.5 M1.5 10 H5 M15 10 H18.5"/><circle cx="10" cy="10" r="1.2" fill="currentColor"/>',
+  distance: '<path d="M5 15 L15 5"/><circle cx="4" cy="16" r="1.8" fill="currentColor"/><circle cx="16" cy="4" r="1.8" fill="currentColor"/><path d="M2.5 11 L9 4.5" stroke-width="1" stroke-dasharray="1.5 1.5"/>',
+  geodesic: '<path d="M2.5 16.5 C6 16.5 7 7.5 10 7.5 C13 7.5 14 16.5 17.5 16.5"/><circle cx="2.5" cy="16.5" r="1.6" fill="currentColor"/><circle cx="17.5" cy="16.5" r="1.6" fill="currentColor"/>',
+  angle: '<path d="M3 16 H17"/><path d="M3 16 L13 5"/><path d="M9 16 A6 6 0 0 0 7.04 11.56"/>',
+  section: '<path d="M3 7 L13 4 L17 13 L7 16 Z"/><path d="M5.1 9.7 L13.5 7.2 M6.4 12.7 L14.9 10.2" stroke-width="1.1"/>',
+  fit: '<path d="M3 7 V3 H7 M13 3 H17 V7 M17 13 V17 H13 M7 17 H3 V13"/>',
+  display: '<path d="M3 6 H17 M3 14 H17"/><rect x="5.5" y="4" width="3" height="4" fill="currentColor"/><rect x="11.5" y="12" width="3" height="4" fill="currentColor"/>',
+  plus: '<path d="M10 4 V16 M4 10 H16"/>',
+  sun: '<circle cx="10" cy="10" r="3.5"/><path d="M10 2 V3.8 M10 16.2 V18 M2 10 H3.8 M16.2 10 H18 M4.3 4.3 L5.6 5.6 M14.4 14.4 L15.7 15.7 M4.3 15.7 L5.6 14.4 M14.4 5.6 L15.7 4.3"/>',
+  moon: '<path d="M10 2.5 A5 5 0 0 0 17.5 10 A7.5 7.5 0 1 1 10 2.5 Z"/>',
+  modeAnnotate: '<path d="M13 3.5 L16.5 7 L7.5 16 L3.5 16.5 L4 12.5 Z"/><path d="M11 5.5 L14.5 9"/><path d="M11.5 17 H17"/>',
+  modeMeasure: '<path d="M2.5 13.5 L13.5 2.5 L17.5 6.5 L6.5 17.5 Z"/><path d="M5 11 L6.5 12.5 M7.5 8.5 L9.5 10.5 M10 6 L11.5 7.5"/>',
+  modePresent: '<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M9 5.8 C11.3 7.2 11.8 10.5 10.4 13.2 C9.8 14.2 8.2 14.2 7.6 13.2 C6.2 10.5 6.7 7.2 9 5.8 Z" fill="currentColor" fill-opacity="0.25"/><path d="M13 14 H15.5"/>',
+  modeCompare: '<circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><path d="M10 5.67 A5 5 0 0 1 10 14.33 A5 5 0 0 1 10 5.67 Z" fill="currentColor" fill-opacity="0.3" stroke="none"/>',
 };
 
 /** Scroll a list box, and nothing around it, so that one of its rows is in view. */

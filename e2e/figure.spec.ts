@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { pngDpi } from '../src/io/png';
 import { boxPly, boxPoint } from './fixtures/meshes';
-import { download, dragArrow, expect, loadMesh, nextFrames, openApp, test } from './helpers';
+import { download, dragArrow, expect, loadMesh, nextFrames, openApp, setUnit, test } from './helpers';
 
 /** Decode a PNG in the page: size, and the alpha and darkness along one row. */
 async function scanRow(page: Page, b64: string, y: number) {
@@ -142,7 +142,7 @@ test('exports an SVG in millimetres with the shading as images and the rest as v
 });
 
 test('has no physical scale when the unit is not stated', async ({ page }) => {
-  await page.locator('#specimen-unit').selectOption('');
+  await setUnit(page, '');
   await expect(page.locator('#fig-scalebar')).toBeDisabled();
   await expect(page.locator('#fig-scale-1')).toBeDisabled();
   const fig = (await page.evaluate(() => window.lithicanalyst.figure('png')))!;

@@ -14,6 +14,19 @@ export interface SurfaceHit {
   distance: number;
 }
 
+/** Length of a camera transition (H, views along a plane or the specimen frame, focusing an item). */
+const TRANSITION_MS = 280;
+
+const easeInOutCubic = (k: number): number => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+
+const reducedMotion = (): boolean => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+interface CameraPose {
+  target: THREE.Vector3;
+  distance: number;
+  orientation: THREE.Quaternion;
+}
+
 /**
  * Scene, camera, renderer and navigation. Knows nothing about scars or the
  * project; layers and tools sit on top of it.
@@ -42,11 +55,15 @@ export class Viewer {
   private navMode: NavMode = 'select';
   private navOverride = false;
   private rafId = 0;
+  /** A camera move in progress: from where, to where, since when. */
+  private transition: { start: number; from: CameraPose; to: CameraPose & { position: THREE.Vector3; up: THREE.Vector3 } } | null = null;
 
   constructor(readonly container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: false });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // transparent: the view's background is the container's (CSS, follows the theme)
+    this.renderer.setClearColor(0x000000, 0);
     this.renderer.domElement.className = 'viewport-canvas';
     this.renderer.domElement.setAttribute('aria-label', '3D view');
     container.appendChild(this.renderer.domElement);
@@ -69,13 +86,22 @@ export class Viewer {
 
     this.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
     container.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+    // a press on the view takes the camera over from a transition
+    container.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (!(e.target as Element | null)?.closest?.('.viewport-ui')) this.stopTransition();
+      },
+      { capture: true },
+    );
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
 
-    const loop = () => {
+    const loop = (now: number) => {
       this.rafId = requestAnimationFrame(loop);
+      if (this.transition) this.stepTransition(now);
       this.controls.update();
       for (const fn of this.frameListeners) fn();
       if (this.dirty) {
@@ -85,7 +111,7 @@ export class Viewer {
         for (const fn of this.renderListeners) fn();
       }
     };
-    loop();
+    loop(performance.now());
   }
 
   dispose(): void {
@@ -116,11 +142,6 @@ export class Viewer {
     return () => this.frameListeners.delete(fn);
   }
 
-  setBackground(color: string): void {
-    this.renderer.setClearColor(new THREE.Color(color), 1);
-    this.requestRender();
-  }
-
   setMesh(mesh: THREE.Mesh, offset: Vec3, diagonal: number): void {
     if (this.mesh) this.meshRoot.remove(this.mesh);
     this.mesh = mesh;
@@ -134,29 +155,93 @@ export class Viewer {
     this.fitView(new THREE.Vector3(0.35, -0.55, 0.76).normalize(), new THREE.Vector3(0, 0, 1));
   }
 
-  /** Frame the whole model, looking from `towardViewer` (direction from model to camera). */
-  fitView(towardViewer?: THREE.Vector3, up?: THREE.Vector3, center: THREE.Vector3 = this.center, distance?: number): void {
+  /**
+   * Frame the whole model, looking from `towardViewer` (direction from model to camera);
+   * `animate`: move there in a short transition (none when the system asks for reduced motion).
+   */
+  fitView(towardViewer?: THREE.Vector3, up?: THREE.Vector3, center: THREE.Vector3 = this.center, distance?: number, animate = false): void {
     const dir = (towardViewer ?? this.camera.position.clone().sub(this.controls.target)).clone().normalize();
     if (!Number.isFinite(dir.x) || dir.lengthSq() === 0) dir.set(0, 0, 1);
     const fov = THREE.MathUtils.degToRad(this.camera.fov);
     const fitHeight = (this.diagonal * 0.5) / Math.sin(fov / 2);
     const fitWidth = fitHeight / Math.max(0.5, this.camera.aspect);
     const dist = distance ?? Math.max(fitHeight, fitWidth) * 1.05;
-    this.controls.target.copy(center);
-    this.camera.position.copy(center).addScaledVector(dir, dist);
+    const target = center.clone();
+    const position = center.clone().addScaledVector(dir, dist);
+    let camUp = this.camera.up.clone();
     if (up) {
       // make "up" perpendicular to the view direction
       const u = up.clone().sub(dir.clone().multiplyScalar(up.dot(dir)));
-      if (u.lengthSq() > 1e-8) this.camera.up.copy(u.normalize());
+      if (u.lengthSq() > 1e-8) camUp = u.normalize();
     }
+    this.moveCamera(position, target, camUp, animate);
+  }
+
+  /** The whole model from the current direction (the H key). */
+  viewAll(animate = false): void {
+    this.fitView(undefined, undefined, this.center, undefined, animate);
+  }
+
+  /** Look along −towardViewer at `center` with the given up vector. */
+  viewFrom(towardViewer: Vec3, up: Vec3, center?: Vec3, distance?: number, animate = false): void {
+    const c = center ? new THREE.Vector3(center[0], center[1], center[2]) : this.center;
+    this.fitView(new THREE.Vector3(...towardViewer), new THREE.Vector3(...up), c, distance, animate);
+  }
+
+  /** Put the camera at `position` looking at `target`, at once or in a transition. */
+  private moveCamera(position: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3, animate: boolean): void {
+    this.stopTransition();
+    if (animate && !reducedMotion()) {
+      const orientation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(position, target, up));
+      this.transition = {
+        start: performance.now(),
+        from: { target: this.controls.target.clone(), distance: this.currentDistance(), orientation: this.camera.quaternion.clone() },
+        to: { target, distance: position.distanceTo(target), orientation, position, up },
+      };
+      this.requestRender();
+      return;
+    }
+    this.controls.target.copy(target);
+    this.camera.position.copy(position);
+    this.camera.up.copy(up);
     this.camera.lookAt(this.controls.target);
     this.cameraChanged();
   }
 
-  /** Look along −towardViewer at `center` with the given up vector. */
-  viewFrom(towardViewer: Vec3, up: Vec3, center?: Vec3, distance?: number): void {
-    const c = center ? new THREE.Vector3(center[0], center[1], center[2]) : this.center;
-    this.fitView(new THREE.Vector3(...towardViewer), new THREE.Vector3(...up), c, distance);
+  /**
+   * One frame of the transition: the centre and the distance move linearly, the
+   * orientation along the shortest rotation (slerp), eased in and out.
+   */
+  private stepTransition(now: number): void {
+    const tr = this.transition!;
+    const k = Math.min(1, Math.max(0, (now - tr.start) / TRANSITION_MS));
+    if (k >= 1) {
+      this.transition = null;
+      this.controls.target.copy(tr.to.target);
+      this.camera.position.copy(tr.to.position);
+      this.camera.up.copy(tr.to.up);
+      this.camera.lookAt(this.controls.target);
+      this.cameraChanged();
+      return;
+    }
+    const e = easeInOutCubic(k);
+    const q = new THREE.Quaternion().slerpQuaternions(tr.from.orientation, tr.to.orientation, e);
+    const target = tr.from.target.clone().lerp(tr.to.target, e);
+    const distance = tr.from.distance + (tr.to.distance - tr.from.distance) * e;
+    this.controls.target.copy(target);
+    this.camera.position.copy(target).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(q), distance);
+    this.camera.up.set(0, 1, 0).applyQuaternion(q);
+    this.camera.quaternion.copy(q);
+    this.cameraChanged();
+  }
+
+  /** End a transition where it is (the user took over the camera). */
+  stopTransition(): void {
+    this.transition = null;
+  }
+
+  get transitioning(): boolean {
+    return this.transition !== null;
   }
 
   currentDistance(): number {
@@ -164,6 +249,7 @@ export class Viewer {
   }
 
   setRotationCenter(p: THREE.Vector3): void {
+    this.stopTransition();
     const delta = p.clone().sub(this.controls.target);
     this.controls.target.add(delta);
     this.camera.position.add(delta);
@@ -263,6 +349,7 @@ export class Viewer {
 
   /** Dolly toward the point under the cursor (factor < 1 zooms in). */
   zoomAt(clientX: number, clientY: number, factor: number): void {
+    this.stopTransition();
     const target = this.controls.target;
     const hit = this.pickSurface(clientX, clientY);
     let anchor: THREE.Vector3;

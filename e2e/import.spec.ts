@@ -29,8 +29,9 @@ for (const { file, format, button } of cases) {
     await expect(page.locator('#empty-open')).toBeHidden();
     await expect(page.locator('#btn-save-project')).toBeEnabled();
     await expect(page.locator('#specimen-id')).toHaveValue('roof');
-    await expect(page.locator('#specimen-meta')).toContainText(`${ROOF_VERTICES.toLocaleString('en-US')} vertices`);
-    await expect(page.locator('#specimen-meta')).toContainText(`${ROOF_TRIANGLES.toLocaleString('en-US')} triangles`);
+    await expect(page.locator('#specimen-name')).toHaveText('roof');
+    await expect(page.locator('#specimen-vertices')).toHaveText(ROOF_VERTICES.toLocaleString('en-US'));
+    await expect(page.locator('#specimen-triangles')).toHaveText(ROOF_TRIANGLES.toLocaleString('en-US'));
 
     const mesh = (await state(page)).mesh!;
     expect(mesh).toMatchObject({ fileName: file.name, format, fileSize: file.buffer.length, vertexCount: ROOF_VERTICES, triangleCount: ROOF_TRIANGLES });

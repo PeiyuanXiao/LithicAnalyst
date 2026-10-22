@@ -27,7 +27,7 @@ import { PlaneLayer, planeColor } from '../render/planeLayer';
 import { SectionLayer, sectionLoops2D } from '../render/sectionLayer';
 import { SectionTool } from '../tools/sectionTool';
 import { ClickTool } from '../tools/clickTool';
-import { RegionLayer, regionColorOf } from '../render/regionLayer';
+import { REGION_COLORS, RegionLayer, regionColorOf } from '../render/regionLayer';
 import { checkRelations, harrisLayout, relationInputs, relationProblems, type HarrisLayout, type RelationChecks } from '../compute/relations';
 import { harrisSvg, type HarrisStyle } from '../render/harris';
 import { sequenceColors } from '../render/sequenceColor';
@@ -59,22 +59,26 @@ import { SurfaceSnap } from '../tools/surfaceSnap';
 import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type DisplayAspect, type DisplaySettings } from './appApi';
-import { segmented, softSet, textRow } from './controls';
+import { fmtCount, fmtQuantity, quantityUnit } from '../core/format';
+import { numRow, segmented, softSet, textRow, textValueRow } from './controls';
 import { Popovers, onViewport } from './popover';
-import { clear, h, icon, ICONS } from './dom';
+import { clear, h, icon, icon20, ICONS, ICONS20 } from './dom';
 import { Feedback } from './feedback';
-import { getLang, onLangChange, setLang, t } from './i18n';
-import { buildSidebar, fmtNum, type RefreshKind, type Sidebar } from './sidebar';
+import { getLang, htmlLang, langInfo, LANGS, onLangChange, setLang, t } from './i18n';
+import { buildSidebar, type RefreshKind, type Sidebar } from './sidebar';
+import { getTheme, onThemeChange, toggleTheme } from './theme';
+import { tip, tips } from './tooltip';
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
+/** Gloss of the surface (0 = matte, 1 = glossy); fixed, as is the fill light (DEFAULT_LIGHT). */
+const GLOSS = 0.45;
 
 const DEFAULT_DISPLAY: DisplaySettings = {
   shading: 'plain',
   light: { ...DEFAULT_LIGHT },
-  gloss: 0.45,
   curvScale: 2,
   curvContrast: 1,
-  background: 'light',
   arrows: { ...DEFAULT_ARROW_DISPLAY },
   curveSnap: 'ridge',
   regions: true,
@@ -86,7 +90,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
 const PROBLEM_COLOR = '#ff3b30';
 
 /** One colour per observer in the compare mode. */
-const OBSERVER_COLORS = ['#e0287d', '#1f9e89', '#3a7fd5', '#e8a10e', '#7b5cd6', '#c8611f', '#5a8f29', '#8a8f98'];
+const OBSERVER_COLORS = ['#e0287d', '#1f9e89', '#3a7fd5', '#d62728', '#7b5cd6', '#c8611f', '#5a8f29', '#8a8f98'];
 
 /** A project compared in the compare mode: the open one (`state` null) or one read from a file. */
 interface Observer {
@@ -104,14 +108,15 @@ interface Observer {
 }
 
 function loadDisplay(): DisplaySettings {
-  const saved = readPref<Partial<DisplaySettings>>('display', {});
+  // settings of earlier versions that are no longer kept: the view's background (the theme
+  // decides it now), gloss and the fill light (fixed)
+  const { background: _background, gloss: _gloss, ...saved } = readPref<Partial<DisplaySettings> & { background?: unknown; gloss?: unknown }>('display', {});
   return {
     ...DEFAULT_DISPLAY,
     ...saved,
     shading: saved.shading === 'curvature' ? 'curvature' : 'plain',
-    background: saved.background === 'dark' ? 'dark' : 'light',
     curvScale: Math.max(0, Math.min(100, Math.round(saved.curvScale ?? DEFAULT_DISPLAY.curvScale))),
-    light: { ...DEFAULT_LIGHT, ...(saved.light ?? {}) },
+    light: { ...DEFAULT_LIGHT, ...(saved.light ?? {}), fillIntensity: DEFAULT_LIGHT.fillIntensity },
     arrows: { ...DEFAULT_ARROW_DISPLAY, ...(saved.arrows ?? {}) },
     curveSnap: SNAP_MODES.includes(saved.curveSnap as SnapMode) ? (saved.curveSnap as SnapMode) : DEFAULT_DISPLAY.curveSnap,
   };
@@ -145,11 +150,22 @@ function countsText(state: Readonly<ProjectState>): string {
   return parts.join(' · ');
 }
 
-const MEASURE_TOOLS: Array<[string, string, string]> = [
-  ['measure-distance', 'tool.distance', 'D'],
-  ['measure-geodesic', 'tool.geodesic', 'G'],
-  ['measure-angle', 'tool.angle', 'N'],
+/** Tool id, name, key and icon of the measuring tools. */
+const MEASURE_TOOLS: Array<[string, string, string, string]> = [
+  ['measure-distance', 'tool.distance', 'D', ICONS20.distance],
+  ['measure-geodesic', 'tool.geodesic', 'G', ICONS20.geodesic],
+  ['measure-angle', 'tool.angle', 'N', ICONS20.angle],
 ];
+
+const MODE_ICONS: Record<AppMode, string> = {
+  annotate: ICONS20.modeAnnotate,
+  measure: ICONS20.modeMeasure,
+  present: ICONS20.modePresent,
+  compare: ICONS20.modeCompare,
+};
+
+/** A row of tools of one work mode: radio buttons with an icon, the name (shown on the current one) and the key. */
+type ToolRow = { el: HTMLElement; set: (v: string) => void };
 
 /** Newell normal of a closed polyline (zero for a degenerate one). */
 function loopNormal(points: Vec3[]): Vec3 {
@@ -262,15 +278,18 @@ export class App implements AppApi {
   private saveBtn!: HTMLButtonElement;
   private fileBtn!: HTMLButtonElement;
   private specimenBar!: HTMLElement;
-  private specimenRefs: { id: HTMLInputElement; unit: HTMLSelectElement; annotator: HTMLInputElement | HTMLTextAreaElement; notes: HTMLInputElement | HTMLTextAreaElement; meta: HTMLElement } | null = null;
-  private readonly popovers = new Popovers();
+  private specimenRefs: { id: HTMLInputElement; unit: HTMLSelectElement; annotator: HTMLInputElement | HTMLTextAreaElement; notes: HTMLInputElement | HTMLTextAreaElement; meta: HTMLElement; name: HTMLElement; unitText: HTMLElement } | null = null;
+  readonly popovers = new Popovers();
   private displayCtl: HTMLElement | null = null;
-  private appModeSeg: ReturnType<typeof segmented> | null = null;
-  private modeSeg: ReturnType<typeof segmented> | null = null;
+  private appModeSeg: ToolRow | null = null;
+  private modeSeg: ToolRow | null = null;
   private snapSeg: ReturnType<typeof segmented> | null = null;
   private snapEl: HTMLElement | null = null;
-  private measureSeg: ReturnType<typeof segmented> | null = null;
-  private presentSeg: ReturnType<typeof segmented> | null = null;
+  private measureSeg: ToolRow | null = null;
+  private presentSeg: ToolRow | null = null;
+  private toolSep: HTMLElement | null = null;
+  private themeBtn: HTMLButtonElement | null = null;
+  private hoverTipTimer = 0;
   private measureBase: SurfaceMeasures | null = null;
   private auto: AutoMeasurements | null = null;
   private autoFrameKey = '';
@@ -281,9 +300,9 @@ export class App implements AppApi {
   private readonly folderInput: HTMLInputElement;
 
   constructor(private readonly root: HTMLElement) {
-    document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en';
+    document.documentElement.lang = htmlLang();
     this.appEl = h('div', { class: 'app' });
-    this.viewportEl = h('section', { class: 'viewport', id: 'viewport', 'data-bg': this.display.background, 'data-mode': this.mode });
+    this.viewportEl = h('section', { class: 'viewport', id: 'viewport', 'data-mode': this.mode });
     this.toolbarEl = h('div', { class: 'viewport-ui vp-toolbar' });
     this.emptyEl = h('div', { class: 'viewport-ui vp-empty' });
     this.coordEl = h('span', { class: 'viewport-ui status-coords mono', id: 'status-coords' });
@@ -324,7 +343,9 @@ export class App implements AppApi {
       return;
     }
     const viewer = this.viewer;
-    this.viewportEl.append(this.toolbarEl, this.emptyEl, this.coordEl, this.dropEl);
+    // corner marks of the view (decoration; not part of figures, which are rendered apart)
+    const corners = (['tl', 'tr', 'bl', 'br'] as const).map((c) => h('span', { class: `vp-corner vp-corner-${c}`, 'aria-hidden': 'true' }));
+    this.viewportEl.append(...corners, this.toolbarEl, this.emptyEl, this.coordEl, this.dropEl);
     this.lights = new LightRig(viewer.scene);
     this.lights.set(this.display.light);
     this.arrows = new ArrowLayer(viewer);
@@ -380,6 +401,7 @@ export class App implements AppApi {
       notify: (key, tone) => this.feedback.toast(t(key), tone === 'warn' ? 'warn' : 'info'),
       changed: () => this.updateCursor(),
       editable: () => this.mode === 'annotate',
+      hovered: (item) => this.hoverTip(item),
     };
     this.tools = new ToolController(ctx, this.viewportEl);
     this.tools.register(new SelectTool(ctx));
@@ -419,10 +441,10 @@ export class App implements AppApi {
       this.updateCursor();
     });
     onLangChange(() => this.rebuildChrome());
+    onThemeChange(() => this.paintThemeButton());
 
     this.wireFiles();
     this.wireKeyboard();
-    this.applyBackground();
     window.addEventListener('pagehide', () => this.flushAutosave());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.flushAutosave();
@@ -434,34 +456,61 @@ export class App implements AppApi {
 
   // ------------------------------------------------------------ chrome
 
+  /**
+   * Top bar: name and version, the specimen; the modes in the middle; File, Save, undo
+   * and redo, language, appearance and shortcuts. Icon buttons have tooltips, no titles.
+   */
   private buildHeader(): HTMLElement {
-    const btn = (id: string, iconPath: string, label: string, onclick: () => void, kind = 'btn-quiet', title?: string) =>
-      h('button', { type: 'button', id, class: `btn ${kind} hdr-btn`, onclick, title: title ?? label }, icon(iconPath), h('span', { class: 'btn-text' }, label)) as HTMLButtonElement;
+    const btn = (id: string, iconPath: string, label: string, onclick: () => void) =>
+      h('button', { type: 'button', id, class: 'btn btn-quiet hdr-btn', onclick }, icon(iconPath), h('span', { class: 'btn-text' }, label)) as HTMLButtonElement;
     this.undoBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-undo', 'aria-label': t('header.undo'), onclick: () => this.undo() }, icon(ICONS.undo)) as HTMLButtonElement;
     this.redoBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-redo', 'aria-label': t('header.redo'), onclick: () => this.redo() }, icon(ICONS.redo)) as HTMLButtonElement;
-    this.saveBtn = btn('btn-save-project', ICONS.save, t('header.save'), () => this.saveProject(), 'btn-quiet', `${t('header.saveProject')} (Ctrl+S)`);
+    const history = (key: 'header.undo' | 'header.redo', what: string | null) => (what ? `${t(key)}: ${t(what)}` : t(key));
+    tips.attach(this.undoBtn, () => ({ label: history('header.undo', this.store.history.undoLabelKey), key: 'Ctrl+Z' }));
+    tips.attach(this.redoBtn, () => ({ label: history('header.redo', this.store.history.redoLabelKey), key: 'Ctrl+Shift+Z' }));
+    this.saveBtn = btn('btn-save-project', ICONS.save, t('header.save'), () => this.saveProject());
+    tip(this.saveBtn, t('header.saveProject'), 'Ctrl+S');
     // opening things: one menu
     const menu = h('div', { class: 'popover menu', id: 'file-menu', role: 'menu', hidden: true });
     this.fileBtn = h(
       'button',
-      { type: 'button', id: 'btn-file', class: 'btn btn-quiet hdr-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: t('header.file'), onclick: () => this.popovers.toggle(this.fileBtn, menu) },
+      { type: 'button', id: 'btn-file', class: 'btn btn-quiet hdr-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('header.file'), onclick: () => this.popovers.toggle(this.fileBtn, menu) },
       icon(ICONS.file),
       h('span', { class: 'btn-text' }, t('header.file')),
       icon(ICONS.chevron),
     ) as HTMLButtonElement;
-    const item = (id: string, iconPath: string, label: string, hint: string, run: () => void) =>
-      h('button', { type: 'button', id, class: 'menu-item', role: 'menuitem', title: hint, onclick: () => (this.popovers.close(), run()) }, icon(iconPath), h('span', {}, label));
+    tip(this.fileBtn, t('header.file'));
+    const item = (id: string, iconPath: string, label: string, run: () => void) =>
+      h('button', { type: 'button', id, class: 'menu-item', role: 'menuitem', onclick: () => (this.popovers.close(), run()) }, icon(iconPath), h('span', {}, label));
     menu.append(
-      item('btn-open', ICONS.cube, t('header.openMesh'), 'PLY · STL · OBJ', () => this.meshInput.click()),
-      item('btn-open-project', ICONS.project, t('header.openProject'), t('header.openProject'), () => this.openProject()),
-      item('btn-open-folder', ICONS.open, t('header.openFolder'), t('header.openFolder'), () => void this.openFolder()),
+      item('btn-open', ICONS.cube, t('header.openMesh'), () => this.meshInput.click()),
+      item('btn-open-project', ICONS.project, t('header.openProject'), () => this.openProject()),
+      item('btn-open-folder', ICONS.open, t('header.openFolder'), () => void this.openFolder()),
     );
+    // languages, each named in itself; the current one checked
+    const langMenu = h('div', { class: 'popover menu', id: 'lang-menu', role: 'menu', hidden: true });
+    const langBtn = h(
+      'button',
+      { type: 'button', id: 'btn-lang', class: 'btn btn-quiet lang-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('header.language'), onclick: () => this.popovers.toggle(langBtn, langMenu) },
+      icon(ICONS.lang),
+      h('span', { class: 'lang-short' }, langInfo().short),
+    ) as HTMLButtonElement;
+    tip(langBtn, t('header.language'));
+    for (const l of LANGS) {
+      const check = icon(ICONS.check);
+      check.classList.add('menu-check');
+      langMenu.append(
+        h('button', { type: 'button', id: `lang-${l.code}`, class: 'menu-item', role: 'menuitemradio', lang: htmlLang(l.code), 'aria-checked': String(l.code === getLang()), onclick: () => (this.popovers.close(), setLang(l.code)) }, check, h('span', {}, l.label)),
+      );
+    }
+    // light / dark shell: the icon shows what a click switches to
+    this.themeBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-theme', onclick: () => toggleTheme() }) as HTMLButtonElement;
+    tips.attach(this.themeBtn, () => ({ label: t(getTheme() === 'dark' ? 'theme.light' : 'theme.dark') }));
+    this.paintThemeButton();
+    const help = h('button', { type: 'button', class: 'icon-btn', id: 'btn-help', 'aria-label': t('header.help'), onclick: () => this.showHelp() }, icon(ICONS.help));
+    tip(help, t('header.help'), '?');
     this.specimenBar = this.buildSpecimenBar();
-    this.appModeSeg = segmented('app-mode', null, APP_MODES.map((m) => ({ value: m, label: t(`appMode.${m}`), title: `${t(`appMode.${m}`)} (M)` })), this.mode, (v) =>
-      this.setMode(v as AppMode),
-    );
-    this.appModeSeg.el.classList.add('seg-app-mode');
-    this.appModeSeg.el.setAttribute('aria-label', t('appMode.label'));
+    this.appModeSeg = this.buildModeSwitch();
     return h(
       'header',
       { class: 'topbar' },
@@ -480,19 +529,47 @@ export class App implements AppApi {
         h('span', { class: 'hdr-sep', 'aria-hidden': 'true' }),
         this.undoBtn,
         this.redoBtn,
-        h('button', { type: 'button', class: 'btn btn-quiet hdr-btn', id: 'btn-lang', title: t('header.otherLang'), onclick: () => setLang(getLang() === 'zh' ? 'en' : 'zh') }, icon(ICONS.lang), h('span', { class: 'btn-text' }, t('header.otherLang'))),
-        h('button', { type: 'button', class: 'icon-btn', id: 'btn-help', title: `${t('header.help')} (?)`, 'aria-label': t('header.help'), onclick: () => this.showHelp() }, icon(ICONS.help)),
+        h('span', { class: 'hdr-sep', 'aria-hidden': 'true' }),
+        h('div', { class: 'menu-wrap' }, langBtn, langMenu),
+        this.themeBtn,
+        help,
       ),
     );
   }
 
-  /** Specimen ID and unit in the top bar; annotator, notes and the model file in a small panel. */
+  private paintThemeButton(): void {
+    const b = this.themeBtn;
+    if (!b) return;
+    const dark = getTheme() === 'dark';
+    clear(b);
+    b.append(icon20(dark ? ICONS20.sun : ICONS20.moon));
+    b.setAttribute('aria-label', t(dark ? 'theme.light' : 'theme.dark'));
+  }
+
+  /** The work modes: icon and name (the name drops in narrow windows), M cycles through them. */
+  private buildModeSwitch(): ToolRow {
+    const buttons = APP_MODES.map((m) => {
+      const name = t(`appMode.${m}`);
+      const b = h(
+        'button',
+        { type: 'button', class: 'mode-btn', role: 'radio', id: `app-mode-${m}`, 'data-value': m, 'aria-checked': String(m === this.mode), 'aria-label': name, onclick: () => this.setMode(m) },
+        icon20(MODE_ICONS[m]),
+        h('span', { class: 'mode-label' }, name),
+      );
+      tip(b, name, 'M');
+      return b;
+    });
+    const el = h('div', { class: 'mode-switch', role: 'radiogroup', 'aria-label': t('appMode.label') }, ...buttons);
+    return { el, set: (v) => buttons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === v))) };
+  }
+
+  /** The specimen in the top bar: one button (name and unit) opening a panel with all its details. */
   private buildSpecimenBar(): HTMLElement {
-    const id = h('input', { id: 'specimen-id', class: 'ctl-text mono spec-id', type: 'text', 'aria-label': t('field.specimenId'), title: t('field.specimenId'), autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+    const id = h('input', { id: 'specimen-id', class: 'ctl-text mono', type: 'text', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
     id.addEventListener('input', () => updateSpecimen(this.store, { id: id.value }));
     const unit = h(
       'select',
-      { id: 'specimen-unit', class: 'ctl-select spec-unit', 'aria-label': t('field.unit'), title: t('field.unit') },
+      { id: 'specimen-unit', class: 'ctl-select' },
       ...['mm', 'cm', 'm', 'in'].map((u) => h('option', { value: u }, u)),
       h('option', { value: '' }, t('unit.unknown')),
     ) as HTMLSelectElement;
@@ -500,16 +577,25 @@ export class App implements AppApi {
       updateSpecimen(this.store, { unit: unit.value });
       writePref('unit', unit.value);
     });
+    const head = h(
+      'div',
+      { class: 'spec-head' },
+      h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'specimen-id' }, t('field.specimenId')), id),
+      h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'specimen-unit' }, t('field.unit')), unit),
+    );
     const annotator = textRow('specimen-annotator', t('field.annotator'), '', (v) => {
       updateSpecimen(this.store, { annotator: v });
       writePref('annotator', v);
     });
     const notes = textRow('specimen-notes', t('field.notes'), '', (v) => updateSpecimen(this.store, { notes: v }), { multiline: true });
-    const meta = h('dl', { class: 'meta', id: 'specimen-meta' });
-    const panel = h('div', { class: 'popover spec-panel', id: 'specimen-panel', hidden: true }, annotator.el, notes.el, meta);
-    const more = h('button', { type: 'button', class: 'icon-btn', id: 'specimen-more', 'aria-expanded': 'false', title: t('sec.specimen'), 'aria-label': t('sec.specimen'), onclick: () => this.popovers.toggle(more, panel) }, icon(ICONS.chevron));
-    this.specimenRefs = { id, unit, annotator: annotator.input, notes: notes.input, meta };
-    return h('div', { class: 'spec-bar', id: 'specimen-bar' }, id, unit, h('div', { class: 'menu-wrap' }, more, panel));
+    const meta = h('dl', { class: 'num-grid', id: 'specimen-meta' });
+    const panel = h('div', { class: 'popover spec-panel', id: 'specimen-panel', role: 'dialog', 'aria-label': t('sec.specimen'), hidden: true }, head, annotator.el, notes.el, meta);
+    const name = h('span', { class: 'spec-name', id: 'specimen-name' });
+    const unitText = h('span', { class: 'spec-unit', id: 'specimen-unit-text' });
+    const more = h('button', { type: 'button', class: 'spec-btn', id: 'specimen-more', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', onclick: () => this.popovers.toggle(more, panel) }, name, unitText, icon(ICONS.chevron));
+    tip(more, t('sec.specimen'));
+    this.specimenRefs = { id, unit, annotator: annotator.input, notes: notes.input, meta, name, unitText };
+    return h('div', { class: 'menu-wrap spec-bar', id: 'specimen-bar' }, more, panel);
   }
 
   private updateSpecimenBar(): void {
@@ -521,15 +607,16 @@ export class App implements AppApi {
     if (r.unit.value !== st.specimen.unit) r.unit.value = st.specimen.unit;
     softSet(r.annotator, st.specimen.annotator);
     softSet(r.notes, st.specimen.notes);
+    r.name.textContent = st.specimen.id || t('specimen.untitled');
+    r.name.classList.toggle('is-untitled', !st.specimen.id);
+    r.unitText.textContent = st.specimen.unit || t('unit.unknown');
     clear(r.meta);
     const m = st.mesh;
-    if (m)
-      r.meta.append(
-        h('dt', {}, t('mesh.file')),
-        h('dd', { title: `SHA-256 ${m.sha256}` }, m.fileName),
-        h('dt', {}, t('mesh.size')),
-        h('dd', {}, t('status.mesh', { v: m.vertexCount.toLocaleString('en-US'), t: m.triangleCount.toLocaleString('en-US') })),
-      );
+    if (m) {
+      const [dt, dd] = textValueRow(t('mesh.file'), m.fileName);
+      dd.title = `SHA-256 ${m.sha256}`;
+      r.meta.append(dt, dd, ...numRow(t('mesh.vertices'), fmtCount(m.vertexCount), '', 'specimen-vertices'), ...numRow(t('mesh.triangles'), fmtCount(m.triangleCount), '', 'specimen-triangles'));
+    }
   }
 
   /** The display settings: a button at the top right of the view and its panel. */
@@ -543,10 +630,10 @@ export class App implements AppApi {
       const room = r.top >= b.bottom ? vp.bottom - r.top - 12 : b.top - vp.top - 18;
       if (r.height > room) panel.style.maxHeight = `${Math.max(120, room)}px`;
     };
-    const button = h('button', { type: 'button', class: 'btn btn-quiet vp-btn', id: 'btn-display', 'aria-expanded': 'false', title: t('sec.display'), onclick: () => {
+    const button = h('button', { type: 'button', class: 'btn vp-btn', id: 'btn-display', 'aria-expanded': 'false', onclick: () => {
       this.popovers.toggle(button, panel);
       fit();
-    } }, icon(ICONS.sliders), h('span', { class: 'btn-text' }, t('sec.display')));
+    } }, icon20(ICONS20.display), h('span', { class: 'btn-text' }, t('sec.display')));
     const el = h('div', { class: 'viewport-ui vp-display' }, button, panel);
     this.popovers.close();
     if (this.displayCtl) this.displayCtl.replaceWith(el);
@@ -588,50 +675,72 @@ export class App implements AppApi {
     this.resizerEl = handle;
   }
 
+  /** The tools of one work mode (`prefix` names their ids, e.g. `mode-draw`). */
+  private toolRow(prefix: string, label: string, tools: Array<{ value: string; icon: string; name: string; key: string }>): ToolRow {
+    const buttons = tools.map((tool) => {
+      const b = h(
+        'button',
+        { type: 'button', class: 'tool-btn', role: 'radio', id: `${prefix}-${tool.value}`, 'data-value': tool.value, 'aria-checked': 'false', 'aria-label': `${tool.name} (${tool.key})`, onclick: () => this.setTool(tool.value) },
+        icon20(tool.icon),
+        h('span', { class: 'tool-name' }, tool.name),
+        h('span', { class: 'tool-key', 'aria-hidden': 'true' }, tool.key),
+      );
+      tip(b, tool.name, tool.key);
+      return b;
+    });
+    const el = h('div', { class: 'tool-group', role: 'radiogroup', 'aria-label': label }, ...buttons);
+    const set = (v: string) => buttons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === v)));
+    set(this.tools?.activeId ?? 'select');
+    return { el, set };
+  }
+
   private buildToolbar(): void {
     clear(this.toolbarEl);
-    this.modeSeg = segmented('mode', null, [
-      { value: 'select', label: `${t('mode.select')}  V` },
-      { value: 'draw', label: `${t('mode.draw')}  A` },
-      { value: 'curve', label: `${t('mode.curve')}  P` },
-      { value: 'region', label: `${t('tool.region')}  R` },
-      { value: 'relation', label: `${t('tool.relation')}  B` },
-      { value: 'landmark', label: `${t('tool.landmark')}  K` },
-    ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
-    this.modeSeg.el.classList.add('seg-mode');
+    const select = { value: 'select', icon: ICONS20.select, name: t('mode.select'), key: 'V' };
+    this.modeSeg = this.toolRow('mode', t('appMode.annotate'), [
+      select,
+      { value: 'draw', icon: ICONS20.arrow, name: t('mode.draw'), key: 'A' },
+      { value: 'curve', icon: ICONS20.curve, name: t('mode.curve'), key: 'P' },
+      { value: 'region', icon: ICONS20.region, name: t('tool.region'), key: 'R' },
+      { value: 'relation', icon: ICONS20.relation, name: t('tool.relation'), key: 'B' },
+      { value: 'landmark', icon: ICONS20.landmark, name: t('tool.landmark'), key: 'K' },
+    ]);
+    this.measureSeg = this.toolRow('measure-tool', t('appMode.measure'), [select, ...MEASURE_TOOLS.map(([value, key, k, ic]) => ({ value, icon: ic, name: t(key), key: k }))]);
+    this.presentSeg = this.toolRow('present-tool', t('appMode.present'), [select, { value: 'section', icon: ICONS20.section, name: t('tool.section'), key: 'X' }]);
     this.snapSeg = segmented('snap', null, SNAP_MODES.map((m) => ({ value: m, label: t(`snap.${m}`) })), this.display.curveSnap, (v) =>
       this.setDisplay((d) => (d.curveSnap = v as SnapMode), 'snap'),
     );
     this.snapSeg.el.setAttribute('aria-label', t('snap.label'));
-    this.snapEl = h('div', { class: 'tb-snap', id: 'snap-control', title: `${t('snap.label')} (S)` }, icon(ICONS.magnet), this.snapSeg.el);
-    this.measureSeg = segmented('measure-tool', null, [
-      { value: 'select', label: `${t('mode.select')}  V` },
-      ...MEASURE_TOOLS.map(([id, key, k]) => ({ value: id, label: `${t(key)}  ${k}` })),
-    ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
-    this.measureSeg.el.classList.add('seg-mode');
-    this.presentSeg = segmented('present-tool', null, [
-      { value: 'select', label: `${t('mode.select')}  V` },
-      { value: 'section', label: `${t('tool.section')}  X` },
-    ], this.tools?.activeId ?? 'select', (v) => this.setTool(v));
-    this.presentSeg.el.classList.add('seg-mode');
-    const fit = h('button', { type: 'button', class: 'icon-btn tb-btn', id: 'btn-fit', title: `${t('view.fit')} (H)`, 'aria-label': t('view.fit'), onclick: () => this.viewer?.fitView() }, icon(ICONS.fit));
-    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.snapEl, fit);
+    this.snapEl = h('div', { class: 'tb-snap', id: 'snap-control' }, icon(ICONS.magnet), this.snapSeg.el);
+    tip(this.snapEl, t('snap.label'), 'S');
+    this.toolSep = h('span', { class: 'tb-sep', 'aria-hidden': 'true' });
+    const fit = h('button', { type: 'button', class: 'tool-btn', id: 'btn-fit', 'aria-label': `${t('view.fit')} (H)`, onclick: () => this.viewer?.viewAll(true) }, icon20(ICONS20.fit), h('span', { class: 'tool-key', 'aria-hidden': 'true' }, 'H'));
+    tip(fit, t('view.fit'), 'H');
+    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.toolSep, fit, this.snapEl);
     this.updateToolbar();
   }
 
-  /** Tools of the current work mode only. */
+  /** Tools of the current work mode only (the compare mode has none, only the full view). */
   private updateToolbar(): void {
     const annotate = this.mode === 'annotate';
     if (this.modeSeg) this.modeSeg.el.hidden = !annotate;
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
     if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
+    if (this.toolSep) this.toolSep.hidden = this.mode === 'compare';
     if (this.snapEl) this.snapEl.hidden = !annotate || !['curve', 'landmark'].includes(this.tools?.activeId ?? '');
   }
 
+  /** Without a model: open one (or a folder, or a project); dropping a file works too. */
   private buildEmptyState(): void {
     clear(this.emptyEl);
     this.emptyEl.append(
       h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.cube), t('header.openMesh')),
+      h(
+        'div',
+        { class: 'vp-empty-row' },
+        h('button', { type: 'button', class: 'btn', id: 'empty-open-folder', onclick: () => void this.openFolder() }, icon(ICONS.open), t('header.openFolder')),
+        h('button', { type: 'button', class: 'btn', id: 'empty-open-project', onclick: () => this.openProject() }, icon(ICONS.project), t('header.openProject')),
+      ),
       h('span', { class: 'vp-empty-formats mono' }, 'PLY · STL · OBJ'),
     );
   }
@@ -662,8 +771,6 @@ export class App implements AppApi {
     const hst = this.store.history;
     this.undoBtn.disabled = !hst.canUndo;
     this.redoBtn.disabled = !hst.canRedo;
-    this.undoBtn.title = hst.undoLabelKey ? `${t('header.undo')}: ${t(hst.undoLabelKey)} (Ctrl+Z)` : `${t('header.undo')} (Ctrl+Z)`;
-    this.redoBtn.title = hst.redoLabelKey ? `${t('header.redo')}: ${t(hst.redoLabelKey)} (Ctrl+Shift+Z)` : `${t('header.redo')} (Ctrl+Shift+Z)`;
   }
 
   private updateMeshDependentUi(): void {
@@ -703,21 +810,17 @@ export class App implements AppApi {
       this.coordsQueued = false;
       const hit = this.lastHover;
       const m = this.store.state.mesh;
-      let text = '';
+      clear(this.coordEl);
       if (hit) {
-        const u = this.store.state.specimen.unit;
-        text = `${t('status.cursor', { x: fmtNum(hit.point.x, 2), y: fmtNum(hit.point.y, 2), z: fmtNum(hit.point.z, 2) })}${u ? ` ${u}` : ''}`;
+        // three right-aligned columns of fixed width, so the reading does not jump
+        const u = quantityUnit('coord', this.store.state.specimen.unit);
+        for (const [k, v] of [['x', hit.point.x], ['y', hit.point.y], ['z', hit.point.z]] as const)
+          this.coordEl.append(h('span', { class: 'coord-k' }, k), h('span', { class: 'coord-v' }, fmtQuantity('coord', v)));
+        if (u) this.coordEl.append(h('span', { class: 'unit' }, ` ${u}`));
       } else if (m) {
-        text = t('status.mesh', { v: m.vertexCount.toLocaleString('en-US'), t: m.triangleCount.toLocaleString('en-US') });
+        this.coordEl.textContent = t('status.mesh', { v: fmtCount(m.vertexCount), t: fmtCount(m.triangleCount) });
       }
-      this.coordEl.textContent = text;
     });
-  }
-
-  private applyBackground(): void {
-    this.viewportEl.dataset.bg = this.display.background;
-    const bg = getComputedStyle(this.viewportEl).getPropertyValue('--viewport-bg').trim() || '#d6dad4';
-    this.viewer?.setBackground(bg);
   }
 
   // ------------------------------------------------------------ state → view
@@ -819,10 +922,11 @@ export class App implements AppApi {
     if (mode === this.mode) return;
     // tools belong to their mode; an unfinished curve is kept (as on Esc)
     this.relationPop?.close();
+    this.tools?.activeTool?.clearHover?.();
     this.setTool('select');
     this.mode = mode;
     writePref('mode', mode);
-    if (mode === 'present') this.viewFrame();
+    if (mode === 'present') this.viewFrame(false);
     if (mode === 'compare' && this.agreementStale) this.scheduleAgreement();
     this.viewportEl.dataset.mode = mode;
     this.appModeSeg?.set(mode);
@@ -852,7 +956,6 @@ export class App implements AppApi {
     switch (aspect) {
       case 'light':
         this.lights?.set(this.display.light);
-        this.meshView?.setRoughness(0.95 - 0.7 * this.display.gloss);
         this.viewer?.requestRender();
         break;
       case 'shading':
@@ -867,10 +970,6 @@ export class App implements AppApi {
           // curves snap at the shading scale
           this.refreshCurveTool();
         }, 120);
-        break;
-      case 'background':
-        this.applyBackground();
-        this.sidebar.refresh('display');
         break;
       case 'arrows':
         this.syncAnnotations();
@@ -924,7 +1023,7 @@ export class App implements AppApi {
     const ln = Math.hypot(n[0], n[1], n[2]);
     const toward: Vec3 = ln > 1e-6 ? [n[0] / ln, n[1] / ln, n[2] / ln] : v.towardViewer();
     const len = Math.hypot(a.end[0] - a.start[0], a.end[1] - a.start[1], a.end[2] - a.start[2]);
-    v.viewFrom(toward, v.cameraUp(), mid, Math.max(len * 3.2, v.diagonal * 0.4));
+    v.viewFrom(toward, v.cameraUp(), mid, Math.max(len * 3.2, v.diagonal * 0.4), true);
   }
 
   focusCurve(id: string): void {
@@ -957,7 +1056,7 @@ export class App implements AppApi {
     const len = Math.hypot(...dir);
     let toward: Vec3 = len > 1e-9 ? [dir[0] / len, dir[1] / len, dir[2] / len] : cur;
     if (c.closed && toward[0] * cur[0] + toward[1] * cur[1] + toward[2] * cur[2] < 0) toward = [-toward[0], -toward[1], -toward[2]];
-    v.viewFrom(toward, v.cameraUp(), center, Math.max(size * 2.2, v.diagonal * 0.35));
+    v.viewFrom(toward, v.cameraUp(), center, Math.max(size * 2.2, v.diagonal * 0.35), true);
   }
 
   private stem(): string {
@@ -968,9 +1067,9 @@ export class App implements AppApi {
   /** "12.345 mm" or "37.2°". */
   formatMeasurement(m: Measurement): string {
     const v = measurementValue(m);
-    if (m.type === 'angle') return `${fmtNum(v, 1)}°`;
+    if (m.type === 'angle') return `${fmtQuantity('angle', v)}°`;
     const u = measurementUnit(m, this.store.state.specimen.unit);
-    return `${fmtNum(v, 3)}${u ? ` ${u}` : ''}`;
+    return `${fmtQuantity('length', v)}${u ? ` ${u}` : ''}`;
   }
 
   autoMeasurements(): AutoMeasurements | null {
@@ -992,7 +1091,7 @@ export class App implements AppApi {
     const r = this.planes.find((p) => p.id === id);
     if (!r?.valid || !this.viewer) return;
     const m = r.matrix!;
-    this.viewer.viewFrom(r.normal!, [m[4], m[5], m[6]], r.center!);
+    this.viewer.viewFrom(r.normal!, [m[4], m[5], m[6]], r.center!, undefined, true);
   }
 
   /** Centre of the model's bounding box: the origin of specimen coordinates. */
@@ -1001,10 +1100,11 @@ export class App implements AppApi {
     return m ? [(m.bboxMin[0] + m.bboxMax[0]) / 2, (m.bboxMin[1] + m.bboxMax[1]) / 2, (m.bboxMin[2] + m.bboxMax[2]) / 2] : null;
   }
 
+  /** `merge`: one undo step with the last change (fine turning), and no camera transition (it follows the slider). */
   private setFrame(matrix: number[] | null, source: string, merge = false): void {
     if (!matrix) return;
     updateSpecimen(this.store, { frame: { matrix: matrix.map((x) => Math.round(x * 1e9) / 1e9), source } }, merge);
-    this.viewFrame();
+    this.viewFrame(!merge);
   }
 
   setFrameFromView(): void {
@@ -1043,12 +1143,12 @@ export class App implements AppApi {
     if (this.store.state.specimen.frame) updateSpecimen(this.store, { frame: null }, false);
   }
 
-  /** Put the camera on the specimen frame: looking at the main face, +Y up. */
-  viewFrame(): void {
+  /** Put the camera on the specimen frame: looking at the main face, +Y up (`animate`: in a short transition). */
+  viewFrame(animate = true): void {
     const f = this.store.state.specimen.frame;
     if (!f || !this.viewer) return;
     const a = frameAxes(f.matrix);
-    this.viewer.viewFrom(a.z, a.y);
+    this.viewer.viewFrom(a.z, a.y, undefined, undefined, animate);
   }
 
   setFigure(change: (f: FigureSettings) => void): void {
@@ -2384,7 +2484,7 @@ export class App implements AppApi {
     }
     const f = this.nodule;
     if (f && this.store.state.nodule.show && this.mode === 'measure') {
-      this.noduleMesh = new THREE.Mesh(new THREE.SphereGeometry(f.radius, 48, 24), new THREE.MeshBasicMaterial({ color: '#d9a441', wireframe: true, transparent: true, opacity: 0.45 }));
+      this.noduleMesh = new THREE.Mesh(new THREE.SphereGeometry(f.radius, 48, 24), new THREE.MeshBasicMaterial({ color: REGION_COLORS.cortex, wireframe: true, transparent: true, opacity: 0.45 }));
       this.noduleMesh.position.set(...f.center);
       v.overlay.add(this.noduleMesh);
     }
@@ -2472,10 +2572,6 @@ export class App implements AppApi {
 
   openProject(): void {
     this.projectInput.click();
-  }
-
-  openModel(): void {
-    this.meshInput.click();
   }
 
   private async save(name: string, text: string, mime: string): Promise<void> {
@@ -2573,7 +2669,7 @@ export class App implements AppApi {
     this.planes = [];
     this.loaded = loaded;
     this.meshView = new MeshView(loaded);
-    this.meshView.setRoughness(0.95 - 0.7 * this.display.gloss);
+    this.meshView.setRoughness(0.95 - 0.7 * GLOSS);
     const g = loaded.geometry;
     this.curvature = new CurvatureService(
       g.getAttribute('position').array as Float32Array,
@@ -2883,7 +2979,7 @@ export class App implements AppApi {
           this.deleteSelection(e);
           return;
         case 'KeyH':
-          this.viewer?.fitView();
+          this.viewer?.viewAll(true);
           return;
         case 'PageDown':
         case 'PageUp':
@@ -2943,75 +3039,107 @@ export class App implements AppApi {
     });
   }
 
+  /**
+   * Select tool: the item under the cursor changed or the cursor moved over it; after a
+   * pause its label and kind are shown next to the cursor ("S2 · Scar arrow").
+   */
+  private hoverTip(item: { id: string; x: number; y: number } | null): void {
+    clearTimeout(this.hoverTipTimer);
+    tips.hideAt();
+    if (!item) return;
+    this.hoverTipTimer = window.setTimeout(() => {
+      const s = this.store;
+      const scar = s.scar(item.id), curve = s.curve(item.id), landmark = s.landmark(item.id), m = s.measurement(item.id);
+      const label = scar
+        ? `${scar.label} · ${t('hover.arrow')}`
+        : curve
+          ? `${curve.label} · ${t('hover.curve')}`
+          : landmark
+            ? `${landmark.name} · ${t('hover.landmark')}`
+            : m
+              ? `${m.label} · ${t(`measure.type.${m.type}`)}`
+              : null;
+      if (label) tips.showAt(item.x, item.y, { label });
+    }, 300);
+  }
+
+  /** The shortcuts: two columns (general and mouse; the modes), keys as key caps, no explanations. */
   private showHelp(): void {
     const count = Math.max(numberKeyField(SCAR_FIELDS)?.options?.length ?? 0, numberKeyField(CURVE_FIELDS)?.options?.length ?? 0) || 5;
-    const groups: Array<[string, Array<[string, string]>]> = [
-      [
-        t('help.group.general'),
-        [
-          ['M', t('help.k.mode')],
-          ['V', t('help.k.select')],
-          ['Delete', t('help.k.delete')],
-          ['Ctrl+Z / Ctrl+Shift+Z', t('help.k.undo')],
-          ['Ctrl+S', t('help.k.save')],
-          ['PageUp / PageDown', t('help.k.workspace')],
-          ['H', t('help.k.fit')],
-          ['C', t('help.k.centre')],
-          ['L', t('help.k.light')],
-          ['Space', t('help.k.space')],
-          ['Esc', t('help.k.esc')],
-        ],
-      ],
-      [
-        t('appMode.annotate'),
-        [
-          ['A', t('help.k.draw')],
-          ['P', t('help.k.curve')],
-          ['R', t('help.k.region')],
-          ['B', t('help.k.relation')],
-          ['1 / 2 / 3 · Delete', t('help.k.relationPick')],
-          ['K', t('help.k.landmark')],
-          ['S', t('help.k.snap')],
-          ['Shift', t('help.k.shift')],
-          ['Enter', t('help.k.finish')],
-          ['Backspace', t('help.k.back')],
-          [`1 – ${count}`, t('help.k.complete')],
-          ['] / [', t('help.k.next')],
-        ],
-      ],
-      [
-        t('appMode.measure'),
-        [
-          ['D / G / N', t('help.k.measure')],
-          ['Backspace', t('help.k.measureBack')],
-        ],
-      ],
-      [t('appMode.present'), [['X', t('help.k.section')]]],
+    /** Keys ("Ctrl+Z / Ctrl+Shift+Z", "1 / 2 / 3 · Delete") as key caps; `hold`: to be held down. */
+    const keys = (spec: string, hold: boolean): HTMLElement => {
+      const dt = h('dt', {});
+      if (hold) dt.append(h('span', { class: 'help-hold' }, t('help.hold')), ' ');
+      spec.split(/( \/ | · | – )/).forEach((part, i) => dt.append(i % 2 ? h('span', { class: 'help-key-sep' }, part) : h('kbd', {}, part)));
+      return dt;
+    };
+    type Row = [string, string, boolean?];
+    const group = (title: string, rows: Row[], mouse = false): HTMLElement[] => [
+      h('h3', {}, title),
+      h('dl', {}, ...rows.flatMap(([k, v, hold]) => [mouse ? h('dt', { class: 'help-mouse' }, t(k)) : keys(k, !!hold), h('dd', {}, t(v))])),
     ];
-    const mouse: Array<[string, string]> = [
-      [t('help.m.rotate'), t('help.m.rotateKeys')],
-      [t('help.m.pan'), t('help.m.panKeys')],
-      [t('help.m.zoom'), t('help.m.zoomKeys')],
-      [t('help.m.centre'), t('help.m.centreKeys')],
-      [t('help.m.close'), t('help.m.closeKeys')],
-    ];
-    const body = h(
+    const left = h(
       'div',
-      { class: 'help' },
-      ...groups.flatMap(([title, rows]) => [
-        h('h3', { class: 'help-group' }, title),
-        h('dl', { class: 'help-keys' }, ...rows.flatMap(([k, v]) => [h('dt', {}, h('kbd', {}, k)), h('dd', {}, v)])),
+      { class: 'help-col' },
+      ...group(t('help.group.general'), [
+        ['M', 'help.k.mode'],
+        ['V', 'help.k.select'],
+        ['H', 'help.k.fit'],
+        ['C', 'help.k.centre'],
+        ['L', 'help.k.light', true],
+        ['Space', 'help.k.space', true],
+        ['Esc', 'help.k.esc'],
+        ['Delete', 'help.k.delete'],
+        ['Ctrl+Z / Ctrl+Shift+Z', 'help.k.undo'],
+        ['Ctrl+S', 'help.k.save'],
+        ['PageUp / PageDown', 'help.k.workspace'],
       ]),
-      h('hr', { class: 'rule' }),
-      h('dl', { class: 'help-keys' }, ...mouse.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
+      ...group(
+        t('help.group.mouse'),
+        [
+          ['help.m.leftDrag', 'help.m.rotate'],
+          ['help.m.rightDrag', 'help.m.rotateDrawing'],
+          ['help.m.middleDrag', 'help.m.pan'],
+          ['help.m.wheel', 'help.m.zoom'],
+          ['help.m.dblclick', 'help.m.centre'],
+          ['help.m.firstPoint', 'help.m.close'],
+        ],
+        true,
+      ),
     );
-    void this.feedback.choose(t('help.title'), body, [{ id: 'close', label: t('dlg.close'), kind: 'primary' }]);
+    const right = h(
+      'div',
+      { class: 'help-col' },
+      ...group(t('appMode.annotate'), [
+        ['A', 'help.k.draw'],
+        ['P', 'help.k.curve'],
+        ['R', 'help.k.region'],
+        ['B', 'help.k.relation'],
+        ['K', 'help.k.landmark'],
+        ['1 / 2 / 3 · Delete', 'help.k.relationPick'],
+        [`1 – ${count}`, 'help.k.complete'],
+        ['S', 'help.k.snap'],
+        ['Shift', 'help.k.shift', true],
+        ['Enter', 'help.k.finish'],
+        ['Backspace', 'help.k.back'],
+        ['] / [', 'help.k.next'],
+      ]),
+      ...group(t('appMode.measure'), [
+        ['D / G / N', 'help.k.measure'],
+        ['Backspace', 'help.k.back'],
+      ]),
+      ...group(t('appMode.present'), [['X', 'help.k.section']]),
+    );
+    const body = h('div', { class: 'help-cols', id: 'help-cols' }, left, right);
+    void this.feedback.choose(t('help.title'), body, [{ id: 'close', label: t('dlg.close'), kind: 'primary' }], { wide: true });
   }
 
   /** Small hook for automated tests and power users (window.lithicanalyst). */
   private exposeDebugApi(): void {
     const api = {
       version: __APP_VERSION__,
+      /** The shell's appearance (light or dark). */
+      theme: () => getTheme(),
       state: () => this.store.state,
       selection: () => this.selection.id,
       project: (p: Vec3) => this.viewer?.project(new THREE.Vector3(p[0], p[1], p[2])),

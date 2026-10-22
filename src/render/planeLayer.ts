@@ -2,11 +2,16 @@ import * as THREE from 'three';
 import type { Polyline } from '../compute/meshGeometry';
 import type { PlaneResult } from '../compute/planes';
 import type { Plane, Vec3 } from '../core/types';
-import { CurveVisual, WIDTH, WIDTH_SELECTED } from './curveLayer';
+import { CurveVisual } from './curveLayer';
 import type { Viewer } from './viewer';
 
-/** One colour per plane, by its number (P1, P2, …). */
-export const PLANE_COLORS = ['#ff8a3d', '#2ec4b6', '#f4d35e', '#9b8cff', '#ff6fa8', '#7bd389'];
+/** One colour per plane, by its number (P1, P2, …); no yellow (it means selected). */
+export const PLANE_COLORS = ['#ff8a3d', '#2ec4b6', '#3a86ff', '#9b8cff', '#ff6fa8', '#7bd389'];
+
+/** Where a plane cuts the model: thinner than curves, with a thinner dark outline. */
+const SECTION_WIDTH = 1.6;
+const SECTION_WIDTH_SELECTED = 2.4;
+const SECTION_HALO = 1.2;
 
 export function planeColor(label: string): string {
   const n = Number(/(\d+)$/.exec(label)?.[1] ?? 1);
@@ -49,7 +54,7 @@ class PlaneVisual {
     this.arrow.setDirection(n);
     this.arrow.setLength(arrowLength, arrowLength * 0.18, arrowLength * 0.09);
     this.arrow.setColor(color);
-    for (const s of this.sections) s.style(color, selected ? WIDTH_SELECTED : WIDTH, false);
+    for (const s of this.sections) s.style(color, selected ? SECTION_WIDTH_SELECTED : SECTION_WIDTH, false, 1, SECTION_HALO);
   }
 
   setSections(lines: Polyline[] | null, color: string, selected: boolean, origin: Vec3): void {
@@ -62,7 +67,7 @@ class PlaneVisual {
     this.sections = (lines ?? []).map((l) => {
       const v = new CurveVisual(false);
       v.setPoints(l.points, l.closed, origin);
-      v.style(color, selected ? WIDTH_SELECTED : WIDTH, false);
+      v.style(color, selected ? SECTION_WIDTH_SELECTED : SECTION_WIDTH, false, 1, SECTION_HALO);
       this.root.add(v.root);
       return v;
     });

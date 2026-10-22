@@ -27,8 +27,9 @@ interface CurveDrag {
 }
 
 /**
- * Select arrows and curves, drag arrow endpoints and curve points (the
- * neighbouring stretches are traced again), double-click to set the rotation centre.
+ * Select arrows, curves, landmarks and measurements, drag arrow endpoints and curve
+ * points (the neighbouring stretches are traced again), double-click to set the
+ * rotation centre. What a click would select is shown under the cursor (hover).
  */
 export class SelectTool implements Tool {
   readonly id = 'select';
@@ -37,6 +38,10 @@ export class SelectTool implements Tool {
   private curveDrag: CurveDrag | null = null;
   private overHandle: 'start' | 'end' | null = null;
   private overAnchor: number | null = null;
+  /** The item a click would select now, and the pick waiting for the next frame. */
+  private hovered: string | null = null;
+  private hoverAt: { x: number; y: number } | null = null;
+  private hoverFrame = 0;
 
   constructor(private readonly ctx: ToolContext) {}
 
@@ -45,6 +50,7 @@ export class SelectTool implements Tool {
   }
 
   deactivate(): void {
+    this.clearHover();
     this.endDrag(false);
     this.endCurveDrag(false);
     this.down = null;
@@ -55,6 +61,7 @@ export class SelectTool implements Tool {
   }
 
   pointerDown(e: PointerEvent): boolean {
+    this.clearHover();
     if (e.button !== 0) return false;
     if (!this.ctx.editable()) {
       this.down = { x: e.clientX, y: e.clientY };
@@ -112,7 +119,51 @@ export class SelectTool implements Tool {
         this.ctx.curves.highlightAnchor(anchor);
         this.ctx.changed();
       }
+      if (over || anchor !== null) this.setHovered(null);
+      else this.queueHover(e.clientX, e.clientY);
     }
+  }
+
+  pointerLeave(): void {
+    this.clearHover();
+  }
+
+  /** The item nearest the cursor that a click would select (the same pick as a click). */
+  private pick(x: number, y: number): { id: string; dist: number } | null {
+    const picks = [this.ctx.arrows.pickNearest(x, y), this.ctx.curves.pickNearest(x, y), this.ctx.landmarks.pickNearest(x, y), this.ctx.measures.pickNearest(x, y)];
+    return picks.reduce<{ id: string; dist: number } | null>((best, p) => (p && (!best || p.dist < best.dist) ? p : best), null);
+  }
+
+  /** Pick at most once a frame (the BVH answers each ray; nothing runs over the whole mesh). */
+  private queueHover(x: number, y: number): void {
+    this.hoverAt = { x, y };
+    if (this.hoverFrame) return;
+    this.hoverFrame = requestAnimationFrame(() => {
+      this.hoverFrame = 0;
+      const at = this.hoverAt;
+      if (!at) return;
+      const id = this.pick(at.x, at.y)?.id ?? null;
+      this.setHovered(id);
+      if (id) this.ctx.hovered({ id, x: at.x, y: at.y });
+    });
+  }
+
+  private setHovered(id: string | null): void {
+    if (id === this.hovered) return;
+    this.hovered = id;
+    this.ctx.arrows.setHoverItem(id);
+    this.ctx.curves.setHoverItem(id);
+    this.ctx.landmarks.setHoverItem(id);
+    this.ctx.measures.setHoverItem(id);
+    if (!id) this.ctx.hovered(null);
+    this.ctx.changed();
+  }
+
+  clearHover(): void {
+    cancelAnimationFrame(this.hoverFrame);
+    this.hoverFrame = 0;
+    this.hoverAt = null;
+    this.setHovered(null);
   }
 
   pointerUp(e: PointerEvent): void {
@@ -125,9 +176,7 @@ export class SelectTool implements Tool {
       return;
     }
     if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) <= CLICK_PX && e.button === 0) {
-      const picks = [this.ctx.arrows.pickNearest(e.clientX, e.clientY), this.ctx.curves.pickNearest(e.clientX, e.clientY), this.ctx.landmarks.pickNearest(e.clientX, e.clientY)];
-      const pick = picks.reduce<{ id: string; dist: number } | null>((best, p) => (p && (!best || p.dist < best.dist) ? p : best), null);
-      this.ctx.selection.set(pick?.id ?? null);
+      this.ctx.selection.set(this.pick(e.clientX, e.clientY)?.id ?? null);
     }
     this.down = null;
   }
@@ -262,6 +311,7 @@ export class SelectTool implements Tool {
 
   cursor(): string {
     if (this.drag || this.curveDrag) return 'grabbing';
-    return this.overHandle || this.overAnchor !== null ? 'grab' : 'default';
+    if (this.overHandle || this.overAnchor !== null) return 'grab';
+    return this.hovered ? 'pointer' : 'default';
   }
 }

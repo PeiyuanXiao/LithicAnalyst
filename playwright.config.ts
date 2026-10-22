@@ -15,6 +15,8 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 1,
     locale: 'en-US',
+    // no transitions or fades: the camera is where it was sent at once
+    contextOptions: { reducedMotion: 'reduce' },
     trace: 'retain-on-failure',
     launchOptions: {
       args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],

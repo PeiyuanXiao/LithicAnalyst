@@ -4,8 +4,9 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { midPointIndex } from '../core/curveGeometry';
+import { defaultCurveAttributes } from '../core/fields';
 import type { Curve, ProjectState, Vec3 } from '../core/types';
-import { pointSegment2D, type ArrowDisplay } from './arrowLayer';
+import { HOT_HANDLE, pointSegment2D, type ArrowDisplay } from './arrowLayer';
 import type { Viewer } from './viewer';
 
 /** Curve colours by type; chosen to stay apart from the curvature ramp (ochre/slate) and the arrow colours. */
@@ -17,15 +18,20 @@ export const CURVE_COLORS = {
     other: '#f2f5f3',
   } as Record<string, string>,
   selected: '#ffc61a',
-  draft: '#ffc61a',
   halo: '#141a18',
 };
 
-export const curveColor = (c: Curve): string => CURVE_COLORS.types[String(c.attributes.type)] ?? CURVE_COLORS.types.other;
+export const curveColor = (c: Pick<Curve, 'attributes'>): string => CURVE_COLORS.types[String(c.attributes.type)] ?? CURVE_COLORS.types.other;
+
+/** A curve being drawn has the colour of the type it will get. */
+export const draftCurveColor = (): string => curveColor({ attributes: defaultCurveAttributes() });
 
 export const WIDTH = 2.6;
 export const WIDTH_SELECTED = 3.4;
-const HALO = 2.6;
+/** The item under the select tool's cursor: between the normal and the selected width. */
+export const WIDTH_HOVER = WIDTH + 0.6;
+/** How much wider than the core the dark halo is. */
+export const HALO = 2.6;
 
 /**
  * Lines lie exactly on the surface. Moving every vertex a little toward the
@@ -121,7 +127,8 @@ export class CurveVisual {
     }
   }
 
-  style(color: string, width: number, ghostOn: boolean, opacity = 1): void {
+  /** `halo`: how much wider than the core the dark outline is. */
+  style(color: string, width: number, ghostOn: boolean, opacity = 1, halo = HALO): void {
     const core = this.core.material as LineMaterial;
     core.color.set(color);
     core.linewidth = width;
@@ -130,12 +137,12 @@ export class CurveVisual {
       core.transparent = opacity < 1;
       core.needsUpdate = true;
     }
-    const halo = this.halo.material as LineMaterial;
-    halo.linewidth = width + HALO;
-    if (halo.opacity !== opacity) {
-      halo.opacity = opacity;
-      halo.transparent = opacity < 1;
-      halo.needsUpdate = true;
+    const outline = this.halo.material as LineMaterial;
+    outline.linewidth = width + halo;
+    if (outline.opacity !== opacity) {
+      outline.opacity = opacity;
+      outline.transparent = opacity < 1;
+      outline.needsUpdate = true;
     }
     const ghost = this.ghost.material as LineMaterial;
     ghost.color.set(color);
@@ -143,13 +150,14 @@ export class CurveVisual {
     this.ghost.visible = ghostOn;
   }
 
-  setLabel(text: string | null, color: string, selected: boolean): void {
+  setLabel(text: string | null, color: string, selected: boolean, hovered = false): void {
     if (!this.label) return;
     this.label.visible = text !== null && this.root.visible;
     if (text === null) return;
     const el = this.label.element;
     if (el.textContent !== text) el.textContent = text;
     el.classList.toggle('is-selected', selected);
+    el.classList.toggle('is-hover', hovered && !selected);
     el.style.setProperty('--chip', color);
   }
 
@@ -166,6 +174,43 @@ export class CurveVisual {
       this.root.remove(this.label);
     }
   }
+}
+
+/**
+ * The line (of these, by id) nearest a client position within `maxPx`, in screen space,
+ * with its distance in pixels; lines hidden there behind the surface are skipped.
+ */
+export function pickPolylines(viewer: Viewer, visuals: Iterable<[string, CurveVisual]>, clientX: number, clientY: number, maxPx: number): { id: string; dist: number } | null {
+  const rect = viewer.renderer.domElement.getBoundingClientRect();
+  const cam = viewer.camera;
+  const v = new THREE.Vector3();
+  const toScreen = (p: Vec3): [number, number, boolean] => {
+    v.set(p[0], p[1], p[2]).project(cam);
+    return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height, v.z > -1 && v.z < 1];
+  };
+  let best: { id: string; dist: number } | null = null;
+  for (const [id, vis] of visuals) {
+    if (!vis.root.visible || vis.points.length < 2) continue;
+    const pts = vis.points;
+    const n = pts.length + (vis.closed ? 1 : 0);
+    let prev = toScreen(pts[0]);
+    let local: { dist: number; i: number; t: number } | null = null;
+    for (let i = 1; i < n; i++) {
+      const cur = toScreen(pts[i % pts.length]);
+      if (prev[2] && cur[2]) {
+        const { dist, t } = pointSegment2D(clientX, clientY, prev[0], prev[1], cur[0], cur[1]);
+        if (dist < (local?.dist ?? maxPx)) local = { dist, i, t };
+      }
+      prev = cur;
+    }
+    if (!local || (best && local.dist >= best.dist)) continue;
+    const a = pts[local.i - 1];
+    const b = pts[local.i % pts.length];
+    const p = new THREE.Vector3(a[0] + (b[0] - a[0]) * local.t, a[1] + (b[1] - a[1]) * local.t, a[2] + (b[2] - a[2]) * local.t);
+    if (viewer.isOccluded(p, viewer.diagonal * 0.004)) continue;
+    best = { id, dist: local.dist };
+  }
+  return best;
 }
 
 /** Screen-size round handles for curve anchors, always drawn on top; hidden ones are left out. */
@@ -287,6 +332,16 @@ export class CurveLayer {
   fixedColor: string | null = null;
   /** Draw the curves faded (they are not what the current work mode is about). */
   dimmed = false;
+  /** The curve under the select tool's cursor. */
+  private hovered: string | null = null;
+
+  /** The curve under the select tool's cursor (an id of another layer, or null: none). */
+  setHoverItem(id: string | null): void {
+    const own = id !== null && this.visuals.has(id) ? id : null;
+    if (own === this.hovered) return;
+    this.hovered = own;
+    this.resync();
+  }
 
   sync(state: Readonly<ProjectState>, selected: string | null, display: ArrowDisplay, showHandles: boolean): void {
     this.last = { state, selected, display, handles: showHandles };
@@ -301,12 +356,13 @@ export class CurveLayer {
         this.group.add(v.root);
       }
       const isSel = c.id === selected;
+      const isHov = !isSel && c.id === this.hovered;
       const pts = this.override?.id === c.id ? this.override.points : c.points;
       v.setPoints(pts, c.closed, this.origin);
       const color = isSel ? CURVE_COLORS.selected : this.fixedColor ?? curveColor(c);
       const dim = this.dimmed && !isSel;
-      v.style(color, isSel ? WIDTH_SELECTED : WIDTH, display.showHidden && !dim, dim ? 0.3 : 1);
-      v.setLabel(display.labels ? c.label : null, color, isSel);
+      v.style(color, isSel ? WIDTH_SELECTED : isHov ? WIDTH_HOVER : WIDTH, display.showHidden && !dim, dim ? 0.3 : 1);
+      v.setLabel(display.labels ? c.label : null, color, isSel, isHov);
     }
     for (const [id, v] of this.visuals) {
       if (!seen.has(id)) {
@@ -334,7 +390,7 @@ export class CurveLayer {
     this.draftAnchors = anchors && anchors.length ? anchors : null;
     if (points && points.length >= 2) {
       this.draft.setPoints(points, false, this.origin);
-      this.draft.style(CURVE_COLORS.draft, WIDTH_SELECTED, true);
+      this.draft.style(draftCurveColor(), WIDTH_SELECTED, true);
     } else this.draft.root.visible = false;
     this.updateDots();
     this.viewer.requestRender();
@@ -344,7 +400,7 @@ export class CurveLayer {
   setLive(points: Vec3[] | null): void {
     if (points && points.length >= 2) {
       this.live.setPoints(points, false, this.origin);
-      this.live.style(CURVE_COLORS.draft, WIDTH, true, 0.75);
+      this.live.style(draftCurveColor(), WIDTH, true, 0.75);
     } else this.live.root.visible = false;
     this.viewer.requestRender();
   }
@@ -368,7 +424,7 @@ export class CurveLayer {
 
   private updateDots(): void {
     const anchors = this.handleAnchors();
-    const colors = anchors.map((_, i) => (i === this.hotAnchor ? CURVE_COLORS.selected : '#ffffff'));
+    const colors = anchors.map((_, i) => (i === this.hotAnchor ? HOT_HANDLE : '#ffffff'));
     this.dots.set(anchors, colors);
     this.dotsVisible = this.dots.rebuild(this.viewer, this.origin, this.viewer.renderer.getPixelRatio());
   }
@@ -404,36 +460,7 @@ export class CurveLayer {
   /** Curve under the cursor, in screen space, with its distance in pixels. */
   pickNearest(clientX: number, clientY: number, maxPx = 8): { id: string; dist: number } | null {
     if (!this.group.visible) return null;
-    const rect = this.viewer.renderer.domElement.getBoundingClientRect();
-    const cam = this.viewer.camera;
-    const v = new THREE.Vector3();
-    const toScreen = (p: Vec3): [number, number, boolean] => {
-      v.set(p[0], p[1], p[2]).project(cam);
-      return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height, v.z > -1 && v.z < 1];
-    };
-    let best: { id: string; dist: number } | null = null;
-    for (const [id, vis] of this.visuals) {
-      if (!vis.root.visible) continue;
-      const pts = vis.points;
-      const n = pts.length + (vis.closed ? 1 : 0);
-      let prev = toScreen(pts[0]);
-      let local: { dist: number; i: number; t: number } | null = null;
-      for (let i = 1; i < n; i++) {
-        const cur = toScreen(pts[i % pts.length]);
-        if (prev[2] && cur[2]) {
-          const { dist, t } = pointSegment2D(clientX, clientY, prev[0], prev[1], cur[0], cur[1]);
-          if (dist < (local?.dist ?? maxPx)) local = { dist, i, t };
-        }
-        prev = cur;
-      }
-      if (!local || (best && local.dist >= best.dist)) continue;
-      const a = pts[local.i - 1];
-      const b = pts[local.i % pts.length];
-      const p = new THREE.Vector3(a[0] + (b[0] - a[0]) * local.t, a[1] + (b[1] - a[1]) * local.t, a[2] + (b[2] - a[2]) * local.t);
-      if (this.viewer.isOccluded(p, this.viewer.diagonal * 0.004)) continue;
-      best = { id, dist: local.dist };
-    }
-    return best;
+    return pickPolylines(this.viewer, this.visuals, clientX, clientY, maxPx);
   }
 
   clearAll(): void {
@@ -445,6 +472,7 @@ export class CurveLayer {
     this.override = null;
     this.draftAnchors = null;
     this.hotAnchor = null;
+    this.hovered = null;
     this.draft.root.visible = false;
     this.live.root.visible = false;
     this.last = null;

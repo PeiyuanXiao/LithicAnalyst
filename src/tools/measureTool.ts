@@ -1,6 +1,7 @@
 import { addMeasurement } from '../core/actions';
 import { MEASURE_POINTS } from '../core/measurements';
 import type { MeasureType, Vec3 } from '../core/types';
+import { MEASURE_COLORS } from '../render/measureLayer';
 import type { SurfaceHit } from '../render/viewer';
 import type { HitProvider, Tool, ToolContext } from './tool';
 
@@ -65,7 +66,7 @@ export class MeasureTool implements Tool {
       return;
     }
     const h = hit();
-    this.ctx.arrows.setHover(h?.point ?? null, h?.normal);
+    this.ctx.arrows.setHover(h?.point ?? null, h?.normal, MEASURE_COLORS.draft);
     this.cursorPoint = h ? [h.point.x, h.point.y, h.point.z] : null;
     this.showDraft();
   }

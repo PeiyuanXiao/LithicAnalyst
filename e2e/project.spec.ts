@@ -1,13 +1,13 @@
 import type { Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { roofPly, roofPoint } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, openSection, setAnnotator, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
+import { counts, curveClick, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, openSection, setAnnotator, setUnit, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
 
 /** One arrow and one curve, with fields and specimen details filled in. */
 async function annotate(page: Page): Promise<void> {
   await viewFromTop(page);
   await setAnnotator(page, 'Observer 甲');
-  await page.locator('#specimen-unit').selectOption('cm');
+  await setUnit(page, 'cm');
   // the unit list keeps the focus (and the keys): use the toolbar
   await page.locator('#mode-draw').click();
   await dragArrow(page, roofPoint(-14, 10), roofPoint(-8, 22));
@@ -23,10 +23,13 @@ async function annotate(page: Page): Promise<void> {
   await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('scar_boundary');
 }
 
+/** Numbers to 12 significant digits: reading a file normalises the normals again, which may change the last bit. */
+const rounded = <T>(v: T): T => JSON.parse(JSON.stringify(v), (_k, x) => (typeof x === 'number' ? Number(x.toPrecision(12)) : x));
+
 /** The parts of the project a file must carry over. */
 const content = async (page: Page) => {
   const s = await state(page);
-  return { specimen: s.specimen, scars: s.scars, curves: s.curves, nextLabelNumber: s.nextLabelNumber, nextCurveNumber: s.nextCurveNumber };
+  return rounded({ specimen: s.specimen, scars: s.scars, curves: s.curves, nextLabelNumber: s.nextLabelNumber, nextCurveNumber: s.nextCurveNumber });
 };
 
 test('saves the project file and reads it back, here and in a fresh browser', async ({ page, browser }) => {
@@ -41,8 +44,8 @@ test('saves the project file and reads it back, here and in a fresh browser', as
   const file = JSON.parse(saved.text);
   expect(file).toMatchObject({ format: 'lithicanalyst-project', formatVersion: 2, specimen: { id: 'roof', annotator: 'Observer 甲', unit: 'cm' } });
   expect(file.mesh).toMatchObject({ fileName: 'roof.ply', sha256: createHash('sha256').update(ply.buffer).digest('hex') });
-  expect(file.annotations.scars).toEqual(before.scars);
-  expect(file.annotations.curves).toEqual(before.curves);
+  expect(rounded(file.annotations.scars)).toEqual(before.scars);
+  expect(rounded(file.annotations.curves)).toEqual(before.curves);
 
   // Ctrl+S saves the same project
   const again = await download(page, () => page.keyboard.press('ControlOrMeta+s'));

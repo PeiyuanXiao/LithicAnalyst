@@ -7,6 +7,7 @@ import type { MeshFile, Vec3 } from './fixtures/meshes';
 /** The test hook the app exposes as window.lithicanalyst (see the end of src/ui/app.ts). */
 export interface LithicApi {
   version: string;
+  theme(): 'light' | 'dark';
   state(): ProjectState;
   selection(): string | null;
   project(p: Vec3): { x: number; y: number; visible: boolean } | undefined;
@@ -224,11 +225,24 @@ export async function openSection(page: Page, id: string): Promise<void> {
   await page.locator(`#sec-${id}`).evaluate((d) => ((d as HTMLDetailsElement).open = true));
 }
 
+/** Open the specimen panel of the top bar (the specimen button). */
+export async function specimenPanel(page: Page): Promise<void> {
+  if (!(await page.locator('#specimen-panel').isVisible())) await page.locator('#specimen-more').click();
+}
+
 /** Set the annotator in the specimen panel of the top bar. */
 export async function setAnnotator(page: Page, name: string): Promise<void> {
-  await page.locator('#specimen-more').click();
+  await specimenPanel(page);
   await page.locator('#specimen-annotator').fill(name);
   await page.keyboard.press('Escape');
+}
+
+/** Set the coordinate unit in the specimen panel ('' = not stated). */
+export async function setUnit(page: Page, unit: string): Promise<void> {
+  await specimenPanel(page);
+  await page.locator('#specimen-unit').selectOption(unit);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#specimen-panel')).toBeHidden();
 }
 
 /** Open the display settings panel over the view. */

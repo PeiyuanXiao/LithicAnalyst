@@ -4,7 +4,8 @@ import type { SemilandmarkResult } from '../compute/landmarks';
 import type { Landmark, Vec3 } from '../core/types';
 import type { Viewer } from './viewer';
 
-export const LANDMARK_COLORS = { fixed: '#00a6a6', semi: '#8c5cf0', selected: '#ffc61a', draft: '#ffc61a' };
+/** A landmark being moved keeps the fixed landmarks' colour; yellow only marks the selected one. */
+export const LANDMARK_COLORS = { fixed: '#00a6a6', semi: '#8c5cf0', selected: '#ffc61a', draft: '#00a6a6' };
 
 const BALL = new THREE.SphereGeometry(1, 16, 12);
 const materials = new Map<string, THREE.Material>();
@@ -61,6 +62,9 @@ export class LandmarkLayer {
   fixedColor: string | null = null;
   /** Draw the points faded (they are not what the current work mode is about). */
   dimmed = false;
+  /** The landmark under the select tool's cursor. */
+  private hovered: string | null = null;
+  private last: Parameters<LandmarkLayer['sync']> | null = null;
 
   constructor(private readonly viewer: Viewer) {
     this.group.name = 'landmarks';
@@ -75,6 +79,7 @@ export class LandmarkLayer {
 
   /** `selected`: a landmark id, a set id (its points are highlighted) or `<set id>#<point index>` (one point). */
   sync(landmarks: readonly Landmark[], sets: readonly SemilandmarkResult[], selected: string | null, labels: boolean, ghost: boolean): void {
+    this.last = [landmarks, sets, selected, labels, ghost];
     const r = this.radius;
     const seen = new Set<string>();
     landmarks.forEach((l) => {
@@ -98,13 +103,15 @@ export class LandmarkLayer {
         this.fixed.set(l.id, v);
       }
       const isSel = l.id === selected;
+      const isHov = !isSel && l.id === this.hovered;
       const color = isSel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.fixed;
       v.point = l.point;
-      v.dot.set(l.point, isSel ? r * 1.25 : r, color, ghost, this.dimmed && !isSel);
+      v.dot.set(l.point, isSel ? r * 1.25 : isHov ? r * 1.12 : r, color, ghost, this.dimmed && !isSel);
       v.label.visible = labels;
       const el = v.label.element;
       if (el.textContent !== l.name) el.textContent = l.name;
       el.classList.toggle('is-selected', isSel);
+      el.classList.toggle('is-hover', isHov);
       el.style.setProperty('--chip', color);
     });
     for (const [id, v] of this.fixed) {
@@ -124,6 +131,14 @@ export class LandmarkLayer {
       if (i < pts.length) d.set(pts[i].p, r * 0.75, pts[i].sel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.semi, ghost, this.dimmed && !pts[i].sel);
     });
     this.viewer.requestRender();
+  }
+
+  /** The landmark under the select tool's cursor (an id of another layer, or null: none). */
+  setHoverItem(id: string | null): void {
+    const own = id !== null && this.fixed.has(id) ? id : null;
+    if (own === this.hovered) return;
+    this.hovered = own;
+    if (this.last) this.sync(...this.last);
   }
 
   /** Where a landmark being dragged would go (null hides it). */
@@ -163,6 +178,8 @@ export class LandmarkLayer {
     this.fixed.clear();
     for (const d of this.semi) this.group.remove(d.root);
     this.semi = [];
+    this.hovered = null;
+    this.last = null;
     this.setPreview(null);
   }
 }

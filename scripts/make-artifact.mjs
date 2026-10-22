@@ -10,12 +10,14 @@ const title = pick(/<title>[\s\S]*?<\/title>/g)[0] ?? '<title>LithicAnalyst</tit
 const metas = pick(/<meta name="(?:claude:viewport-fit-sides|description)"[^>]*>/g);
 const links = pick(/<link\b[^>]*>/g).filter((l) => /fonts\.(googleapis|gstatic)\.com/.test(l));
 const styles = pick(/<style[^>]*>[\s\S]*?<\/style>/g);
+// the theme is set before the first frame (index.html), then the app itself
+const themeInit = pick(/<script id="theme-init">[\s\S]*?<\/script>/g);
 const scripts = pick(/<script type="module"[^>]*>[\s\S]*?<\/script>/g);
 const bodyMatch = /<body[^>]*>([\s\S]*?)<\/body>/.exec(src);
 const bodyMarkup = (bodyMatch ? bodyMatch[1] : '<div id="app"></div>').replace(/<script[\s\S]*?<\/script>/g, '').trim();
 
 if (!scripts.length) throw new Error('No inline module script found in dist/index.html');
 
-const out = [title, ...metas, ...links, ...styles, bodyMarkup, ...scripts].join('\n');
+const out = [title, ...metas, ...links, ...themeInit, ...styles, bodyMarkup, ...scripts].join('\n');
 writeFileSync(new URL('../dist/artifact.html', import.meta.url), out);
 console.log(`artifact.html: ${(out.length / 1024).toFixed(0)} KiB`);
