@@ -25,7 +25,7 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
     [boxPoint(4, -2, 5), boxPoint(-2, -7, 5)],
   ];
   for (const [a, b] of arrows) await dragArrow(page, a, b);
-  await page.keyboard.press('5');
+  await page.keyboard.press('6');
   await page.keyboard.press('p');
   for (const p of [boxPoint(-16, 7, 5), boxPoint(-4, 8, 5), boxPoint(8, 4, 5)]) await curveClick(page, await toScreen(page, p), { shift: true });
   await page.keyboard.press('Enter');
@@ -53,6 +53,9 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
   p1 = await plane(page, 'P1');
   expect(p1).toMatchObject({ method: 'scar_starts', valid: true, inputCount: 4 });
   expect(p1.center![2]).toBeCloseTo(BOX.center[2] + 5, 3);
+  // every completeness code is offered, the new one checked like the others
+  await expect(page.locator('#plane-inputs input[type="checkbox"]')).toHaveCount(6);
+  await expect(page.locator('#plane-use-proximal_missing')).toBeChecked();
   await page.locator('#plane-use-both_missing').uncheck();
   await expect.poll(async () => (await plane(page, 'P1')).inputCount).toBe(3);
   // flipping turns the normal; undo turns it back

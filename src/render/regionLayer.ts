@@ -29,6 +29,8 @@ export interface RegionPaint {
   component: number;
   color: string;
   selected: boolean;
+  /** Fainter than the others (e.g. a scar in no sequence while sequences are being made). */
+  faded?: boolean;
 }
 
 /**
@@ -70,7 +72,7 @@ export class RegionLayer {
       g.setIndex(idx);
       const common = { depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
       // in the view the colour multiplies the shading, so the relief of the scars shows through
-      const tint = new THREE.Color(1, 1, 1).lerp(new THREE.Color(p.color), p.selected ? 0.72 : this.dimmed ? 0.2 : 0.5);
+      const tint = new THREE.Color(1, 1, 1).lerp(new THREE.Color(p.color), p.selected ? 0.72 : this.dimmed || p.faded ? 0.2 : 0.5);
       const view = new THREE.MeshBasicMaterial({ ...common, color: tint, transparent: true, blending: THREE.MultiplyBlending, premultipliedAlpha: true });
       // figures keep the plain translucent colour
       const figure = new THREE.MeshBasicMaterial({ ...common, color: p.color, transparent: true, opacity: p.selected ? 0.62 : 0.42 });

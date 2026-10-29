@@ -5,7 +5,7 @@ self-contained HTML file. All processing happens in the browser; nothing is uplo
 
 ```
 ui/       header, toolbar, sidebar, dialogs, shortcuts, two languages    (depends on everything below)
-tools/    interaction tools: select, draw arrow, draw curve (one module each); surface snapping
+tools/    interaction tools: select, draw arrow, draw curve, relation, sequence … (one module each); surface snapping
 render/   three.js viewer, raking light, mesh shading, arrow and curve layers
 core/     data model, fields, commands + undo history, project format   (no DOM, no three.js)
 compute/  pure geometry on typed arrays: curvature, surface paths, vertex welding, hashing
@@ -26,6 +26,10 @@ analysis  outside this repository (R, Python, …) reads the CSV or the project 
    display; neither touches the data.
 4. **Fields live in one list** (`core/fields.ts`). The inspector, list summaries, colour modes
    and CSV columns are generated from it; adding a field there carries it through the app.
+   `numberKeys` / `shiftNumberKeys` give a field the number keys (or Shift + number keys) of the
+   selected item. A field that follows another is set through `withAttribute` (the termination
+   is `na` and locked, `fieldLocked`, while the completeness says it is missing), which
+   `setScarAttribute` applies in one undo step.
 5. **Tools implement one interface** (`tools/tool.ts`) and are registered with the
    `ToolController`. The controller listens on the viewport in the capture phase, so a tool
    can claim a press before the camera controls see it.
@@ -207,10 +211,38 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   (rows by the longest chain of earlier scars, columns grouped by sequence; scars without a
   "cuts" relation go to a last column of their own, `unrelated`). The app recomputes them on
   every change (cheap) and stores the checks under `derived.relations`.
+* **Order from the relations** (`compute/relations.ts`): `stratigraphy` is the transitive closure
+  of the "cuts" relations (`later`, `before` — later one way and not also the other —, `chain` for
+  the relations behind an order, `sequenceBefore`); `stableOrder` sorts so that constraints hold
+  and everything else keeps its order (each step takes the first item nothing left must precede;
+  constraints inside a strongly connected component are dropped, so cycles keep their order);
+  `orderSequences` applies it to the members of ordered sequences and to the sequences. Every
+  action that changes relations or memberships (`core/actions.ts`: set, reverse or delete a
+  relation; add a scar to a sequence or take it out; add or delete a sequence; order a sequence)
+  reorders in the same undo step (`CompoundCommand` of the relations and the sequences). Manual
+  moves do not reorder; the sidebar disables those the relations rule out and gives the chain as
+  the reason, and draws the link between two members solid (held by the relations) or dashed.
 * `tools/relationTool.ts`: two clicks on scars (an arrow, else the scar region under the click);
-  `App.relationPopover` then offers the choices next to the second click, on the side that
-  leaves both scars and the first click in view, and takes the keyboard while open (1 / 2 / 3,
-  Delete, Esc). `render/harris.ts` draws the matrix as SVG (shown in a viewport panel that can be
+  the first cuts the second (`App.recordRelation`, at once). `App.showRelationChip` then shows the
+  relation in a small bar next to the second click, placed by `App.placeNear` on the side that
+  leaves both scars and the first click in view; its keys (1 / 2 / 3, Delete, Esc) are handled in
+  the app's key handler while it is shown, and it goes at the next press in the view, a change of
+  tool, Esc or another selection — it never holds the tool up.
+* `tools/sequenceTool.ts`: a click on a scar puts it into the app's current sequence or takes it
+  out (`App.toggleInSequence`; the first click without any sequence starts one). The bar of
+  sequences (`#sequence-bar`, `App.updateSequenceBar`) sits under the toolbar; digits and N go to
+  it while the tool is active. Meanwhile `syncAnnotations` draws the arrows in the `sequence`
+  colour mode and fades the scars in no sequence (`ArrowLayer.faded`, `RegionPaint.faded`)
+  without touching the display settings. The Harris panel also shows while the relation or
+  sequence tool is in use on scars (`App.harrisAuto`; closing it then lasts until the tool changes).
+* **Borders not judged yet** (`compute/adjacency.ts`): `scarBordersSteps` walks the triangle sides
+  once (in slices) and collects the mesh edges whose two triangles lie in the regions of two
+  different scars; pairs sharing less than twice the mean edge length are left out. The app
+  reruns it after the regions are found again (it reuses the partition) and filters out the pairs
+  with any relation on every change; `chainEdges` joins a pair's edges into polylines, which
+  `render/borderLayer.ts` draws dashed (white core, dark outline) while the relation tool is in
+  use. "Next pair" turns the camera to the shared edge nearest the middle of a border.
+* `render/harris.ts` draws the matrix as SVG (shown in a viewport panel that can be
   moved, resized and folded, its place kept in the `harrisPanel` pref and fitted into the view;
   exported as is); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
   light (earliest) to dark (latest), used by the `sequence` colour mode for arrows and scar
@@ -319,6 +351,21 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
              ArrowLayer.sync ◀── App.onStoreChange ◀── store.subscribe ◀──────┘
              Sidebar.refresh  ◀─┘          └─▶ autosave (localStorage, keyed by mesh SHA-256)
 ```
+
+## Opening and closing a model
+
+* `io/loadMesh.ts` turns every format into an indexed mesh with shared vertices: STL and OBJ are
+  welded from triangle soup (`weldExact`), and an indexed PLY is welded too (`weldIndexed`:
+  vertices with bit-identical coordinates merged, in the order of their first occurrence, the
+  first colour kept), since some writers give every face vertices of its own; triangles that
+  become degenerate are dropped. A mesh without repeated vertices comes back unchanged. The
+  checksum is taken over the file's bytes before any of this.
+* `App.releaseMesh` lets go of the model and of everything drawn or computed for it (snapping,
+  curvature, layers, partition, regions, borders, cuts, observers); `installMesh` calls it before
+  a new model, `App.closeModel` (File ▸ Close) to end with none: it cancels the tool, finishes the
+  pending saves, asks only when edits would be lost (`unsaved` in a read-only folder — edits since
+  the project file was last downloaded —, or `autosaveFailed`), then releases the model, clears the
+  view (`Viewer.clearMesh`), leaves the folder and resets the store (which clears the history).
 
 ## Performance notes
 

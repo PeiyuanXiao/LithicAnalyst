@@ -34,7 +34,7 @@ import {
   setScarLabel,
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
-import { CURVE_FIELDS, REGION_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
+import { CURVE_FIELDS, fieldLocked, REGION_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
 import { fmtCount, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
@@ -47,7 +47,7 @@ import { planeColor } from '../render/planeLayer';
 import { FIGURE_VIEWS } from '../render/figure';
 import { SECTION_COLORS } from '../render/sectionLayer';
 import { regionColorOf } from '../render/regionLayer';
-import { relationProblems, type RelationProblem } from '../compute/relations';
+import { relationInputs, relationProblems, stratigraphy, type RelationProblem, type Stratigraphy } from '../compute/relations';
 import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import { LANDMARK_COLORS } from '../render/landmarkLayer';
 import type { ShadingMode } from '../render/meshView';
@@ -173,10 +173,20 @@ function arrowsSection(api: AppApi): Section {
     const onPick = (v: string) => {
       if (api.selection.id) setScarAttribute(api.store, api.selection.id, f.key, v);
     };
+    if (f.type === 'enum' && f.options && (f.numberKeys || f.shiftNumberKeys)) {
+      // number keys (or Shift + number keys) set it; a field that follows another is locked meanwhile
+      const key = (i: number) => (i < 9 ? `${f.shiftNumberKeys ? '⇧' : ''}${i + 1}` : undefined);
+      const ctl = optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: key(i) })), String(current), onPick);
+      const set = (x: Scar) => {
+        ctl.set(String(x.attributes[f.key]));
+        const locked = fieldLocked(x.attributes, f.key);
+        ctl.enable((v) => !locked || v === 'na');
+      };
+      set(a);
+      return { el: h('div', { class: 'field', 'data-field': f.key }, ctl.el), set };
+    }
     if (f.type === 'enum' && f.options) {
-      const ctl = f.numberKeys
-        ? optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: i < 9 ? String(i + 1) : undefined })), String(current), onPick)
-        : segmented(id, tl(f.label), f.options.map((o) => ({ value: o.value, label: tl(o.label) })), String(current), onPick);
+      const ctl = segmented(id, tl(f.label), f.options.map((o) => ({ value: o.value, label: tl(o.label) })), String(current), onPick);
       return { el: h('div', { class: 'field' }, ctl.el), set: (x) => ctl.set(String(x.attributes[f.key])) };
     }
     const row = textRow(id, tl(f.label), current === null || current === undefined ? '' : String(current), (v) => {
@@ -824,9 +834,18 @@ function relationsSection(api: AppApi): Section {
   const seqInspector = h('div', { class: 'inspector', id: 'sequence-inspector' });
   const harris = checkbox('harris-show', t('harris.title'), api.display.harris, (on) => api.setDisplay((d) => (d.harris = on), 'harris'));
   const checksRow = h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('relation.checks')), checks);
+  // the relation tool: bordering scars with nothing recorded yet
+  const unjudgedText = h('span', { class: 'ctl-label', id: 'relation-unjudged-count' });
+  const unjudged = h(
+    'div',
+    { class: 'checks-row', id: 'relation-unjudged', hidden: true },
+    unjudgedText,
+    h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'relation-next-pair', onclick: () => api.nextUnjudgedPair() }, t('relation.nextPair')),
+  );
   body.append(
     checksRow,
     problems,
+    unjudged,
     list,
     inspector,
     h('span', { class: 'ctl-label sub-label' }, t('sequence.title')),
@@ -856,6 +875,18 @@ function relationsSection(api: AppApi): Section {
   let seqBuiltFor: string | null = null;
   let seqLabelInput: HTMLInputElement | null = null;
 
+  /** Why `later` comes after `earlier`: the relations leading from one to the other ("S3 cuts S5 · S5 cuts S2"). */
+  const why = (s: Stratigraphy, later: string, earlier: string) =>
+    (s.chain(later, earlier) ?? []).map((e) => t('relation.cuts', { a: scarLabel(e.later), b: scarLabel(e.earlier) })).join(' · ');
+  /** Why sequence `p` comes before `q` (a member of q is later than one of p). */
+  const whySeq = (s: Stratigraphy, p: readonly string[], q: readonly string[]) => {
+    for (const x of q) for (const y of p) if (s.later(x, y)) return why(s, x, y);
+    return '';
+  };
+  /** A move button; a move the relations rule out is disabled and says why. */
+  const moveButton = (attrs: Record<string, unknown>, label: string, reason: string, content: Node[], blocked: boolean) =>
+    h('button', { type: 'button', ...attrs, title: reason ? `${label} · ${reason}` : label, 'aria-label': label, disabled: blocked }, ...content);
+
   const renderSequence = () => {
     const st = api.store.state;
     const sel = api.selection.id;
@@ -878,12 +909,22 @@ function relationsSection(api: AppApi): Section {
     clear(holder);
     const i = st.sequences.indexOf(q);
     const colors = sequenceColors(st.sequences);
+    const { scarIds, edges } = relationInputs(st);
+    const s = stratigraphy(scarIds, edges);
+    const ids = q.scarIds;
     const members = h('ol', { class: 'arrow-list', id: 'sequence-members' });
-    q.scarIds.forEach((id, k) => {
+    ids.forEach((id, k) => {
+      // between two rows: solid where the relations put them in this order, dashed where only the hand did
+      if (q.ordered && k > 0) {
+        const held = s.before(ids[k - 1], id);
+        members.append(h('li', { class: `member-link ${held ? 'is-held' : 'is-manual'}`, 'aria-hidden': 'true' }));
+      }
+      const upReason = k > 0 && s.before(ids[k - 1], id) ? why(s, id, ids[k - 1]) : '';
+      const downReason = k < ids.length - 1 && s.before(id, ids[k + 1]) ? why(s, ids[k + 1], id) : '';
       const tools = q.ordered
         ? [
-            h('button', { type: 'button', class: 'icon-btn', 'data-act': 'up', title: t('sequence.earlier'), 'aria-label': t('sequence.earlier'), disabled: k === 0, onclick: (e: Event) => (e.stopPropagation(), moveInSequence(api.store, id, -1)) }, icon(ICONS.up)),
-            h('button', { type: 'button', class: 'icon-btn', 'data-act': 'down', title: t('sequence.later'), 'aria-label': t('sequence.later'), disabled: k === q.scarIds.length - 1, onclick: (e: Event) => (e.stopPropagation(), moveInSequence(api.store, id, 1)) }, icon(ICONS.down)),
+            moveButton({ class: 'icon-btn', 'data-act': 'up', onclick: (e: Event) => (e.stopPropagation(), moveInSequence(api.store, id, -1)) }, t('sequence.earlier'), upReason, [icon(ICONS.up)], k === 0 || !!upReason),
+            moveButton({ class: 'icon-btn', 'data-act': 'down', onclick: (e: Event) => (e.stopPropagation(), moveInSequence(api.store, id, 1)) }, t('sequence.later'), downReason, [icon(ICONS.down)], k === ids.length - 1 || !!downReason),
           ]
         : [];
       members.append(
@@ -896,15 +937,18 @@ function relationsSection(api: AppApi): Section {
         ),
       );
     });
-    members.hidden = q.scarIds.length === 0;
+    members.hidden = ids.length === 0;
+    const prev = st.sequences[i - 1], next = st.sequences[i + 1];
+    const earlierReason = prev && s.sequenceBefore(prev.scarIds, ids) ? whySeq(s, prev.scarIds, ids) : '';
+    const laterReason = next && s.sequenceBefore(ids, next.scarIds) ? whySeq(s, ids, next.scarIds) : '';
     holder.append(
       checkbox('sequence-ordered', t('sequence.ordered'), q.ordered, (on) => updateSequence(api.store, q.id, { ordered: on })),
       members,
       h(
         'div',
         { class: 'btn-row' },
-        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'sequence-earlier', disabled: i === 0, onclick: () => moveSequence(api.store, q.id, -1) }, icon(ICONS.up), t('sequence.earlier')),
-        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'sequence-later', disabled: i === st.sequences.length - 1, onclick: () => moveSequence(api.store, q.id, 1) }, icon(ICONS.down), t('sequence.later')),
+        moveButton({ class: 'btn btn-quiet btn-sm', id: 'sequence-earlier', onclick: () => moveSequence(api.store, q.id, -1) }, t('sequence.earlier'), earlierReason, [icon(ICONS.up), document.createTextNode(t('sequence.earlier'))], !prev || !!earlierReason),
+        moveButton({ class: 'btn btn-quiet btn-sm', id: 'sequence-later', onclick: () => moveSequence(api.store, q.id, 1) }, t('sequence.later'), laterReason, [icon(ICONS.down), document.createTextNode(t('sequence.later'))], !next || !!laterReason),
         h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'sequence-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSequence(api.store, q.id) }, icon(ICONS.trash), t('arrows.delete')),
       ),
     );
@@ -930,6 +974,10 @@ function relationsSection(api: AppApi): Section {
     found.forEach((p, i) =>
       problems.append(h('li', { class: `problem-item${focus === i ? ' is-focused' : ''}`, 'data-kind': p.kind, onclick: () => api.setProblems(true, focus === i ? null : i) }, problemText(p))),
     );
+    // bordering scars not judged yet (while the relation tool is in use)
+    const pairs = api.toolId() === 'relation' ? api.unjudgedPairs() : 0;
+    unjudged.hidden = pairs === 0;
+    unjudgedText.textContent = t('relation.unjudged', { n: pairs });
     // relations
     clear(list);
     list.hidden = st.relations.length === 0;
@@ -1529,6 +1577,7 @@ const TOOL_SECTIONS: Record<string, string> = {
   curve: 'curves',
   region: 'regions',
   relation: 'relations',
+  sequence: 'relations',
   landmark: 'landmarks',
   'measure-distance': 'measure-manual',
   'measure-geodesic': 'measure-manual',

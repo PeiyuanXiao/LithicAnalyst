@@ -89,8 +89,9 @@ describe('project file format 2', () => {
       const raw = make();
       const { first, saved, second } = roundTrip(raw);
       const old = (raw.annotations as { scarVectors: Array<Record<string, unknown>> }).scarVectors;
+      // fields added since (the termination) come in not filled in
       expect(first.scars).toEqual(
-        old.map(({ start, end, startNormal, endNormal, ...rest }) => ({ ...rest, vector: { start, end, startNormal, endNormal } })),
+        old.map(({ start, end, startNormal, endNormal, ...rest }) => ({ ...rest, attributes: { termination: null, ...(rest.attributes as object) }, vector: { start, end, startNormal, endNormal } })),
       );
       expect(first.specimen).toEqual({ ...(raw.specimen as object), frame: null });
       expect(first.nextLabelNumber).toBe(4);
@@ -107,13 +108,25 @@ describe('project file format 2', () => {
     expect(roundTrip(v1File()).first.curves).toEqual([]);
   });
 
-  it('keeps the arrow CSV of migrated files unchanged', () => {
+  it('writes the arrow CSV of migrated files with the termination not filled in', () => {
     const csv = scarVectorCsv(parseProjectFile(v1File()), { excelBom: false });
     expect(csv).toBe(
-      'specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,certainty,note,unit\n' +
-        `LB-1023,S1,12.734,-3.118,9.905,2.051,1.877,11.402,${Math.round(Math.hypot(10.683, 4.995, 1.497) * 1e6) / 1e6},bulb_truncated,probable,"hinge, ""step""",mm\n` +
-        `LB-1023,S3,1,2,3,4,5,6,${Math.round(Math.sqrt(27) * 1e6) / 1e6},point_complete,certain,,mm\n`,
+      'specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,unit\n' +
+        `LB-1023,S1,12.734,-3.118,9.905,2.051,1.877,11.402,${Math.round(Math.hypot(10.683, 4.995, 1.497) * 1e6) / 1e6},bulb_truncated,,probable,"hinge, ""step""",mm\n` +
+        `LB-1023,S3,1,2,3,4,5,6,${Math.round(Math.sqrt(27) * 1e6) / 1e6},point_complete,,certain,,mm\n`,
     );
+  });
+
+  it('reads files without a termination as not filled in, and the new completeness code', () => {
+    const file = v1File() as { annotations: { scarVectors: Array<{ attributes: Record<string, unknown> }> } };
+    file.annotations.scarVectors[1].attributes.completeness = 'proximal_missing';
+    const st = parseProjectFile(file);
+    expect(st.scars.map((s) => [s.attributes.completeness, s.attributes.termination])).toEqual([
+      ['bulb_truncated', null],
+      ['proximal_missing', null],
+    ]);
+    const again = parseProjectFile(JSON.parse(JSON.stringify(serializeProject(st, '0.2.0'))));
+    expect(again.scars.map((s) => s.attributes)).toEqual(st.scars.map((s) => s.attributes));
   });
 
   it('stores scars without a direction, and leaves them out of the arrow CSV', () => {
@@ -131,7 +144,7 @@ describe('project file format 2', () => {
     ]);
     expect(second).toEqual(first);
     const rows = scarVectorCsv(first, { excelBom: false }).trimEnd().split('\n');
-    expect(rows).toEqual([rows[0], 'X,S1,0,0,0,3,4,0,5,both_missing,certain,,mm']);
+    expect(rows).toEqual([rows[0], 'X,S1,0,0,0,3,4,0,5,both_missing,na,certain,,mm']);
   });
 
   it('keeps the specimen frame and rejects a malformed one', () => {

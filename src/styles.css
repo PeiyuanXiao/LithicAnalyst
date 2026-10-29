@@ -355,6 +355,16 @@ kbd {
   cursor: default;
 }
 
+.menu-item:disabled:hover {
+  background: transparent;
+}
+
+.menu-sep {
+  margin: 4px 6px;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+}
+
 .menu-check {
   width: 16px;
   height: 16px;
@@ -1405,6 +1415,16 @@ input[type="checkbox"]:disabled {
   color: var(--ink);
 }
 
+/* a field that follows another (the termination while it is missing) */
+.opt-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.opt-btn:disabled:hover {
+  color: var(--ink-2);
+}
+
 .opt-btn kbd {
   min-width: 1.6em;
   text-align: center;
@@ -2424,35 +2444,136 @@ input[type="checkbox"]:disabled {
   text-overflow: ellipsis;
 }
 
-/* ------------------------------------------------------------ relation choice next to the click */
+/* ------------------------------------------------------------ the relation just recorded, next to the click */
 
-.relation-pop {
+.relation-chip {
   position: absolute;
   z-index: 8;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 4px 4px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-pop);
   box-shadow: var(--shadow);
+  white-space: nowrap;
   animation: pop-in 140ms ease-out;
 }
 
-.relation-pop-title {
-  padding: 2px 6px 4px;
-  color: var(--ink-2);
-  font-size: 11px;
+.relation-chip-text {
+  margin-right: 6px;
+  font-weight: 600;
+  font-size: var(--step--1);
 }
 
-.relation-pop .btn {
-  justify-content: flex-start;
+.relation-chip .btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-.relation-pop kbd {
-  min-width: 2.4em;
+.relation-chip .relation-chip-delete {
+  color: var(--danger);
+}
+
+.relation-chip kbd {
+  min-width: 2.2em;
   text-align: center;
+}
+
+/* ------------------------------------------------------------ the sequences, under the toolbar (sequence tool) */
+
+.vp-seqbar {
+  position: absolute;
+  top: 64px;
+  left: max(12px, env(safe-area-inset-left, 0px));
+  max-width: calc(100% - 160px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  z-index: 3;
+}
+
+.seq-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 38px;
+  height: 32px;
+  padding: 0 16px 0 9px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.seq-chip:hover:not([aria-checked="true"]) {
+  background: var(--surface-pop);
+}
+
+.seq-chip[aria-checked="true"] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent-text);
+}
+
+.seq-chip[aria-checked="true"] .tool-key {
+  color: var(--accent-text);
+}
+
+.seq-chip-label {
+  font-weight: 600;
+}
+
+/* the number of scars, as a capsule (the key sits in the corner) */
+.seq-chip-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.seq-add {
+  justify-content: center;
+  padding: 0 9px;
+  color: var(--ink-2);
+}
+
+/* the order of two members: held by the relations (solid) or only by hand (dashed) */
+.member-link {
+  position: relative;
+  height: 0;
+}
+
+.member-link::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: 14px;
+  top: -10px;
+  height: 20px;
+  border-left: 1.5px solid var(--ink-2);
+  pointer-events: none;
+}
+
+.member-link.is-manual::before {
+  border-left-style: dashed;
 }
 
 .agree-table .agree-group th {
@@ -2518,7 +2639,8 @@ input[type="checkbox"]:disabled {
   .mode-switch {
     grid-area: modes;
   }
-  .vp-toolbar {
+  .vp-toolbar,
+  .vp-seqbar {
     max-width: calc(100% - 24px);
   }
   .spec-panel {

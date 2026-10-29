@@ -5,7 +5,7 @@ import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { signedVolume } from '../compute/curvature';
 import { sha256Hex } from '../compute/hash';
-import { removeDegenerateTriangles, weldExact } from '../compute/weld';
+import { removeDegenerateTriangles, weldExact, weldIndexed } from '../compute/weld';
 import type { MeshFormat, MeshInfo, Vec3 } from '../core/types';
 
 // Fast ray picking on large scans.
@@ -72,6 +72,12 @@ export async function readMeshFile(file: File, onStage?: (stage: string) => Prom
         positions = w.positions;
         index = w.index;
         colors = null;
+      } else {
+        // some writers give every face vertices of its own: join the faces at coincident corners
+        const w = weldIndexed(positions, index, colors);
+        positions = w.positions;
+        index = removeDegenerateTriangles(w.index);
+        colors = w.colors;
       }
     } else if (ext === 'stl') {
       const g = new STLLoader().parse(buffer);

@@ -10,7 +10,9 @@ export interface ScarPick {
 
 /**
  * Record a relation: click one scar (its arrow or its region), then another;
- * `onPair` then asks, next to the click, how the two relate. Dragging still turns the view.
+ * `onPair` records "the first cuts the second" (the order of the clicks is the
+ * order of the words). Clicking the first scar again keeps it as the first;
+ * Esc lets go of it. Dragging still turns the view.
  */
 export class RelationTool implements Tool {
   readonly id = 'relation';

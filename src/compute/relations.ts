@@ -166,6 +166,115 @@ export function directRelations(edges: RelationEdge[], cycleEdges: RelationEdge[
   return [...[...unique.values()].filter((e) => !reachableAvoiding(e.later, e.earlier)), ...cycleEdges];
 }
 
+/** Which scar is later than which, from all "cuts" relations chained (the transitive closure). */
+export interface Stratigraphy {
+  /** `a` is later than `b` through one or more relations. */
+  later(a: string, b: string): boolean;
+  /** `a` comes before (is earlier than) `b`: `b` is later and not also earlier (a cycle). */
+  before(a: string, b: string): boolean;
+  /** The relations leading from `later` down to `earlier` (fewest steps), or null. */
+  chain(later: string, earlier: string): RelationEdge[] | null;
+  /** Sequence `p` comes before `q`: a member of q is later than one of p, and no member of p is later than one of q. */
+  sequenceBefore(p: readonly string[], q: readonly string[]): boolean;
+}
+
+export function stratigraphy(scarIds: readonly string[], edges: readonly RelationEdge[]): Stratigraphy {
+  const known = new Set(scarIds);
+  const out = new Map<string, string[]>();
+  for (const e of edges) if (known.has(e.later) && known.has(e.earlier) && e.later !== e.earlier) (out.get(e.later) ?? out.set(e.later, []).get(e.later)!).push(e.earlier);
+  // breadth first from each scar: what lies below it, and the step each was reached from
+  const below = new Map<string, Map<string, string>>();
+  const reach = (from: string): Map<string, string> => {
+    let seen = below.get(from);
+    if (seen) return seen;
+    seen = new Map();
+    const queue = [from];
+    for (let i = 0; i < queue.length; i++)
+      for (const w of out.get(queue[i]) ?? [])
+        if (!seen.has(w)) {
+          seen.set(w, queue[i]);
+          queue.push(w);
+        }
+    below.set(from, seen);
+    return seen;
+  };
+  const later = (a: string, b: string) => a !== b && reach(a).has(b);
+  return {
+    later,
+    before: (a, b) => later(b, a) && !later(a, b),
+    chain: (a, b) => {
+      const seen = reach(a);
+      if (a === b || !seen.has(b)) return null;
+      const path: RelationEdge[] = [];
+      for (let v = b; v !== a; v = seen.get(v)!) path.unshift({ later: seen.get(v)!, earlier: v });
+      return path;
+    },
+    sequenceBefore: (p, q) => q.some((y) => p.some((x) => later(y, x))) && !p.some((x) => q.some((y) => later(x, y))),
+  };
+}
+
+/**
+ * Items reordered so that `before(a, b)` puts a ahead of b, otherwise keeping
+ * their order: each step takes the first item nothing left must precede.
+ * Items caught in a cycle of `before` keep their order among themselves.
+ */
+export function stableOrder<T>(items: readonly T[], before: (a: T, b: T) => boolean): T[] {
+  const n = items.length;
+  const pred: number[][] = items.map((_, i) => items.flatMap((_, j) => (i !== j && before(items[j], items[i]) ? [j] : [])));
+  // strongly connected components (Tarjan); constraints inside one are dropped
+  const comp = new Int32Array(n).fill(-1);
+  const index = new Int32Array(n).fill(-1), low = new Int32Array(n);
+  const stack: number[] = [];
+  const onStack = new Uint8Array(n);
+  let counter = 0, comps = 0;
+  const visit = (v: number) => {
+    index[v] = low[v] = counter++;
+    stack.push(v);
+    onStack[v] = 1;
+    for (const w of pred[v]) {
+      if (index[w] < 0) {
+        visit(w);
+        low[v] = Math.min(low[v], low[w]);
+      } else if (onStack[w]) low[v] = Math.min(low[v], index[w]);
+    }
+    if (low[v] === index[v]) {
+      let w: number;
+      do {
+        w = stack.pop()!;
+        onStack[w] = 0;
+        comp[w] = comps;
+      } while (w !== v);
+      comps++;
+    }
+  };
+  for (let v = 0; v < n; v++) if (index[v] < 0) visit(v);
+  const placed = new Uint8Array(n);
+  const out: T[] = [];
+  while (out.length < n) {
+    let next = -1;
+    for (let i = 0; i < n && next < 0; i++) if (!placed[i] && pred[i].every((j) => placed[j] || comp[j] === comp[i])) next = i;
+    placed[next] = 1;
+    out.push(items[next]);
+  }
+  return out;
+}
+
+/**
+ * The sequences in the order the relations call for (earliest first), and
+ * the members of each ordered sequence likewise. Whatever the relations do not
+ * decide keeps the order it had; scars or sequences caught in a cycle keep
+ * theirs among themselves (the checks report the cycle).
+ */
+export function orderSequences<T extends Pick<SequenceInput, 'scarIds' | 'ordered'>>(scarIds: readonly string[], edges: readonly RelationEdge[], sequences: readonly T[]): T[] {
+  const s = stratigraphy(scarIds, edges);
+  const inner = sequences.map((q) => {
+    if (!q.ordered || q.scarIds.length < 2) return q;
+    const ids = stableOrder(q.scarIds, s.before);
+    return ids.every((id, i) => id === q.scarIds[i]) ? q : { ...q, scarIds: ids };
+  });
+  return stableOrder(inner, (p, q) => s.sequenceBefore(p.scarIds, q.scarIds));
+}
+
 export interface HarrisLayout {
   width: number;
   height: number;

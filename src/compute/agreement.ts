@@ -10,6 +10,9 @@ import { hasVector, type ProjectState, type Vec3 } from '../core/types';
 import { arcLengths, landmarkTable, pointAtArc } from './landmarks';
 import type { PlaneResult } from './planes';
 
+/** An enumerated attribute as its code; '' when not filled in. */
+const attrCode = (v: unknown): string => (v === null || v === undefined ? '' : String(v));
+
 // ---------------------------------------------------------------- assignment
 
 /**
@@ -353,8 +356,11 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
     return p && q ? [[p, q] as const] : [];
   });
   for (const f of SCAR_FIELDS) {
-    if (f.type !== 'enum' || !matched.length) continue;
-    const ag = cohenKappa(matched.map(([p, q]) => [String(p.attributes[f.key] ?? ''), String(q.attributes[f.key] ?? '')] as [string, string]));
+    if (f.type !== 'enum') continue;
+    // a scar either observer left unfilled (e.g. the termination not judged yet) does not count
+    const pairs = matched.map(([p, q]) => [attrCode(p.attributes[f.key]), attrCode(q.attributes[f.key])] as [string, string]).filter(([x, y]) => x && y);
+    if (!pairs.length) continue;
+    const ag = cohenKappa(pairs);
     row('scar_attribute', f.key, 'agreement', ag.agreement);
     row('scar_attribute', f.key, 'cohen_kappa', ag.kappa);
     row('scar_attribute', f.key, 'n_items', ag.n);
@@ -473,8 +479,10 @@ export function compareObservers(observers: readonly ObserverData[], opts: Compa
   const scarOf = (k: number, id: string) => others[k].state.scars.find((s) => s.id === maps[k + 1].get(id));
   const items = ref.scars.filter((s) => mapped(s.id));
   for (const f of SCAR_FIELDS) {
-    if (f.type !== 'enum' || !items.length) continue;
-    const ag = fleissKappa(items.map((s) => [String(s.attributes[f.key] ?? ''), ...others.map((_, k) => String(scarOf(k, s.id)?.attributes[f.key] ?? ''))]));
+    if (f.type !== 'enum') continue;
+    const cats = items.map((s) => [attrCode(s.attributes[f.key]), ...others.map((_, k) => attrCode(scarOf(k, s.id)?.attributes[f.key]))]).filter((c) => c.every(Boolean));
+    if (!cats.length) continue;
+    const ag = fleissKappa(cats);
     row('scar_attribute', f.key, 'agreement', ag.agreement);
     row('scar_attribute', f.key, 'fleiss_kappa', ag.kappa);
     row('scar_attribute', f.key, 'n_items', ag.n);

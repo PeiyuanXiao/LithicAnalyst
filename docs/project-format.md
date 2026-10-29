@@ -53,6 +53,10 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 Readers should ignore keys they do not know. Future annotation layers will be added next to
 `scars` and `curves` inside `annotations`.
 
+`mesh.sha256` is the checksum of the file's bytes; `vertexCount` and `triangleCount` describe the
+mesh as the app uses it: vertices with identical coordinates merged (also in PLY files whose
+faces each have vertices of their own) and degenerate triangles left out.
+
 ## Specimen
 
 ```json
@@ -167,6 +171,13 @@ fitted planes, fitted spheres, volumes ….
   per pair of scars. On reading, relations with unknown scars and repeated pairs are dropped.
 * Sequences are listed earliest first. A scar is in one sequence at most; within an `ordered`
   sequence `scarIds` runs from the earliest scar, otherwise their order means nothing.
+* The app keeps both orders as the relations have them (`orderSequences` in
+  `src/compute/relations.ts`), whenever relations or memberships change: A is earlier than B when
+  B cuts A through one or more `a_cuts_b` relations (also through scars in other sequences or
+  none). Within an ordered sequence the scars are sorted so; sequence P comes before Q when a
+  scar of Q is later than one of P and none of P is later than one of Q. What the relations do
+  not decide keeps the order it had (set by hand), and scars or sequences in a cycle keep theirs.
+  Files written otherwise (by hand, or by earlier versions) are read as they are.
 * Deleting a scar removes its relations and takes it out of its sequence.
 
 ## Landmarks
@@ -252,7 +263,7 @@ Only the inputs are stored; the plane is recomputed whenever they change.
     "startNormal": [0.12, -0.05, 0.99],
     "endNormal": [0.02, 0.01, 0.99]
   },
-  "attributes": { "completeness": "bulb_truncated", "certainty": "certain", "note": "" },
+  "attributes": { "completeness": "bulb_truncated", "termination": "na", "certainty": "certain", "note": "" },
   "createdAt": "2026-10-15T20:31:02.114Z",
   "modifiedAt": "2026-10-15T20:31:40.551Z"
 }
@@ -272,9 +283,20 @@ Defined in `src/core/fields.ts`.
 
 | key | values |
 |---|---|
-| `completeness` | `point_complete` 可见打击点+尾端完整 · `bulb_complete` 可见负向打击泡+尾端完整 · `point_truncated` 可见打击点+尾端缺失 · `bulb_truncated` 可见负向打击泡+尾端缺失 · `both_missing` 两端缺失 |
+| `completeness` | `point_complete` 可见打击点+尾端完整 · `bulb_complete` 可见负向打击泡+尾端完整 · `proximal_missing` 打击点缺失+尾端完整 · `point_truncated` 可见打击点+尾端缺失 · `bulb_truncated` 可见负向打击泡+尾端缺失 · `both_missing` 两端缺失 |
+| `termination` | `feather` 羽状 · `step` 阶梯状 · `hinge` 铰链状 · `overshot` 过击 · `na` 缺失 (looked at: there is no termination) · `null` not judged yet |
 | `certainty` | `certain` · `probable` · `uncertain` |
 | `note` | free text |
+
+* The codes are listed in the order the interface shows them (number keys 1–6 for the
+  completeness, Shift + 1–5 for the termination). `proximal_missing` was added after the others;
+  no code has changed.
+* `termination` follows the completeness: with `point_truncated`, `bulb_truncated` or
+  `both_missing` it is `na` (and cannot be set otherwise); when the completeness changes back to
+  one with a termination, an `na` termination becomes `null` again. Files without the key (written
+  before it existed) read as `null`, whatever their completeness.
+* Readers should keep attribute keys they do not know; adding a field or a code needs no new
+  `formatVersion`.
 
 ## Curve
 
@@ -316,10 +338,11 @@ Defined in `src/core/fields.ts`.
 
 ## CSV export
 
-One row per scar that has a direction arrow (scars with `"vector": null` are left out):
+One row per scar that has a direction arrow (scars with `"vector": null` are left out;
+`termination` is empty when not judged yet):
 
 ```
-specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,certainty,note,unit
+specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,unit
 ```
 
 One row per curve point (curve CSV), in order along each curve:
@@ -390,8 +413,9 @@ Observer agreement (compare mode; not part of the project file):
   — one row per value, for every pair of observers; with three or more, Fleiss' κ rows have
   `annotator_a = all` and an empty `annotator_b`. `item_type` / `metric`: `arrow` (per matched
   pair `item_key = <label a>|<label b>`: `angle_deg`, `start_distance`, `end_distance`; `all`:
-  `matched`, `unmatched_a`, `unmatched_b`), `scar_attribute` (field key: `agreement`,
-  `cohen_kappa` / `fleiss_kappa`, `n_items`), `relation` (`all`: same), `curve` (pairs:
+  `matched`, `unmatched_a`, `unmatched_b`), `scar_attribute` (field key, e.g. `completeness`,
+  `termination`: `agreement`, `cohen_kappa` / `fleiss_kappa`, `n_items`; scars an observer left
+  unfilled are left out), `relation` (`all`: same), `curve` (pairs:
   `mean_distance`, `hausdorff`; `all`: counts), `plane` (pairs: `normal_angle_deg` 0–90,
   `center_distance`), `region` (type: `iou`, `dice` by area; scar region pairs likewise),
   `region_type` (`all`: `agreement`, kappa, `area` typed by both), `landmark` (name:

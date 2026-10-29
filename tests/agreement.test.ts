@@ -85,6 +85,27 @@ describe('comparing observers', () => {
   const arrow = (s: ProjectStore, start: Vec3, end: Vec3) => addScarVector(s, { start, end, startNormal: [0, 0, 1], endNormal: [0, 0, 1] });
   const observer = (label: string, s: ProjectStore, measures: Record<string, number | null> = {}): ObserverData => ({ label, state: s.state, planes: [], faces: null, measures });
 
+  it('compares the termination like the completeness, over the scars both observers judged', () => {
+    const a = new ProjectStore(), b = new ProjectStore(), c = new ProjectStore();
+    const ys = [0, 20, 40, 60];
+    const [sa, sb, sc] = [a, b, c].map((s) => ys.map((y) => arrow(s, [0, y, 0], [10, y, 0])));
+    // A: feather, hinge, step, (none) · B: feather, step, (none), hinge · C: feather, hinge, step, hinge
+    const set = (s: ProjectStore, list: typeof sa, codes: Array<string | null>) => codes.forEach((v, i) => v && setScarAttribute(s, list[i].id, 'termination', v));
+    set(a, sa, ['feather', 'hinge', 'step', null]);
+    set(b, sb, ['feather', 'step', null, 'hinge']);
+    set(c, sc, ['feather', 'hinge', 'step', 'hinge']);
+    const rows = compareObservers([observer('A', a), observer('B', b), observer('C', c)], { gate: 5, faceArea: null });
+    const get = (metric: string, x: string, y: string) => rows.find((r) => r.itemType === 'scar_attribute' && r.itemKey === 'termination' && r.metric === metric && r.a === x && r.b === y)?.value;
+    // A–B: only S1 and S2 are judged by both; they agree on one
+    expect(get('n_items', 'A', 'B')).toBe(2);
+    expect(get('agreement', 'A', 'B')).toBeCloseTo(0.5, 12);
+    expect(get('cohen_kappa', 'A', 'B')).toBeCloseTo(cohenKappa([['feather', 'feather'], ['hinge', 'step']]).kappa, 12);
+    // A–C: three judged by both, all the same
+    expect([get('n_items', 'A', 'C'), get('agreement', 'A', 'C')]).toEqual([3, 1]);
+    // all three: only S1 and S2 are judged by everyone
+    expect(get('n_items', 'all', '')).toBe(2);
+  });
+
   it('matches arrows by their ends and compares their directions, attributes and relations', () => {
     const a = new ProjectStore(), b = new ProjectStore(), c = new ProjectStore();
     const [a1, a2, a3] = [arrow(a, [0, 0, 0], [10, 0, 0]), arrow(a, [0, 20, 0], [10, 20, 0]), arrow(a, [50, 50, 0], [60, 50, 0])];
@@ -115,6 +136,9 @@ describe('comparing observers', () => {
     // three observers: Fleiss on the scars all of them share
     expect(rows.find((r) => r.a === 'all' && r.itemKey === 'completeness' && r.metric === 'n_items')?.value).toBe(2);
     expect(rows.filter((r) => r.a === 'A' && r.b === 'C' && r.itemType === 'arrow' && r.metric === 'angle_deg').map((r) => r.value)).toEqual([0, 0]);
+
+    // nobody judged both terminations of a pair (A's S2 is NA by its completeness, B's is not filled in)
+    expect(get('scar_attribute', 'termination', 'n_items')).toBeUndefined();
 
     const sum = summarize(rows);
     const angles = sum.find((r) => r.itemType === 'arrow' && r.metric === 'angle_deg' && r.a === 'A' && r.b === 'B')!;

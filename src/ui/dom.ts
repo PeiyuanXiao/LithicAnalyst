@@ -99,6 +99,7 @@ export const ICONS20 = {
   curve: '<path d="M3 15 C6 4 11 17 17 5"/><rect x="1.8" y="13.8" width="2.4" height="2.4" fill="currentColor"/><rect x="15.8" y="3.8" width="2.4" height="2.4" fill="currentColor"/><rect x="8.8" y="8.8" width="2.4" height="2.4" fill="currentColor"/>',
   region: '<path d="M4 7 C4 3.5 9 2.5 12 4.5 C15.5 6.5 17.5 9 15.5 13 C13.5 17 7 17.5 5 14.5 C3.5 12 4 10 4 7 Z" fill="currentColor" fill-opacity="0.25"/>',
   relation: '<path d="M8 6.5 H3 V15.5 H12 V12.5"/><path d="M8 3.5 H17 V12.5 H8 Z" fill="currentColor" fill-opacity="0.3"/>',
+  sequence: '<rect x="3" y="3" width="9" height="4" rx="1"/><rect x="5.5" y="8" width="9" height="4" rx="1"/><rect x="8" y="13" width="9" height="4" rx="1"/>',
   landmark: '<circle cx="10" cy="10" r="5.5"/><path d="M10 1.5 V5 M10 15 V18.5 M1.5 10 H5 M15 10 H18.5"/><circle cx="10" cy="10" r="1.2" fill="currentColor"/>',
   distance: '<path d="M5 15 L15 5"/><circle cx="4" cy="16" r="1.8" fill="currentColor"/><circle cx="16" cy="4" r="1.8" fill="currentColor"/><path d="M2.5 11 L9 4.5" stroke-width="1" stroke-dasharray="1.5 1.5"/>',
   geodesic: '<path d="M2.5 16.5 C6 16.5 7 7.5 10 7.5 C13 7.5 14 16.5 17.5 16.5"/><circle cx="2.5" cy="16.5" r="1.6" fill="currentColor"/><circle cx="17.5" cy="16.5" r="1.6" fill="currentColor"/>',

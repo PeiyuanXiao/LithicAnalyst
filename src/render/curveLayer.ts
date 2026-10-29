@@ -40,7 +40,8 @@ export const HALO = 2.6;
  */
 const PULL = 0.996;
 
-function lineMaterial(color: string, width: number, opts: { ghost?: boolean; opacity?: number; halo?: boolean } = {}): LineMaterial {
+/** `dash`: dash and gap lengths along the line (world units; the line needs its distances computed). */
+export function lineMaterial(color: string, width: number, opts: { ghost?: boolean; opacity?: number; halo?: boolean; dash?: [number, number] } = {}): LineMaterial {
   const m = new LineMaterial({
     color: new THREE.Color(color),
     linewidth: width,
@@ -50,6 +51,11 @@ function lineMaterial(color: string, width: number, opts: { ghost?: boolean; opa
     // the halo must not write depth: its caps would hide the core at every joint
     depthWrite: !opts.ghost && !opts.halo,
   });
+  if (opts.dash) {
+    m.dashed = true;
+    m.dashSize = opts.dash[0];
+    m.gapSize = opts.dash[1];
+  }
   if (!opts.ghost) {
     m.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader.replace(

@@ -40,6 +40,40 @@ export function weldExact(soup: Float32Array): { positions: Float32Array; index:
   return { positions, index };
 }
 
+/**
+ * Merge the vertices of an indexed mesh that have bit-identical coordinates
+ * (some PLY writers give every triangle three vertices of its own). Vertices
+ * keep the order of their first occurrence, so a mesh without repeated
+ * vertices comes back unchanged; a merged vertex keeps the colour of its first
+ * occurrence. Triangles that become degenerate are left in (see
+ * removeDegenerateTriangles).
+ */
+export function weldIndexed(
+  positions: Float32Array,
+  index: Uint32Array,
+  colors: Float32Array | null = null,
+): { positions: Float32Array; index: Uint32Array; colors: Float32Array | null } {
+  const w = weldExact(positions);
+  const n = w.positions.length / 3;
+  if (n === positions.length / 3) return { positions, index, colors };
+  const remapped = new Uint32Array(index.length);
+  for (let i = 0; i < index.length; i++) remapped[i] = w.index[index[i]];
+  let merged: Float32Array | null = null;
+  if (colors) {
+    merged = new Float32Array(n * 3);
+    // vertices are numbered by first occurrence: the first vertex mapped to w is the one with w's colour
+    let next = 0;
+    for (let v = 0; v < w.index.length && next < n; v++) {
+      if (w.index[v] !== next) continue;
+      merged[3 * next] = colors[3 * v];
+      merged[3 * next + 1] = colors[3 * v + 1];
+      merged[3 * next + 2] = colors[3 * v + 2];
+      next++;
+    }
+  }
+  return { positions: w.positions, index: remapped, colors: merged };
+}
+
 /** Drop triangles whose corners are not three distinct vertices. */
 export function removeDegenerateTriangles(index: Uint32Array): Uint32Array {
   let keep = 0;

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- Relations (B): the order of the clicks is the order of the words — clicking A, then B records
+  "A cuts B" at once (and rewrites what the pair had). A small bar next to the second click shows
+  it and offers Reverse (2), Cannot tell (3) and Delete; 1 brings back "A cuts B". The bar takes
+  nothing away from the tool and goes at the next press in the view, a change of tool, Esc or
+  another selection. Nothing is ever recorded as "cannot tell" unasked. While the tool is in use,
+  the borders of scars whose regions meet and have no relation yet are drawn dashed (white with a
+  dark outline), and the sidebar counts them with a "Next pair" button that turns the view there.
+- Sequences (Q): a new tool. A bar under the toolbar lists Q1, Q2 … (colour and number of scars);
+  1–9 choose the current sequence, N or "+" makes a new one. A click on a scar (arrow or region)
+  puts it into the current sequence, or takes it out again. Meanwhile arrows are coloured by
+  sequence and scars in none are faded. The Harris matrix shows itself while the relation or
+  sequence tool is in use.
+- The order of the sequences, and of the scars within ordered ones, follows the relations
+  (chained through other scars as well); what the relations do not decide keeps its order, and a
+  cycle keeps the order it had. The reordering is part of the same undo step as the change. Moves
+  in the sidebar that the relations rule out are disabled and say why ("S3 cuts S2"); between
+  members a solid line marks an order held by the relations, a dashed one an order set by hand.
+- Completeness: a sixth code, `proximal_missing` (point of percussion missing, termination
+  present), third in the list; the keys are now 1–6 in the order shown (codes unchanged).
+- Termination: a new arrow field (`termination`: `feather`, `step`, `hinge`, `overshot`, `na`),
+  set with Shift+1–5; empty until judged, apart from `na` (looked at, no termination). A
+  completeness without a termination sets it to `na` and locks it; back to one with a
+  termination, `na` is cleared. The arrow CSV has a `termination` column after `completeness`;
+  agreement includes it (pairs with an unfilled side are left out).
+- File menu: Close puts the model away (and leaves the folder), back to the empty view. It asks
+  first only when edits could be lost: a read-only folder with edits not downloaded, or an
+  autosave that failed.
+- PLY files whose triangles each have vertices of their own are joined at coincident corners on
+  reading, so snapping, curvature and regions work on them; the checksum is still that of the file.
 - Appearance: light and dark shells, switched from the top bar (moon / sun) and remembered; the
   first visit follows the system setting. Warm stone neutrals with an amber accent; yellow now
   only marks the selection (items being drawn take their layer's colour; plane P3, a scar-region,
@@ -40,8 +69,7 @@
 - View: measure mode fades the annotations; present mode hides labels and shows the layers
   the figure shows; labels that would overlap move apart or hide; fitted-plane discs are barely
   visible unless selected; region colours keep the relief visible (figures unchanged).
-- Relations are chosen in a small popover next to the click (1 / 2 / 3, Delete, Esc). The
-  Harris matrix panel can be moved, resized and folded, stays above the labels, and lists
+- The Harris matrix panel can be moved, resized and folded, stays above the labels, and lists
   scars without "cuts" relations apart. The agreement table is grouped by object, with
   pairing counts, named metrics and units; a click shows the most different pair in 3D.
 - The IBM Plex fonts are bundled into the HTML file (no requests to Google Fonts).

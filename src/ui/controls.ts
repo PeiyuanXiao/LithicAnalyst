@@ -80,14 +80,14 @@ export function segmented(
   return { el, set };
 }
 
-/** A vertical list of mutually exclusive options, each with an optional key badge. */
+/** A vertical list of mutually exclusive options, each with an optional key badge; `enable` says which can be chosen. */
 export function optionList(
   id: string,
   label: string,
   options: Array<SegOption & { key?: string }>,
   value: string,
   onChange: (v: string) => void,
-): { el: HTMLElement; set: (v: string) => void } {
+): { el: HTMLElement; set: (v: string) => void; enable: (allowed: (v: string) => boolean) => void } {
   const buttons = options.map((opt) =>
     h(
       'button',
@@ -98,6 +98,7 @@ export function optionList(
         'aria-checked': String(opt.value === value),
         'data-value': opt.value,
         id: `${id}-${opt.value}`,
+        disabled: opt.disabled,
         onclick: () => {
           set(opt.value);
           onChange(opt.value);
@@ -105,13 +106,16 @@ export function optionList(
       },
       opt.key ? h('kbd', {}, opt.key) : null,
       h('span', {}, opt.label),
-    ),
+    ) as HTMLButtonElement,
   );
   const group = h('div', { class: 'opt-list', role: 'radiogroup', 'aria-label': label }, ...buttons);
   const set = (v: string) => {
     for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === v));
   };
-  return { el: h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, label), group), set };
+  const enable = (allowed: (v: string) => boolean) => {
+    for (const b of buttons) b.disabled = !allowed(b.dataset.value ?? '');
+  };
+  return { el: h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, label), group), set, enable };
 }
 
 export function selectRow(

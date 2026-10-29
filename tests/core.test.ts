@@ -13,7 +13,7 @@ import {
   updateSpecimen,
 } from '../src/core/actions';
 import { assembleCurve, curveLength, curveSegments, isValidShape, midPointIndex } from '../src/core/curveGeometry';
-import { CURVE_FIELDS, defaultAttributes, defaultCurveAttributes, numberKeyField, SCAR_FIELDS } from '../src/core/fields';
+import { CURVE_FIELDS, defaultAttributes, defaultCurveAttributes, fieldLocked, numberKeyField, SCAR_FIELDS, shiftNumberKeyField, TERMINATION_MISSING, withAttribute } from '../src/core/fields';
 import { parseProjectFile, ProjectFileError, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import type { Vec3 } from '../src/core/types';
@@ -23,12 +23,13 @@ const N: Vec3 = [0, 0, 1];
 const add = (s: ProjectStore, a: Vec3, b: Vec3) => addScarVector(s, { start: a, end: b, startNormal: N, endNormal: N });
 
 describe('fields', () => {
-  it('records the five completeness categories, settable with keys 1–5', () => {
+  it('records the six completeness categories, settable with keys 1–6', () => {
     const f = numberKeyField()!;
     expect(f.key).toBe('completeness');
     expect(f.options!.map((o) => o.value)).toEqual([
       'point_complete',
       'bulb_complete',
+      'proximal_missing',
       'point_truncated',
       'bulb_truncated',
       'both_missing',
@@ -36,11 +37,58 @@ describe('fields', () => {
     expect(f.options!.map((o) => o.label.zh)).toEqual([
       '可见打击点+尾端完整',
       '可见负向打击泡+尾端完整',
+      '打击点缺失+尾端完整',
       '可见打击点+尾端缺失',
       '可见负向打击泡+尾端缺失',
       '两端缺失',
     ]);
-    expect(defaultAttributes()).toEqual({ completeness: 'point_complete', certainty: 'certain', note: '' });
+    expect(f.options![2]).toMatchObject({ short: { zh: '仅尾端', en: 'Term. only' }, label: { en: 'Proximal end missing + termination' } });
+    // the termination is not judged yet on a new scar
+    expect(defaultAttributes()).toEqual({ completeness: 'point_complete', termination: null, certainty: 'certain', note: '' });
+  });
+
+  it('records the termination, settable with Shift + 1–5', () => {
+    const f = shiftNumberKeyField()!;
+    expect(f.key).toBe('termination');
+    expect(f.options!.map((o) => [o.value, o.label.zh, o.label.en])).toEqual([
+      ['feather', '羽状', 'Feather'],
+      ['step', '阶梯状', 'Step'],
+      ['hinge', '铰链状', 'Hinge'],
+      ['overshot', '过击', 'Overshot'],
+      ['na', '缺失', 'NA'],
+    ]);
+  });
+
+  it('a completeness without a termination sets it to NA and locks it; one with a termination clears an NA', () => {
+    const base = defaultAttributes();
+    expect(withAttribute(base, 'termination', 'hinge')).toMatchObject({ completeness: 'point_complete', termination: 'hinge' });
+    for (const c of TERMINATION_MISSING) {
+      const truncated = withAttribute({ ...base, termination: 'hinge' }, 'completeness', c)!;
+      expect(truncated.termination).toBe('na');
+      expect(fieldLocked(truncated, 'termination')).toBe(true);
+      expect(withAttribute(truncated, 'termination', 'feather')).toBeNull();
+      // back to a termination: not judged yet
+      expect(withAttribute(truncated, 'completeness', 'proximal_missing')).toMatchObject({ completeness: 'proximal_missing', termination: null });
+    }
+    // a judged termination stays when the completeness keeps a termination
+    expect(withAttribute({ ...base, termination: 'step' }, 'completeness', 'bulb_complete')!.termination).toBe('step');
+    expect(fieldLocked(base, 'termination')).toBe(false);
+  });
+
+  it('changes the completeness and the termination in one undo step', () => {
+    const s = new ProjectStore();
+    const a = add(s, [0, 0, 0], [1, 0, 0]);
+    setScarAttribute(s, a.id, 'termination', 'feather');
+    setScarAttribute(s, a.id, 'completeness', 'both_missing');
+    expect(s.scar(a.id)!.attributes).toMatchObject({ completeness: 'both_missing', termination: 'na' });
+    // locked: Shift + number keys change nothing
+    setScarAttribute(s, a.id, 'termination', 'step');
+    expect(s.scar(a.id)!.attributes.termination).toBe('na');
+    s.history.undo();
+    expect(s.scar(a.id)!.attributes).toMatchObject({ completeness: 'point_complete', termination: 'feather' });
+    setScarAttribute(s, a.id, 'completeness', 'point_truncated');
+    setScarAttribute(s, a.id, 'completeness', 'bulb_complete');
+    expect(s.scar(a.id)!.attributes.termination).toBeNull();
   });
 });
 
@@ -154,9 +202,10 @@ describe('CSV export', () => {
     expect(lines[0]).toBe(
       ['specimen_id', 'scar_id', 'start_x', 'start_y', 'start_z', 'end_x', 'end_y', 'end_z', 'length', ...SCAR_FIELDS.map((f) => f.key), 'unit'].join(','),
     );
-    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,certainty,note,unit');
-    expect(lines[1].startsWith('LB-1023,S1,10,0,0,30,0,0,20,point_complete,certain,"step ""hinge"", maybe')).toBe(true);
-    expect(csv).toContain(',bulb_truncated,certain,,mm');
+    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,unit');
+    // the termination: empty until judged; NA once the completeness says it is missing
+    expect(lines[1].startsWith('LB-1023,S1,10,0,0,30,0,0,20,point_complete,,certain,"step ""hinge"", maybe')).toBe(true);
+    expect(csv).toContain(',bulb_truncated,na,certain,,mm');
     expect(csv.charCodeAt(0)).not.toBe(0xfeff);
     expect(scarVectorCsv(s.state, { excelBom: true }).charCodeAt(0)).toBe(0xfeff);
   });

@@ -23,7 +23,7 @@ test.describe('in a Chinese browser', () => {
     await viewFromTop(page);
     await page.keyboard.press('a');
     await dragArrow(page, roofPoint(-14, 10), roofPoint(-8, 22));
-    await page.keyboard.press('4');
+    await page.keyboard.press('5');
     const enCsv = await exportFile(page, 'scar-vectors');
 
     // the menu names each language in itself and checks the current one
@@ -45,7 +45,7 @@ test.describe('in a Chinese browser', () => {
     // exported codes do not depend on the interface language
     const zhCsv = await exportFile(page, 'scar-vectors');
     expect(zhCsv.text).toBe(enCsv.text);
-    expect(zhCsv.text).toContain(',bulb_truncated,certain,,mm');
+    expect(zhCsv.text).toContain(',bulb_truncated,na,certain,,mm');
 
     // the choice is kept
     await page.reload();

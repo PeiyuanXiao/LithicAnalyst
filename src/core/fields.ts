@@ -24,6 +24,8 @@ export interface FieldDef {
   default: AttributeValue;
   /** Number keys 1…n set this field on the selected arrow. */
   numberKeys?: boolean;
+  /** Shift + number keys 1…n set this field on the selected arrow. */
+  shiftNumberKeys?: boolean;
   /** When to show the value in the arrow list. */
   listSummary?: 'always' | 'nonDefault';
 }
@@ -48,6 +50,11 @@ export const SCAR_FIELDS: FieldDef[] = [
         short: { zh: '负向泡+尾端', en: 'Bulb + term.' },
       },
       {
+        value: 'proximal_missing',
+        label: { zh: '打击点缺失+尾端完整', en: 'Proximal end missing + termination' },
+        short: { zh: '仅尾端', en: 'Term. only' },
+      },
+      {
         value: 'point_truncated',
         label: { zh: '可见打击点+尾端缺失', en: 'Point of percussion, termination missing' },
         short: { zh: '仅打击点', en: 'Point only' },
@@ -62,6 +69,21 @@ export const SCAR_FIELDS: FieldDef[] = [
         label: { zh: '两端缺失', en: 'Both ends missing' },
         short: { zh: '两端缺失', en: 'Neither end' },
       },
+    ],
+  },
+  {
+    // empty (null) until judged; `na` means looked at and there is no termination
+    key: 'termination',
+    label: { zh: '尾端形态', en: 'Termination' },
+    type: 'enum',
+    default: null,
+    shiftNumberKeys: true,
+    options: [
+      { value: 'feather', label: { zh: '羽状', en: 'Feather' } },
+      { value: 'step', label: { zh: '阶梯状', en: 'Step' } },
+      { value: 'hinge', label: { zh: '铰链状', en: 'Hinge' } },
+      { value: 'overshot', label: { zh: '过击', en: 'Overshot' } },
+      { value: 'na', label: { zh: '缺失', en: 'NA' } },
     ],
   },
   {
@@ -145,3 +167,30 @@ export const curveFieldByKey = (key: string): FieldDef | undefined => CURVE_FIEL
 /** The enum field that number keys 1…n set on the selected item. */
 export const numberKeyField = (fields: FieldDef[] = SCAR_FIELDS): FieldDef | undefined =>
   fields.find((f) => f.numberKeys && f.type === 'enum' && f.options?.length);
+
+/** The enum field that Shift + number keys 1…n set on the selected item. */
+export const shiftNumberKeyField = (fields: FieldDef[] = SCAR_FIELDS): FieldDef | undefined =>
+  fields.find((f) => f.shiftNumberKeys && f.type === 'enum' && f.options?.length);
+
+/** Completeness codes without a termination: the termination is then `na`, and stays so. */
+export const TERMINATION_MISSING: readonly string[] = ['point_truncated', 'bulb_truncated', 'both_missing'];
+
+/** The field cannot be set by hand (the termination of a scar whose termination is missing). */
+export const fieldLocked = (attributes: Readonly<Record<string, AttributeValue>>, key: string): boolean =>
+  key === 'termination' && TERMINATION_MISSING.includes(String(attributes.completeness));
+
+/**
+ * The attributes with one field set, and the fields that follow from it: a
+ * completeness without a termination sets the termination to `na`; back to one
+ * with a termination, an `na` termination is cleared (not judged yet). Null
+ * when the field is locked to another value.
+ */
+export function withAttribute(attributes: Readonly<Record<string, AttributeValue>>, key: string, value: AttributeValue): Record<string, AttributeValue> | null {
+  if (fieldLocked(attributes, key) && value !== 'na') return null;
+  const out = { ...attributes, [key]: value };
+  if (key === 'completeness') {
+    if (TERMINATION_MISSING.includes(String(value))) out.termination = 'na';
+    else if (out.termination === 'na') out.termination = null;
+  }
+  return out;
+}

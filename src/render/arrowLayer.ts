@@ -236,6 +236,8 @@ export class ArrowLayer {
   fixedColor: string | null = null;
   /** Draw the arrows faded (they are not what the current work mode is about). */
   dimmed = false;
+  /** Draw these scars' arrows faded (e.g. scars in no sequence while sequences are being made), from the next sync. */
+  faded: ReadonlySet<string> | null = null;
   onLabelClick: (id: string) => void = () => {};
 
   constructor(private readonly viewer: Viewer) {
@@ -306,7 +308,8 @@ export class ArrowLayer {
       const isHov = !isSel && !isHl && a.id === this.hovered;
       const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : this.fixedColor ?? arrowColor(a, display.colorMode, seq);
       const r = isSel || isHl ? radius * 1.15 : isHov ? radius * 1.08 : radius;
-      v.update(s, e, toV(sn), r, color, display.showHidden, display.labels ? a.label : null, isSel, this.dimmed && !isSel, isHov);
+      const faded = !isSel && (this.dimmed || (!isHl && !!this.faded?.has(a.id)));
+      v.update(s, e, toV(sn), r, color, display.showHidden, display.labels ? a.label : null, isSel, faded, isHov);
     }
     for (const [id, v] of this.visuals) {
       if (!seen.has(id)) {

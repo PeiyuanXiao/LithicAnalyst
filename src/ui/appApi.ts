@@ -126,4 +126,10 @@ export interface AppApi {
   openExport(): void;
   /** The relation tool has its first scar and waits for the second. */
   relationPending(): boolean;
+  /** The tool in use (null before the view is ready). */
+  toolId(): string | null;
+  /** Pairs of scars whose regions border on each other and have no relation recorded. */
+  unjudgedPairs(): number;
+  /** Turn the view to the next such border. */
+  nextUnjudgedPair(): void;
 }

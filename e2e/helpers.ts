@@ -41,6 +41,14 @@ export interface LithicApi {
   harrisSvg(): string;
   highlighted(): string[];
   relationPending(): string | null;
+  currentSequence(): string | null;
+  borders(): { all: Array<[string, string, number]>; unjudged: Array<[string, string]> };
+  harrisShown(): boolean;
+  fadedArrows(): string[];
+  borderLines(): number;
+  viewTarget(): Vec3 | null;
+  closeModel(): Promise<void>;
+  workspace(): { name: string; writable: boolean; meshes: string[]; index: number } | null;
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;

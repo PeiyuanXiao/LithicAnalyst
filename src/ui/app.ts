@@ -5,11 +5,11 @@ import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compu
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addLandmark, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, updateSpecimen } from '../core/actions';
+import { addLandmark, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
-import { CURVE_FIELDS, numberKeyField, REGION_FIELDS, SCAR_FIELDS } from '../core/fields';
+import { CURVE_FIELDS, numberKeyField, REGION_FIELDS, SCAR_FIELDS, shiftNumberKeyField } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type Vec3 } from '../core/types';
@@ -30,8 +30,11 @@ import { ClickTool } from '../tools/clickTool';
 import { REGION_COLORS, RegionLayer, regionColorOf } from '../render/regionLayer';
 import { checkRelations, harrisLayout, relationInputs, relationProblems, type HarrisLayout, type RelationChecks } from '../compute/relations';
 import { harrisSvg, type HarrisStyle } from '../render/harris';
-import { sequenceColors } from '../render/sequenceColor';
+import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import { RelationTool, type ScarPick } from '../tools/relationTool';
+import { SequenceTool } from '../tools/sequenceTool';
+import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjacency';
+import { BorderLayer } from '../render/borderLayer';
 import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
 import { landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
@@ -150,6 +153,18 @@ function countsText(state: Readonly<ProjectState>): string {
   return parts.join(' · ');
 }
 
+/** Keys of the bar shown after recording a relation. */
+const CHIP_KEYS: Record<string, 'ab' | 'reverse' | 'ind' | 'delete'> = {
+  Digit1: 'ab',
+  Numpad1: 'ab',
+  Digit2: 'reverse',
+  Numpad2: 'reverse',
+  Digit3: 'ind',
+  Numpad3: 'ind',
+  Delete: 'delete',
+  Backspace: 'delete',
+};
+
 /** Tool id, name, key and icon of the measuring tools. */
 const MEASURE_TOOLS: Array<[string, string, string, string]> = [
   ['measure-distance', 'tool.distance', 'D', ICONS20.distance],
@@ -224,6 +239,16 @@ export class App implements AppApi {
   problemsOpen = false;
   private focusedProblem: number | null = null;
   private harrisEl: HTMLElement | null = null;
+  /** The Harris panel was closed while the relation or sequence tool showed it: not again until the tool changes. */
+  private harrisAutoOff = false;
+  /** The sequence the sequence tool puts scars into. */
+  private currentSequence: string | null = null;
+  private sequenceBarEl: HTMLElement | null = null;
+  /** Borders between scar regions (for the scars not judged yet), and the one "next pair" went to last. */
+  private borders: ScarBorder[] = [];
+  private bordersToken = 0;
+  private borderCursor = -1;
+  private borderLayer: BorderLayer | null = null;
   private landmarkLayer: LandmarkLayer | null = null;
   private landmarks: LandmarkTable = { rows: [], sliders: [], sets: [] };
   /** Landmark names carried over from the last specimen, and those skipped. */
@@ -261,6 +286,11 @@ export class App implements AppApi {
   private autosaveTimer = 0;
   private readonly autosaveOk = autosaveAvailable();
   private autosaveWarned = false;
+  /** The last autosave could not be written (the browser's storage is full). */
+  private autosaveFailed = false;
+  /** Edits since the project file was last saved (downloaded): what a read-only folder would lose. */
+  private unsaved = false;
+  private closeItem: HTMLButtonElement | null = null;
   private occlusionDirty = true;
   private lastOcclusion = 0;
   private coordsQueued = false;
@@ -359,6 +389,7 @@ export class App implements AppApi {
     this.regionLayer = new RegionLayer(viewer.scene);
     this.landmarkLayer = new LandmarkLayer(viewer);
     this.landmarkLayer.onLabelClick = (id) => this.selection.set(id);
+    this.borderLayer = new BorderLayer(viewer);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -411,7 +442,8 @@ export class App implements AppApi {
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
     this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p)));
-    this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => void this.askRelation(a, b, at, from)));
+    this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => this.recordRelation(a, b, at, from)));
+    this.tools.register(new SequenceTool((x, y, hit) => this.scarAt(x, y, hit), (id) => this.toggleInSequence(id)));
     this.tools.onHover = (hit) => {
       this.lastHover = hit;
       this.queueCoords();
@@ -433,7 +465,9 @@ export class App implements AppApi {
 
     this.store.subscribe((c) => this.onStoreChange(c));
     this.store.history.onChange(() => this.updateUndoButtons());
-    this.selection.onChange(() => {
+    this.selection.onChange((id) => {
+      // the relation's bar goes once something else is selected
+      if (this.relationChip && id !== this.relationChip.id) this.relationChip.close();
       this.syncAnnotations();
       if (this.store.region(this.selection.id ?? '') || this.regions?.results.length) this.paintRegions();
       this.sidebar.refresh('selection');
@@ -482,10 +516,15 @@ export class App implements AppApi {
     tip(this.fileBtn, t('header.file'));
     const item = (id: string, iconPath: string, label: string, run: () => void) =>
       h('button', { type: 'button', id, class: 'menu-item', role: 'menuitem', onclick: () => (this.popovers.close(), run()) }, icon(iconPath), h('span', {}, label));
+    // closing has no key: Ctrl+W would close the browser's tab
+    this.closeItem = item('btn-close-model', ICONS.close, t('header.close'), () => void this.closeModel()) as HTMLButtonElement;
+    this.closeItem.disabled = !this.hasMesh();
     menu.append(
       item('btn-open', ICONS.cube, t('header.openMesh'), () => this.meshInput.click()),
       item('btn-open-project', ICONS.project, t('header.openProject'), () => this.openProject()),
       item('btn-open-folder', ICONS.open, t('header.openFolder'), () => void this.openFolder()),
+      h('hr', { class: 'menu-sep', 'aria-hidden': 'true' }),
+      this.closeItem,
     );
     // languages, each named in itself; the current one checked
     const langMenu = h('div', { class: 'popover menu', id: 'lang-menu', role: 'menu', hidden: true });
@@ -703,6 +742,7 @@ export class App implements AppApi {
       { value: 'curve', icon: ICONS20.curve, name: t('mode.curve'), key: 'P' },
       { value: 'region', icon: ICONS20.region, name: t('tool.region'), key: 'R' },
       { value: 'relation', icon: ICONS20.relation, name: t('tool.relation'), key: 'B' },
+      { value: 'sequence', icon: ICONS20.sequence, name: t('tool.sequence'), key: 'Q' },
       { value: 'landmark', icon: ICONS20.landmark, name: t('tool.landmark'), key: 'K' },
     ]);
     this.measureSeg = this.toolRow('measure-tool', t('appMode.measure'), [select, ...MEASURE_TOOLS.map(([value, key, k, ic]) => ({ value, icon: ic, name: t(key), key: k }))]);
@@ -717,6 +757,11 @@ export class App implements AppApi {
     const fit = h('button', { type: 'button', class: 'tool-btn', id: 'btn-fit', 'aria-label': `${t('view.fit')} (H)`, onclick: () => this.viewer?.viewAll(true) }, icon20(ICONS20.fit), h('span', { class: 'tool-key', 'aria-hidden': 'true' }, 'H'));
     tip(fit, t('view.fit'), 'H');
     this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.toolSep, fit, this.snapEl);
+    // the sequences, under the toolbar while the sequence tool is in use
+    const bar = h('div', { class: 'viewport-ui vp-seqbar', id: 'sequence-bar', role: 'radiogroup', 'aria-label': t('sequence.title'), hidden: true });
+    if (this.sequenceBarEl) this.sequenceBarEl.replaceWith(bar);
+    else this.viewportEl.append(bar);
+    this.sequenceBarEl = bar;
     this.updateToolbar();
   }
 
@@ -728,6 +773,61 @@ export class App implements AppApi {
     if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
     if (this.toolSep) this.toolSep.hidden = this.mode === 'compare';
     if (this.snapEl) this.snapEl.hidden = !annotate || !['curve', 'landmark'].includes(this.tools?.activeId ?? '');
+    this.updateSequenceBar();
+  }
+
+  /** The sequence tool's bar: Q1, Q2 … with their colour and number of scars, the current one marked, then "+". */
+  private updateSequenceBar(): void {
+    const bar = this.sequenceBarEl;
+    if (!bar) return;
+    const shown = this.mode === 'annotate' && this.tools?.activeId === 'sequence' && this.hasMesh();
+    bar.hidden = !shown;
+    if (!shown) return;
+    const seqs = this.store.state.sequences;
+    if (!seqs.some((q) => q.id === this.currentSequence)) this.currentSequence = seqs[seqs.length - 1]?.id ?? null;
+    clear(bar);
+    seqs.forEach((q, i) => {
+      const b = h(
+        'button',
+        { type: 'button', class: 'seq-chip', role: 'radio', 'data-id': q.id, 'aria-checked': String(q.id === this.currentSequence), 'aria-label': `${q.label} · ${t('sequence.members', { n: q.scarIds.length })}`, onclick: () => this.setCurrentSequence(q.id) },
+        h('span', { class: 'chip', style: `--chip:${sequenceSwatch(i)}` }),
+        h('span', { class: 'seq-chip-label mono' }, q.label),
+        h('span', { class: 'seq-chip-count mono' }, String(q.scarIds.length)),
+        i < 9 ? h('span', { class: 'tool-key', 'aria-hidden': 'true' }, String(i + 1)) : null,
+      );
+      tip(b, `${q.label} · ${t('sequence.members', { n: q.scarIds.length })}`, i < 9 ? String(i + 1) : undefined);
+      bar.append(b);
+    });
+    const add = h('button', { type: 'button', class: 'seq-chip seq-add', id: 'sequence-bar-add', 'aria-label': `${t('sequence.new')} (N)`, onclick: () => this.newSequence() }, icon20(ICONS20.plus), h('span', { class: 'tool-key', 'aria-hidden': 'true' }, 'N'));
+    tip(add, t('sequence.new'), 'N');
+    bar.append(add);
+    // just under the toolbar, which may have wrapped onto two lines
+    bar.style.top = `${this.toolbarEl.offsetTop + this.toolbarEl.offsetHeight + 8}px`;
+  }
+
+  private setCurrentSequence(id: string): void {
+    this.currentSequence = id;
+    this.updateSequenceBar();
+  }
+
+  /** A new sequence (after the others), made current. */
+  private newSequence(): void {
+    if (!this.hasMesh()) return;
+    this.currentSequence = addSequence(this.store).id;
+    this.updateSequenceBar();
+  }
+
+  /** Sequence tool: a click puts the scar into the current sequence, or takes it out when it is there. */
+  private toggleInSequence(scarId: string): void {
+    const seqs = this.store.state.sequences;
+    const q = seqs.find((x) => x.id === this.currentSequence) ?? null;
+    if (!q) {
+      // no sequence yet: the first click starts one
+      this.currentSequence = addSequence(this.store, [scarId]).id;
+      this.updateSequenceBar();
+      return;
+    }
+    setScarSequence(this.store, scarId, q.scarIds.includes(scarId) ? null : q.id);
   }
 
   /** Without a model: open one (or a folder, or a project); dropping a file works too. */
@@ -778,6 +878,7 @@ export class App implements AppApi {
     this.emptyEl.hidden = has;
     this.toolbarEl.hidden = !has;
     this.saveBtn.disabled = !has;
+    if (this.closeItem) this.closeItem.disabled = !has;
     // the main action: opening something until a model is open, then saving
     this.fileBtn.classList.toggle('btn-primary', !has);
     this.fileBtn.classList.toggle('btn-quiet', has);
@@ -860,12 +961,27 @@ export class App implements AppApi {
       this.updateAuto();
       this.sidebar.refresh('figure');
     }
+    if (['scars', 'sequences', 'reset'].includes(c.kind)) this.updateSequenceBar();
+    this.relationChip?.update();
+    this.unsaved = c.kind !== 'reset';
     if (c.kind !== 'reset') {
       this.scheduleAutosave();
       this.scheduleFolderSave();
     }
     this.scheduleAgreement();
     this.queueCoords();
+  }
+
+  /** The sequence tool is in use: arrows and scar regions are coloured by sequence, the scars in none faded. */
+  private sequencing(): boolean {
+    return this.mode === 'annotate' && this.tools?.activeId === 'sequence';
+  }
+
+  /** Scars in no sequence (faded while sequencing). */
+  private unsequenced(): Set<string> {
+    const st = this.store.state;
+    const inSeq = new Set(st.sequences.flatMap((q) => q.scarIds));
+    return new Set(st.scars.filter((s) => !inSeq.has(s.id)).map((s) => s.id));
   }
 
   private syncAnnotations(): void {
@@ -876,7 +992,11 @@ export class App implements AppApi {
     if (this.curves) this.curves.dimmed = dim;
     if (this.landmarkLayer) this.landmarkLayer.dimmed = dim;
     this.arrows?.setHighlight(this.emphasis());
-    this.arrows?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
+    // the user's own colour setting comes back when the sequence tool is left
+    const sequencing = this.sequencing();
+    if (this.arrows) this.arrows.faded = sequencing ? this.unsequenced() : null;
+    this.arrows?.sync(this.store.state, this.selection.id, sequencing ? { ...this.display.arrows, colorMode: 'sequence' } : this.display.arrows, handles);
+    this.showBorders();
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
     this.landmarkLayer?.sync(this.store.state.landmarks, this.landmarks.sets, this.selection.id, this.display.arrows.labels, this.display.arrows.showHidden);
@@ -911,17 +1031,28 @@ export class App implements AppApi {
   }
 
   setTool(id: string): void {
-    if (id !== this.tools?.activeId) this.sidebar.focusTool(id);
+    const changed = id !== this.tools?.activeId;
+    if (changed) {
+      this.sidebar.focusTool(id);
+      this.relationChip?.close();
+      this.harrisAutoOff = false;
+    }
     this.tools?.setActive(id);
     this.syncAnnotations();
     this.updateCursor();
+    if (changed) {
+      // the sequence tool colours by sequence; the relation and sequence tools show the matrix
+      this.paintRegions();
+      this.updateHarris();
+      this.sidebar.refresh('relations');
+    }
   }
 
   /** Switch the work mode. The selection and the undo history are kept. */
   setMode(mode: AppMode): void {
     if (mode === this.mode) return;
     // tools belong to their mode; an unfinished curve is kept (as on Esc)
-    this.relationPop?.close();
+    this.relationChip?.close();
     this.tools?.activeTool?.clearHover?.();
     this.setTool('select');
     this.mode = mode;
@@ -1422,6 +1553,7 @@ export class App implements AppApi {
     this.conflictKey = conflicts;
     this.paintRegions();
     this.updateNodule();
+    this.updateBorders();
     this.sidebar.refresh('regions');
   }
 
@@ -1858,6 +1990,10 @@ export class App implements AppApi {
     return tool instanceof RelationTool && tool.pending() !== null;
   }
 
+  toolId(): string | null {
+    return this.tools?.activeId ?? null;
+  }
+
   /** Show the pair of items that differ most in a metric, each in its observer's drawing (again: clear). */
   focusAgreement(itemType: string, metric: string, a: string, b: string): void {
     const key = `${itemType}|${metric}|${a}|${b}`;
@@ -2123,7 +2259,8 @@ export class App implements AppApi {
   private emphasis(): { ids: Set<string>; color: string } | null {
     if (this.mode !== 'annotate') return null;
     const sel = this.selection.id;
-    const rel = sel ? this.store.relation(sel) : undefined;
+    // while sequencing, the colours are the sequences'
+    const rel = sel && !this.sequencing() ? this.store.relation(sel) : undefined;
     if (rel) return { ids: new Set([rel.a, rel.b]), color: ARROW_COLORS.selected };
     if (!this.problemsOpen) return null;
     const found = relationProblems(this.relationChecks());
@@ -2144,26 +2281,31 @@ export class App implements AppApi {
     return r?.scarId && this.store.scar(r.scarId) ? { scarId: r.scarId, selectId: r.id } : null;
   }
 
-  /** Relation tool: ask, next to the click, how two scars relate, and record it. */
-  private async askRelation(a: string, b: string, at: { x: number; y: number }, from: { x: number; y: number }): Promise<void> {
-    const A = this.store.scar(a)?.label ?? '', B = this.store.scar(b)?.label ?? '';
-    const old = relationBetween(this.store.state, a, b);
-    const current = !old ? null : old.kind === 'indeterminate' ? 'ind' : old.a === a ? 'ab' : 'ba';
-    const options: Array<{ id: string; key: string; label: string }> = [
-      { id: 'ab', key: '1', label: t('relation.cuts', { a: A, b: B }) },
-      { id: 'ba', key: '2', label: t('relation.cuts', { a: B, b: A }) },
-      { id: 'ind', key: '3', label: t('relation.indeterminate') },
-    ];
-    if (old) options.push({ id: 'delete', key: 'Del', label: t('arrows.delete') });
-    const choice = await this.relationPopover(`${A} · ${B}`, options, current, at, [from, ...this.scarScreenPoints(a), ...this.scarScreenPoints(b)]);
-    if (!this.store.scar(a) || !this.store.scar(b)) return;
-    if (choice === 'delete' && old) {
-      deleteRelation(this.store, old.id);
-      this.selection.set(null);
-      return;
-    }
-    const rel = choice === 'ab' ? setRelation(this.store, a, b, 'a_cuts_b') : choice === 'ba' ? setRelation(this.store, b, a, 'a_cuts_b') : choice === 'ind' ? setRelation(this.store, a, b, 'indeterminate') : null;
-    this.selection.set(rel?.id ?? null);
+  /**
+   * Relation tool: the scar clicked first cuts the one clicked second (the
+   * order of the clicks is the order of the words), replacing what was
+   * recorded for the pair. A small bar next to the click offers to change it.
+   */
+  private recordRelation(a: string, b: string, at: { x: number; y: number }, from: { x: number; y: number }): void {
+    const rel = setRelation(this.store, a, b, 'a_cuts_b');
+    if (!rel) return;
+    this.selection.set(rel.id);
+    this.showRelationChip(rel.id, a, b, at, [from, ...this.scarScreenPoints(a), ...this.scarScreenPoints(b)]);
+  }
+
+  /**
+   * Change the relation the bar shows: `ab` the first scar cuts the second (key 1),
+   * `reverse` the other way round, or back (2), `ind` cannot tell (3), `delete`.
+   */
+  private applyRelationChoice(choice: 'ab' | 'reverse' | 'ind' | 'delete'): void {
+    const c = this.relationChip;
+    const r = c ? this.store.relation(c.id) : undefined;
+    if (!c || !r) return;
+    if (choice === 'delete') deleteRelation(this.store, r.id);
+    else if (choice === 'ind') setRelation(this.store, c.a, c.b, 'indeterminate');
+    else if (choice === 'ab' || (r.kind === 'a_cuts_b' && r.a === c.b)) setRelation(this.store, c.a, c.b, 'a_cuts_b');
+    else setRelation(this.store, c.b, c.a, 'a_cuts_b');
+    this.relationChip?.update();
   }
 
   /** Where a scar shows on screen: points along its arrow, or its regions' seeds. */
@@ -2181,75 +2323,156 @@ export class App implements AppApi {
     return pts.map((p) => v.project(new THREE.Vector3(p[0], p[1], p[2]))).filter((p) => p.visible);
   }
 
-  private relationPop: { close: () => void } | null = null;
+  /** The bar of the relation just recorded (`a` and `b` in the order clicked); null when none is shown. */
+  private relationChip: { id: string; a: string; b: string; close: () => void; update: () => void } | null = null;
 
   /**
-   * A small popover next to `at` (client coordinates) with numbered choices;
-   * it goes to whichever side of the click leaves `avoid` (the two scars) in view.
-   * 1 / 2 / 3, Delete and Esc work from the keyboard; a press elsewhere cancels.
+   * Place `el` (in the view) next to `at` (client coordinates), on whichever side
+   * of the click leaves `avoid` (the two scars) in view.
    */
-  private relationPopover(title: string, options: Array<{ id: string; key: string; label: string }>, current: string | null, at: { x: number; y: number }, avoid: Array<{ x: number; y: number }>): Promise<string | null> {
-    this.relationPop?.close();
-    return new Promise((resolve) => {
-      const buttons = options.map((o) =>
-        h('button', { type: 'button', class: `btn btn-sm ${o.id === 'delete' ? 'btn-danger' : o.id === current ? 'btn-primary' : 'btn-quiet'}`, 'data-choice': o.id, onclick: () => finish(o.id) }, h('kbd', {}, o.key), h('span', {}, o.label)),
-      );
-      const el = h('div', { class: 'viewport-ui relation-pop', id: 'relation-pop', role: 'dialog', 'aria-label': title }, h('div', { class: 'relation-pop-title mono' }, title), ...buttons);
-      el.style.visibility = 'hidden';
-      this.viewportEl.append(el);
-      // place it: the first side of the click that fits in the view and covers neither scar
-      const area = this.viewportEl.getBoundingClientRect();
-      const w = el.offsetWidth, hgt = el.offsetHeight, gap = 14, margin = 8;
-      const cx = at.x - area.left, cy = at.y - area.top;
-      // [x, y, 1 when it had to be pushed into the view]
-      const spots = [
-        [cx + gap, cy + gap],
-        [cx - gap - w, cy + gap],
-        [cx + gap, cy - gap - hgt],
-        [cx - gap - w, cy - gap - hgt],
-      ].map(([x, y]) => {
-        const fx = Math.max(margin, Math.min(area.width - w - margin, x)), fy = Math.max(margin, Math.min(area.height - hgt - margin, y));
-        return [fx, fy, fx !== x || fy !== y ? 1 : 0];
-      });
-      const inside = (px: number, py: number, [x, y]: number[], pad: number) => px > x - pad && px < x + w + pad && py > y - pad && py < y + hgt + pad;
-      // the clicked point counts most, then the scars; a spot that fits as it is beats one pushed into the view
-      const cost = (s: number[]) =>
-        (inside(cx, cy, s, gap) ? 100 : 0) + avoid.filter((p) => inside(p.x - area.left, p.y - area.top, s, margin)).length + 0.5 * s[2];
-      const best = spots.reduce((b, p) => (cost(p) < cost(b) ? p : b), spots[0]);
-      el.style.left = `${best[0]}px`;
-      el.style.top = `${best[1]}px`;
-      el.style.visibility = '';
-      const keys: Record<string, string> = { Digit1: 'ab', Numpad1: 'ab', Digit2: 'ba', Numpad2: 'ba', Digit3: 'ind', Numpad3: 'ind' };
-      const onKey = (e: KeyboardEvent) => {
-        let choice: string | null | undefined = keys[e.code];
-        if (e.key === 'Delete' || e.key === 'Backspace') {
-          e.preventDefault();
-          if (!options.some((o) => o.id === 'delete')) return;
-          choice = 'delete';
-        }
-        if (e.key === 'Escape') choice = null;
-        if (choice === undefined) return;
-        e.preventDefault();
-        e.stopPropagation();
-        finish(choice);
-      };
-      const onDown = (e: PointerEvent) => {
-        if (el.contains(e.target as Node)) return;
-        finish(null);
-        if (onViewport(e.target as Node)) e.stopPropagation();
-      };
-      const finish = (choice: string | null) => {
-        el.remove();
-        document.removeEventListener('keydown', onKey, true);
-        document.removeEventListener('pointerdown', onDown, true);
-        if (this.relationPop === handle) this.relationPop = null;
-        resolve(choice);
-      };
-      const handle = { close: () => finish(null) };
-      this.relationPop = handle;
-      document.addEventListener('keydown', onKey, true);
-      document.addEventListener('pointerdown', onDown, true);
+  private placeNear(el: HTMLElement, at: { x: number; y: number }, avoid: Array<{ x: number; y: number }>): void {
+    el.style.visibility = 'hidden';
+    const area = this.viewportEl.getBoundingClientRect();
+    const w = el.offsetWidth, hgt = el.offsetHeight, gap = 14, margin = 8;
+    const cx = at.x - area.left, cy = at.y - area.top;
+    // [x, y, 1 when it had to be pushed into the view]
+    const spots = [
+      [cx + gap, cy + gap],
+      [cx - gap - w, cy + gap],
+      [cx + gap, cy - gap - hgt],
+      [cx - gap - w, cy - gap - hgt],
+    ].map(([x, y]) => {
+      const fx = Math.max(margin, Math.min(area.width - w - margin, x)), fy = Math.max(margin, Math.min(area.height - hgt - margin, y));
+      return [fx, fy, fx !== x || fy !== y ? 1 : 0];
     });
+    const inside = (px: number, py: number, [x, y]: number[], pad: number) => px > x - pad && px < x + w + pad && py > y - pad && py < y + hgt + pad;
+    // the clicked point counts most, then the scars; a spot that fits as it is beats one pushed into the view
+    const cost = (s: number[]) =>
+      (inside(cx, cy, s, gap) ? 100 : 0) + avoid.filter((p) => inside(p.x - area.left, p.y - area.top, s, margin)).length + 0.5 * s[2];
+    const best = spots.reduce((b, p) => (cost(p) < cost(b) ? p : b), spots[0]);
+    el.style.left = `${best[0]}px`;
+    el.style.top = `${best[1]}px`;
+    el.style.visibility = '';
+  }
+
+  /**
+   * A small bar next to the second click: "S4 cuts S3" and buttons to reverse it (2),
+   * make it "cannot tell" (3) or delete it (Delete); 1 brings back "S4 cuts S3".
+   * It takes nothing away from the tool: it goes at the next press in the view, a
+   * change of tool, Esc, or when something else is selected.
+   */
+  private showRelationChip(id: string, a: string, b: string, at: { x: number; y: number }, avoid: Array<{ x: number; y: number }>): void {
+    this.relationChip?.close();
+    const text = h('span', { class: 'relation-chip-text mono', id: 'relation-chip-text' });
+    const button = (choice: 'reverse' | 'ind' | 'delete', key: string, label: string, extra = '') =>
+      h('button', { type: 'button', class: `btn btn-sm btn-quiet${extra}`, 'data-choice': choice, 'aria-pressed': 'false', onclick: () => this.applyRelationChoice(choice) }, h('kbd', {}, key), h('span', {}, label));
+    const reverse = button('reverse', '2', t('relation.reverse'));
+    const ind = button('ind', '3', t('relation.indeterminate'));
+    const del = button('delete', 'Del', t('arrows.delete'), ' relation-chip-delete');
+    del.removeAttribute('aria-pressed');
+    const el = h('div', { class: 'viewport-ui relation-chip', id: 'relation-chip', role: 'group' }, text, reverse, ind, del);
+    this.viewportEl.append(el);
+    this.placeNear(el, at, avoid);
+    const label = (x: string) => this.store.scar(x)?.label ?? '?';
+    const update = () => {
+      const r = this.store.relation(id);
+      if (!r) return close();
+      text.textContent = r.kind === 'indeterminate' ? t('relation.pairUnknown', { a: label(a), b: label(b) }) : t('relation.cuts', { a: label(r.a), b: label(r.b) });
+      el.setAttribute('aria-label', text.textContent);
+      reverse.setAttribute('aria-pressed', String(r.kind === 'a_cuts_b' && r.a === b));
+      ind.setAttribute('aria-pressed', String(r.kind === 'indeterminate'));
+    };
+    // a press in the view (not on the bar) lets it go, and goes on to the tool as usual
+    const onDown = (e: PointerEvent) => {
+      if (!el.contains(e.target as Node) && onViewport(e.target as Node)) close();
+    };
+    const close = () => {
+      el.remove();
+      document.removeEventListener('pointerdown', onDown, true);
+      if (this.relationChip === handle) this.relationChip = null;
+    };
+    const handle = { id, a, b, close, update };
+    this.relationChip = handle;
+    document.addEventListener('pointerdown', onDown, true);
+    update();
+  }
+
+  // ------------------------------------------------------------ borders of scars not judged yet
+
+  /** What the borders were last computed from (the partition and the scar of each piece). */
+  private bordersFor: { part: Partition | null; key: string } = { part: null, key: '' };
+
+  /** Which scars' regions border on each other (in slices), after the regions are found again (only when the pieces or their scars changed). */
+  private updateBorders(): void {
+    const part = this.partition, base = this.measureBase, loaded = this.loaded;
+    const st = this.store.state;
+    // the scar of each piece of surface: its first scar region's
+    const scars: string[] = [];
+    const owner = new Int32Array(part?.count ?? 0).fill(-1);
+    st.regions.forEach((r, i) => {
+      const c = this.seedComponent[i];
+      if (!part || r.type !== 'scar' || !r.scarId || !this.store.scar(r.scarId) || c < 0 || owner[c] >= 0) return;
+      const k = scars.indexOf(r.scarId);
+      owner[c] = k >= 0 ? k : scars.push(r.scarId) - 1;
+    });
+    const key = JSON.stringify([scars, [...owner].flatMap((k, c) => (k >= 0 ? [c, k] : []))]);
+    if (part && part === this.bordersFor.part && key === this.bordersFor.key) return;
+    this.bordersFor = { part, key };
+    const token = ++this.bordersToken;
+    this.borderCursor = -1;
+    const done = (b: ScarBorder[]) => {
+      if (token !== this.bordersToken) return;
+      this.borders = b;
+      this.showBorders();
+      this.sidebar.refresh('relations');
+    };
+    if (!part || !base || !loaded || scars.length < 2) return done([]);
+    const g = loaded.geometry;
+    const o = loaded.offset;
+    void runSliced(scarBordersSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, part.region, owner, scars)).then((list) => {
+      if (this.loaded !== loaded) return;
+      // the mesh is re-centred: back to original coordinates
+      done(list.map((x) => ({ ...x, mid: [x.mid[0] + o[0], x.mid[1] + o[1], x.mid[2] + o[2]] as Vec3 })));
+    });
+  }
+
+  /** Bordering scars with no relation recorded (not even "cannot tell"). */
+  private unjudgedBorders(): ScarBorder[] {
+    const st = this.store.state;
+    return this.borders.filter((b) => this.store.scar(b.a) && this.store.scar(b.b) && !relationBetween(st, b.a, b.b));
+  }
+
+  unjudgedPairs(): number {
+    return this.unjudgedBorders().length;
+  }
+
+  /** The relation tool draws the borders of the scars not judged yet, dashed. */
+  private showBorders(): void {
+    const layer = this.borderLayer, loaded = this.loaded;
+    if (!layer) return;
+    const pairs = this.mode === 'annotate' && this.tools?.activeId === 'relation' && loaded ? this.unjudgedBorders() : [];
+    if (!pairs.length || !loaded) {
+      layer.clear();
+      return;
+    }
+    const key = `${this.bordersToken}#${pairs.map((p) => `${p.a}|${p.b}`).join(',')}`;
+    if (layer.shows(key)) return;
+    const pos = loaded.geometry.getAttribute('position').array as Float32Array;
+    const o = loaded.offset;
+    const at = (v: number): Vec3 => [pos[3 * v] + o[0], pos[3 * v + 1] + o[1], pos[3 * v + 2] + o[2]];
+    layer.sync(key, pairs.flatMap((p) => chainEdges(p.edges).map((c) => c.map(at))), o);
+  }
+
+  /** Turn the view to the middle of the next border of scars not judged yet. */
+  nextUnjudgedPair(): void {
+    const pairs = this.unjudgedBorders();
+    const v = this.viewer;
+    if (!pairs.length || !v) return;
+    this.borderCursor = (this.borderCursor + 1) % pairs.length;
+    const b = pairs[this.borderCursor];
+    const snap = this.surfaceSnap;
+    const toward = snap ? snap.normal(snap.nearestVertex(b.mid)) : v.towardViewer();
+    v.viewFrom(toward, v.cameraUp(), b.mid, v.currentDistance(), true);
   }
 
   /** The Harris matrix panel: move it by its title bar, size it from its corner, fold it to one line (all remembered). */
@@ -2268,7 +2491,11 @@ export class App implements AppApi {
       h('span', { class: 'harris-title' }, t('harris.title')),
       h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'harris-svg', onclick: () => this.exportHarrisSvg() }, 'SVG'),
       fold,
-      h('button', { type: 'button', class: 'icon-btn', id: 'harris-close', 'aria-label': t('dlg.close'), onclick: () => this.setDisplay((d) => (d.harris = false), 'harris') }, icon(ICONS.close)),
+      h('button', { type: 'button', class: 'icon-btn', id: 'harris-close', 'aria-label': t('dlg.close'), onclick: () => {
+        // shown by the relation or sequence tool: away until the tool changes
+        if (this.harrisAuto()) this.harrisAutoOff = true;
+        this.setDisplay((d) => (d.harris = false), 'harris');
+      } }, icon(ICONS.close)),
     );
     const grip = h('div', { class: 'harris-grip', 'aria-hidden': 'true' });
     const el = h('div', { class: 'viewport-ui harris-panel', id: 'harris-panel', hidden: true }, head, body, grip);
@@ -2356,11 +2583,16 @@ export class App implements AppApi {
     return { labels: new Map(st.scars.map((s) => [s.id, s.label])), fills: sequenceColors(st.sequences), selected };
   }
 
-  /** Redraw the Harris matrix panel (annotate mode, when switched on). */
+  /** The relation or sequence tool is in use on scars: the matrix shows whatever the display setting says. */
+  private harrisAuto(): boolean {
+    return this.mode === 'annotate' && ['relation', 'sequence'].includes(this.tools?.activeId ?? '') && this.store.state.scars.length > 0;
+  }
+
+  /** Redraw the Harris matrix panel (annotate mode, when switched on or while the relation or sequence tool is used). */
   private updateHarris(): void {
     const el = this.harrisEl, body = this.harrisBody;
     if (!el || !body) return;
-    const shown = this.display.harris && this.mode === 'annotate' && this.hasMesh();
+    const shown = (this.display.harris || (this.harrisAuto() && !this.harrisAutoOff)) && this.mode === 'annotate' && this.hasMesh();
     const wasShown = !el.hidden;
     el.hidden = !shown;
     if (!shown) return;
@@ -2498,14 +2730,16 @@ export class App implements AppApi {
     const results = this.regions?.results ?? [];
     const st = this.store.state;
     layer.dimmed = this.mode === 'measure';
-    const seq = this.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
+    const sequencing = this.sequencing();
+    const seq = this.display.arrows.colorMode === 'sequence' || sequencing ? sequenceColors(st.sequences) : null;
+    const loose = sequencing ? this.unsequenced() : null;
     const em = this.emphasis();
     const paints = this.display.regions
       ? results.flatMap((r, i) => {
           const c = this.seedComponent[i];
           if (c < 0 || this.seedComponent.indexOf(c) !== i) return [];
           const hl = !!em && !!r.scarId && em.ids.has(r.scarId);
-          return [{ component: c, color: hl ? em!.color : regionColorOf(r, st.scars, seq), selected: hl || r.id === this.selection.id }];
+          return [{ component: c, color: hl ? em!.color : regionColorOf(r, st.scars, seq), selected: hl || r.id === this.selection.id, faded: !!loose && r.type === 'scar' && !!r.scarId && loose.has(r.scarId) }];
         })
       : [];
     const g = loaded?.geometry;
@@ -2567,19 +2801,22 @@ export class App implements AppApi {
     // agreement analysis tells observers apart by their name
     if (!this.store.state.specimen.annotator.trim()) this.feedback.toast(t('toast.noAnnotator'), 'info', 5000);
     const file = serializeProject(this.store.state, __APP_VERSION__, this.meshResults());
-    void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json');
+    void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json').then((outcome) => {
+      if (outcome === 'saved') this.unsaved = false;
+    });
   }
 
   openProject(): void {
     this.projectInput.click();
   }
 
-  private async save(name: string, text: string, mime: string): Promise<void> {
+  private async save(name: string, text: string, mime: string): Promise<Awaited<ReturnType<typeof saveTextFile>>> {
     const outcome = await saveTextFile(name, text, mime);
     if (outcome === 'saved') this.feedback.toast(t('toast.saved', { name }));
     else if (outcome === 'declined') this.feedback.toast(t('toast.declined'));
     else if (outcome === 'busy') this.feedback.toast(t('toast.busy'), 'warn');
     else this.feedback.showCopy(name, text);
+    return outcome;
   }
 
   private deleteSelection(e: KeyboardEvent): void {
@@ -2643,15 +2880,15 @@ export class App implements AppApi {
 
   // ------------------------------------------------------------ meshes and projects
 
-  private installMesh(loaded: LoadedMesh): void {
-    const v = this.viewer;
-    if (!v) return;
-    // an unfinished curve is kept with the previous model, then saved
-    this.tools?.cancel();
-    this.flushAutosave();
+  /** Let go of the model and of everything drawn or computed for it (another model follows, or none). */
+  private releaseMesh(): void {
+    this.relationChip?.close();
     this.surfaceSnap?.dispose();
     this.curvature?.dispose();
     this.meshView?.dispose();
+    this.surfaceSnap = null;
+    this.curvature = null;
+    this.meshView = null;
     this.arrows?.clearAll();
     this.curves?.clearAll();
     this.landmarkLayer?.clearAll();
@@ -2660,6 +2897,7 @@ export class App implements AppApi {
     this.planesLayer?.clearAll();
     this.sectionLayer?.clearAll();
     this.regionLayer?.clear();
+    this.borderLayer?.clear();
     this.partition = null;
     this.regions = null;
     this.seedComponent = [];
@@ -2667,6 +2905,18 @@ export class App implements AppApi {
     this.nodule = null;
     this.cuts.clear();
     this.planes = [];
+    this.borders = [];
+    this.bordersToken++;
+    this.loaded = null;
+  }
+
+  private installMesh(loaded: LoadedMesh): void {
+    const v = this.viewer;
+    if (!v) return;
+    // an unfinished curve is kept with the previous model, then saved
+    this.tools?.cancel();
+    this.flushAutosave();
+    this.releaseMesh();
     this.loaded = loaded;
     this.meshView = new MeshView(loaded);
     this.meshView.setRoughness(0.95 - 0.7 * GLOSS);
@@ -2701,6 +2951,45 @@ export class App implements AppApi {
     this.applyShading();
     this.updateMeshDependentUi();
     this.sidebar.refresh('all');
+  }
+
+  /**
+   * Close the model: finish the tool's work and the pending saves, let go of the
+   * model and its layers, the undo history, the selection and the observers
+   * compared with it, leave the folder, and show the empty view. Asks first only
+   * when edits would be lost: a read-only folder with edits not downloaded, or
+   * an autosave that failed.
+   */
+  async closeModel(): Promise<void> {
+    if (!this.hasMesh() || this.batch) return;
+    this.popovers.close();
+    this.relationChip?.close();
+    this.tools?.cancel();
+    await this.flushFolderSave();
+    this.flushAutosave();
+    const readOnly = !!this.workspace && !this.workspace.writable;
+    const reason = this.autosaveFailed ? 'dlg.closeModel.autosaveFailed' : readOnly && this.unsaved ? 'dlg.closeModel.notDownloaded' : null;
+    if (reason && !(await this.feedback.confirm(t('dlg.closeModel.title'), t(reason), t('dlg.closeModel.yes'), t('dlg.cancel')))) return;
+    this.setTool('select');
+    this.releaseMesh();
+    this.viewer?.clearMesh();
+    this.measureToken++;
+    this.measureBase = null;
+    this.auto = null;
+    this.autoFrameKey = '';
+    this.faceAreas = null;
+    this.curvBusy = false;
+    this.pendingProject = null;
+    this.lastHover = null;
+    this.workspace = null;
+    this.wsIndex = -1;
+    this.autosaveFailed = false;
+    this.selection.set(null);
+    this.store.reset(emptyProject());
+    this.showNodule();
+    this.updateMeshDependentUi();
+    this.sidebar.refresh('all');
+    this.queueCoords();
   }
 
   private applyProject(state: ProjectState, toastKey: string | null = 'toast.projectLoaded'): void {
@@ -2834,6 +3123,7 @@ export class App implements AppApi {
     const st = this.store.state;
     if (!st.mesh) return;
     const ok = writeAutosave(st.mesh.sha256, serializeProject(st, __APP_VERSION__, this.meshResults()));
+    this.autosaveFailed = !ok;
     // the browser's storage is small; say so once instead of failing silently
     if (!ok && !this.autosaveWarned) {
       this.autosaveWarned = true;
@@ -2882,8 +3172,7 @@ export class App implements AppApi {
 
   private wireKeyboard(): void {
     window.addEventListener('keydown', (e) => {
-      // the relation popover takes the keyboard as a dialog would
-      if (document.querySelector('.modal-backdrop') || this.relationPop) return;
+      if (document.querySelector('.modal-backdrop')) return;
       if (e.key === 'Escape' && this.popovers.close()) {
         e.preventDefault();
         return;
@@ -2898,6 +3187,16 @@ export class App implements AppApi {
       if (isTyping(e.target)) {
         if (e.key === 'Escape') (e.target as HTMLElement).blur();
         return;
+      }
+      // the bar of the relation just recorded: 1 / 2 / 3, Delete; Esc lets it go
+      if (this.relationChip && !mod && !e.altKey && !e.shiftKey) {
+        const choice = CHIP_KEYS[e.code];
+        if (choice || e.key === 'Escape') {
+          e.preventDefault();
+          if (choice) this.applyRelationChoice(choice);
+          else this.relationChip.close();
+          return;
+        }
       }
       const tool = this.tools?.activeTool ?? null;
       if (e.key === 'Shift') tool?.modifiersChanged?.(e);
@@ -2941,6 +3240,9 @@ export class App implements AppApi {
         case 'KeyB':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('relation');
           return;
+        case 'KeyQ':
+          if (this.hasMesh() && this.mode === 'annotate') this.setTool('sequence');
+          return;
         case 'KeyK':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('landmark');
           return;
@@ -2950,6 +3252,11 @@ export class App implements AppApi {
         case 'KeyD':
         case 'KeyG':
         case 'KeyN': {
+          // N: a new sequence, in the sequence tool
+          if (e.code === 'KeyN' && this.sequencing()) {
+            this.newSequence();
+            return;
+          }
           const tool = MEASURE_TOOLS.find(([, , k]) => `Key${k}` === e.code);
           if (tool && this.hasMesh() && this.mode === 'measure') this.setTool(tool[0]);
           return;
@@ -3014,7 +3321,20 @@ export class App implements AppApi {
         return;
       }
       const digit = /^Digit([1-9])$/.exec(e.code) ?? /^Numpad([1-9])$/.exec(e.code);
+      // the sequence tool: 1–9 choose the current sequence
+      if (digit && !e.shiftKey && this.sequencing()) {
+        const q = this.store.state.sequences[Number(digit[1]) - 1];
+        if (q) this.setCurrentSequence(q.id);
+        return;
+      }
       if (digit && sel && this.mode === 'annotate') {
+        // Shift + 1–5: the selected arrow's termination
+        if (e.shiftKey) {
+          const f = shiftNumberKeyField(SCAR_FIELDS);
+          const opt = f?.options?.[Number(digit[1]) - 1];
+          if (f && opt && this.store.scar(sel)) setScarAttribute(this.store, sel, f.key, opt.value);
+          return;
+        }
         if (this.store.region(sel)) {
           const opt = numberKeyField(REGION_FIELDS)?.options?.[Number(digit[1]) - 1];
           if (opt) this.setRegionTypeFor(sel, opt.value as RegionType);
@@ -3115,9 +3435,12 @@ export class App implements AppApi {
         ['P', 'help.k.curve'],
         ['R', 'help.k.region'],
         ['B', 'help.k.relation'],
+        ['Q', 'help.k.sequence'],
         ['K', 'help.k.landmark'],
         ['1 / 2 / 3 · Delete', 'help.k.relationPick'],
+        ['1 – 9 / N', 'help.k.sequencePick'],
         [`1 – ${count}`, 'help.k.complete'],
+        [`Shift+1 – ${shiftNumberKeyField(SCAR_FIELDS)?.options?.length ?? 5}`, 'help.k.termination'],
         ['S', 'help.k.snap'],
         ['Shift', 'help.k.shift', true],
         ['Enter', 'help.k.finish'],
@@ -3201,6 +3524,19 @@ export class App implements AppApi {
         const tool = this.tools?.activeTool;
         return tool instanceof RelationTool ? tool.pending() : null;
       },
+      /** The sequence the sequence tool puts scars into. */
+      currentSequence: () => this.currentSequence,
+      /** Pairs of scars whose regions border on each other: all of them, and those with no relation yet. */
+      borders: () => ({ all: this.borders.map((b) => [b.a, b.b, b.length] as const), unjudged: this.unjudgedBorders().map((b) => [b.a, b.b] as const) }),
+      /** Whether the Harris matrix panel is shown. */
+      harrisShown: () => !!this.harrisEl && !this.harrisEl.hidden,
+      /** Arrows drawn faded (scars in no sequence, while sequencing). */
+      fadedArrows: () => [...(this.arrows?.faded ?? [])],
+      /** Lines drawn along the borders of scars not judged yet (two per chain: outline and core). */
+      borderLines: () => this.borderLayer?.group.children.length ?? 0,
+      /** The point the camera turns around. */
+      viewTarget: (): Vec3 | null => (this.viewer ? [this.viewer.controls.target.x, this.viewer.controls.target.y, this.viewer.controls.target.z] : null),
+      closeModel: () => this.closeModel(),
       /** Points of the measurement being taken (null when no measuring tool is active). */
       measureDraft: (): Vec3[] | null => {
         const tool = this.tools?.activeTool;

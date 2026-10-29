@@ -26,7 +26,8 @@ import {
   type Command,
 } from './commands';
 import type { CurveShape } from './curveGeometry';
-import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey } from './fields';
+import { orderSequences, relationInputs } from '../compute/relations';
+import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, withAttribute } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
 import type { AttributeValue, Curve, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenInfo, Vec3 } from './types';
@@ -120,12 +121,15 @@ export function moveEndpoint(
   });
 }
 
+/** Set a field; fields that follow from it change in the same step (completeness → termination). */
 export function setScarAttribute(store: ProjectStore, id: string, key: string, value: AttributeValue): void {
   const a = store.scar(id);
   if (!a || a.attributes[key] === value) return;
+  const next = withAttribute(a.attributes, key, value);
+  if (!next) return;
   const isText = fieldByKey(key)?.type === 'text';
   update(store, id, 'cmd.editField', (x) => {
-    x.attributes[key] = value;
+    x.attributes = next;
   }, isText ? `attr:${key}:${id}` : null);
 }
 
@@ -408,6 +412,28 @@ export function deleteRegion(store: ProjectStore, id: string): void {
 export const relationBetween = (state: Readonly<ProjectState>, x: string, y: string): Relation | undefined =>
   state.relations.find((r) => (r.a === x && r.b === y) || (r.a === y && r.b === x));
 
+/**
+ * The sequences in the order the relations call for (earliest first, and the
+ * members of ordered ones): see orderSequences. Sequences that move are touched.
+ */
+function ordered(state: Readonly<ProjectState>, sequences: Sequence[], relations: readonly Relation[] = state.relations): Sequence[] {
+  const { scarIds, edges } = relationInputs({ scars: state.scars, relations: [...relations], sequences: [] });
+  const t = nowIso();
+  // orderSequences hands back the same object for a sequence whose members kept their order
+  return orderSequences(scarIds, edges, sequences).map((q) => (sequences.includes(q) ? q : { ...q, modifiedAt: t }));
+}
+
+/** New relations, with the sequences reordered to follow them in the same undo step. */
+function changeRelations(store: ProjectStore, labelKey: string, after: Relation[]): void {
+  const before = store.state.relations;
+  const seqBefore = store.state.sequences;
+  const seqAfter = ordered(store.state, structuredClone(seqBefore), after);
+  const rel = new SetRelationsCommand(labelKey, structuredClone(before), after);
+  store.history.execute(
+    JSON.stringify(seqAfter) === JSON.stringify(seqBefore) ? rel : new CompoundCommand(labelKey, [rel, new SetSequencesCommand(labelKey, structuredClone(seqBefore), seqAfter)]),
+  );
+}
+
 /** Record "a cuts b" or "cannot tell" for a pair of scars, replacing what was recorded for the pair. */
 export function setRelation(store: ProjectStore, a: string, b: string, kind: RelationKind): Relation | null {
   if (a === b || !store.scar(a) || !store.scar(b)) return null;
@@ -416,42 +442,46 @@ export function setRelation(store: ProjectStore, a: string, b: string, kind: Rel
   if (old && old.kind === kind && (kind === 'indeterminate' || old.a === a)) return old;
   const t = nowIso();
   const rel: Relation = old ? { ...structuredClone(old), a, b, kind, modifiedAt: t } : { id: uuid(), a, b, kind, createdAt: t, modifiedAt: t };
-  const after = old ? before.map((r) => (r.id === old.id ? rel : structuredClone(r))) : [...structuredClone(before), rel];
-  store.history.execute(new SetRelationsCommand(old ? 'cmd.editRelation' : 'cmd.addRelation', structuredClone(before), after));
+  changeRelations(store, old ? 'cmd.editRelation' : 'cmd.addRelation', old ? before.map((r) => (r.id === old.id ? rel : structuredClone(r))) : [...structuredClone(before), rel]);
   return rel;
 }
 
 export function deleteRelation(store: ProjectStore, id: string): void {
   const before = store.state.relations;
   if (!before.some((r) => r.id === id)) return;
-  store.history.execute(new SetRelationsCommand('cmd.deleteRelation', structuredClone(before), structuredClone(before.filter((r) => r.id !== id))));
+  changeRelations(store, 'cmd.deleteRelation', structuredClone(before.filter((r) => r.id !== id)));
 }
 
-function changeSequences(store: ProjectStore, labelKey: string, change: (list: Sequence[]) => Sequence[], mergeKey: string | null = null): void {
+/** `reorder`: put the sequences in the order the relations call for (changes of membership); not for manual moves or names. */
+function changeSequences(store: ProjectStore, labelKey: string, change: (list: Sequence[]) => Sequence[], mergeKey: string | null = null, reorder = false): void {
   const before = store.state.sequences;
-  const after = change(structuredClone(before));
+  let after = change(structuredClone(before));
+  if (reorder) after = ordered(store.state, after);
   if (JSON.stringify(after) === JSON.stringify(before)) return;
   store.history.execute(new SetSequencesCommand(labelKey, structuredClone(before), after, null, mergeKey));
 }
 
-/** A new, empty sequence after (later than) the others. */
-export function addSequence(store: ProjectStore): Sequence {
+/** A new sequence after (later than) the others, empty or with these scars (taken out of any other). */
+export function addSequence(store: ProjectStore, scarIds: string[] = []): Sequence {
   const n = store.state.nextSequenceNumber;
   const t = nowIso();
-  const q: Sequence = { id: uuid(), label: `Q${n}`, scarIds: [], ordered: false, createdAt: t, modifiedAt: t };
+  const ids = scarIds.filter((id) => store.scar(id));
+  const q: Sequence = { id: uuid(), label: `Q${n}`, scarIds: ids, ordered: false, createdAt: t, modifiedAt: t };
   const before = store.state.sequences;
-  store.history.execute(new SetSequencesCommand('cmd.addSequence', structuredClone(before), [...structuredClone(before), q], n + 1));
+  const rest = structuredClone(before).map((x) => (x.scarIds.some((id) => ids.includes(id)) ? { ...x, scarIds: x.scarIds.filter((id) => !ids.includes(id)), modifiedAt: t } : x));
+  store.history.execute(new SetSequencesCommand('cmd.addSequence', structuredClone(before), ordered(store.state, [...rest, q]), n + 1));
   return q;
 }
 
 export const deleteSequence = (store: ProjectStore, id: string): void =>
-  changeSequences(store, 'cmd.deleteSequence', (list) => list.filter((q) => q.id !== id));
+  changeSequences(store, 'cmd.deleteSequence', (list) => list.filter((q) => q.id !== id), null, true);
 
+/** Rename a sequence, or order it within (its members then follow the relations). */
 export function updateSequence(store: ProjectStore, id: string, patch: Partial<Pick<Sequence, 'label' | 'ordered'>>): void {
   const q = store.sequence(id);
   if (!q || Object.entries(patch).every(([k, v]) => q[k as keyof typeof patch] === v)) return;
   const key = 'label' in patch ? `sequence-label:${id}` : null;
-  changeSequences(store, 'cmd.editSequence', (list) => list.map((q) => (q.id === id ? { ...q, ...patch, modifiedAt: nowIso() } : q)), key);
+  changeSequences(store, 'cmd.editSequence', (list) => list.map((q) => (q.id === id ? { ...q, ...patch, modifiedAt: nowIso() } : q)), key, 'ordered' in patch);
 }
 
 /** Move a sequence earlier (−1) or later (+1). */
@@ -465,16 +495,24 @@ export function moveSequence(store: ProjectStore, id: string, step: -1 | 1): voi
   });
 }
 
-/** Put a scar at the end of a sequence (taking it out of any other), or out of every sequence (null). */
+/**
+ * Put a scar at the end of a sequence (taking it out of any other), or out of
+ * every sequence (null); the sequences then follow the relations (one undo step).
+ */
 export function setScarSequence(store: ProjectStore, scarId: string, sequenceId: string | null): void {
   if (!store.scar(scarId)) return;
   if (sequenceId && store.sequence(sequenceId)?.scarIds.includes(scarId)) return;
-  changeSequences(store, 'cmd.editSequence', (list) =>
-    list.map((q) => {
-      const ids = q.scarIds.filter((x) => x !== scarId);
-      if (q.id === sequenceId) ids.push(scarId);
-      return ids.length === q.scarIds.length && q.id !== sequenceId ? q : { ...q, scarIds: ids, modifiedAt: nowIso() };
-    }),
+  changeSequences(
+    store,
+    'cmd.editSequence',
+    (list) =>
+      list.map((q) => {
+        const ids = q.scarIds.filter((x) => x !== scarId);
+        if (q.id === sequenceId) ids.push(scarId);
+        return ids.length === q.scarIds.length && q.id !== sequenceId ? q : { ...q, scarIds: ids, modifiedAt: nowIso() };
+      }),
+    null,
+    true,
   );
 }
 

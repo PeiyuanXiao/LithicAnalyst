@@ -155,6 +155,14 @@ export class Viewer {
     this.fitView(new THREE.Vector3(0.35, -0.55, 0.76).normalize(), new THREE.Vector3(0, 0, 1));
   }
 
+  /** Take the model out of the view (it is closed). */
+  clearMesh(): void {
+    this.stopTransition();
+    if (this.mesh) this.meshRoot.remove(this.mesh);
+    this.mesh = null;
+    this.requestRender();
+  }
+
   /**
    * Frame the whole model, looking from `towardViewer` (direction from model to camera);
    * `animate`: move there in a short transition (none when the system asks for reduced motion).

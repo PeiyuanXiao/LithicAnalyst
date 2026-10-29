@@ -20,7 +20,7 @@ test('each mode shows its own tools and sections; switching keeps the selection 
   const start = roofPoint(-14, 10);
   const end = roofPoint(-8, 22);
   await dragArrow(page, start, end);
-  await page.keyboard.press('3');
+  await page.keyboard.press('4');
   const before = await state(page);
   const id = before.scars[0].id;
 

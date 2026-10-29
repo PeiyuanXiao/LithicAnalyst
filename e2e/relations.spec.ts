@@ -13,13 +13,14 @@ async function click(page: Page, p: Vec3): Promise<void> {
   await page.mouse.click(s.x, s.y);
 }
 
-/** Relation tool: click two scars (points on their arrows or regions), then a choice in the dialog. */
-async function relate(page: Page, a: Vec3, b: Vec3, choice: 'ab' | 'ba' | 'ind' | 'delete'): Promise<void> {
+const relations = async (page: Page) => (await state(page)).relations.map((r) => [r.a, r.b, r.kind]);
+
+/** Relation tool: click two scars (points on their arrows or regions): the first cuts the second at once, and the bar shows it. */
+async function relate(page: Page, a: Vec3, b: Vec3): Promise<void> {
   await click(page, a);
   await expect.poll(() => pending(page)).not.toBeNull();
   await click(page, b);
-  await page.locator(`#relation-pop [data-choice="${choice}"]`).click();
-  await expect(page.locator('#relation-pop')).toHaveCount(0);
+  await expect(page.locator('#relation-chip')).toBeVisible();
 }
 
 const scarRow = (page: Page, label: string) => page.locator('#scar-list .arrow-row').filter({ has: page.locator('.arrow-id', { hasText: new RegExp(`^${label}$`) }) });
@@ -43,39 +44,88 @@ test('records relations by clicking arrows, checks them against the sequences li
   for (const y of [-6, 0, 6]) await dragArrow(page, boxPoint(-10, y, 5), boxPoint(10, y, 5));
   const [s1, s2, s3] = await ids(page);
 
+  // the matrix shows itself while the relation tool is in use (the setting stays off)
+  await expect(page.locator('#harris-panel')).toBeHidden();
   await page.keyboard.press('b');
   await expect(page.locator('#mode-relation')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#harris-panel')).toBeVisible();
   await click(page, onArrow(0));
   expect([await pending(page), await selection(page)]).toEqual([s2, s2]);
+  // the same scar again: still the first
+  await click(page, onArrow(0));
+  expect(await pending(page)).toBe(s2);
   await page.keyboard.press('Escape');
   expect(await pending(page)).toBeNull();
-  await relate(page, onArrow(0), onArrow(-6), 'ab');
+
+  // the order of the clicks is the order of the words: S2 cuts S1, at once, nothing to answer
+  await relate(page, onArrow(0), onArrow(-6));
   let st = await state(page);
-  expect(st.relations.map((r) => [r.a, r.b, r.kind])).toEqual([[s2, s1, 'a_cuts_b']]);
+  expect(await relations(page)).toEqual([[s2, s1, 'a_cuts_b']]);
+  await expect(page.locator('.modal')).toHaveCount(0);
+  await expect(page.locator('#relation-chip-text')).toHaveText('S2 cuts S1');
   // the new relation is selected and its two scars are highlighted
   expect(await selection(page)).toBe(st.relations[0].id);
   expect(await highlighted(page)).toEqual([s1, s2].sort());
-  await relate(page, onArrow(6), onArrow(0), 'ab');
+  // the bar: 2 reverses it, 3 cannot tell, 1 back to the order of the clicks; each one undo step
+  const reverse = page.locator('#relation-chip [data-choice="reverse"]');
+  await page.keyboard.press('2');
+  expect(await relations(page)).toEqual([[s1, s2, 'a_cuts_b']]);
+  await expect(page.locator('#relation-chip-text')).toHaveText('S1 cuts S2');
+  await expect(reverse).toHaveAttribute('aria-pressed', 'true');
+  await reverse.click();
+  expect(await relations(page)).toEqual([[s2, s1, 'a_cuts_b']]);
+  await page.keyboard.press('3');
+  await expect(page.locator('#relation-chip-text')).toHaveText('S2 – S1 cannot tell');
+  await expect(page.locator('#relation-chip [data-choice="ind"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('1');
+  expect(await relations(page)).toEqual([[s2, s1, 'a_cuts_b']]);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('#relation-chip-text')).toHaveText('S2 – S1 cannot tell');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(page.locator('#relation-chip-text')).toHaveText('S2 cuts S1');
+  expect((await state(page)).relations[0].id).toBe(st.relations[0].id);
+
+  // the next press in the view lets the bar go, and counts for the tool
+  await relate(page, onArrow(6), onArrow(0));
+  await expect(page.locator('#relation-chip')).toHaveCount(1);
+  await expect(page.locator('#relation-chip-text')).toHaveText('S3 cuts S2');
   await expect(page.locator('#relation-problems')).toHaveText('✓');
+  // Esc lets it go
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#relation-chip')).toHaveCount(0);
   // S1 cuts S3 closes a cycle
-  await relate(page, onArrow(-6), onArrow(6), 'ab');
+  await relate(page, onArrow(-6), onArrow(6));
   await expect(page.locator('#relation-list .relation-row')).toHaveCount(3);
   await expect(page.locator('#relation-problems')).toHaveText('⚠ 1');
   expect((await page.evaluate(() => window.lithicanalyst.relationChecks())).cycles[0].sort()).toEqual([s1, s2, s3].sort());
+  // another selection lets the bar go too
+  await page.locator('#sec-relations .relation-row').first().click();
+  await expect(page.locator('#relation-chip')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.locator('#relation-problems').click();
   await expect(page.locator('#relation-problem-list .problem-item')).toHaveCount(1);
   expect(await highlighted(page)).toEqual([s1, s2, s3].sort());
-  // the same pair again: the dialog offers to delete it
-  await relate(page, onArrow(6), onArrow(-6), 'delete');
+  await page.locator('#relation-problem-list .problem-item').first().click();
+  await expect(page.locator('#relation-problem-list .problem-item.is-focused')).toHaveCount(1);
+  // the same pair the other way round rewrites it: S3 cuts S1 (the same relation), no cycle left
+  const cycleId = (await state(page)).relations[2].id;
+  await relate(page, onArrow(6), onArrow(-6));
+  expect((await state(page)).relations[2]).toMatchObject({ id: cycleId, a: s3, b: s1, kind: 'a_cuts_b' });
   await expect(page.locator('#relation-problems')).toHaveText('✓');
   await expect(page.locator('#relation-problem-list')).toBeHidden();
+  // Delete removes it, and the bar with it
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#relation-chip')).toHaveCount(0);
+  expect((await state(page)).relations).toHaveLength(2);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await state(page)).relations[2]).toMatchObject({ a: s3, b: s1 });
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('#relation-problems')).toHaveText('⚠ 1');
-  await expect(page.locator('#relation-problem-list')).toBeHidden();
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('#relation-problems')).toHaveText('✓');
   expect((await state(page)).relations).toHaveLength(2);
+  // nothing is ever recorded as "cannot tell" unasked
+  expect((await state(page)).relations.every((r) => r.kind === 'a_cuts_b')).toBe(true);
 
   // Harris matrix: later scars higher, only direct relations drawn
   await page.locator('#harris-show').check();
@@ -87,7 +137,7 @@ test('records relations by clicking arrows, checks them against the sequences li
   await expect(page.locator('#harris-body line')).toHaveCount(2);
   // S3 cuts S1 is implied by S3 > S2 > S1: no extra line
   await page.keyboard.press('b');
-  await relate(page, onArrow(6), onArrow(-6), 'ab');
+  await relate(page, onArrow(6), onArrow(-6));
   await expect(page.locator('#harris-body line')).toHaveCount(2);
   await page.keyboard.press('ControlOrMeta+z');
   // node ↔ selection
@@ -121,25 +171,24 @@ test('records relations by clicking arrows, checks them against the sequences li
     ['Q1', [s1, s2]],
     ['Q2', [s3]],
   ]);
-  // ordered within Q1: S1 then S2 agrees with "S2 cuts S1"; swapping them does not
+  // ordered within Q1: S1 then S2, as "S2 cuts S1" has it; the move against it is not offered, and says why
   await page.locator('#sequence-list .sequence-row', { hasText: 'Q1' }).click();
   await page.locator('#sequence-ordered').check();
-  await page.locator('#sequence-members .member-row', { hasText: 'S2' }).locator('[data-act="up"]').click();
-  await expect(page.locator('#relation-problems')).toHaveText('⚠ 1');
-  await page.locator('#relation-problems').click();
-  await expect(page.locator('#relation-problem-list .problem-item')).toHaveText([/S2.*S1.*Q1/]);
-  await page.keyboard.press('ControlOrMeta+z');
-  await expect(page.locator('#relation-problems')).toHaveText('✓');
-  // Q2 before Q1 contradicts "S3 cuts S2"
+  const up = page.locator('#sequence-members .member-row', { hasText: 'S2' }).locator('[data-act="up"]');
+  await expect(up).toBeDisabled();
+  await expect(up).toHaveAttribute('title', /S2 cuts S1/);
+  // the line between the two rows is solid: the relations hold this order
+  await expect(page.locator('#sequence-members .member-link')).toHaveClass(/is-held/);
+  // Q2 cannot go before Q1 ("S3 cuts S2")
   await page.locator('#sequence-list .sequence-row', { hasText: 'Q2' }).click();
-  await page.locator('#sequence-earlier').click();
-  await expect(page.locator('#relation-problems')).toHaveText('⚠ 1');
-  await expect(page.locator('#relation-problem-list')).toBeHidden();
-  await page.locator('#relation-problems').click();
-  await page.locator('#relation-problem-list .problem-item').first().click();
-  await expect(page.locator('#relation-problem-list .problem-item.is-focused')).toHaveCount(1);
-  expect(await highlighted(page)).toEqual([s2, s3].sort());
+  await expect(page.locator('#sequence-earlier')).toBeDisabled();
+  await expect(page.locator('#sequence-earlier')).toHaveAttribute('title', /S3 cuts S2/);
+  // S3 into Q1 and back: the order follows the relations, one undo step each
+  await scarRow(page, 'S3').click();
+  await page.locator('#scar-sequence').selectOption({ label: 'Q1' });
+  expect((await state(page)).sequences.map((q) => q.scarIds)).toEqual([[s1, s2, s3], []]);
   await page.keyboard.press('ControlOrMeta+z');
+  expect((await state(page)).sequences.map((q) => q.scarIds)).toEqual([[s1, s2], [s3]]);
   await expect(page.locator('#relation-problems')).toHaveText('✓');
   // the matrix frames the sequences
   await expect(page.locator('#harris-body .hm-box')).toHaveCount(2);
@@ -227,9 +276,10 @@ test('picks a scar known only by its region, and selects the region from the mat
   await click(page, boxPoint(15, -8, 5));
   expect(await pending(page)).toBe(area);
   await click(page, onArrow(8));
-  await page.locator('#relation-pop [data-choice="ba"]').click();
+  expect(await relations(page)).toEqual([[area, arrow, 'a_cuts_b']]);
+  await page.locator('#relation-chip [data-choice="reverse"]').click();
   st = await state(page);
-  expect(st.relations.map((r) => [r.a, r.b, r.kind])).toEqual([[arrow, area, 'a_cuts_b']]);
+  expect(await relations(page)).toEqual([[arrow, area, 'a_cuts_b']]);
 
   await page.locator('#harris-show').check();
   await page.locator('#harris-body .hm-node', { hasText: 'S1' }).click();

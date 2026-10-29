@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRelations, directRelations, harrisLayout, relationInputs, relationProblems, relationResults, type RelationEdge } from '../src/compute/relations';
+import { checkRelations, directRelations, harrisLayout, orderSequences, relationInputs, relationProblems, relationResults, stableOrder, stratigraphy, type RelationEdge } from '../src/compute/relations';
 import { addScarVector, addSequence, deleteRelation, deleteScar, moveInSequence, moveSequence, setRelation, setScarSequence, updateSequence, updateSpecimen } from '../src/core/actions';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -47,6 +47,111 @@ describe('scar relations', () => {
     // groups by sequence get a box
     const boxed = harrisLayout(['a', 'b', 'c'], edges.slice(0, 3), [{ id: 'q', label: 'Q1', scarIds: ['a', 'b'], ordered: false }], checkRelations(['a', 'b', 'c'], edges.slice(0, 3), []));
     expect(boxed.boxes.map((b) => b.label)).toEqual(['Q1']);
+  });
+});
+
+describe('sequence order from the relations', () => {
+  const ordered = (id: string, scarIds: string[]) => ({ id, label: id, scarIds, ordered: true });
+  const members = (scarIds: string[], edges: RelationEdge[], ids: string[]) => orderSequences(scarIds, edges, [ordered('q', ids)])[0].scarIds;
+
+  it('follows a chain of relations within a sequence (earliest first)', () => {
+    // c cuts b cuts a: a, b, c
+    expect(members(['a', 'b', 'c'], [cut('c', 'b'), cut('b', 'a')], ['c', 'a', 'b'])).toEqual(['a', 'b', 'c']);
+    // the transitive closure counts: c cuts b, b cuts a, nothing direct between a and c
+    expect(members(['a', 'b', 'c'], [cut('c', 'b'), cut('b', 'a')], ['c', 'b', 'a'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('counts relations through scars outside the sequence', () => {
+    // b cuts x, x cuts a; x is in no sequence: a comes before b
+    expect(members(['a', 'b', 'x'], [cut('b', 'x'), cut('x', 'a')], ['b', 'a'])).toEqual(['a', 'b']);
+    const s = stratigraphy(['a', 'b', 'x'], [cut('b', 'x'), cut('x', 'a')]);
+    expect(s.later('b', 'a')).toBe(true);
+    expect(s.before('a', 'b')).toBe(true);
+    expect(s.chain('b', 'a')).toEqual([cut('b', 'x'), cut('x', 'a')]);
+    expect(s.chain('a', 'b')).toBeNull();
+  });
+
+  it('keeps the order where the relations decide nothing', () => {
+    expect(members(['a', 'b', 'c', 'd'], [], ['d', 'b', 'c', 'a'])).toEqual(['d', 'b', 'c', 'a']);
+    // only "c cuts a" is decided: c waits until a is placed; d, b and a keep their order
+    expect(members(['a', 'b', 'c', 'd'], [cut('c', 'a')], ['d', 'c', 'b', 'a'])).toEqual(['d', 'b', 'a', 'c']);
+    // already in order: nothing moves; an unordered sequence is left alone
+    const q = ordered('q', ['a', 'b']);
+    expect(orderSequences(['a', 'b'], [cut('b', 'a')], [q])[0]).toBe(q);
+    const loose = { ...q, scarIds: ['b', 'a'], ordered: false };
+    expect(orderSequences(['a', 'b'], [cut('b', 'a')], [loose])[0]).toBe(loose);
+  });
+
+  it('leaves a cycle in its order, and still orders the rest around it', () => {
+    // a ↔ b cut each other: no order between them
+    expect(members(['a', 'b'], [cut('a', 'b'), cut('b', 'a')], ['a', 'b'])).toEqual(['a', 'b']);
+    expect(members(['a', 'b'], [cut('a', 'b'), cut('b', 'a')], ['b', 'a'])).toEqual(['b', 'a']);
+    // a ↔ b, and both later than c (through a): c first, a and b as they were
+    expect(members(['a', 'b', 'c'], [cut('a', 'b'), cut('b', 'a'), cut('a', 'c')], ['b', 'a', 'c'])).toEqual(['c', 'b', 'a']);
+  });
+
+  it('orders the sequences: P before Q when a member of Q is later than one of P and none of P later than one of Q', () => {
+    const P = ordered('P', ['a']), Q = ordered('Q', ['b']), R = ordered('R', ['c']);
+    // b cuts a: P before Q; c is unrelated and keeps its place
+    expect(orderSequences(['a', 'b', 'c'], [cut('b', 'a')], [Q, R, P]).map((q) => q.id)).toEqual(['R', 'P', 'Q']);
+    // through a scar in no sequence
+    expect(orderSequences(['a', 'b', 'x'], [cut('b', 'x'), cut('x', 'a')], [Q, P]).map((q) => q.id)).toEqual(['P', 'Q']);
+    // each later than the other somewhere: no order between them
+    const P2 = ordered('P', ['a', 'd']);
+    expect(orderSequences(['a', 'b', 'd'], [cut('b', 'a'), cut('d', 'b')], [Q, P2]).map((q) => q.id)).toEqual(['Q', 'P']);
+    // members and sequences together
+    const both = orderSequences(['a', 'b', 'c'], [cut('c', 'b'), cut('b', 'a')], [ordered('Q', ['c', 'b']), ordered('P', ['a'])]);
+    expect(both.map((q) => [q.id, q.scarIds])).toEqual([
+      ['P', ['a']],
+      ['Q', ['b', 'c']],
+    ]);
+  });
+
+  it('a sequence-level cycle keeps its order', () => {
+    // P = {p1, p2}, Q = {q1, q2}, R = {r1, r2}: q1 > p1, r1 > q2, p2 > r2 and no scar cycle
+    const P = ordered('P', ['p1', 'p2']), Q = ordered('Q', ['q1', 'q2']), R = ordered('R', ['r1', 'r2']);
+    const edges = [cut('q1', 'p1'), cut('r1', 'q2'), cut('p2', 'r2')];
+    expect(orderSequences(['p1', 'p2', 'q1', 'q2', 'r1', 'r2'], edges, [R, Q, P]).map((q) => q.id)).toEqual(['R', 'Q', 'P']);
+  });
+
+  it('stableOrder takes the first item that nothing left must precede', () => {
+    const before = (x: number, y: number) => x === 3 && y === 1;
+    expect(stableOrder([1, 2, 3, 4], before)).toEqual([2, 3, 1, 4]);
+    expect(stableOrder([], before)).toEqual([]);
+  });
+
+  it('reorders in the same undo step as the change of relation or membership', () => {
+    const s = new ProjectStore();
+    const [a, b, c] = Array.from({ length: 3 }, (_, i) => addScarVector(s, { start: [i, 0, 0], end: [i, 1, 0], startNormal: [0, 0, 1], endNormal: [0, 0, 1] }).id);
+    const q = addSequence(s, [a]);
+    setScarSequence(s, b, q.id);
+    setScarSequence(s, c, q.id);
+    updateSequence(s, q.id, { ordered: true });
+    expect(s.state.sequences[0].scarIds).toEqual([a, b, c]);
+    // a cuts c: a goes after c
+    setRelation(s, a, c, 'a_cuts_b');
+    expect(s.state.sequences[0].scarIds).toEqual([b, c, a]);
+    s.history.undo();
+    expect([s.state.relations.length, s.state.sequences[0].scarIds]).toEqual([0, [a, b, c]]);
+    s.history.redo();
+    // reversing: c cuts a
+    setRelation(s, c, a, 'a_cuts_b');
+    expect(s.state.sequences[0].scarIds).toEqual([b, a, c]);
+    // "cannot tell" decides nothing: the order stays
+    setRelation(s, c, a, 'indeterminate');
+    expect(s.state.sequences[0].scarIds).toEqual([b, a, c]);
+    // a second sequence whose scar cuts b moves after the first … and b cuts it puts it first
+    const r = addSequence(s);
+    const d = addScarVector(s, { start: [9, 0, 0], end: [9, 1, 0], startNormal: [0, 0, 1], endNormal: [0, 0, 1] }).id;
+    setRelation(s, b, d, 'a_cuts_b');
+    setScarSequence(s, d, r.id);
+    expect(s.state.sequences.map((x) => x.id)).toEqual([r.id, q.id]);
+    s.history.undo();
+    expect(s.state.sequences.map((x) => x.id)).toEqual([q.id, r.id]);
+    // deleting the relation keeps the order (nothing is decided the other way)
+    s.history.redo();
+    deleteRelation(s, s.state.relations.find((x) => x.a === b)!.id);
+    expect(s.state.sequences.map((x) => x.id)).toEqual([r.id, q.id]);
   });
 });
 
