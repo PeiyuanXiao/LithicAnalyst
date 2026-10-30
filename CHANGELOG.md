@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Folders: subfolders are read (folders starting with "." and the app's own `LithicAnalyst/` are
+  left out). The app keeps its files in `LithicAnalyst/`: projects in
+  `projects/<model path>.lithicanalyst.json` (named with the model's extension, so `EXP03.ply` and
+  `EXP03.stl` no longer share one), every export in a new `exports/<date_time>/` and figures in
+  `figures/<date_time>/<subfolder>/`, with a `manifest.json`; nothing is overwritten. Projects kept
+  next to the model by earlier versions are still read (when the checksum matches), never changed.
+  Models sharing a file name get their paths as specimen IDs.
+- The folder panel is a list (filter, a dot for models with a project, the open one marked) with
+  "Next not started" (Shift+PageDown); it handles a thousand models.
+- Export dialog: with a folder open, the scope is this specimen or the whole folder (the summary
+  export, formerly "Measure all"); figures for the whole folder are a switch next to PNG / SVG.
+  Both batch runs skip models that cannot be read or measured, list them (`failures.csv`, the
+  manifest) and report "N done, M failed"; their progress shows the time left.
+- The summary export runs in a background worker (it goes on in a background window), reads each
+  project file once, and uses the results a project stored instead of reading its model when they
+  were written by this version. Figures for the whole folder keep the screen on and pause while the
+  page is in the background.
+- `measurements.csv` has a `file` column (the model, its path in a folder). Project files store
+  the vertices' principal axes (`derived.vertices`).
+- Read-only folders (Firefox, Safari): edits are kept for the session, "Download all project files
+  (zip)" saves them in the folder's layout, exports come as one ZIP of that layout, and leaving the
+  page with edits not downloaded asks first.
+- Compare mode: "Add the folder's project files" loads the other project files of the model.
 - Relations (B): the order of the clicks is the order of the words — clicking A, then B records
   "A cuts B" at once (and rewrites what the pair had). A small bar next to the second click shows
   it and offers Reverse (2), Cannot tell (3) and Delete; 1 brings back "A cuts B". The bar takes

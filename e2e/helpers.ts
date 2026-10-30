@@ -48,7 +48,9 @@ export interface LithicApi {
   borderLines(): number;
   viewTarget(): Vec3 | null;
   closeModel(): Promise<void>;
-  workspace(): { name: string; writable: boolean; meshes: string[]; index: number } | null;
+  openFolderHandle(handle: never): Promise<void>;
+  specimenIds(): Record<string, string>;
+  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; undownloaded: number } | null;
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;
@@ -278,4 +280,91 @@ export async function exportAvailable(page: Page, key: string): Promise<boolean>
   await page.keyboard.press('Escape');
   await expect(page.locator('.modal')).toHaveCount(0);
   return enabled;
+}
+
+/**
+ * A writable folder in memory behind the File System Access API's handles (files by path,
+ * subfolders made as they are written), set up before the page loads. Open it with openMockFolder.
+ */
+export async function mockFolder(page: Page, name: string, files: Record<string, Buffer>): Promise<void> {
+  const initial = Object.fromEntries(Object.entries(files).map(([p, b]) => [p, b.toString('base64')]));
+  await page.addInitScript(
+    ([folderName, init]: [string, Record<string, string>]) => {
+      const files = new Map<string, Uint8Array>(Object.entries(init).map(([p, b]) => [p, Uint8Array.from(atob(b), (c) => c.charCodeAt(0))]));
+      const w = window as unknown as { __folder: Map<string, Uint8Array>; __folderRoot: unknown };
+      w.__folder = files;
+      const fileHandle = (path: string) => ({
+        kind: 'file' as const,
+        name: path.split('/').pop()!,
+        getFile: async () => new File([files.get(path)! as BlobPart], path.split('/').pop()!),
+        createWritable: async () => {
+          const parts: Uint8Array[] = [];
+          return {
+            write: async (d: string | Uint8Array) => void parts.push(typeof d === 'string' ? new TextEncoder().encode(d) : d),
+            close: async () => {
+              const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+              let o = 0;
+              for (const p of parts) out.set(p, (o += p.length) - p.length);
+              files.set(path, out);
+            },
+          };
+        },
+      });
+      const dir = (dirName: string, prefix: string): unknown => ({
+        kind: 'directory',
+        name: dirName,
+        values: async function* () {
+          const dirs = new Set<string>();
+          for (const p of [...files.keys()]) {
+            if (!p.startsWith(prefix)) continue;
+            const rest = p.slice(prefix.length).split('/');
+            if (rest.length > 1) dirs.add(rest[0]);
+            else yield fileHandle(p);
+          }
+          for (const d of dirs) yield dir(d, `${prefix}${d}/`);
+        },
+        getFileHandle: async (n: string, opts?: { create?: boolean }) => {
+          const path = `${prefix}${n}`;
+          if (!files.has(path)) {
+            if (!opts?.create) throw new DOMException('missing', 'NotFoundError');
+            files.set(path, new Uint8Array());
+          }
+          return fileHandle(path);
+        },
+        getDirectoryHandle: async (n: string, opts?: { create?: boolean }) => {
+          if (![...files.keys()].some((p) => p.startsWith(`${prefix}${n}/`)) && !opts?.create) throw new DOMException('missing', 'NotFoundError');
+          return dir(n, `${prefix}${n}/`);
+        },
+      });
+      w.__folderRoot = dir(folderName, '');
+    },
+    [name, initial] as [string, Record<string, string>],
+  );
+}
+
+/** Open the folder set up by mockFolder (the app gets its handle through window.lithicanalyst). */
+export async function openMockFolder(page: Page): Promise<void> {
+  await page.evaluate(() => window.lithicanalyst.openFolderHandle((window as unknown as { __folderRoot: never }).__folderRoot));
+}
+
+/** The paths of the mock folder, sorted, and one file's text (null when missing). */
+export const folderPaths = (page: Page): Promise<string[]> => page.evaluate(() => [...(window as unknown as { __folder: Map<string, Uint8Array> }).__folder.keys()].sort());
+export const folderText = (page: Page, path: string): Promise<string | null> =>
+  page.evaluate((p) => {
+    const f = (window as unknown as { __folder: Map<string, Uint8Array> }).__folder.get(p);
+    return f ? new TextDecoder().decode(f) : null;
+  }, path);
+
+/** Names and texts of the files in a stored (uncompressed) ZIP, as the app writes them. */
+export function unzip(buf: Buffer): Record<string, string> {
+  const out: Record<string, string> = {};
+  let o = 0;
+  while (o + 30 <= buf.length && buf.readUInt32LE(o) === 0x04034b50) {
+    const size = buf.readUInt32LE(o + 18), nameLen = buf.readUInt16LE(o + 26), extra = buf.readUInt16LE(o + 28);
+    const name = buf.toString('utf8', o + 30, o + 30 + nameLen);
+    const start = o + 30 + nameLen + extra;
+    out[name] = buf.toString('utf8', start, start + size);
+    o = start + size;
+  }
+  return out;
 }

@@ -80,3 +80,20 @@ export function merge(...meshes: Mesh[]): Mesh {
 
 export const moved = (m: Mesh, d: Vec3): Mesh => ({ positions: m.positions.map((x, i) => x + d[i % 3]), index: m.index });
 
+/** The mesh as a binary PLY file (little endian, float positions, triangle faces). */
+export function plyBytes(m: Mesh): Uint8Array {
+  const nv = m.positions.length / 3, nf = m.index.length / 3;
+  const head = new TextEncoder().encode(
+    `ply\nformat binary_little_endian 1.0\nelement vertex ${nv}\nproperty float x\nproperty float y\nproperty float z\nelement face ${nf}\nproperty list uchar int vertex_indices\nend_header\n`,
+  );
+  const out = new Uint8Array(head.length + nv * 12 + nf * 13);
+  out.set(head);
+  const v = new DataView(out.buffer);
+  let o = head.length;
+  for (let i = 0; i < m.positions.length; i++, o += 4) v.setFloat32(o, m.positions[i], true);
+  for (let f = 0; f < nf; f++) {
+    v.setUint8(o++, 3);
+    for (let c = 0; c < 3; c++, o += 4) v.setInt32(o, m.index[3 * f + c], true);
+  }
+  return out;
+}

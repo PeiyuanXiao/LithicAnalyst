@@ -108,6 +108,8 @@ fitted planes, fitted spheres, volumes ….
   only computed when the mesh is closed (otherwise null, as are the two indices; holes are not
   filled). `surfaceToVolumeRatio` = A / V^(2/3) (dimensionless); `wadellSphericity` =
   π^(1/3) (6V)^(2/3) / A.
+* `vertices`: the principal axes of all mesh vertices (`{ mean, axes, variances }`, original
+  coordinates; the `all_vertices` plane and the plane frames use them), or null.
 * `manualMeasurements`: the value of each manual measurement (length in the specimen unit, or
   degrees for angles).
 * `regions`: each region as found on the mesh: `{ id, label, type, scarId, area, conflict }`
@@ -433,17 +435,51 @@ measurements by label and type. Kappas: Cohen for two observers, Fleiss for all 
 the scars of the first that every other has matched (relations: pairs of those scars that
 someone related; regions: triangles typed by all, weighted by area).
 
-Batch runs (a folder): the project of a model is kept next to it as `<model>.lithicanalyst.json`;
-other project files in the folder belong to a model by `mesh.sha256`. Merged outputs are named
-after the folder: `<folder>_<kind>.csv` with the same columns as the per-specimen files (one
-measurement row per model, from its own project file, or from the first project file of the
-model), `<folder>_landmarks.tps` (one block per specimen), and — with several observers per
-model, told apart by `specimen.annotator` — `<folder>_icc.csv`: `measure,n_specimens,n_raters,icc`
-(ICC(2,1), two-way random, absolute agreement, single rater; over the specimens every observer
-measured; measures: length, width, thickness along each observer's frame, cortex_ratio,
-nodule_radius, volume_ratio from the stored derived results, and manual measurements by label).
+Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` at the top of it:
 
-The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio`.
+```
+<folder>/
+  …models (in subfolders too; folders starting with "." are left out)
+  LithicAnalyst/
+    projects/<model path>.lithicanalyst.json     e.g. projects/site1/EXP03.ply.lithicanalyst.json
+    exports/<YYYY-MM-DD_HHMMSS>/                  one new folder per export, never overwritten
+      manifest.json, failures.csv (only when something failed)
+      measurements.csv, scar_vectors.csv …        (whole folder)
+      <specimen>_<kind>.csv …                     (one specimen)
+    figures/<YYYY-MM-DD_HHMMSS>/<model's subfolder>/<specimen>_figure.png|svg, manifest.json
+```
+
+* A model's project file name keeps the model's extension, so `EXP03.ply` and `EXP03.stl` have
+  one each. Projects are always written to `LithicAnalyst/projects/`. Earlier versions kept them
+  next to the model as `<name without extension>.lithicanalyst.json`; such a file is still read
+  when there is none in the new place, if its `mesh.sha256` is the model's, and is never changed
+  or deleted (it can be removed by hand once the new one exists). Any other project file of the
+  folder belongs to a model by `mesh.sha256` (other observers).
+* Specimen IDs of models without a project: the file name without its extension; where two
+  models share it (different subfolders or extensions), the path without the extension
+  (`site1/EXP03`), and with the extension when that is still the same (`EXP03.ply`). The manifest
+  lists these names (`duplicateNames`).
+* A read-only folder (a directory upload) gets the same layout in one ZIP to unpack into it: the
+  exports, and "Download all project files" (`LithicAnalyst/projects/…`).
+* `manifest.json`: `app`, `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
+  (`tables` or `figures`), `options`, `specimens` (`id`, `file` = model path, `sha256`, `project`
+  = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
+  `files` (the files of the export). `failures.csv`: `file,reason`.
+
+Summary export (the whole folder): one file per kind with the same columns as the per-specimen
+files (one measurement row per model, from its own project file, or from another project file of
+the model, or a fresh project; `file` is the model's path), `landmarks.tps` (one block per
+specimen), and — with several observers per model, told apart by `specimen.annotator` —
+`icc.csv`: `measure,n_specimens,n_raters,icc` (ICC(2,1), two-way random, absolute agreement,
+single rater; over the specimens every observer measured; measures: length, width, thickness
+along each observer's frame, cortex_ratio, nodule_radius, volume_ratio from the stored derived
+results, and manual measurements by label). A model that cannot be read or measured is left out
+and listed in `failures`. The stored results of a model's project files are used instead of
+reading the model when every one of them was written by the same version of the app and holds
+`derived.measurements` (and `derived.vertices` when it has planes); the tables are the same
+either way.
+
+The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio,file` (`file`: the model, its path in a folder).
 
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.

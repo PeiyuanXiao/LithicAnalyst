@@ -119,7 +119,8 @@ const cell = (n: number | null): string => (n === null ? '' : fmt(n));
 /**
  * One row per specimen: the automatic measurements. Lengths are in the
  * specimen unit, the area in unit², the volume in unit³; volume-based values
- * are empty when the mesh is not closed (or not yet measured).
+ * are empty when the mesh is not closed (or not yet measured). `file` is the
+ * model (its path in a folder; by default its file name).
  */
 export function measurementsCsv(
   state: Readonly<ProjectState>,
@@ -128,6 +129,7 @@ export function measurementsCsv(
   regions: RegionTotals | null = null,
   nodule: { radius: number; rms: number } | null = null,
   split: { upper: number; lower: number; ratio: number | null } | null = null,
+  file: string = state.mesh?.fileName ?? '',
 ): string {
   const header = [
     'specimen_id',
@@ -151,6 +153,7 @@ export function measurementsCsv(
     'volume_upper',
     'volume_lower',
     'volume_ratio',
+    'file',
   ];
   const row = [
     csvCell(state.specimen.id),
@@ -174,6 +177,7 @@ export function measurementsCsv(
     cell(split?.upper ?? null),
     cell(split?.lower ?? null),
     cell(split?.ratio ?? null),
+    csvCell(file),
   ];
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }

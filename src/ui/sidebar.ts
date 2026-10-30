@@ -35,7 +35,7 @@ import {
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
 import { CURVE_FIELDS, fieldLocked, REGION_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
-import { fmtCount, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
+import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
 import type { AttributeValue, Curve, Measurement, PlaneMethod, Scar, Vec3 } from '../core/types';
@@ -741,9 +741,11 @@ function figureSection(api: AppApi): Section {
   const sizeEl = h('dl', { class: 'meta' });
   const png = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-png', onclick: () => api.exportFigure('png') }, 'PNG') as HTMLButtonElement;
   const svg = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-svg', onclick: () => api.exportFigure('svg') }, 'SVG') as HTMLButtonElement;
-  body.append(views, light.el, overlays, scale.el, dpi.el, sizeEl, h('div', { class: 'btn-row' }, png, svg));
+  // with a folder open: one figure per model instead
+  const all = checkbox('fig-folder', t('figure.folder'), api.figureFolder, (on) => (api.figureFolder = on));
+  body.append(views, light.el, overlays, scale.el, dpi.el, sizeEl, h('div', { class: 'btn-row' }, png, svg, all));
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'figure', 'specimen', 'sections'].includes(kind)) return;
+    if (!['all', 'mesh', 'figure', 'specimen', 'sections', 'workspace'].includes(kind)) return;
     const f = api.figure;
     viewBoxes.forEach((b, i) => (b.checked = f.views.includes(FIGURE_VIEWS[i])));
     light.set(f.lightElevation);
@@ -754,7 +756,9 @@ function figureSection(api: AppApi): Section {
     (scaleBarEl.querySelector('input') as HTMLInputElement).disabled = !unitStated;
     for (const b of scale.el.querySelectorAll('button')) (b as HTMLButtonElement).disabled = !unitStated;
     for (const b of dpi.el.querySelectorAll('button')) (b as HTMLButtonElement).disabled = !unitStated;
-    png.disabled = svg.disabled = !api.hasMesh() || (!f.views.length && !api.store.state.sections.some((x) => x.inFigure));
+    png.disabled = svg.disabled = !api.hasMesh() || !!api.batchInfo() || (!f.views.length && !api.store.state.sections.some((x) => x.inFigure));
+    all.hidden = !api.workspaceInfo();
+    (all.querySelector('input') as HTMLInputElement).checked = api.figureFolder;
     clear(sizeEl);
     const layout = api.hasMesh() && api.mode === 'present' ? api.figureLayout() : null;
     if (layout) {
@@ -1325,40 +1329,86 @@ function sectionsSection(api: AppApi): Section {
 function workspaceSection(api: AppApi): Section {
   const { el, body } = section('workspace', t('sec.workspace'));
   const name = h('div', { class: 'checks-row' });
-  const select = h('select', { id: 'workspace-mesh', class: 'ctl-select', 'aria-label': t('sec.workspace') }) as HTMLSelectElement;
-  select.addEventListener('change', () => void api.openWorkspaceMesh(Number(select.value)));
+  const filter = h('input', { id: 'workspace-filter', class: 'ctl-text', type: 'search', placeholder: t('workspace.filter'), 'aria-label': t('workspace.filter'), autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+  // the models: only the rows in view are made (folders of a thousand models stay quick)
+  const ROW = 28;
+  const list = h('div', { class: 'ws-list', id: 'workspace-list', role: 'listbox', 'aria-label': t('sec.workspace') });
+  const spacer = h('div', { class: 'ws-spacer' });
+  list.append(spacer);
   const prev = h('button', { type: 'button', class: 'icon-btn', id: 'workspace-prev', title: `${t('workspace.prev')} (PageUp)`, 'aria-label': t('workspace.prev'), onclick: () => api.stepWorkspace(-1) }, icon(ICONS.up)) as HTMLButtonElement;
   const next = h('button', { type: 'button', class: 'icon-btn', id: 'workspace-next', title: `${t('workspace.next')} (PageDown)`, 'aria-label': t('workspace.next'), onclick: () => api.stepWorkspace(1) }, icon(ICONS.down)) as HTMLButtonElement;
-  const measure = h('button', { type: 'button', class: 'btn btn-primary', id: 'batch-measure', onclick: () => api.runBatch('measure') }, t('workspace.batchMeasure')) as HTMLButtonElement;
-  const figures = h('button', { type: 'button', class: 'btn btn-primary', id: 'batch-figures', onclick: () => api.runBatch('figures') }, t('workspace.batchFigures')) as HTMLButtonElement;
-  const format = segmented('batch-format', null, [
-    { value: 'png', label: 'PNG' },
-    { value: 'svg', label: 'SVG' },
-  ], api.batchFormat, (v) => (api.batchFormat = v as 'png' | 'svg'));
+  const nextNew = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'workspace-next-new', title: `${t('workspace.nextNew')} (Shift+PageDown)`, onclick: () => api.nextUnstarted() }, t('workspace.nextNew')) as HTMLButtonElement;
+  const download = h('button', { type: 'button', class: 'btn btn-sm', id: 'workspace-download', onclick: () => void api.downloadProjects() }, icon(ICONS.download), t('workspace.downloadProjects')) as HTMLButtonElement;
   const bar = h('progress', { id: 'batch-progress', max: 1, value: 0 }) as HTMLProgressElement;
   const barText = h('span', { class: 'mono', id: 'batch-status' });
   const cancel = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'batch-cancel', onclick: () => api.cancelBatch() }, t('dlg.cancel'));
   const progress = h('div', { class: 'batch-row' }, barText, bar, cancel);
-  body.append(name, h('div', { class: 'workspace-nav' }, prev, select, next), h('div', { class: 'btn-row' }, measure, figures, format.el), progress);
+  body.append(name, filter, list, h('div', { class: 'workspace-nav' }, prev, next, nextNew), download, progress);
+
+  let shown: number[] = [];
+  let lastIndex = -2;
+  const renderRows = () => {
+    const ws = api.workspaceInfo();
+    if (!ws) return;
+    const from = Math.max(0, Math.floor(list.scrollTop / ROW) - 4);
+    const to = Math.min(shown.length, from + Math.ceil((list.clientHeight || 10 * ROW) / ROW) + 8);
+    for (const r of [...list.querySelectorAll('.ws-row')]) r.remove();
+    for (let k = from; k < to; k++) {
+      const i = shown[k];
+      const started = ws.started[i];
+      list.append(
+        h(
+          'div',
+          { class: 'ws-row', role: 'option', 'data-index': String(i), 'aria-selected': String(i === ws.index), style: `top:${k * ROW}px`, title: ws.meshes[i], onclick: () => !api.batchInfo() && void api.openWorkspaceMesh(i) },
+          h('span', { class: `ws-dot${started ? ' is-started' : ''}`, title: t(started ? 'workspace.started' : 'workspace.notStarted'), 'aria-label': t(started ? 'workspace.started' : 'workspace.notStarted') }),
+          h('span', { class: 'ws-path mono' }, ws.meshes[i]),
+        ),
+      );
+    }
+  };
+  list.addEventListener('scroll', () => requestAnimationFrame(renderRows));
+  const applyFilter = () => {
+    const ws = api.workspaceInfo();
+    if (!ws) return;
+    const q = filter.value.trim().toLowerCase();
+    shown = ws.meshes.flatMap((m, i) => (!q || m.toLowerCase().includes(q) ? [i] : []));
+    spacer.style.height = `${shown.length * ROW}px`;
+    list.style.height = `${Math.max(1, Math.min(shown.length, 10)) * ROW + 2}px`;
+    renderRows();
+  };
+  filter.addEventListener('input', applyFilter);
+
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'workspace', 'mesh'].includes(kind)) return;
     const ws = api.workspaceInfo();
     if (!ws) return;
     clear(name);
     name.append(h('span', { class: 'workspace-name', id: 'workspace-name' }, ws.name), ws.writable ? h('span') : h('span', { class: 'tag', id: 'workspace-readonly' }, t('workspace.readOnly')));
-    clear(select);
-    ws.meshes.forEach((m, i) => select.append(h('option', { value: String(i) }, `${i + 1} / ${ws.meshes.length} · ${m}`)));
-    if (ws.index < 0) select.append(h('option', { value: '-1' }, '–'));
-    select.value = String(ws.index);
     const b = api.batchInfo();
+    applyFilter();
+    // the open model in view
+    if (ws.index !== lastIndex) {
+      lastIndex = ws.index;
+      const k = shown.indexOf(ws.index);
+      if (k >= 0 && (k * ROW < list.scrollTop || (k + 1) * ROW > list.scrollTop + list.clientHeight)) {
+        list.scrollTop = Math.max(0, k * ROW - list.clientHeight / 2);
+        renderRows();
+      }
+    }
     prev.disabled = !!b || ws.index <= 0;
     next.disabled = !!b || ws.index >= ws.meshes.length - 1;
-    select.disabled = measure.disabled = figures.disabled = !!b;
+    nextNew.disabled = !!b || ws.started.every(Boolean);
+    list.classList.toggle('is-busy', !!b);
+    download.hidden = ws.writable;
+    download.disabled = !!b || !ws.undownloaded;
+    download.classList.toggle('btn-primary', ws.undownloaded > 0);
     progress.hidden = !b;
     if (b) {
       bar.max = b.total;
       bar.value = b.done;
-      barText.textContent = `${t(b.kind === 'measure' ? 'workspace.batchMeasure' : 'workspace.batchFigures')} ${b.done} / ${b.total}`;
+      const what = t(b.kind === 'measure' ? 'workspace.exportAll' : 'workspace.batchFigures');
+      const state = b.paused ? t('workspace.paused') : b.eta !== null ? t('workspace.eta', { t: fmtDuration(b.eta) }) : '';
+      barText.textContent = [`${what} ${b.done} / ${b.total}`, state].filter(Boolean).join(' · ');
     }
   };
   refresh('all');
@@ -1371,12 +1421,13 @@ function observersSection(api: AppApi): Section {
   const { el, body } = section('observers', t('sec.observers'));
   const list = h('ol', { class: 'arrow-list', id: 'observer-list', 'aria-label': t('sec.observers') });
   const add = addButton(t('compare.add'), () => api.addObserverFiles(), 'compare-add');
+  const addFolder = addButton(t('compare.addFolder'), () => void api.addFolderObservers(), 'compare-add-folder');
   const gate = h('input', { id: 'compare-gate', class: 'ctl-text mono', type: 'number', min: 0, step: 'any' }) as HTMLInputElement;
   gate.addEventListener('change', () => api.setCompareGate(Number(gate.value)));
   const unit = h('span', { class: 'gate-unit mono' });
-  body.append(list, add, h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'compare-gate' }, t('compare.gate')), h('div', { class: 'gate-row' }, gate, unit)));
+  body.append(list, add, addFolder, h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'compare-gate' }, t('compare.gate')), h('div', { class: 'gate-row' }, gate, unit)));
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'compare', 'mesh', 'specimen'].includes(kind)) return;
+    if (!['all', 'compare', 'mesh', 'specimen', 'workspace'].includes(kind)) return;
     clear(list);
     for (const o of api.observerList()) {
       const box = h('input', { type: 'checkbox', checked: o.included, 'aria-label': o.label }) as HTMLInputElement;
@@ -1393,6 +1444,8 @@ function observersSection(api: AppApi): Section {
       );
     }
     add.disabled = !api.hasMesh();
+    addFolder.hidden = !api.workspaceInfo();
+    addFolder.disabled = !api.hasMesh();
     softSet(gate, String(api.compareGate()));
     unit.textContent = api.store.state.specimen.unit;
   };

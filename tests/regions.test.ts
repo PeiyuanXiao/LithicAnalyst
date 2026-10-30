@@ -103,6 +103,6 @@ describe('regions bounded by curves', () => {
     expect(back.nextRegionNumber).toBe(4);
 
     expect(regionsCsv(s.state, results, { excelBom: false })).toBe('specimen_id,region_id,type,scar_id,area,unit\n,R1,scar,S1,12,mm\n,R2,cortex,,12,mm\n');
-    expect(measurementsCsv(s.state, null, { excelBom: false }, totals).split('\n')[1].endsWith(',12,12,0,0,0.5,,,,,')).toBe(true);
+    expect(measurementsCsv(s.state, null, { excelBom: false }, totals).split('\n')[1].endsWith(',12,12,0,0,0.5,,,,,,')).toBe(true);
   });
 });

@@ -1,14 +1,18 @@
 import { icc21 } from '../compute/agreement';
 import { landmarkTable } from '../compute/landmarks';
-import type { PlaneResult } from '../compute/planes';
+import type { PrincipalAxes } from '../compute/meshGeometry';
+import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AutoMeasurements } from '../core/derived';
+import { measurementValue } from '../core/measurements';
 import type { ProjectState } from '../core/types';
 import { csvCell, curveCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
 import { landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
 export interface BatchSpecimen {
+  /** The model's path in the folder. */
+  file: string;
   state: ProjectState;
   auto: AutoMeasurements;
   /** Recomputed from the project's inputs. */
@@ -21,6 +25,115 @@ export interface BatchSpecimen {
   /** Each observer's values (annotator → measure → value), from every project file of the model, for the ICC. */
   observers: Map<string, Record<string, number>>;
 }
+
+/** A project of a model in a batch: its annotations and the results it stored. */
+export interface BatchProject {
+  /** Its file in the folder (null for a fresh project of a model without one). */
+  path: string | null;
+  state: ProjectState;
+  derived: Record<string, unknown>;
+  /** Version of the app that wrote it. */
+  appVersion: string;
+}
+
+/** What a batch row needs from the mesh for one project: the automatic measurements along its frame, and the vertices' principal axes. */
+export interface ModelMeasures {
+  auto: AutoMeasurements;
+  vertices: PrincipalAxes | null;
+}
+
+const isVec = (v: unknown): boolean => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+
+/** The vertices' principal axes as stored in a project file, or null. */
+function storedAxes(v: unknown): PrincipalAxes | null {
+  const a = v as PrincipalAxes | null | undefined;
+  return a && isVec(a.mean) && Array.isArray(a.axes) && a.axes.length === 3 && a.axes.every(isVec) && Array.isArray(a.variances) ? a : null;
+}
+
+/** The automatic measurements as stored in a project file, or null. */
+function storedAuto(v: unknown): AutoMeasurements | null {
+  const m = v as AutoMeasurements | null | undefined;
+  return m && (m.frame === 'specimen' || m.frame === 'principal') && [m.length, m.width, m.thickness, m.surfaceArea].every((x) => typeof x === 'number' && Number.isFinite(x)) ? m : null;
+}
+
+/**
+ * The results a project stored can stand for its model's (no need to read the
+ * mesh): written by this version of the app, with the automatic measurements
+ * and — when it has planes — the vertices' axes. (The checksum is checked by
+ * the caller: the project is the model's by its `mesh.sha256`.)
+ */
+export function savedResultsUsable(p: BatchProject, appVersion: string): boolean {
+  return p.appVersion === appVersion && !!storedAuto(p.derived.measurements) && (!p.state.planes.length || !!storedAxes(p.derived.vertices));
+}
+
+/** The stored results of a project that passes savedResultsUsable. */
+export const savedMeasures = (p: BatchProject): ModelMeasures => ({ auto: storedAuto(p.derived.measurements)!, vertices: storedAxes(p.derived.vertices) });
+
+/**
+ * One specimen of a batch export: the row comes from `primary` (the model's own
+ * project, or a fresh one) and its measures; every project of the model is an
+ * observer for the ICC (told apart by annotator, else by file). The same for
+ * stored and recomputed measures, so both give the same tables.
+ */
+export function batchSpecimen(file: string, primary: { project: BatchProject; measures: ModelMeasures }, projects: ReadonlyArray<{ project: BatchProject; measures: ModelMeasures }>): BatchSpecimen {
+  const observers = new Map<string, Record<string, number>>();
+  for (const { project: p, measures } of projects) {
+    const st = p.state;
+    const who = st.specimen.annotator || p.path || '';
+    if (observers.has(who)) continue;
+    const a = measures.auto;
+    const values: Record<string, number> = { length: a.length, width: a.width, thickness: a.thickness };
+    const totals = p.derived.regionTotals as { cortexRatio?: number } | null | undefined;
+    if (typeof totals?.cortexRatio === 'number') values.cortex_ratio = totals.cortexRatio;
+    const nod = p.derived.nodule as { radius?: number } | null | undefined;
+    if (typeof nod?.radius === 'number') values.nodule_radius = nod.radius;
+    const sp = p.derived.split as { ratio?: number | null } | null | undefined;
+    if (typeof sp?.ratio === 'number') values.volume_ratio = sp.ratio;
+    for (const m of st.measurements) values[m.label] = measurementValue(m);
+    observers.set(who, values);
+  }
+  const { state, derived } = primary.project;
+  return {
+    file,
+    state,
+    auto: primary.measures.auto,
+    planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices)),
+    regions: (derived.regions as BatchSpecimen['regions']) ?? [],
+    regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
+    nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
+    split: (derived.split as BatchSpecimen['split']) ?? null,
+    observers,
+  };
+}
+
+/** A model a batch could not read or measure. */
+export interface BatchFailure {
+  file: string;
+  reason: string;
+}
+
+/** The failures of a batch, one row each. */
+export function failuresCsv(failures: readonly BatchFailure[], bom: boolean): string {
+  return (bom ? '﻿' : '') + ['file,reason', ...failures.map((f) => [csvCell(f.file), csvCell(f.reason)].join(','))].join('\n') + '\n';
+}
+
+/** What an export folder holds and how it was made (`manifest.json`). */
+export interface Manifest {
+  app: { name: string; version: string };
+  createdAt: string;
+  /** One specimen, or every model of the folder. */
+  scope: 'specimen' | 'folder';
+  folder: string | null;
+  kind: 'tables' | 'figures';
+  options: Record<string, unknown>;
+  specimens: Array<{ id: string; file: string; sha256: string | null; project: string | null; annotator: string }>;
+  /** Models sharing a file name, whose IDs were made from their paths. */
+  duplicateNames: Array<{ name: string; files: string[] }>;
+  failures: BatchFailure[];
+  files: string[];
+}
+
+export const manifestJson = (m: Manifest): string => JSON.stringify(m, null, 2) + '\n';
 
 /** CSV texts of one kind as one file: the first header, then every row. */
 export function mergeCsv(texts: readonly string[], bom: boolean): string {
@@ -54,7 +167,7 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
   const plain = { excelBom: false };
   const merged = (make: (s: BatchSpecimen) => string) => mergeCsv(specimens.map(make), opts.excelBom);
   const out: Array<{ suffix: string; text: string }> = [
-    { suffix: 'measurements.csv', text: merged((s) => measurementsCsv(s.state, s.auto, plain, s.regionTotals, s.nodule, s.split)) },
+    { suffix: 'measurements.csv', text: merged((s) => measurementsCsv(s.state, s.auto, plain, s.regionTotals, s.nodule, s.split, s.file)) },
   ];
   const kinds: Array<[string, (s: BatchSpecimen) => string]> = [
     ['scar_vectors.csv', (s) => scarVectorCsv(s.state, plain)],

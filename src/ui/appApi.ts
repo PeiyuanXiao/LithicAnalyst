@@ -111,14 +111,24 @@ export interface AppApi {
   focusAgreement(itemType: string, metric: string, a: string, b: string): void;
   /** The row whose pair is shown (`type|metric|a|b`), or null. */
   agreementFocus(): string | null;
-  /** The open folder: its models and which one is open (−1: none of them). */
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number } | null;
+  /**
+   * The open folder: its models (paths), which one is open (−1: none of them), which have a
+   * project, and (read-only folder) how many edited models were not downloaded.
+   */
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; undownloaded: number } | null;
   openWorkspaceMesh(i: number): Promise<void>;
   stepWorkspace(step: number): void;
-  batchInfo(): { kind: 'measure' | 'figures'; done: number; total: number } | null;
-  runBatch(kind: 'measure' | 'figures'): void;
+  /** Open the next model without a project. */
+  nextUnstarted(): void;
+  /** Read-only folder: this session's projects as one ZIP. */
+  downloadProjects(): Promise<void>;
+  /** A batch run: progress, failures so far, paused (figures while the page is in the background), seconds left (null: not known yet). */
+  batchInfo(): { kind: 'measure' | 'figures'; done: number; total: number; failed: number; paused: boolean; eta: number | null } | null;
   cancelBatch(): void;
-  batchFormat: 'png' | 'svg';
+  /** Figures: PNG and SVG render every model of the folder. */
+  figureFolder: boolean;
+  /** Compare mode: add the folder's other project files of this model. */
+  addFolderObservers(): Promise<void>;
   saveProject(): void;
   openProject(): void;
   openFolder(): Promise<void>;

@@ -47,3 +47,13 @@ export function quantityUnit(kind: Quantity, unit: string): string {
   if (kind === 'volume') return `${unit}³`;
   return unit;
 }
+
+/** A time left, rounded to what is worth saying: "45 s", "3 min", "1 h 05 min" (under 10 s: "< 10 s"). */
+export function fmtDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return MISSING;
+  if (seconds < 10) return '< 10 s';
+  if (seconds < 60) return `${Math.round(seconds / 5) * 5} s`;
+  const min = Math.round(seconds / 60);
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+}

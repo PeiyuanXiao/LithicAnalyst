@@ -15,9 +15,12 @@ import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
-import { buildLoadedMesh, centredMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
-import { folderPicker, projectNameFor, workspaceFromFiles, workspaceFromHandle, type Workspace } from '../io/workspace';
-import { batchOutputs, type BatchSpecimen } from '../io/batch';
+import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
+import { APP_DIR, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
+import { batchOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
+import { ProjectIndex, type IndexedProject } from '../io/projectIndex';
+import { createMeasurer, type MeshMeasurer } from '../io/meshMeasurer';
+import BatchWorker from '../io/batchWorker?worker&inline';
 import { zipStored } from '../io/zip';
 import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
 import { ArrowLayer, arrowColor, ARROW_COLORS, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
@@ -268,8 +271,18 @@ export class App implements AppApi {
   /** The workspace model that is open (−1: none, or a model opened from elsewhere). */
   private wsIndex = -1;
   private folderSaveTimer = 0;
-  private batch: { kind: 'measure' | 'figures'; done: number; total: number; cancelled: boolean } | null = null;
-  batchFormat: 'png' | 'svg' = 'png';
+  /** Specimen ID of each model of the folder (by path), and the file names several models share. */
+  private wsIds = new Map<string, string>();
+  private wsDuplicates: Array<{ name: string; files: string[] }> = [];
+  /** The folder's project files by model checksum (read the first time a batch or a comparison needs them). */
+  private projectIndex: ProjectIndex | null = null;
+  /** Read-only folder: the project of each model edited in this session (JSON), and those not downloaded since. */
+  private sessionProjects = new Map<string, string>();
+  private undownloaded = new Set<string>();
+  private batch: { kind: 'measure' | 'figures'; done: number; total: number; failed: number; cancelled: boolean; started: number; pausedMs: number; pausedAt: number | null } | null = null;
+  private batchTimer = 0;
+  /** Figures: PNG and SVG render every model of the folder. */
+  figureFolder = false;
   private harrisBody: HTMLElement | null = null;
   private tools: ToolController | null = null;
   private sidebar: Sidebar;
@@ -480,6 +493,12 @@ export class App implements AppApi {
     this.wireFiles();
     this.wireKeyboard();
     window.addEventListener('pagehide', () => this.flushAutosave());
+    // a read-only folder keeps this session's edits in memory only: ask before they go
+    window.addEventListener('beforeunload', (e) => {
+      if (!this.lossOnLeaving()) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.flushAutosave();
     });
@@ -963,7 +982,10 @@ export class App implements AppApi {
     }
     if (['scars', 'sequences', 'reset'].includes(c.kind)) this.updateSequenceBar();
     this.relationChip?.update();
+    const wasUnsaved = this.unsaved;
     this.unsaved = c.kind !== 'reset';
+    // a read-only folder: the first edit makes something to download
+    if (this.unsaved && !wasUnsaved && this.workspace && !this.workspace.writable) this.sidebar.refresh('workspace');
     if (c.kind !== 'reset') {
       this.scheduleAutosave();
       this.scheduleFolderSave();
@@ -1422,6 +1444,11 @@ export class App implements AppApi {
   }
 
   exportFigure(format: 'png' | 'svg'): void {
+    // the whole folder: one figure per model, in a new figures folder
+    if (this.figureFolder && this.workspace) {
+      void this.batchFigures(format);
+      return;
+    }
     void (async () => {
       if (!this.hasMesh()) return;
       if (!this.store.state.specimen.frame) this.feedback.toast(t('figure.noFrame'), 'info', 3500);
@@ -1563,9 +1590,16 @@ export class App implements AppApi {
 
   // ------------------------------------------------------------ workspace
 
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number } | null {
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; undownloaded: number } | null {
     const ws = this.workspace;
-    return ws ? { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex } : null;
+    if (!ws) return null;
+    return { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex, started: ws.meshes.map((p) => this.started(p)), undownloaded: this.undownloadedCount() };
+  }
+
+  /** A model has a project (in the folder, from an earlier version next to it, or edited in this session); none are read for this. */
+  private started(path: string): boolean {
+    const ws = this.workspace;
+    return !!ws && (this.sessionProjects.has(path) || ws.has(projectPathFor(path)) || ws.has(legacyProjectPathFor(path)));
   }
 
   /** Open a folder of models: writable through the File System Access API, else read from a directory upload. */
@@ -1590,46 +1624,50 @@ export class App implements AppApi {
       this.feedback.toast(t('workspace.empty', { name: ws.name }), 'warn');
       return;
     }
+    // edits of a read-only folder that were not downloaded would be lost with it
+    if (this.lossOnLeaving() && !(await this.feedback.confirm(t('dlg.closeModel.title'), t('dlg.closeModel.notDownloaded'), t('dlg.closeModel.yes'), t('dlg.cancel')))) return;
     this.workspace = ws;
     this.wsIndex = -1;
+    const { ids, duplicates } = specimenIds(ws.meshes);
+    this.wsIds = ids;
+    this.wsDuplicates = duplicates;
+    this.projectIndex = new ProjectIndex(() => ws.projects, async (p) => (await ws.read(p)).text());
+    this.sessionProjects.clear();
+    this.undownloaded.clear();
     this.sidebar.refresh('workspace');
     await this.openWorkspaceMesh(0);
   }
 
-  /** The project files of the folder written for this model (by its checksum), each read once per call. */
-  private async folderProjects(sha: string): Promise<Array<{ name: string; state: ProjectState; derived: Record<string, unknown> }>> {
+  /** The project files that may be model `path`'s, best first: edited in this session, in LithicAnalyst/projects, next to the model (earlier versions). */
+  private async folderProjects(path: string): Promise<ProjectState[]> {
     const ws = this.workspace;
     if (!ws) return [];
-    const out: Array<{ name: string; state: ProjectState; derived: Record<string, unknown> }> = [];
-    for (const name of ws.projects) {
+    const out: ProjectState[] = [];
+    const session = this.sessionProjects.get(path);
+    if (session) out.push(parseProjectFile(JSON.parse(session)));
+    for (const p of [projectPathFor(path), legacyProjectPathFor(path)]) {
+      if (!ws.has(p)) continue;
+      // read once: what the index holds already is not read again
+      const known = this.projectIndex?.get(p);
       try {
-        const raw = JSON.parse(await (await ws.read(name)).text());
-        if (raw?.mesh?.sha256 !== sha) continue;
-        out.push({ name, state: parseProjectFile(raw), derived: (raw.derived ?? {}) as Record<string, unknown> });
-      } catch {
-        // not a project file of this app
+        out.push(known ? structuredClone(known.state) : parseProjectFile(JSON.parse(await (await ws.read(p)).text())));
+      } catch (e) {
+        this.feedback.toast(t('error.project', { msg: `${p}: ${(e as Error).message}` }), 'error');
       }
     }
     return out;
   }
 
-  /** Open model `i` of the workspace with the project kept next to it. */
+  /** Open model `i` of the folder with its project (the first of its project files made on this very model). */
   async openWorkspaceMesh(i: number, quiet = false): Promise<void> {
     const ws = this.workspace;
     if (!ws || i < 0 || i >= ws.meshes.length) return;
     await this.flushFolderSave();
-    const name = ws.meshes[i];
-    let project: ProjectState | null = null;
-    if (ws.projects.includes(projectNameFor(name))) {
-      try {
-        project = parseProjectFile(JSON.parse(await (await ws.read(projectNameFor(name))).text()));
-      } catch (e) {
-        this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
-      }
-    }
+    const path = ws.meshes[i];
+    const projects = await this.folderProjects(path);
     this.wsIndex = i;
-    await this.openMeshFile(await ws.read(name), { project, quiet });
-    if (this.store.state.mesh?.fileName !== name) this.wsIndex = -1;
+    await this.openMeshFile(await ws.read(path), { project: projects, quiet, specimenId: this.wsIds.get(path) });
+    if (this.store.state.mesh?.fileName !== baseName(path)) this.wsIndex = -1;
     this.sidebar.refresh('workspace');
   }
 
@@ -1640,9 +1678,24 @@ export class App implements AppApi {
     if (i !== this.wsIndex) void this.openWorkspaceMesh(i);
   }
 
-  /** Writable workspace: keep the project file next to the open model up to date. */
+  /** The next model (after the open one, round to the start) without a project. */
+  nextUnstarted(): void {
+    const ws = this.workspace;
+    if (!ws || this.batch) return;
+    const n = ws.meshes.length;
+    for (let k = 1; k <= n; k++) {
+      const i = ((this.wsIndex < 0 ? -1 : this.wsIndex) + k + n) % n;
+      if (i !== this.wsIndex && !this.started(ws.meshes[i])) {
+        void this.openWorkspaceMesh(i);
+        return;
+      }
+    }
+    this.feedback.toast(t('workspace.allStarted'), 'info', 2000);
+  }
+
+  /** Keep the open model's project up to date: in the folder, or (read-only folder) in this session's memory. */
   private scheduleFolderSave(): void {
-    if (!this.workspace?.writable || this.wsIndex < 0) return;
+    if (!this.workspace || this.wsIndex < 0) return;
     clearTimeout(this.folderSaveTimer);
     this.folderSaveTimer = window.setTimeout(() => void this.flushFolderSave(), 800);
   }
@@ -1651,110 +1704,234 @@ export class App implements AppApi {
     if (!this.folderSaveTimer) return;
     clearTimeout(this.folderSaveTimer);
     this.folderSaveTimer = 0;
+    this.keepSessionProject();
     const ws = this.workspace;
     const st = this.store.state;
-    if (!ws?.writable || this.wsIndex < 0 || st.mesh?.fileName !== ws.meshes[this.wsIndex]) return;
+    if (!ws?.writable || this.wsIndex < 0 || st.mesh?.fileName !== baseName(ws.meshes[this.wsIndex])) return;
+    const path = projectPathFor(ws.meshes[this.wsIndex]);
+    const file = serializeProject(st, __APP_VERSION__, this.meshResults());
     try {
-      await ws.write(projectNameFor(ws.meshes[this.wsIndex]), JSON.stringify(serializeProject(st, __APP_VERSION__, this.meshResults()), null, 2));
+      await ws.write(path, JSON.stringify(file, null, 2));
+      this.projectIndex?.add(path, structuredClone(file));
+      this.sidebar.refresh('workspace');
     } catch (e) {
       this.feedback.toast(t('workspace.saveFailed', { msg: (e as Error).message }), 'error');
     }
   }
 
-  batchInfo(): { kind: 'measure' | 'figures'; done: number; total: number } | null {
-    return this.batch;
+  /** A read-only folder: the open model's project is kept in memory for the session (not in the browser's small storage). */
+  private keepSessionProject(): void {
+    const ws = this.workspace;
+    const st = this.store.state;
+    if (!ws || ws.writable || this.wsIndex < 0 || !this.unsaved || st.mesh?.fileName !== baseName(ws.meshes[this.wsIndex])) return;
+    const path = ws.meshes[this.wsIndex];
+    const file = serializeProject(st, __APP_VERSION__, this.meshResults());
+    this.sessionProjects.set(path, JSON.stringify(file, null, 2));
+    this.projectIndex?.add(projectPathFor(path), structuredClone(file));
+    this.undownloaded.add(path);
+    this.unsaved = false;
+    this.sidebar.refresh('workspace');
+  }
+
+  /** Models of a read-only folder edited and not downloaded since (the open one included). */
+  private undownloadedCount(): number {
+    const ws = this.workspace;
+    if (!ws || ws.writable) return 0;
+    const open = this.wsIndex >= 0 && this.unsaved ? ws.meshes[this.wsIndex] : null;
+    return this.undownloaded.size + (open && !this.undownloaded.has(open) ? 1 : 0);
+  }
+
+  /** Leaving the folder (or the page) would lose edits not downloaded. */
+  private lossOnLeaving(): boolean {
+    return this.undownloadedCount() > 0;
+  }
+
+  /** Read-only folder: every project edited in this session, as LithicAnalyst/projects/… in one ZIP to unpack into the folder. */
+  async downloadProjects(): Promise<void> {
+    const ws = this.workspace;
+    if (!ws || ws.writable) return;
+    clearTimeout(this.folderSaveTimer);
+    this.folderSaveTimer = 0;
+    this.keepSessionProject();
+    if (!this.sessionProjects.size) return;
+    const enc = new TextEncoder();
+    const name = `${fileStem(ws.name, 'folder')}_projects.zip`;
+    const outcome = await saveFile(name, zipStored([...this.sessionProjects].map(([p, text]) => ({ name: projectPathFor(p), data: enc.encode(text) }))), 'application/zip');
+    if (outcome === 'saved') {
+      this.undownloaded.clear();
+      this.feedback.toast(t('toast.saved', { name }));
+    } else this.feedback.toast(t(outcome === 'declined' ? 'toast.declined' : outcome === 'busy' ? 'toast.busy' : 'export.zipFailed'), outcome === 'declined' ? 'info' : 'warn');
+    this.sidebar.refresh('workspace');
+  }
+
+  batchInfo(): { kind: 'measure' | 'figures'; done: number; total: number; failed: number; paused: boolean; eta: number | null } | null {
+    const b = this.batch;
+    if (!b) return null;
+    // the time per model so far (pauses left out) for the models left
+    const active = performance.now() - b.started - b.pausedMs - (b.pausedAt ? performance.now() - b.pausedAt : 0);
+    const eta = b.done > 0 && b.done < b.total ? ((active / b.done) * (b.total - b.done)) / 1000 : null;
+    return { kind: b.kind, done: b.done, total: b.total, failed: b.failed, paused: b.pausedAt !== null, eta };
   }
 
   cancelBatch(): void {
     if (this.batch) this.batch.cancelled = true;
   }
 
-  /** Write a batch output into the folder, or download it when the folder is read-only. */
-  private async putFile(name: string, data: string | Uint8Array, mime: string): Promise<void> {
-    const ws = this.workspace;
-    if (ws?.writable) await ws.write(name, data);
-    else if (typeof data === 'string') await this.save(name, data, mime);
-    else await saveFile(name, data, mime);
-  }
-
-  runBatch(kind: 'measure' | 'figures'): void {
-    if (this.batch || !this.workspace) return;
-    void (kind === 'measure' ? this.batchMeasure() : this.batchFigures());
-  }
-
-  /** Automatic measurements of every model, with the derived results of its projects, merged by kind. */
-  private async batchMeasure(): Promise<void> {
-    const ws = this.workspace!;
-    await this.flushFolderSave();
-    const batch = (this.batch = { kind: 'measure' as const, done: 0, total: ws.meshes.length, cancelled: false });
+  private startBatch(kind: 'measure' | 'figures', total: number): NonNullable<App['batch']> {
+    const b = (this.batch = { kind, done: 0, total, failed: 0, cancelled: false, started: performance.now(), pausedMs: 0, pausedAt: null as number | null });
     this.sidebar.refresh('workspace');
-    const specimens: BatchSpecimen[] = [];
+    // the remaining time counts down between models too
+    this.batchTimer = window.setInterval(() => this.sidebar.refresh('workspace'), 1000);
+    return b;
+  }
+
+  private endBatch(): void {
+    this.batch = null;
+    clearInterval(this.batchTimer);
+    this.sidebar.refresh('workspace');
+  }
+
+  /**
+   * Somewhere to put the files of one export: a new folder `LithicAnalyst/<kind>/<time>/` of a
+   * writable folder (files written as they come), or, for a read-only folder, a ZIP of the same
+   * layout downloaded at the end. `finish` writes the manifest and says where it all went.
+   */
+  private async exportSink(kind: 'exports' | 'figures'): Promise<{ base: string; put: (name: string, data: string | Uint8Array) => Promise<void>; finish: (m: Omit<Manifest, 'files'>) => Promise<string | null> }> {
+    const ws = this.workspace!;
+    const base = await freshFolder(`${APP_DIR}/${kind}/${timeStamp(new Date())}`, (p) => ws.exists(p));
+    const held: Array<{ name: string; data: Uint8Array }> = [];
+    const names: string[] = [];
+    const enc = new TextEncoder();
+    const put = async (name: string, data: string | Uint8Array) => {
+      names.push(name);
+      if (ws.writable) await ws.write(`${base}/${name}`, data);
+      else held.push({ name: `${base}/${name}`, data: typeof data === 'string' ? enc.encode(data) : data });
+    };
+    const finish = async (m: Omit<Manifest, 'files'>): Promise<string | null> => {
+      await put('manifest.json', manifestJson({ ...m, files: [...names] }));
+      if (ws.writable) return `${base}/`;
+      const zip = `${fileStem(ws.name, 'folder')}_${kind}_${base.split('/').pop()}.zip`;
+      const outcome = await saveFile(zip, zipStored(held), 'application/zip');
+      return outcome === 'saved' ? zip : null;
+    };
+    return { base, put, finish };
+  }
+
+  private manifestBase(scope: Manifest['scope'], kind: Manifest['kind'], options: Record<string, unknown>): Omit<Manifest, 'files' | 'specimens' | 'failures'> {
+    return {
+      app: { name: 'LithicAnalyst', version: __APP_VERSION__ },
+      createdAt: new Date().toISOString(),
+      scope,
+      folder: this.workspace?.name ?? null,
+      kind,
+      options,
+      duplicateNames: this.wsDuplicates,
+    };
+  }
+
+  /** "Done N, failed M", and where the files went. */
+  private batchToast(done: number, failures: readonly BatchFailure[], where: string | null): void {
+    const parts = [t('batch.done', { n: done, m: failures.length })];
+    if (where) parts.push(t('batch.written', { path: where }));
+    this.feedback.toast(parts.join(' · '), failures.length ? 'warn' : 'info', 6000);
+  }
+
+  /** The batch worker (inlined into the page); null where workers cannot be made. */
+  private workerFactory(): (() => Worker) | null {
+    return typeof Worker === 'function' ? () => new BatchWorker() : null;
+  }
+
+  /** Summary export (whole folder): the tables of every model, merged by kind, in a new export folder. */
+  private async exportFolder(bom: boolean): Promise<void> {
+    const ws = this.workspace;
+    if (!ws || this.batch) return;
+    await this.flushFolderSave();
+    this.keepSessionProject();
+    const batch = this.startBatch('measure', ws.meshes.length);
+    let measurer: MeshMeasurer | null = null;
     try {
-      for (const name of ws.meshes) {
+      const index = this.projectIndex!;
+      await index.ready();
+      measurer = await createMeasurer(this.workerFactory());
+      const specimens: BatchSpecimen[] = [];
+      const listed: Manifest['specimens'] = [];
+      const failures: BatchFailure[] = [];
+      for (const [i, path] of ws.meshes.entries()) {
         if (batch.cancelled) break;
-        const raw = await readMeshFile(await ws.read(name));
-        const mesh = centredMesh(raw);
-        const base = await runSliced(surfaceMeasuresSteps(mesh.positions, mesh.index));
-        const axes = { ...base.vertices, mean: [base.vertices.mean[0] + mesh.offset[0], base.vertices.mean[1] + mesh.offset[1], base.vertices.mean[2] + mesh.offset[2]] as Vec3 };
-        const projects = await this.folderProjects(raw.sha256);
-        const open = this.store.state.mesh?.sha256 === raw.sha256;
-        const primary = projects.find((p) => p.name === projectNameFor(name)) ?? projects[0] ?? null;
-        let state: ProjectState;
-        let derived: Record<string, unknown>;
-        if (open) {
-          // the open model: its current annotations and results
-          state = structuredClone(this.store.state) as ProjectState;
-          derived = { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split };
-        } else if (primary) {
-          state = primary.state;
-          derived = primary.derived;
-        } else {
-          state = emptyProject();
-          state.specimen.id = name.replace(/\.[^.]+$/, '');
-          derived = {};
+        // each model on its own: one that cannot be read or measured is listed and left out
+        try {
+          const { specimen, entry } = await this.folderSpecimen(i, path, index, measurer);
+          specimens.push(specimen);
+          listed.push(entry);
+        } catch (e) {
+          failures.push({ file: path, reason: e instanceof Error ? e.message : String(e) });
+          measurer.drop(i);
+          batch.failed++;
         }
-        const observers = new Map<string, Record<string, number>>();
-        for (const p of projects) {
-          const st = open && p === primary ? state : p.state;
-          const who = st.specimen.annotator || p.name;
-          if (observers.has(who)) continue;
-          const a = autoMeasurements(mesh.positions, base, st.specimen.frame);
-          const d = open && p === primary ? derived : p.derived;
-          const values: Record<string, number> = { length: a.length, width: a.width, thickness: a.thickness };
-          const totals = d.regionTotals as { cortexRatio?: number } | null | undefined;
-          if (typeof totals?.cortexRatio === 'number') values.cortex_ratio = totals.cortexRatio;
-          const nod = d.nodule as { radius?: number } | null | undefined;
-          if (typeof nod?.radius === 'number') values.nodule_radius = nod.radius;
-          const sp = d.split as { ratio?: number | null } | null | undefined;
-          if (typeof sp?.ratio === 'number') values.volume_ratio = sp.ratio;
-          for (const m of st.measurements) values[m.label] = measurementValue(m);
-          observers.set(who, values);
-        }
-        specimens.push({
-          state,
-          auto: autoMeasurements(mesh.positions, base, state.specimen.frame),
-          planes: state.planes.map((p) => computePlane(p, state, axes)),
-          regions: (derived.regions as BatchSpecimen['regions']) ?? [],
-          regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
-          nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
-          split: (derived.split as BatchSpecimen['split']) ?? null,
-          observers,
-        });
         batch.done++;
         this.sidebar.refresh('workspace');
-        await nextFrame();
       }
-      if (!batch.cancelled) {
-        const stem = fileStem(ws.name, 'batch');
-        for (const f of batchOutputs(specimens, { excelBom: this.display.excelBom })) await this.putFile(`${stem}_${f.suffix}`, f.text, f.suffix.endsWith('.csv') ? 'text/csv' : 'text/plain');
-        this.feedback.toast(t('workspace.batchDone', { n: specimens.length }));
-      }
+      if (batch.cancelled) return;
+      const sink = await this.exportSink('exports');
+      for (const f of batchOutputs(specimens, { excelBom: bom })) await sink.put(f.suffix, f.text);
+      if (failures.length) await sink.put('failures.csv', failuresCsv(failures, bom));
+      const where = await sink.finish({ ...this.manifestBase('folder', 'tables', { excelBom: bom, worker: measurer.inWorker }), specimens: listed, failures });
+      this.batchToast(specimens.length, failures, where);
     } catch (e) {
       this.feedback.toast((e as Error).message, 'error');
     } finally {
-      this.batch = null;
-      this.sidebar.refresh('workspace');
+      measurer?.dispose();
+      this.endBatch();
     }
+  }
+
+  /**
+   * One model of a summary export: its checksum finds its projects (the index); their stored
+   * results are used when they can stand for the model, else the model is read and measured (in
+   * the worker). The open model uses what is on screen.
+   */
+  private async folderSpecimen(i: number, path: string, index: ProjectIndex, measurer: MeshMeasurer): Promise<{ specimen: BatchSpecimen; entry: Manifest['specimens'][number] }> {
+    const ws = this.workspace!;
+    const sha = await measurer.hash(i, await ws.read(path));
+    const own = projectPathFor(path), old = legacyProjectPathFor(path);
+    const asBatch = (p: IndexedProject): BatchProject => ({ path: p.path, state: p.state, derived: p.derived, appVersion: p.appVersion });
+    let projects = index.forMesh(sha).map(asBatch);
+    // the copy an earlier version kept next to the model gives way to the one in LithicAnalyst/projects
+    if (projects.some((p) => p.path === own)) projects = projects.filter((p) => p.path !== old);
+    let primary = projects.find((p) => p.path === own) ?? projects.find((p) => p.path === old) ?? projects[0] ?? null;
+    const loaded = this.loaded, base = this.measureBase;
+    const open = this.store.state.mesh?.sha256 === sha && !!loaded && !!base;
+    let measure: (p: BatchProject, k: number) => ModelMeasures;
+    if (open) {
+      // the open model: its current annotations and results
+      measurer.drop(i);
+      const live: BatchProject = {
+        path: primary?.path ?? own,
+        state: structuredClone(this.store.state) as ProjectState,
+        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split },
+        appVersion: __APP_VERSION__,
+      };
+      projects = projects.map((p) => (p === primary ? live : p));
+      primary = live;
+      const positions = loaded!.geometry.getAttribute('position').array as Float32Array;
+      const vertices = this.vertexAxes();
+      measure = (p) => ({ auto: autoMeasurements(positions, base!, p.state.specimen.frame), vertices });
+    } else {
+      const fresh: BatchProject = { path: null, state: emptyProject(), derived: {}, appVersion: __APP_VERSION__ };
+      fresh.state.specimen.id = this.wsIds.get(path) ?? baseName(path).replace(/\.[^.]+$/, '');
+      primary ??= fresh;
+      if (projects.length && projects.every((p) => savedResultsUsable(p, __APP_VERSION__))) {
+        measurer.drop(i);
+        measure = (p) => savedMeasures(p);
+      } else {
+        const asked = projects.length ? projects : [primary];
+        const m = await measurer.measure(i, asked.map((p) => p.state.specimen.frame));
+        measure = (p) => ({ auto: m.auto[Math.max(0, asked.indexOf(p))], vertices: m.vertices });
+      }
+    }
+    const rows = projects.map((p, k) => ({ project: p, measures: measure(p, k) }));
+    const specimen = batchSpecimen(path, { project: primary, measures: measure(primary, -1) }, rows);
+    return { specimen, entry: { id: primary.state.specimen.id, file: path, sha256: sha, project: primary.path, annotator: primary.state.specimen.annotator } };
   }
 
   /** Wait until what a figure shows is computed (measurements, regions, sections). */
@@ -1770,32 +1947,84 @@ export class App implements AppApi {
     }
   }
 
-  /** The figure of every model, with the same presentation settings. */
-  private async batchFigures(): Promise<void> {
-    const ws = this.workspace!;
-    const start = this.wsIndex;
-    const format = this.batchFormat;
-    const batch = (this.batch = { kind: 'figures' as const, done: 0, total: ws.meshes.length, cancelled: false });
+  /** Rendering needs the page in front: wait while it is in the background (shown as paused). */
+  private async whileHidden(batch: NonNullable<App['batch']>): Promise<void> {
+    if (document.visibilityState !== 'hidden') return;
+    batch.pausedAt = performance.now();
     this.sidebar.refresh('workspace');
+    await new Promise<void>((resolve) => {
+      const on = () => {
+        if (document.visibilityState === 'hidden') return;
+        document.removeEventListener('visibilitychange', on);
+        resolve();
+      };
+      document.addEventListener('visibilitychange', on);
+    });
+    batch.pausedMs += performance.now() - batch.pausedAt;
+    batch.pausedAt = null;
+    this.sidebar.refresh('workspace');
+  }
+
+  /** The figure of every model, with the same presentation settings, in a new figures folder (by the models' subfolders). */
+  private async batchFigures(format: 'png' | 'svg'): Promise<void> {
+    const ws = this.workspace;
+    if (!ws || this.batch) return;
+    await this.flushFolderSave();
+    this.keepSessionProject();
+    const start = this.wsIndex;
+    const batch = this.startBatch('figures', ws.meshes.length);
+    // keep the screen on (if the browser lets us); taken again after the page was in the background
+    type Lock = { release(): Promise<void> };
+    let lock: Lock | null = null;
+    const wake = async () => {
+      try {
+        lock = (await (navigator as unknown as { wakeLock?: { request(k: string): Promise<Lock> } }).wakeLock?.request('screen')) ?? null;
+      } catch {
+        lock = null;
+      }
+    };
+    await wake();
+    const failures: BatchFailure[] = [];
+    const listed: Manifest['specimens'] = [];
     try {
-      for (let i = 0; i < ws.meshes.length; i++) {
+      const sink = await this.exportSink('figures');
+      for (const [i, path] of ws.meshes.entries()) {
         if (batch.cancelled) break;
-        await this.openWorkspaceMesh(i, true);
-        await this.settled();
-        await nextFrame();
-        const fig = this.makeFigure();
-        if (fig) await this.putFile(`${this.stem()}_figure.${format}`, format === 'png' ? await fig.png() : await fig.svg(), format === 'png' ? 'image/png' : 'image/svg+xml');
+        if (document.visibilityState === 'hidden') {
+          await this.whileHidden(batch);
+          await wake();
+        }
+        try {
+          await this.openWorkspaceMesh(i, true);
+          if (this.wsIndex !== i) throw new Error(t('batch.notOpened'));
+          await this.settled();
+          await nextFrame();
+          const fig = this.makeFigure();
+          if (!fig) throw new Error(t('batch.noFigure'));
+          const dir = path.includes('/') ? `${path.slice(0, path.lastIndexOf('/'))}/` : '';
+          const name = fileStem(this.stem().split('/').pop() ?? '', 'specimen');
+          await sink.put(`${dir}${name}_figure.${format}`, format === 'png' ? await fig.png() : await fig.svg());
+          const st = this.store.state;
+          listed.push({ id: st.specimen.id, file: path, sha256: st.mesh?.sha256 ?? null, project: this.started(path) ? projectPathFor(path) : null, annotator: st.specimen.annotator });
+        } catch (e) {
+          const msg = e instanceof FigureError && e.code === 'tooLarge' ? t('figure.tooLarge', { msg: e.message }) : e instanceof Error ? e.message : String(e);
+          failures.push({ file: path, reason: msg });
+          batch.failed++;
+        }
         batch.done++;
         this.sidebar.refresh('workspace');
       }
-      if (!batch.cancelled) this.feedback.toast(t('workspace.batchDone', { n: batch.done }));
+      if (!batch.cancelled) {
+        if (failures.length) await sink.put('failures.csv', failuresCsv(failures, this.display.excelBom));
+        const where = await sink.finish({ ...this.manifestBase('folder', 'figures', { format, figure: structuredClone(this.figure) }), specimens: listed, failures });
+        this.batchToast(listed.length, failures, where);
+      }
     } catch (e) {
-      const msg = e instanceof FigureError && e.code === 'tooLarge' ? t('figure.tooLarge', { msg: e.message }) : (e as Error).message;
-      this.feedback.toast(msg, 'error');
+      this.feedback.toast((e as Error).message, 'error');
     } finally {
-      this.batch = null;
+      await (lock as Lock | null)?.release().catch(() => {});
+      this.endBatch();
       if (start >= 0) await this.openWorkspaceMesh(start, true);
-      this.sidebar.refresh('workspace');
     }
   }
 
@@ -1823,7 +2052,7 @@ export class App implements AppApi {
     }
     if (this.mode === 'measure')
       return [
-        csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split)),
+        csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile())),
         csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
         csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
       ];
@@ -1839,19 +2068,47 @@ export class App implements AppApi {
     return [];
   }
 
-  /** Pick the files to export; several go into one ZIP archive. */
+  /** The open model's file: its path in the folder, else its file name. */
+  private currentFile(): string {
+    const ws = this.workspace;
+    return ws && this.wsIndex >= 0 ? ws.meshes[this.wsIndex] : (this.store.state.mesh?.fileName ?? '');
+  }
+
+  /**
+   * Pick the files to export; several go into one ZIP archive. With a folder open, the
+   * scope can be the whole folder (the summary export), and either goes into a new
+   * folder LithicAnalyst/exports/<time>/ (a ZIP of that layout for a read-only folder).
+   */
   openExport(): void {
     if (!this.hasMesh()) return;
     const files = this.exportables(false);
     if (!files.length) return;
+    const ws = this.workspace;
     const boxes = files.map((f) =>
       h('input', { type: 'checkbox', id: `export-file-${f.key}`, 'data-key': f.key, checked: f.available, disabled: !f.available }) as HTMLInputElement,
     );
     const bom = h('input', { type: 'checkbox', id: 'export-bom', checked: this.display.excelBom }) as HTMLInputElement;
+    const list = h(
+      'div',
+      { class: 'export-files', id: 'export-files' },
+      ...files.map((f, i) => h('label', { class: `ctl-check export-item${f.available ? '' : ' is-empty'}`, for: boxes[i].id }, boxes[i], h('span', {}, f.label), h('span', { class: 'mono export-name' }, f.name))),
+    );
+    let scope: 'specimen' | 'folder' = 'specimen';
+    const scopes = ws
+      ? segmented('export-scope', t('export.scope'), [
+          { value: 'specimen', label: t('export.scope.specimen') },
+          { value: 'folder', label: t('export.scope.folder') },
+        ], scope, (v) => {
+          scope = v as typeof scope;
+          list.hidden = scope === 'folder';
+        })
+      : null;
+    if (this.batch) scopes?.el.querySelector<HTMLButtonElement>('[data-value="folder"]')?.setAttribute('disabled', '');
     const body = h(
       'div',
       { class: 'export-list' },
-      ...files.map((f, i) => h('label', { class: `ctl-check export-item${f.available ? '' : ' is-empty'}`, for: boxes[i].id }, boxes[i], h('span', {}, f.label), h('span', { class: 'mono export-name' }, f.name))),
+      scopes ? h('div', { class: 'export-scope' }, scopes.el) : null,
+      list,
       h('hr', { class: 'rule' }),
       h('label', { class: 'ctl-check', for: 'export-bom' }, bom, h('span', {}, t('export.bom'))),
     );
@@ -1863,8 +2120,25 @@ export class App implements AppApi {
       .then(async (choice) => {
         if (choice !== 'export') return;
         if (bom.checked !== this.display.excelBom) this.setDisplay((d) => (d.excelBom = bom.checked), 'other');
+        if (scope === 'folder') {
+          await this.exportFolder(bom.checked);
+          return;
+        }
         const chosen = this.exportables(bom.checked).filter((f, i) => f.available && boxes[i].checked);
         if (!chosen.length) return;
+        if (ws) {
+          // into the folder's exports, never over an earlier export
+          const sink = await this.exportSink('exports');
+          for (const f of chosen) await sink.put(f.name, f.text());
+          const st = this.store.state;
+          const where = await sink.finish({
+            ...this.manifestBase('specimen', 'tables', { excelBom: bom.checked, files: chosen.map((f) => f.key) }),
+            specimens: [{ id: st.specimen.id, file: this.currentFile(), sha256: st.mesh?.sha256 ?? null, project: ws.has(projectPathFor(this.currentFile())) ? projectPathFor(this.currentFile()) : null, annotator: st.specimen.annotator }],
+            failures: [],
+          });
+          if (where) this.feedback.toast(t('batch.written', { path: where }), 'info', 5000);
+          return;
+        }
         if (chosen.length === 1) {
           const f = chosen[0];
           await this.save(f.name, f.text(), f.name.endsWith('.csv') ? 'text/csv' : 'text/plain');
@@ -1902,6 +2176,29 @@ export class App implements AppApi {
 
   addObserverFiles(): void {
     this.compareInput.click();
+  }
+
+  /** The folder's other project files of this model (by checksum, from the index: each file read once). */
+  async addFolderObservers(): Promise<void> {
+    const ws = this.workspace, index = this.projectIndex;
+    const sha = this.store.state.mesh?.sha256;
+    if (!ws || !index || !sha) return;
+    await this.flushFolderSave();
+    await index.ready();
+    const path = this.wsIndex >= 0 ? ws.meshes[this.wsIndex] : null;
+    const own = path ? [projectPathFor(path), legacyProjectPathFor(path)] : [];
+    const have = new Set(this.observers.map((o) => o.fileName));
+    let added = 0;
+    for (const p of index.forMesh(sha)) {
+      if (own.includes(p.path) || have.has(p.path)) continue;
+      const st = structuredClone(p.state);
+      const used = new Set(this.observers.map((o) => o.color));
+      const color = OBSERVER_COLORS.find((c) => !used.has(c)) ?? OBSERVER_COLORS[this.observers.length % OBSERVER_COLORS.length];
+      this.observers.push({ id: uuid(), label: st.specimen.annotator || p.path, fileName: p.path, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st) });
+      added++;
+    }
+    if (!added) this.feedback.toast(t('compare.noneInFolder'), 'info', 2500);
+    this.observersChanged();
   }
 
   private async addObservers(files: File[]): Promise<void> {
@@ -2802,7 +3099,12 @@ export class App implements AppApi {
     if (!this.store.state.specimen.annotator.trim()) this.feedback.toast(t('toast.noAnnotator'), 'info', 5000);
     const file = serializeProject(this.store.state, __APP_VERSION__, this.meshResults());
     void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json').then((outcome) => {
-      if (outcome === 'saved') this.unsaved = false;
+      if (outcome !== 'saved') return;
+      // a read-only folder: this model's edits are downloaded now
+      this.keepSessionProject();
+      this.undownloaded.delete(this.currentFile());
+      this.unsaved = false;
+      this.sidebar.refresh('workspace');
     });
   }
 
@@ -2910,7 +3212,8 @@ export class App implements AppApi {
     this.loaded = null;
   }
 
-  private installMesh(loaded: LoadedMesh): void {
+  /** `specimenId`: the ID a new project gets (in a folder, see specimenIds); else the file name without its extension. */
+  private installMesh(loaded: LoadedMesh, specimenId?: string): void {
     const v = this.viewer;
     if (!v) return;
     // an unfinished curve is kept with the previous model, then saved
@@ -2939,7 +3242,7 @@ export class App implements AppApi {
     const fresh = emptyProject();
     fresh.mesh = loaded.info;
     fresh.specimen = {
-      id: loaded.info.fileName.replace(/\.[^.]+$/, ''),
+      id: specimenId ?? loaded.info.fileName.replace(/\.[^.]+$/, ''),
       annotator: readPref('annotator', prev.specimen.annotator),
       unit: readPref('unit', prev.specimen.unit || 'mm'),
       notes: '',
@@ -2968,7 +3271,7 @@ export class App implements AppApi {
     await this.flushFolderSave();
     this.flushAutosave();
     const readOnly = !!this.workspace && !this.workspace.writable;
-    const reason = this.autosaveFailed ? 'dlg.closeModel.autosaveFailed' : readOnly && this.unsaved ? 'dlg.closeModel.notDownloaded' : null;
+    const reason = this.autosaveFailed ? 'dlg.closeModel.autosaveFailed' : readOnly && this.lossOnLeaving() ? 'dlg.closeModel.notDownloaded' : null;
     if (reason && !(await this.feedback.confirm(t('dlg.closeModel.title'), t(reason), t('dlg.closeModel.yes'), t('dlg.cancel')))) return;
     this.setTool('select');
     this.releaseMesh();
@@ -2983,6 +3286,11 @@ export class App implements AppApi {
     this.lastHover = null;
     this.workspace = null;
     this.wsIndex = -1;
+    this.projectIndex = null;
+    this.wsIds = new Map();
+    this.wsDuplicates = [];
+    this.sessionProjects.clear();
+    this.undownloaded.clear();
     this.autosaveFailed = false;
     this.selection.set(null);
     this.store.reset(emptyProject());
@@ -3001,7 +3309,8 @@ export class App implements AppApi {
   }
 
   /** `project`: the project file kept next to the model in a workspace; `quiet`: no questions (batch runs). */
-  private async openMeshFile(file: File, opts: { project?: ProjectState | null; quiet?: boolean } = {}): Promise<void> {
+  /** `project`: project files that may be the model's (a folder's); `quiet`: no questions (batch runs); `specimenId`: for a new project. */
+  private async openMeshFile(file: File, opts: { project?: ProjectState[]; quiet?: boolean; specimenId?: string } = {}): Promise<void> {
     if (!this.viewer) return;
     const host = this.viewportEl;
     try {
@@ -3012,7 +3321,7 @@ export class App implements AppApi {
       this.feedback.busy(t('load.indexing'), host);
       await nextFrame();
       const loaded = buildLoadedMesh(raw);
-      this.installMesh(loaded);
+      this.installMesh(loaded, opts.specimenId);
       this.feedback.busy(null);
       if (!opts.quiet) this.feedback.toast(t('toast.loaded', { name: file.name }));
       await this.afterMeshLoaded(loaded, opts);
@@ -3028,14 +3337,15 @@ export class App implements AppApi {
     }
   }
 
-  private async afterMeshLoaded(loaded: LoadedMesh, opts: { project?: ProjectState | null; quiet?: boolean } = {}): Promise<void> {
+  private async afterMeshLoaded(loaded: LoadedMesh, opts: { project?: ProjectState[]; quiet?: boolean } = {}): Promise<void> {
     const pending = this.pendingProject;
     this.pendingProject = null;
     if (pending && pending.mesh?.sha256 === loaded.info.sha256) {
       this.applyProject(pending);
       return;
     }
-    const kept = opts.project && opts.project.mesh?.sha256 === loaded.info.sha256 ? opts.project : null;
+    // the first project file made on this very model (an old one next to it may belong to another)
+    const kept = opts.project?.find((p) => p.mesh?.sha256 === loaded.info.sha256) ?? null;
     if (opts.quiet) {
       if (kept) this.applyProject(kept, null);
       return;
@@ -3292,7 +3602,9 @@ export class App implements AppApi {
         case 'PageUp':
           if (this.workspace) {
             e.preventDefault();
-            this.stepWorkspace(e.code === 'PageDown' ? 1 : -1);
+            // Shift + PageDown: the next model not started yet
+            if (e.shiftKey && e.code === 'PageDown') this.nextUnstarted();
+            else this.stepWorkspace(e.code === 'PageDown' ? 1 : -1);
           }
           return;
         case 'KeyC':
@@ -3413,6 +3725,7 @@ export class App implements AppApi {
         ['Ctrl+Z / Ctrl+Shift+Z', 'help.k.undo'],
         ['Ctrl+S', 'help.k.save'],
         ['PageUp / PageDown', 'help.k.workspace'],
+        ['Shift+PageDown', 'help.k.nextNew'],
       ]),
       ...group(
         t('help.group.mouse'),
@@ -3498,7 +3811,7 @@ export class App implements AppApi {
         const bytes = await fig.png();
         return { layout: fig.layout, data: btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join('')) };
       },
-      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule, this.split),
+      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile()),
       volumeSplit: () => this.split,
       nodule: () => this.nodule,
       regions: () => this.regions,
@@ -3511,6 +3824,10 @@ export class App implements AppApi {
       agreementBusy: () => this.agreementBusyFlag,
       observers: () => this.observerList(),
       workspace: () => this.workspaceInfo(),
+      /** Open a folder given as a directory handle (tests hand in one of their own). */
+      openFolderHandle: async (handle: DirectoryHandle) => this.useWorkspace(await workspaceFromHandle(handle)),
+      /** Specimen IDs of the folder's models, by path. */
+      specimenIds: () => Object.fromEntries(this.wsIds),
       batch: () => this.batchInfo(),
       exportLandmarksText: (kind: 'tps' | 'fcsv' | 'csv' | 'sliders') => this.landmarkExport(kind, false).text,
       exportSeriesCsvText: () => seriesCsv(this.store.state, { excelBom: false }),
@@ -3558,6 +3875,9 @@ export class App implements AppApi {
     (window as unknown as { lithicanalyst: typeof api }).lithicanalyst = api;
   }
 }
+
+/** The file name of a path in a folder. */
+const baseName = (path: string): string => path.split('/').pop() ?? path;
 
 /** A semilandmark row key (`<set label>_<number>`) as the landmark layer's point id (`<set id>#<index>`). */
 function semilandmarkPoint(st: Readonly<ProjectState>, key: string): string | undefined {

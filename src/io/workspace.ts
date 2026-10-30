@@ -1,20 +1,27 @@
-import { extensionOf, SUPPORTED_EXTENSIONS } from './loadMesh';
+import { extensionOf, SUPPORTED_EXTENSIONS } from './readMesh';
 
 /**
- * A folder of models and project files. Chrome and Edge open it through the
- * File System Access API and can write into it; elsewhere the folder is read
+ * A folder of models, read with its subfolders. Chrome and Edge open it through
+ * the File System Access API and can write into it; elsewhere the folder is read
  * from a directory upload and is read-only (files are downloaded instead).
+ *
+ * The app's own files go into `LithicAnalyst/` at the top of the folder:
+ * `projects/<model path>.lithicanalyst.json`, `exports/<time>/…` and
+ * `figures/<time>/…`. Paths are relative to the folder, with `/`.
  */
 export interface Workspace {
   name: string;
   writable: boolean;
-  /** Model files, by name. */
+  /** Model files, by path, sorted. */
   meshes: string[];
-  /** Project files (.json), by name. */
+  /** Project files, by path: those in LithicAnalyst/projects/ and (from earlier versions) any next to the models. */
   projects: string[];
-  read(name: string): Promise<File>;
-  /** Writable folders only. */
-  write(name: string, data: string | Uint8Array): Promise<void>;
+  has(path: string): boolean;
+  /** A file or folder at this path (also one the listing leaves out, such as earlier exports). */
+  exists(path: string): Promise<boolean>;
+  read(path: string): Promise<File>;
+  /** Writable folders only; folders on the way are created. */
+  write(path: string, data: string | Uint8Array): Promise<void>;
 }
 
 interface FileHandle {
@@ -27,16 +34,53 @@ interface FileHandle {
 export interface DirectoryHandle {
   kind: 'directory';
   name: string;
-  values(): AsyncIterable<FileHandle | { kind: 'directory'; name: string }>;
+  values(): AsyncIterable<FileHandle | DirectoryHandle>;
   getFileHandle(name: string, opts?: { create?: boolean }): Promise<FileHandle>;
+  getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<DirectoryHandle>;
 }
 
-/** The project file kept next to a model: `box.ply` → `box.lithicanalyst.json`. */
-export const projectNameFor = (meshName: string): string => `${meshName.replace(/\.[^.]+$/, '')}.lithicanalyst.json`;
+/** The folder the app keeps its files in. */
+export const APP_DIR = 'LithicAnalyst';
+
+/** Where a model's project file goes: `site1/EXP03.ply` → `LithicAnalyst/projects/site1/EXP03.ply.lithicanalyst.json`. */
+export const projectPathFor = (meshPath: string): string => `${APP_DIR}/projects/${meshPath}.lithicanalyst.json`;
+
+/** Where earlier versions kept it: next to the model, without the extension (`site1/EXP03.lithicanalyst.json`). */
+export const legacyProjectPathFor = (meshPath: string): string => `${meshPath.replace(/\.[^./]+$/, '')}.lithicanalyst.json`;
 
 const isMesh = (name: string) => (SUPPORTED_EXTENSIONS as readonly string[]).includes(extensionOf(name));
-const isProject = (name: string) => extensionOf(name) === 'json';
-const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+const isJson = (name: string) => extensionOf(name) === 'json';
+const byPath = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
+/** A folder that is not read: one starting with ".", or the app's own (other than its projects at the top). */
+function skipDir(parts: readonly string[]): boolean {
+  if (parts.some((p) => p.startsWith('.'))) return true;
+  const app = parts.indexOf(APP_DIR);
+  if (app < 0) return false;
+  // only LithicAnalyst/projects/… at the top of the folder is read
+  return app > 0 || (parts.length > 1 && parts[1] !== 'projects');
+}
+
+/** What a file of the folder is: a model, a project file, or neither. */
+export function classify(path: string): 'mesh' | 'project' | null {
+  const parts = path.split('/');
+  const name = parts.pop()!;
+  if (skipDir(parts)) return null;
+  if (parts[0] === APP_DIR) return parts[1] === 'projects' && isJson(name) ? 'project' : null;
+  if (isMesh(name)) return 'mesh';
+  return isJson(name) ? 'project' : null;
+}
+
+function listing(paths: Iterable<string>): { meshes: string[]; projects: string[] } {
+  const meshes: string[] = [];
+  const projects: string[] = [];
+  for (const p of paths) {
+    const k = classify(p);
+    if (k === 'mesh') meshes.push(p);
+    else if (k === 'project') projects.push(p);
+  }
+  return { meshes: meshes.sort(byPath), projects: projects.sort(byPath) };
+}
 
 /** The folder picker, where the browser has one and allows it (not inside a frame); null otherwise. */
 export function folderPicker(): (() => Promise<DirectoryHandle>) | null {
@@ -45,50 +89,144 @@ export function folderPicker(): (() => Promise<DirectoryHandle>) | null {
   return () => w.showDirectoryPicker!({ mode: 'readwrite' });
 }
 
-export async function workspaceFromHandle(dir: DirectoryHandle): Promise<Workspace> {
+export async function workspaceFromHandle(root: DirectoryHandle): Promise<Workspace> {
   const files = new Map<string, FileHandle>();
-  for await (const h of dir.values()) if (h.kind === 'file' && (isMesh(h.name) || isProject(h.name))) files.set(h.name, h as FileHandle);
+  const dirs = new Map<string, DirectoryHandle>([['', root]]);
+  const walk = async (dir: DirectoryHandle, parts: string[]): Promise<void> => {
+    for await (const h of dir.values()) {
+      if (h.kind === 'directory') {
+        const sub = [...parts, h.name];
+        if (skipDir(sub)) continue;
+        dirs.set(sub.join('/'), h);
+        await walk(h, sub);
+      } else {
+        const path = [...parts, h.name].join('/');
+        if (classify(path)) files.set(path, h);
+      }
+    }
+  };
+  await walk(root, []);
+  const dirFor = async (parts: string[]): Promise<DirectoryHandle> => {
+    let at = '', dir = root;
+    for (const p of parts) {
+      at = at ? `${at}/${p}` : p;
+      let next = dirs.get(at);
+      if (!next) dirs.set(at, (next = await dir.getDirectoryHandle(p, { create: true })));
+      dir = next;
+    }
+    return dir;
+  };
+  const { meshes, projects } = listing(files.keys());
   const ws: Workspace = {
-    name: dir.name,
+    name: root.name,
     writable: true,
-    meshes: [...files.keys()].filter(isMesh).sort(byName),
-    projects: [...files.keys()].filter(isProject).sort(byName),
-    read: async (name) => {
-      const h = files.get(name);
-      if (!h) throw new Error(`${name} is not in the folder.`);
+    meshes,
+    projects,
+    has: (path) => files.has(path),
+    exists: async (path) => {
+      if (files.has(path) || dirs.has(path)) return true;
+      const parts = path.split('/');
+      let dir = root;
+      for (const [i, p] of parts.entries()) {
+        try {
+          dir = await dir.getDirectoryHandle(p);
+        } catch {
+          if (i < parts.length - 1) return false;
+          try {
+            await dir.getFileHandle(p);
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      }
+      return true;
+    },
+    read: async (path) => {
+      const h = files.get(path);
+      if (!h) throw new Error(`${path} is not in the folder.`);
       return h.getFile();
     },
-    write: async (name, data) => {
-      const h = files.get(name) ?? (await dir.getFileHandle(name, { create: true }));
+    write: async (path, data) => {
+      let h = files.get(path);
+      if (!h) {
+        const parts = path.split('/');
+        const name = parts.pop()!;
+        h = await (await dirFor(parts)).getFileHandle(name, { create: true });
+      }
       const w = await h.createWritable();
       await w.write(data);
       await w.close();
-      if (!files.has(name)) {
-        files.set(name, h);
-        if (isProject(name)) ws.projects = [...ws.projects, name].sort(byName);
+      if (!files.has(path)) {
+        files.set(path, h);
+        if (classify(path) === 'project') ws.projects = [...ws.projects, path].sort(byPath);
       }
     },
   };
   return ws;
 }
 
-/** A directory upload (`<input webkitdirectory>`): the files at the top of the folder, read-only. */
+/** A directory upload (`<input webkitdirectory>`), read-only; paths are taken below the chosen folder. */
 export function workspaceFromFiles(list: readonly File[]): Workspace | null {
-  const top = list.filter((f) => (f.webkitRelativePath || f.name).split('/').length <= 2);
-  if (!top.length) return null;
-  const files = new Map(top.map((f) => [f.name, f]));
+  if (!list.length) return null;
+  const rel = (f: File) => (f.webkitRelativePath || f.name).split('/').slice(f.webkitRelativePath ? 1 : 0).join('/');
+  const files = new Map(list.map((f) => [rel(f), f] as const).filter(([p]) => classify(p)));
+  const { meshes, projects } = listing(files.keys());
   return {
-    name: (top[0].webkitRelativePath || '').split('/')[0] || 'folder',
+    name: (list[0].webkitRelativePath || '').split('/')[0] || 'folder',
     writable: false,
-    meshes: [...files.keys()].filter(isMesh).sort(byName),
-    projects: [...files.keys()].filter(isProject).sort(byName),
-    read: async (name) => {
-      const f = files.get(name);
-      if (!f) throw new Error(`${name} is not in the folder.`);
+    meshes,
+    projects,
+    has: (path) => files.has(path),
+    exists: async (path) => files.has(path) || [...files.keys()].some((k) => k.startsWith(`${path}/`)),
+    read: async (path) => {
+      const f = files.get(path);
+      if (!f) throw new Error(`${path} is not in the folder.`);
       return f;
     },
     write: async () => {
       throw new Error('This folder is read-only.');
     },
   };
+}
+
+/**
+ * The specimen ID of each model: its file name without the extension; where
+ * two models share that name (in different subfolders, or with different
+ * extensions), the path without the extension (`site1/EXP03`), and with it
+ * when that is still the same (`EXP03.ply`, `EXP03.stl`). `duplicates` lists
+ * the names that were shared.
+ */
+export function specimenIds(paths: readonly string[]): { ids: Map<string, string>; duplicates: Array<{ name: string; files: string[] }> } {
+  const base = (p: string) => p.split('/').pop()!.replace(/\.[^.]+$/, '');
+  const noExt = (p: string) => p.replace(/\.[^./]+$/, '');
+  const group = <T>(list: readonly T[], key: (x: T) => string) => {
+    const out = new Map<string, T[]>();
+    for (const x of list) (out.get(key(x)) ?? out.set(key(x), []).get(key(x))!).push(x);
+    return out;
+  };
+  const ids = new Map<string, string>();
+  const duplicates: Array<{ name: string; files: string[] }> = [];
+  for (const [name, list] of group(paths, base)) {
+    if (list.length === 1) {
+      ids.set(list[0], name);
+      continue;
+    }
+    duplicates.push({ name, files: [...list] });
+    for (const same of group(list, noExt).values()) for (const p of same) ids.set(p, same.length === 1 ? noExt(p) : p);
+  }
+  return { ids, duplicates };
+}
+
+/** Name of an export folder: the local time, `YYYY-MM-DD_HHMMSS`. */
+export function timeStamp(d: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}_${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+}
+
+/** `base`, or `base-2`, `base-3` … when that folder exists already: an export never overwrites. */
+export async function freshFolder(base: string, exists: (path: string) => boolean | Promise<boolean>): Promise<string> {
+  let name = base;
+  for (let k = 2; await exists(name); k++) name = `${base}-${k}`;
+  return name;
 }

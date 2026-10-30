@@ -43,6 +43,8 @@ export interface ManualMeasurementValue {
 export interface DerivedResults {
   /** Null until the mesh has been measured. */
   measurements: AutoMeasurements | null;
+  /** Principal axes of all vertices (original coordinates; the `all_vertices` plane and the plane frames use them), null until measured. */
+  vertices: PrincipalAxes | null;
   manualMeasurements: ManualMeasurementValue[];
   planes: PlaneResult[];
   /** Surface regions found from their seeds (empty until the mesh is partitioned). */
@@ -82,6 +84,7 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
   const auto = mesh?.measurements ?? null;
   return {
     measurements: auto ? { ...auto } : null,
+    vertices: mesh?.vertices ? structuredClone(mesh.vertices) : null,
     manualMeasurements: state.measurements.map((m) => ({
       id: m.id,
       label: m.label,

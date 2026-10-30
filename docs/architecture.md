@@ -265,18 +265,44 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
 
 ## Workspace and batch runs
 
-* `io/workspace.ts`: a folder of models and project files — writable through the File System
-  Access API (`showDirectoryPicker`, Chrome / Edge, not inside frames), otherwise read-only from
-  a directory upload (`<input webkitdirectory>`); only the files at the top of the folder count.
-* The open model's project is written next to it (`<model>.lithicanalyst.json`, debounced like
-  the autosave) and read back when the model is opened again; the browser's autosave still
-  wins when it holds later edits of the same project.
-* Batch measurements (`App.batchMeasure`) read, measure and drop one model at a time without
-  the viewer (`centredMesh`, `surfaceMeasuresSteps`), take each model's project files by
-  checksum, and merge the per-specimen CSVs by kind (`io/batch.ts`); with two or more
-  observers per model it adds ICC(2,1) per measure. Batch figures open each model in the viewer,
-  wait until regions and sections are computed (`App.settled`) and render the figure with the
-  current settings. Results go into the folder, or are downloaded from a read-only one.
+* `io/workspace.ts`: a folder of models and project files, read with its subfolders (paths
+  relative to the folder, `/`) — writable through the File System Access API
+  (`showDirectoryPicker`, Chrome / Edge, not inside frames; `write` makes the folders on the
+  way), otherwise read-only from a directory upload (`<input webkitdirectory>`). `classify` says
+  what counts: models anywhere but in folders starting with "." and in `LithicAnalyst/`; project
+  files in `LithicAnalyst/projects/` and, from earlier versions, any `.json` next to the models.
+  `specimenIds` names the models (file name; path where names are shared), `timeStamp` /
+  `freshFolder` name export folders that never overwrite one.
+* The app's files go into `LithicAnalyst/`: the open model's project is written to
+  `projects/<model path>.lithicanalyst.json` (debounced like the autosave); when a model opens,
+  its project is the first of: this session's copy (read-only folder), the new place, the old
+  place next to the model — the first made on this very model (checksum). The browser's autosave
+  still wins when it holds later edits. In a read-only folder the edited projects are kept in
+  memory (`App.sessionProjects`) and downloaded as one ZIP of `LithicAnalyst/projects/…`; until
+  then, leaving the page or the folder asks first (`beforeunload`, `App.lossOnLeaving`).
+* `io/projectIndex.ts`: the folder's project files by checksum, each file read once, the first
+  time a summary export or a comparison needs them; files the app writes are put in as written.
+* **Summary export** (`App.exportFolder`, the export dialog's "whole folder"): for each model,
+  one at a time and in a try/catch of its own (failures are listed, the rest goes on), the
+  checksum finds its projects in the index. When all of them were written by this version and
+  stored their measurements (and the vertices' axes for planes: `derived.vertices`), those are
+  used (`savedResultsUsable`); else the model is parsed and measured along each project's frame.
+  Both go through `batchSpecimen`, so they give the same tables. Hashing, parsing, joining
+  vertices and measuring run in the batch worker (`io/batchWorker.ts`, imported with
+  `?worker&inline` into the single file; `io/meshJobs.ts` is the shared work, `io/meshMeasurer.ts`
+  the client); where no worker can be made or it does not answer, the same jobs run on the page in
+  slices. The open model uses what is on screen.
+* **Figures for the whole folder** (`App.batchFigures`, "whole folder" in the figure section)
+  open each model in the viewer, wait until regions and sections are computed (`App.settled`) and
+  render the figure with the current settings. They need the page in front: a wake lock keeps the
+  screen on where allowed, and the run pauses while the page is hidden (`App.whileHidden`); the
+  remaining time leaves the pauses out.
+* Every export with a folder open goes into a new `LithicAnalyst/exports/<time>/` or
+  `figures/<time>/` (`App.exportSink`) with a `manifest.json` (and `failures.csv` when something
+  failed); a read-only folder gets one ZIP of that layout instead.
+* The folder panel lists the models (filter, a dot for "has a project" from the listing alone,
+  only the rows in view made) and steps through them (PageUp / PageDown, Shift+PageDown: next not
+  started).
 
 ## Compare mode
 
