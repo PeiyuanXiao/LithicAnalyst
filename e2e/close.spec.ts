@@ -8,6 +8,9 @@ const close = async (page: Page) => fileMenu(page, '#btn-close-model');
 
 async function expectEmpty(page: Page): Promise<void> {
   await expect(page.locator('#empty-open')).toBeVisible();
+  // one main button: the view's Open model (File stays quiet)
+  await expect(page.locator('#empty-open')).toHaveClass(/btn-primary/);
+  await expect(page.locator('#btn-file')).not.toHaveClass(/btn-primary/);
   const st = await state(page);
   expect([st.mesh, st.scars.length]).toEqual([null, 0]);
   expect(await page.evaluate(() => window.lithicanalyst.selection())).toBeNull();

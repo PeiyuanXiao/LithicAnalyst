@@ -188,6 +188,8 @@ describe('relations and sequences in a project', () => {
     const q1 = addSequence(s);
     const q2 = addSequence(s);
     expect([q1.label, q2.label, s.state.nextSequenceNumber]).toEqual(['Q1', 'Q2', 3]);
+    // new sequences are ordered: their members follow the relations
+    expect([q1.ordered, q2.ordered]).toEqual([true, true]);
     setScarSequence(s, a, q1.id);
     setScarSequence(s, b, q1.id);
     setScarSequence(s, c, q2.id);
@@ -231,6 +233,11 @@ describe('relations and sequences in a project', () => {
     expect(back.nextSequenceNumber).toBe(3);
     expect(file.derived.relations).toMatchObject({ count: 1, unassigned: [c], direct: [{ later: b, earlier: a }] });
 
+    // a file keeps its own value: unordered as written, or (an earlier file without the key) unordered
+    file.annotations.sequences[1].ordered = false;
+    expect(parseProjectFile(file).sequences[1].ordered).toBe(false);
+    delete file.annotations.sequences[1].ordered;
+    expect(parseProjectFile(file).sequences[1].ordered).toBe(false);
     file.annotations.relations.push({ a, b, kind: 'indeterminate' }, { a, b: 'gone', kind: 'a_cuts_b' });
     file.annotations.sequences[1].scarIds = [a, c, 'gone'];
     const again = parseProjectFile(file);

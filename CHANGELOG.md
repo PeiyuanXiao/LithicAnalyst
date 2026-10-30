@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- New sequences are ordered: their scars follow the relations at once (and `order_in_series` is
+  filled) without ticking "Ordered within", which can still be switched off. Sequences in files
+  keep their setting. With the whole folder as the export scope the dialog's button reads
+  "Export"; the File button is no longer a main button when no model is open.
 - Folders: subfolders are read (folders starting with "." and the app's own `LithicAnalyst/` are
   left out). The app keeps its files in `LithicAnalyst/`: projects in
   `projects/<model path>.lithicanalyst.json` (named with the model's extension, so `EXP03.ply` and

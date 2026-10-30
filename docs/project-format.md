@@ -173,6 +173,9 @@ fitted planes, fitted spheres, volumes ….
   per pair of scars. On reading, relations with unknown scars and repeated pairs are dropped.
 * Sequences are listed earliest first. A scar is in one sequence at most; within an `ordered`
   sequence `scarIds` runs from the earliest scar, otherwise their order means nothing.
+* A sequence the app creates is `ordered: true` (its members follow the relations, in the order
+  they were added where the relations decide nothing); the user can switch it off. Sequences read
+  from a file keep the value written there (a missing `ordered` reads as `false`).
 * The app keeps both orders as the relations have them (`orderSequences` in
   `src/compute/relations.ts`), whenever relations or memberships change: A is earlier than B when
   B cuts A through one or more `a_cuts_b` relations (also through scars in other sequences or

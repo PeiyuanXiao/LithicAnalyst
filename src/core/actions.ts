@@ -466,7 +466,8 @@ export function addSequence(store: ProjectStore, scarIds: string[] = []): Sequen
   const n = store.state.nextSequenceNumber;
   const t = nowIso();
   const ids = scarIds.filter((id) => store.scar(id));
-  const q: Sequence = { id: uuid(), label: `Q${n}`, scarIds: ids, ordered: false, createdAt: t, modifiedAt: t };
+  // ordered from the start: its members follow the relations (the order of the clicks where they decide nothing)
+  const q: Sequence = { id: uuid(), label: `Q${n}`, scarIds: ids, ordered: true, createdAt: t, modifiedAt: t };
   const before = store.state.sequences;
   const rest = structuredClone(before).map((x) => (x.scarIds.some((id) => ids.includes(id)) ? { ...x, scarIds: x.scarIds.filter((id) => !ids.includes(id)), modifiedAt: t } : x));
   store.history.execute(new SetSequencesCommand('cmd.addSequence', structuredClone(before), ordered(store.state, [...rest, q]), n + 1));

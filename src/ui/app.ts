@@ -898,9 +898,7 @@ export class App implements AppApi {
     this.toolbarEl.hidden = !has;
     this.saveBtn.disabled = !has;
     if (this.closeItem) this.closeItem.disabled = !has;
-    // the main action: opening something until a model is open, then saving
-    this.fileBtn.classList.toggle('btn-primary', !has);
-    this.fileBtn.classList.toggle('btn-quiet', has);
+    // File stays quiet (without a model the main button is the view's "Open model"); with one, Save is the main button
     this.saveBtn.classList.toggle('btn-primary', has);
     this.saveBtn.classList.toggle('btn-quiet', !has);
     if (this.displayCtl) this.displayCtl.hidden = !has;
@@ -2101,6 +2099,9 @@ export class App implements AppApi {
         ], scope, (v) => {
           scope = v as typeof scope;
           list.hidden = scope === 'folder';
+          // nothing to pick for the whole folder: the button just exports
+          const run = list.closest('.modal')?.querySelector('[data-choice="export"]');
+          if (run) run.textContent = t(scope === 'folder' ? 'export.runAll' : 'export.run');
         })
       : null;
     if (this.batch) scopes?.el.querySelector<HTMLButtonElement>('[data-value="folder"]')?.setAttribute('disabled', '');

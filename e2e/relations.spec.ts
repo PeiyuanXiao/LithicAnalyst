@@ -210,7 +210,7 @@ test('records relations by clicking arrows, checks them against the sequences li
   ]);
   const ser = await exportFile(page, 'series');
   expect(ser.name).toBe('box_series.csv');
-  expect(ser.text).toBe('specimen_id,series_id,series_order,scar_id,order_in_series\nbox,Q1,1,S1,1\nbox,Q1,1,S2,2\nbox,Q2,2,S3,\n');
+  expect(ser.text).toBe('specimen_id,series_id,series_order,scar_id,order_in_series\nbox,Q1,1,S1,1\nbox,Q1,1,S2,2\nbox,Q2,2,S3,1\n');
   const svg = await download(page, () => page.locator('#harris-svg').click());
   expect(svg.name).toBe('box_harris.svg');
   expect(svg.text).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);

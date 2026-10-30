@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, dragArrow, expect, loadMesh, openApp, openSection, state, test, toScreen, viewFromTop } from './helpers';
+import { counts, curveClick, dragArrow, expect, exportFile, loadMesh, openApp, openSection, parseCsv, state, test, toScreen, viewFromTop } from './helpers';
 
 const sequences = async (page: Page) => (await state(page)).sequences.map((q) => [q.label, q.scarIds]);
 const faded = async (page: Page) => (await page.evaluate(() => window.lithicanalyst.fadedArrows())).sort();
@@ -93,6 +93,49 @@ test('the sequence tool: a click puts a scar into the current sequence or takes 
   await page.keyboard.press('2');
   expect((await state(page)).scars[0].attributes.completeness).toBe('bulb_complete');
   await expect(page.locator('#sequence-bar')).toBeHidden();
+});
+
+test('a new sequence is ordered: the relations put its scars in order without touching the switch', async ({ page }) => {
+  await openApp(page);
+  await loadMesh(page, boxPly());
+  await viewFromTop(page);
+  await page.keyboard.press('a');
+  for (const y of [-6, 0, 6]) await dragArrow(page, boxPoint(-10, y, 5), boxPoint(10, y, 5));
+  const [s1, s2, s3] = (await state(page)).scars.map((s) => s.id);
+  // S1 cuts S2, S2 cuts S3 (relation tool: the first click cuts the second)
+  await page.keyboard.press('b');
+  for (const [a, b] of [[-6, 0], [0, 6]]) {
+    await click(page, onArrow(a));
+    await expect.poll(() => page.evaluate(() => window.lithicanalyst.relationPending())).not.toBeNull();
+    await click(page, onArrow(b));
+    await expect(page.locator('#relation-chip')).toBeVisible();
+    await page.keyboard.press('Escape');
+  }
+  expect((await state(page)).relations.map((r) => [r.a, r.b, r.kind])).toEqual([
+    [s1, s2, 'a_cuts_b'],
+    [s2, s3, 'a_cuts_b'],
+  ]);
+  // a new sequence, then S1 and S3 clicked in this order
+  await page.keyboard.press('q');
+  await page.keyboard.press('n');
+  await expect(chips(page)).toHaveCount(1);
+  await click(page, onArrow(-6));
+  await click(page, onArrow(6));
+  // ordered from the start: S3 (the earliest, through S2) first
+  await expect.poll(() => sequences(page)).toEqual([['Q1', [s3, s1]]]);
+  expect((await state(page)).sequences[0].ordered).toBe(true);
+  await page.locator('#sequence-list .sequence-row').first().click();
+  await expect(page.locator('#sequence-ordered')).toBeChecked();
+  await expect(page.locator('#sequence-members .member-link')).toHaveClass(/is-held/);
+  const ser = await exportFile(page, 'series');
+  expect(parseCsv(ser.text).map((r) => [r.series_id, r.scar_id, r.order_in_series])).toEqual([
+    ['Q1', 'S3', '1'],
+    ['Q1', 'S1', '2'],
+  ]);
+  // switched off by hand: the order inside is no longer kept
+  await page.locator('#sequence-ordered').uncheck();
+  expect((await state(page)).sequences[0].ordered).toBe(false);
+  expect(parseCsv((await exportFile(page, 'series')).text).map((r) => r.order_in_series)).toEqual(['', '']);
 });
 
 test('in the relation tool, scars whose regions meet and are not judged yet are marked, and "next pair" turns to them', async ({ page }) => {

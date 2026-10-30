@@ -137,6 +137,13 @@ test('summary export and figures for the whole folder: new export folders, broke
   await page.locator('#btn-export').click();
   await page.locator('#export-scope-folder').click();
   await expect(page.locator('#export-files')).toBeHidden();
+  // nothing to pick for the whole folder: the button just exports, and says so
+  const run = page.locator('.modal [data-choice="export"]');
+  await expect(run).toHaveText('Export');
+  await page.locator('#export-scope-specimen').click();
+  await expect(run).toHaveText('Export selected');
+  await page.locator('#export-scope-folder').click();
+  await expect(run).toHaveText('Export');
   await page.locator('.modal [data-choice="export"]').click();
   const all = await exportFolder(page, 'exports', 'failures.csv');
   await expect(page.locator('#batch-progress')).toBeHidden({ timeout: 60_000 });

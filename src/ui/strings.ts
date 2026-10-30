@@ -326,6 +326,7 @@ export const STRINGS = {
   'export.button': { zh: '导出', en: 'Export' },
   'export.title': { zh: '导出', en: 'Export' },
   'export.run': { zh: '导出所选', en: 'Export selected' },
+  'export.runAll': { zh: '导出', en: 'Export' },
   'export.zipFailed': { zh: '无法下载压缩包；逐个导出可复制文本', en: 'Could not download the archive; export one file at a time to copy its text' },
   'export.project': { zh: '保存项目文件', en: 'Save project file' },
   'export.measurements': { zh: '测量 CSV', en: 'Measurement CSV' },
