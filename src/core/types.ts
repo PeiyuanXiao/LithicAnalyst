@@ -7,6 +7,8 @@
  * touch stored coordinates.
  */
 
+import type { ConfigFace, ConfigRole, Polarity } from './fields';
+
 export type Vec3 = [number, number, number];
 
 export interface LocalizedText {
@@ -245,6 +247,20 @@ export interface SemilandmarkSet {
   modifiedAt: string;
 }
 
+/**
+ * Manual corrections to the volumetric configuration (compute/configuration.ts);
+ * the configuration itself is derived. Keys are face codes; a join's key is two
+ * face codes in face order joined by "|" (e.g. "front|right"). The faces follow
+ * the box's orientation, so a change of the specimen frame clears all but the polarity.
+ */
+export interface ConfigCorrections {
+  roles: Partial<Record<ConfigFace, ConfigRole>>;
+  joins: Record<string, boolean>;
+  surfaceType: Partial<Record<ConfigFace, 'wide' | 'narrow'>>;
+  axis: Partial<Record<ConfigFace, 'long' | 'short'>>;
+  polarity: Polarity | null;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -268,6 +284,8 @@ export interface ProjectState {
    * oriented by `upHint`). Null when not used.
    */
   split: { source: 'plane' | 'curve'; id: string; upHint: Vec3 } | null;
+  /** Manual corrections to the volumetric configuration (none by default). */
+  configuration: ConfigCorrections;
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */

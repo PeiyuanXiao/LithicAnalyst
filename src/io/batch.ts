@@ -1,12 +1,13 @@
 import { icc21 } from '../compute/agreement';
+import { computeConfiguration, storedBox, type ConfigBox, type ConfigurationResult } from '../compute/configuration';
 import { landmarkTable } from '../compute/landmarks';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AutoMeasurements } from '../core/derived';
 import { measurementValue } from '../core/measurements';
-import type { ProjectState } from '../core/types';
-import { csvCell, curveCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
+import { hasVector, type ProjectState } from '../core/types';
+import { configurationCsv, csvCell, curveCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
 import { landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
@@ -17,6 +18,8 @@ export interface BatchSpecimen {
   auto: AutoMeasurements;
   /** Recomputed from the project's inputs. */
   planes: PlaneResult[];
+  /** Recomputed from the project's inputs and the model's box. */
+  configuration: ConfigurationResult | null;
   /** From the project file's derived results (the values the app last computed). */
   regions: RegionResult[];
   regionTotals: RegionTotals | null;
@@ -36,10 +39,11 @@ export interface BatchProject {
   appVersion: string;
 }
 
-/** What a batch row needs from the mesh for one project: the automatic measurements along its frame, and the vertices' principal axes. */
+/** What a batch row needs from the mesh for one project: the automatic measurements and the box along its frame, and the vertices' principal axes. */
 export interface ModelMeasures {
   auto: AutoMeasurements;
   vertices: PrincipalAxes | null;
+  box: ConfigBox | null;
 }
 
 const isVec = (v: unknown): boolean => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
@@ -58,16 +62,22 @@ function storedAuto(v: unknown): AutoMeasurements | null {
 
 /**
  * The results a project stored can stand for its model's (no need to read the
- * mesh): written by this version of the app, with the automatic measurements
- * and — when it has planes — the vertices' axes. (The checksum is checked by
- * the caller: the project is the model's by its `mesh.sha256`.)
+ * mesh): written by this version of the app, with the automatic measurements,
+ * — when it has planes — the vertices' axes and — when it has arrows — the box of
+ * its volumetric configuration. (The checksum is checked by the caller: the
+ * project is the model's by its `mesh.sha256`.)
  */
 export function savedResultsUsable(p: BatchProject, appVersion: string): boolean {
-  return p.appVersion === appVersion && !!storedAuto(p.derived.measurements) && (!p.state.planes.length || !!storedAxes(p.derived.vertices));
+  return (
+    p.appVersion === appVersion &&
+    !!storedAuto(p.derived.measurements) &&
+    (!p.state.planes.length || !!storedAxes(p.derived.vertices)) &&
+    (!p.state.scars.some(hasVector) || !!storedBox(p.derived.configuration))
+  );
 }
 
 /** The stored results of a project that passes savedResultsUsable. */
-export const savedMeasures = (p: BatchProject): ModelMeasures => ({ auto: storedAuto(p.derived.measurements)!, vertices: storedAxes(p.derived.vertices) });
+export const savedMeasures = (p: BatchProject): ModelMeasures => ({ auto: storedAuto(p.derived.measurements)!, vertices: storedAxes(p.derived.vertices), box: storedBox(p.derived.configuration) });
 
 /**
  * One specimen of a batch export: the row comes from `primary` (the model's own
@@ -98,6 +108,7 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     state,
     auto: primary.measures.auto,
     planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices)),
+    configuration: computeConfiguration(state.scars, state.configuration, primary.measures.box),
     regions: (derived.regions as BatchSpecimen['regions']) ?? [],
     regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
@@ -170,7 +181,7 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
     { suffix: 'measurements.csv', text: merged((s) => measurementsCsv(s.state, s.auto, plain, s.regionTotals, s.nodule, s.split, s.file)) },
   ];
   const kinds: Array<[string, (s: BatchSpecimen) => string]> = [
-    ['scar_vectors.csv', (s) => scarVectorCsv(s.state, plain)],
+    ['scar_vectors.csv', (s) => scarVectorCsv(s.state, plain, s.configuration)],
     ['curves.csv', (s) => curveCsv(s.state, plain)],
     ['manual_measurements.csv', (s) => manualMeasurementsCsv(s.state, plain)],
     ['planes.csv', (s) => planesCsv(s.state, s.planes, plain)],
@@ -182,6 +193,13 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
   for (const [suffix, make] of kinds) {
     const text = merged(make);
     if (hasRows(text)) out.push({ suffix, text });
+  }
+  // the volumetric configuration: specimens that have one (arrows on a measured model)
+  const configured = specimens.filter((s) => s.configuration);
+  if (configured.length) {
+    out.push({ suffix: 'configuration.csv', text: mergeCsv(configured.map((s) => configurationCsv(s.state, s.configuration, plain, s.file)), opts.excelBom) });
+    const surfaces = mergeCsv(configured.map((s) => flakingSurfacesCsv(s.state, s.configuration, plain, s.file)), opts.excelBom);
+    if (hasRows(surfaces)) out.push({ suffix: 'flaking_surfaces.csv', text: surfaces });
   }
   const tps = specimens.filter((s) => s.state.landmarks.length || s.state.semilandmarks.length).map((s) => landmarksTps(s.state, landmarkTable(s.state)));
   if (tps.length) out.push({ suffix: 'landmarks.tps', text: tps.join('') });

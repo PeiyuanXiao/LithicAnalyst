@@ -31,10 +31,12 @@ export interface DisplaySettings {
   regions: boolean;
   /** Show the Harris matrix panel (annotate mode). */
   harris: boolean;
+  /** Show the volumetric configuration panel and the view cube (annotate mode). */
+  configuration: boolean;
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'other';
+export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'other';
 
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
@@ -142,4 +144,14 @@ export interface AppApi {
   unjudgedPairs(): number;
   /** Turn the view to the next such border. */
   nextUnjudgedPair(): void;
+  /** Volumetric configuration (null without arrows, or before the mesh is measured). */
+  configuration(): import('../compute/configuration').ConfigurationResult | null;
+  /** The face picked in the configuration panel or the view cube (null: none). */
+  configFace(): import('../core/fields').ConfigFace | null;
+  /** Pick a face (null: none); `turn`: also turn the view to it. */
+  selectConfigFace(face: import('../core/fields').ConfigFace | null, turn?: boolean): void;
+  /** The sketch of the configuration (its canvas goes into the panel). */
+  configSketch(): import('../render/configSketch').ConfigSketch;
+  /** The user's own values of a curve field used so far: in this specimen and in the folder's project files already read. */
+  customValues(key: string): string[];
 }

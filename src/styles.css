@@ -34,6 +34,10 @@
   --viewport-bg-bottom: #d8d8d4;
   --viewport-ink: #1b2220;
   --viewport-ink-2: #56625e;
+  /* faces of the volumetric configuration by role (sketch and view cube) */
+  --cfg-flaking: #6e927a;
+  --cfg-platform: #d4b679;
+  --cfg-none: #c4c0b4;
   color-scheme: light;
 
   --font-ui: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
@@ -83,6 +87,9 @@
   --viewport-bg-bottom: #3f4140;
   --viewport-ink: #e4e9e6;
   --viewport-ink-2: #a3aeaa;
+  --cfg-flaking: #8dbd99;
+  --cfg-platform: #e2c486;
+  --cfg-none: #8f948f;
   color-scheme: dark;
 }
 
@@ -2054,13 +2061,9 @@ input[type="checkbox"]:disabled {
   margin-top: 2px;
 }
 
-.harris-panel {
+.float-panel {
   position: absolute;
-  left: max(12px, env(safe-area-inset-left, 0px));
-  bottom: 10px;
   z-index: 6;
-  max-width: min(60%, 640px);
-  max-height: 55%;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -2069,25 +2072,44 @@ input[type="checkbox"]:disabled {
   box-shadow: var(--shadow);
 }
 
-.harris-panel.is-collapsed {
-  height: auto !important;
-}
-
-.harris-panel.is-collapsed .harris-body,
-.harris-panel.is-collapsed .harris-grip {
+.float-panel[hidden] {
   display: none;
 }
 
-.harris-panel.is-collapsed .harris-fold svg {
+.float-panel.is-collapsed {
+  height: auto !important;
+}
+
+.float-panel.is-collapsed .float-body,
+.float-panel.is-collapsed .float-grip {
+  display: none;
+}
+
+.float-panel.is-collapsed .float-fold svg {
   transform: rotate(-90deg);
 }
 
-.harris-head {
+.float-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border-bottom: 1px solid var(--line);
   cursor: move;
   user-select: none;
 }
 
-.harris-grip {
+.float-panel.is-collapsed .float-head {
+  border-bottom: 0;
+}
+
+.float-title {
+  margin-right: auto;
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.float-grip {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -2098,31 +2120,23 @@ input[type="checkbox"]:disabled {
   border-bottom-right-radius: var(--radius-lg);
 }
 
-.harris-panel[hidden] {
-  display: none;
-}
-
-.harris-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 10px;
-  border-bottom: 1px solid var(--line);
-}
-
-.harris-title {
-  margin-right: auto;
-  font-size: var(--step--1);
-  font-weight: 600;
-}
-
-.harris-body {
+.float-body {
   flex: 1;
   overflow: auto;
   min-height: 40px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.harris-panel {
+  left: max(12px, env(safe-area-inset-left, 0px));
+  bottom: 10px;
+  max-width: min(60%, 640px);
+  max-height: 55%;
+}
+
+.harris-body {
   /* the matrix is drawn as it is exported: on white */
   background: #ffffff;
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 .harris-body svg {
@@ -2722,4 +2736,113 @@ input[type="checkbox"]:disabled {
     top: auto;
     bottom: calc(100% + 6px);
   }
+  /* the display button has gone down: the cube takes the corner */
+  .view-cube-board,
+  .view-cube-hit {
+    top: 12px;
+    width: 80px;
+    height: 80px;
+  }
+  .config-panel {
+    top: 104px;
+  }
+}
+
+/* ------------------------------------------------------------ volumetric configuration */
+
+/* the view cube: a board under the (transparent) canvas, a click target over it */
+.view-cube-board,
+.view-cube-hit {
+  position: absolute;
+  top: 62px;
+  right: max(12px, env(safe-area-inset-right, 0px));
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius-lg);
+}
+
+.view-cube-board {
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.view-cube-hit {
+  cursor: pointer;
+}
+
+/* the panel over the view: below the cube, clear of the display button and of the Harris matrix (lower left) */
+.config-panel {
+  top: 170px;
+  right: max(12px, env(safe-area-inset-right, 0px));
+  width: 300px;
+  max-width: calc(100% - 24px);
+}
+
+.config-body {
+  padding: 8px 10px 10px;
+}
+
+.config-sketch-wrap {
+  margin-bottom: 8px;
+}
+
+.config-sketch {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  cursor: grab;
+  touch-action: none;
+}
+
+.config-sketch:active {
+  cursor: grabbing;
+}
+
+/* label | value (values are words, not numbers) */
+.config-traits {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.config-traits dd.text {
+  grid-column: auto;
+}
+
+.config-polarity {
+  min-height: 26px;
+  padding: 2px 6px;
+  font-size: var(--step--1);
+  text-align: left;
+}
+
+.config-card[hidden] {
+  display: none;
+}
+
+.config-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+}
+
+.config-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.config-face-name {
+  font-weight: 600;
+}
+
+.config-face-count {
+  color: var(--ink-2);
+  font-size: var(--step--1);
 }

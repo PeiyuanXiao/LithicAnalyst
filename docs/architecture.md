@@ -29,7 +29,11 @@ analysis  outside this repository (R, Python, …) reads the CSV or the project 
    `numberKeys` / `shiftNumberKeys` give a field the number keys (or Shift + number keys) of the
    selected item. A field that follows another is set through `withAttribute` (the termination
    is `na` and locked, `fieldLocked`, while the completeness says it is missing), which
-   `setScarAttribute` applies in one undo step.
+   `setScarAttribute` applies in one undo step. An option marked `legacy` is read and shown but
+   no longer offered (`offeredOptions`); a field with `allowCustom` also takes the user's own
+   text, stored as the value (`customValue`, `isCustomValue`), and the number key after its
+   options opens the box for it (`Sidebar.openCustomType`; suggestions from `App.customValues`:
+   this specimen and the folder's project files already in `ProjectIndex`).
 5. **Tools implement one interface** (`tools/tool.ts`) and are registered with the
    `ToolController`. The controller listens on the viewport in the capture phase, so a tool
    can claim a press before the camera controls see it.
@@ -242,12 +246,57 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   with any relation on every change; `chainEdges` joins a pair's edges into polylines, which
   `render/borderLayer.ts` draws dashed (white core, dark outline) while the relation tool is in
   use. "Next pair" turns the camera to the shared edge nearest the middle of a border.
-* `render/harris.ts` draws the matrix as SVG (shown in a viewport panel that can be
-  moved, resized and folded, its place kept in the `harrisPanel` pref and fitted into the view;
-  exported as is); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
+* `render/harris.ts` draws the matrix as SVG (shown in a floating viewport panel,
+  `ui/floatingPanel.ts`: moved by its title bar, resized from its corner and folded, its place kept
+  in the `harrisPanel` pref and fitted into the view; exported as is); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
   light (earliest) to dark (latest), used by the `sequence` colour mode for arrows and scar
   regions. Arrows and regions of a selected relation, or of the opened problems, are drawn
   highlighted (`ArrowLayer.setHighlight`, `App.emphasis`).
+
+## Volumetric configuration
+
+* **The box** comes from the pass that measures length, width and thickness
+  (`frameMeasuresSteps` in `compute/measure.ts`: the vertices' min and max along the specimen
+  frame's X, Y, Z, or the principal axes with Y the first, Z the third and X = Y × Z), in the app
+  (`App.updateAuto`, again when the frame changes) and in the batch worker (`MeshMeasures.boxes`).
+  It reaches the derived results through `MeshResults.box`; the principal orientation is never
+  written to `specimen.frame`.
+* `compute/configuration.ts` is pure: `placeScar` (face by the averaged normal without its
+  component along the arrow, platform = the adjacent face facing back along the arrow),
+  `computeConfiguration` (which faces are flaking surfaces first, with the corrections, so that
+  only their scars make platforms; then the roles, joins of adjacent flaking faces by a shared
+  platform, flaking surfaces by union–find with `alsoPlatform`, the seven traits) and
+  `storedBox` (the box a project file kept, for the batch). The thresholds are named constants and
+  are written with the result. The app recomputes it (cheap) on every change of scars, corrections
+  or box (`App.updateConfiguration`).
+* **Corrections** are `ProjectState.configuration`, changed by `SetConfigurationCommand` through
+  `setConfigRole`, `setConfigJoin`, `setConfigSurfaceType`, `setConfigAxis` (both written to every
+  face of the surface), `resetConfigFace` and `setConfigPolarity`. They name faces of the current
+  orientation, so `updateSpecimen` clears all but the polarity in the same `SetSpecimenCommand`
+  when the frame changes (merged steps of fine turning keep the first "before"), and returns whether
+  it did (the app then says so once).
+* **The panel** is a floating viewport panel (`ui/floatingPanel.ts`, the Harris matrix's too;
+  place and fold in the `configPanel` pref, never in the project file) holding the sidebar module's
+  configuration content (`Sidebar.configEl`, refreshed with the sidebar; the "Principal axes" pill
+  `Sidebar.configPill` sits in its title bar). The display setting `configuration` switches it and
+  the view cube on (`App.configShown`: annotate mode, a model, a scar with an arrow);
+  `App.updateConfigPanel` shows or hides both, and lets go of the picked face when hidden or folded.
+* **The sketch** (`render/configSketch.ts`) is a small canvas of its own in the panel, drawn only
+  when its content changes or it is turned: a transparent `RoundedBoxGeometry` (inside, then near
+  side, neither writing depth), the edge midlines as fat lines and, on faces that are both, a band
+  in the platform colour (`edgeBand`; `render/configShape.ts`, shared with the cube), and one arrow
+  per scar with an arrow floating over its face with a soft shadow (`sketchArrows`: the ends scaled
+  from the box into the sketch's box, kept on the face's flat part). The arrows are instanced
+  meshes, one per part, face and whether the scars count; the selected scar's arrow is coloured per
+  instance. A click within a few pixels of an arrow (in screen space) selects its scar, elsewhere on
+  a face picks the face. Colours are the theme's `--cfg-*` tokens, read again when the theme changes.
+* **The view cube** (`render/viewCube.ts`) has no WebGL context of its own: after each frame of the
+  main view (`Viewer.onAfterRender`) the main renderer clears a scissored corner viewport and draws
+  the cube there, posed as the box's axes are seen by the camera. A board under the transparent
+  canvas makes the panel; a transparent `.viewport-ui` element over it takes the clicks (picked in
+  the cube's own viewport). Clicking a face of the cube or the sketch picks it
+  (`App.selectConfigFace`) and turns the view to it with the six views' directions
+  (`viewAxes` in `render/figure.ts`); meanwhile `syncAnnotations` fades the arrows on other faces.
 
 ## Landmarks
 

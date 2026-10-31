@@ -98,6 +98,13 @@ const VIEWS: Record<FigureView, ViewDef> = {
   bottom: { toward: ['y', -1], right: ['x', 1], up: ['z', 1], col: 1, row: 0 },
 };
 
+/** A standard view's direction toward the camera and its up direction, from the specimen axes (as the view cube turns to a face). */
+export function viewAxes(view: FigureView, axes: Record<Axis, Vec3>): { toward: Vec3; up: Vec3 } {
+  const d = VIEWS[view];
+  const along = ([a, s]: [Axis, number]): Vec3 => axes[a].map((x) => x * s) as Vec3;
+  return { toward: along(d.toward), up: along(d.up) };
+}
+
 export interface FigureLayoutView {
   view: FigureView;
   /** Position and size on the figure, pixels. */

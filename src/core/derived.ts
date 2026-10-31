@@ -1,3 +1,4 @@
+import { computeConfiguration, type ConfigBox, type ConfigurationResult } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
@@ -59,6 +60,8 @@ export interface DerivedResults {
   relations: RelationResults;
   /** Every landmark in export order (fixed, then each set's semilandmarks), the sliders, and the sets' points. */
   landmarks: LandmarkTable;
+  /** Volumetric configuration of the core (null without arrows or before the mesh is measured). */
+  configuration: ConfigurationResult | null;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -69,6 +72,8 @@ export interface MeshResults {
   regions?: { results: RegionResult[]; totals: RegionTotals } | null;
   nodule?: (SphereFit & { regions: string[] }) | null;
   split?: VolumeSplit | null;
+  /** The model's box along the specimen frame or the principal axes (volumetric configuration). */
+  box?: ConfigBox | null;
 }
 
 /** Volume-based shape indices; null when the volume is unknown. */
@@ -99,5 +104,6 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     split: mesh?.split ?? null,
     relations: relationResults(state),
     landmarks: landmarkTable(state),
+    configuration: computeConfiguration(state.scars, state.configuration, mesh?.box ?? null),
   };
 }

@@ -128,9 +128,11 @@ export const BOX = { center: [500, 200, -50] as Vec3, size: [40, 20, 10] as Vec3
 /** Point given relative to the box centre, in original (file) coordinates. */
 export const boxPoint = (x: number, y: number, z: number): Vec3 => [BOX.center[0] + x, BOX.center[1] + y, BOX.center[2] + z];
 
-export function boxMesh(): Mesh {
-  const [hx, hy, hz] = BOX.size.map((s) => s / 2);
-  const n = BOX.n;
+export const boxMesh = (): Mesh => cuboidMesh(BOX.center, BOX.size, BOX.n);
+
+/** A closed axis-aligned box of `size` around `center`, each face an n × n grid. */
+function cuboidMesh(center: Vec3, size: Vec3, n: number): Mesh {
+  const [hx, hy, hz] = size.map((s) => s / 2);
   // origin corner and two edge vectors per face, u × v pointing outward
   const faces: Array<[Vec3, Vec3, Vec3]> = [
     [[hx, -hy, -hz], [0, 2 * hy, 0], [0, 0, 2 * hz]],
@@ -148,7 +150,7 @@ export function boxMesh(): Mesh {
     if (i === undefined) {
       i = pos.length / 3;
       ids.set(key, i);
-      pos.push(...boxPoint(p[0], p[1], p[2]));
+      pos.push(center[0] + p[0], center[1] + p[1], center[2] + p[2]);
     }
     return i;
   };
@@ -162,6 +164,13 @@ export function boxMesh(): Mesh {
 }
 
 export const boxPly = (): MeshFile => ({ name: 'box.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(boxMesh()) });
+
+/** A columnar core 36 × 60 × 24 (x × y × z), centred away from the origin: its principal axes are y, x, z. */
+export const COLUMN = { center: [300, -100, 20] as Vec3, size: [36, 60, 24] as Vec3, n: 6 };
+
+export const columnPoint = (x: number, y: number, z: number): Vec3 => [COLUMN.center[0] + x, COLUMN.center[1] + y, COLUMN.center[2] + z];
+
+export const columnPly = (): MeshFile => ({ name: 'column.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(cuboidMesh(COLUMN.center, COLUMN.size, COLUMN.n)) });
 
 /** An icosphere of radius 20 (1280 triangles), centred away from the origin: a whole nodule of cortex. */
 export const SPHERE = { center: [-100, 50, 30] as Vec3, radius: 20 };

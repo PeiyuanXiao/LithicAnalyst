@@ -18,6 +18,12 @@ import {
   deletePlane,
   deleteSection,
   deleteRegion,
+  resetConfigFace,
+  setConfigAxis,
+  setConfigJoin,
+  setConfigPolarity,
+  setConfigRole,
+  setConfigSurfaceType,
   setNoduleRegion,
   setNoduleShown,
   setSplit,
@@ -34,7 +40,8 @@ import {
   setScarLabel,
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
-import { CURVE_FIELDS, fieldLocked, REGION_FIELDS, SCAR_FIELDS, type FieldDef } from '../core/fields';
+import { CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, offeredOptions, POLARITIES, REGION_FIELDS, SCAR_FIELDS, type ConfigFace, type ConfigRole, type FieldDef, type Polarity } from '../core/fields';
+import type { ConfigurationResult, FlakingSurface } from '../compute/configuration';
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
@@ -57,7 +64,7 @@ import { clear, h, icon, ICONS, revealInList } from './dom';
 import { t, tl } from './i18n';
 import { tip, tips } from './tooltip';
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -99,10 +106,20 @@ const metaRow = (term: string, value: Node | string, title?: string) => [h('dt',
 
 // ---------------------------------------------------------------- arrows
 
+/** An enum value as shown: its option's label, the user's own text, or — when not filled in. */
+function fieldText(f: FieldDef, v: AttributeValue | undefined): string {
+  const opt = f.options?.find((o) => o.value === v);
+  return opt ? tl(opt.label) : isCustomValue(f, v) ? v : MISSING;
+}
+
 function listSummary(attributes: Record<string, AttributeValue>, fields: FieldDef[] = SCAR_FIELDS): string {
   const parts: string[] = [];
   for (const f of fields) {
     if (f.type !== 'enum' || !f.listSummary) continue;
+    if (f.allowCustom) {
+      parts.push(fieldText(f, attributes[f.key]));
+      continue;
+    }
     const opt = f.options?.find((o) => o.value === attributes[f.key]);
     if (!opt) continue;
     if (f.listSummary === 'nonDefault' && opt.value === f.default) continue;
@@ -310,6 +327,7 @@ function curvesSection(api: AppApi): Section {
     const onPick = (v: string) => {
       if (api.selection.id) setCurveAttribute(api.store, api.selection.id, f.key, v);
     };
+    if (f.type === 'enum' && f.options && f.allowCustom) return customField(api, f, id, String(current ?? ''), onPick);
     if (f.type === 'enum' && f.options) {
       const ctl = f.numberKeys
         ? optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: i < 9 ? String(i + 1) : undefined })), String(current), onPick)
@@ -381,6 +399,72 @@ function curvesSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+/** The value that stands for the user's own text in the option list. */
+const CUSTOM = 'custom';
+
+/**
+ * An enum field that also takes the user's own text: its offered options with
+ * number keys, then Custom (the next key), which opens a text box suggesting the
+ * custom values used so far (Enter keeps the text, Esc lets it go). An older
+ * code no longer offered is shown while the item has it.
+ */
+function customField(api: AppApi, f: FieldDef, id: string, current: string, onPick: (v: string) => void): { el: HTMLElement; set: (x: { attributes: Record<string, AttributeValue> }) => void } {
+  const offered = offeredOptions(f);
+  const legacy = f.options?.find((o) => o.legacy && o.value === current);
+  const shown = (v: string) => (isCustomValue(f, v) ? CUSTOM : v);
+  const ctl = optionList(
+    id,
+    tl(f.label),
+    [
+      ...offered.map((o, i) => ({ value: o.value, label: tl(o.label), key: String(i + 1) })),
+      ...(legacy ? [{ value: legacy.value, label: tl(legacy.label) }] : []),
+      { value: CUSTOM, label: t('field.custom'), key: String(offered.length + 1) },
+    ],
+    shown(current),
+    (v) => {
+      if (v === CUSTOM) return open();
+      input.hidden = true;
+      onPick(v);
+    },
+  );
+  const customLabel = ctl.el.querySelector(`#${id}-${CUSTOM} span`) as HTMLElement;
+  const list = h('datalist', { id: `${id}-suggest` });
+  const input = h('input', { class: 'ctl-text', id: `${id}-text`, type: 'text', list: `${id}-suggest`, autocomplete: 'off', spellcheck: 'false', 'aria-label': t('field.custom'), hidden: true }) as HTMLInputElement;
+  let value = current;
+  const show = (v: string) => {
+    value = v;
+    ctl.set(shown(v));
+    customLabel.textContent = isCustomValue(f, v) ? `${t('field.custom')} · ${v}` : t('field.custom');
+  };
+  function open() {
+    clear(list);
+    for (const s of api.customValues(f.key)) list.append(h('option', { value: s }));
+    input.value = isCustomValue(f, value) ? value : '';
+    input.hidden = false;
+    input.focus();
+    input.select();
+  }
+  const cancel = () => {
+    input.hidden = true;
+    show(value);
+  };
+  input.addEventListener('keydown', (e) => {
+    // typed text is no shortcut
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.hidden = true;
+      onPick(customValue(f, input.value));
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
+  });
+  input.addEventListener('blur', () => !input.hidden && cancel());
+  show(current);
+  return { el: h('div', { class: 'field' }, ctl.el, input, list), set: (x) => show(String(x.attributes[f.key] ?? '')) };
+}
+
 // ---------------------------------------------------------------- display
 
 /** Display settings: shown in a panel over the view, not in the sidebar. */
@@ -428,6 +512,7 @@ function displaySection(api: AppApi): Section {
   const labels = checkbox('arrow-labels', t('display.labels'), d.arrows.labels, (v) => api.setDisplay((x) => (x.arrows.labels = v), 'arrows'));
   const hidden = checkbox('arrow-hidden', t('display.hidden'), d.arrows.showHidden, (v) => api.setDisplay((x) => (x.arrows.showHidden = v), 'arrows'));
   const regions = checkbox('display-regions', t('display.regions'), d.regions, (v) => api.setDisplay((x) => (x.regions = v), 'regions'));
+  const config = checkbox('config-show', t('sec.configuration'), d.configuration, (v) => api.setDisplay((x) => (x.configuration = v), 'configuration'));
 
   // shading; the light; the arrows; what is drawn
   body.append(
@@ -435,10 +520,13 @@ function displaySection(api: AppApi): Section {
     curvGroup,
     h('div', { class: 'ctl-grid' }, az.el, elv.el),
     h('div', { class: 'ctl-grid' }, thickness.el, colorMode.el),
-    h('div', { class: 'check-row' }, labels, hidden, regions),
+    h('div', { class: 'check-row' }, labels, hidden, regions, config),
   );
 
   const refresh = (kind: RefreshKind) => {
+    // the configuration panel belongs to the annotate mode (as the Harris matrix)
+    config.hidden = api.mode !== 'annotate';
+    (config.querySelector('input') as HTMLInputElement).checked = api.display.configuration;
     if (kind !== 'all' && kind !== 'display' && kind !== 'mesh') return;
     shading.set(api.display.shading);
     const scanBtn = shading.el.querySelector('[data-value="scan"]') as HTMLButtonElement | null;
@@ -544,8 +632,8 @@ function planesSection(api: AppApi): Section {
       }
     } else if (p.method === 'curves') {
       for (const c of api.store.state.curves) {
-        const type = CURVE_FIELDS.find((f) => f.key === 'type')?.options?.find((o) => o.value === c.attributes.type);
-        inputs.append(checkbox(`plane-curve-${c.id}`, type ? `${c.label} · ${tl(type.label)}` : c.label, p.curveIds.includes(c.id), (on) => setPlaneCurve(api.store, p.id, c.id, on)));
+        const type = fieldText(CURVE_FIELDS.find((x) => x.key === 'type')!, c.attributes.type);
+        inputs.append(checkbox(`plane-curve-${c.id}`, type !== MISSING ? `${c.label} · ${type}` : c.label, p.curveIds.includes(c.id), (on) => setPlaneCurve(api.store, p.id, c.id, on)));
       }
     }
     const actions = h(
@@ -824,6 +912,111 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
   };
   refresh('all');
   return { el, refresh };
+}
+
+/** Name of a face ("Front"). */
+const faceName = (f: ConfigFace) => t(`figure.view.${f}`);
+
+/** A flaking surface's faces: "F1 Front + Right". */
+const surfaceText = (s: FlakingSurface) => `${s.id} ${s.faces.map(faceName).join(t('config.join'))}`;
+
+/** One value per flaking surface: "F1 Wide · F2 Narrow". */
+const perSurface = (r: ConfigurationResult, value: (s: FlakingSurface) => string) => (r.surfaces.length ? r.surfaces.map((s) => `${s.id} ${value(s)}`).join(' · ') : MISSING);
+
+/** The volumetric configuration, for the panel over the view: the sketch, the seven traits, the picked face's card; and the title bar's pill. */
+function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
+  const pill = h('span', { class: 'pill', id: 'config-frame', hidden: true }, t('config.principal'));
+  const el = h('div', { class: 'config-content' });
+  const body = el;
+  const sketch = h('div', { class: 'config-sketch-wrap' }, api.configSketch().canvas);
+  const traits = h('dl', { class: 'num-grid config-traits', id: 'config-traits' });
+  const card = h('div', { class: 'config-card', id: 'config-card' });
+  body.append(sketch, traits, card);
+  const polarity = h('select', { class: 'ctl-select config-polarity', id: 'config-polarity', 'aria-label': t('config.polarity') }) as HTMLSelectElement;
+  polarity.addEventListener('change', () => setConfigPolarity(api.store, (polarity.value || null) as Polarity | null));
+
+  const renderCard = (r: ConfigurationResult) => {
+    clear(card);
+    const st = api.store.state;
+    const c = st.configuration;
+    // only once a face is picked
+    const face = api.configFace();
+    card.hidden = !face;
+    if (!face) return;
+    const fr = r.faces.find((f) => f.face === face)!;
+    const edited = c.roles[face] !== undefined || c.surfaceType[face] !== undefined || c.axis[face] !== undefined || Object.keys(c.joins).some((k) => k.split('|').includes(face));
+    const surface = r.surfaces.find((s) => s.faces.includes(face));
+    card.dataset.face = face;
+    card.append(
+      h(
+        'div',
+        { class: 'config-card-head' },
+        h('span', { class: 'config-face-name', id: 'config-face-name' }, faceName(face)),
+        h('span', { class: 'config-face-count mono' }, t('config.scars', { n: fr.scars })),
+        h('span', { class: `pill${edited ? ' pill-set' : ''}`, id: 'config-face-state' }, t(edited ? 'config.edited' : 'config.isAuto')),
+        edited ? h('button', { type: 'button', class: 'btn btn-text btn-sm', id: 'config-reset', onclick: () => resetConfigFace(api.store, face, surface?.faces ?? [face]) }, t('config.reset')) : null,
+      ),
+      segmented(
+        'config-role',
+        null,
+        CONFIG_ROLES.map((v) => ({ value: v, label: t(`config.role.${v}`) })),
+        fr.role,
+        (v) => setConfigRole(api.store, face, v === fr.autoRole ? null : (v as ConfigRole)),
+      ).el,
+    );
+    if (!surface) return;
+    // type and axis act on the whole flaking surface; an automatic "unclear" or "—" lights neither
+    card.append(
+      segmented(
+        'config-type',
+        null,
+        (['wide', 'narrow'] as const).map((v) => ({ value: v, label: t(`config.type.${v}`) })),
+        surface.type,
+        (v) => setConfigSurfaceType(api.store, face, v === surface.autoType ? null : (v as 'wide' | 'narrow'), surface.faces),
+      ).el,
+      segmented(
+        'config-axis',
+        null,
+        (['long', 'short'] as const).map((v) => ({ value: v, label: t(`config.axis.${v}`) })),
+        surface.axis,
+        (v) => setConfigAxis(api.store, face, v === surface.autoAxis ? null : (v as 'long' | 'short'), surface.faces),
+      ).el,
+    );
+    for (const j of r.joins.filter((x) => x.faces.includes(face))) {
+      const other = j.faces[0] === face ? j.faces[1] : j.faces[0];
+      card.append(checkbox(`config-join-${other}`, t('config.joined', { face: faceName(other) }), j.joined, (on) => setConfigJoin(api.store, face, other, on === j.auto ? null : on)));
+    }
+  };
+
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'configuration', 'arrows', 'specimen', 'mesh', 'figure'].includes(kind)) return;
+    const st = api.store.state;
+    pill.hidden = !!st.specimen.frame;
+    const r = api.configuration();
+    clear(traits);
+    clear(card);
+    clear(polarity);
+    const code = (prefix: string, v: string | null) => (v ? t(`${prefix}.${v}`) : MISSING);
+    polarity.append(
+      h('option', { value: '', selected: !st.configuration.polarity }, t('config.auto', { value: code('config.polarity', r?.autoPolarity ?? null) })),
+      ...POLARITIES.map((p) => h('option', { value: p, selected: st.configuration.polarity === p }, t(`config.polarity.${p}`))),
+    );
+    polarity.disabled = !r?.surfaces.length;
+    traits.append(
+      ...textValueRow(t('config.facial'), code('config.facial', r?.facialCharacter ?? null), 'config-facial'),
+      ...textValueRow(t('config.surfaces'), r?.surfaces.length ? r.surfaces.map(surfaceText).join(' · ') : MISSING, 'config-surfaces'),
+      ...textValueRow(t('config.surfaceRelation'), code('config.relation', r?.flakingSurfaceRelation ?? null), 'config-surface-relation'),
+      ...textValueRow(t('config.platformRelation'), code('config.relation', r?.platformRelation ?? null), 'config-platform-relation'),
+      h('dt', {}, t('config.polarity')),
+      h('dd', { class: 'text', id: 'config-polarity-cell' }, polarity),
+      ...textValueRow(t('config.surfaceType'), r ? perSurface(r, (s) => t(`config.type.${s.type}`)) : MISSING, 'config-type-value'),
+      ...textValueRow(t('config.axis'), r ? perSurface(r, (s) => t(`config.axis.${s.axis}`)) : MISSING, 'config-axis-value'),
+    );
+    if (r) renderCard(r);
+    else card.hidden = true;
+  };
+  refresh('all');
+  return { el, refresh, pill };
 }
 
 function relationsSection(api: AppApi): Section {
@@ -1602,9 +1795,9 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [sectionsSection, ['present']],
   [figureSection, ['present']],
   [arrowsSection, ['annotate']],
+  [relationsSection, ['annotate']],
   [curvesSection, ['annotate']],
   [(api) => regionsSection(api, (id, type) => api.setRegionType(id, type)), ['annotate']],
-  [relationsSection, ['annotate']],
   [landmarksSection, ['annotate']],
   [measureAutoSection, ['measure']],
   [measureManualSection, ['measure']],
@@ -1620,6 +1813,11 @@ export interface Sidebar {
   refresh: (kind: RefreshKind) => void;
   /** The display settings, for the panel over the view. */
   displayEl: HTMLElement;
+  /** The volumetric configuration, for its panel over the view, and its title bar's pill. */
+  configEl: HTMLElement;
+  configPill: HTMLElement;
+  /** The selected curve's type: open the box for the user's own text. */
+  openCustomType: () => void;
   /** A tool was chosen: open its section and fold the others but the folder's (choosing Select changes nothing). */
   focusTool: (tool: string) => void;
 }
@@ -1661,6 +1859,7 @@ export function buildSidebar(api: AppApi): Sidebar {
   const sections = SECTIONS.map(([make, modes]) => ({ ...make(api), modes }));
   el.append(...sections.map((s) => s.el));
   const display = displaySection(api);
+  const config = configurationPanel(api);
   const exportBtn = h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'btn-export', onclick: () => api.openExport() }, icon(ICONS.download), t('export.button'));
   const foot = h('div', { class: 'sidebar-foot' }, exportBtn);
   el.append(foot);
@@ -1703,14 +1902,19 @@ export function buildSidebar(api: AppApi): Sidebar {
       showMode();
       if (kind === 'mode') {
         for (const s of sections) s.refresh('figure');
+        display.refresh('mode');
         return;
       }
       for (const s of sections) s.refresh(kind);
       display.refresh(kind);
+      config.refresh(kind);
       showMode();
       if (kind === 'selection') focusSelection();
     },
     displayEl: display.el,
+    configEl: config.el,
+    configPill: config.pill,
+    openCustomType: () => (el.querySelector('#curve-field-type-custom') as HTMLButtonElement | null)?.click(),
     focusTool: (tool) => {
       const target = TOOL_SECTIONS[tool];
       if (!target) return;

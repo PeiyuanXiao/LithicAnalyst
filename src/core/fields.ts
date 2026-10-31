@@ -14,6 +14,8 @@ export interface FieldOption {
   label: LocalizedText;
   /** Compact label for the arrow list. */
   short?: LocalizedText;
+  /** Read from older files and shown with its label, but no longer offered. */
+  legacy?: boolean;
 }
 
 export interface FieldDef {
@@ -28,6 +30,8 @@ export interface FieldDef {
   shiftNumberKeys?: boolean;
   /** When to show the value in the arrow list. */
   listSummary?: 'always' | 'nonDefault';
+  /** Besides its options, the user's own text (stored as the value); the number key after the options asks for it. */
+  allowCustom?: boolean;
 }
 
 export const SCAR_FIELDS: FieldDef[] = [
@@ -112,14 +116,20 @@ export const CURVE_FIELDS: FieldDef[] = [
     key: 'type',
     label: { zh: '类型', en: 'Type' },
     type: 'enum',
-    default: 'other',
+    // not filled in until chosen
+    default: '',
     numberKeys: true,
-    listSummary: 'nonDefault',
+    listSummary: 'always',
+    allowCustom: true,
     options: [
-      { value: 'edge', label: { zh: '刃缘', en: 'Edge' } },
-      { value: 'ridge', label: { zh: '棱脊', en: 'Ridge' } },
-      { value: 'scar_boundary', label: { zh: '片疤边界', en: 'Scar boundary' } },
-      { value: 'other', label: { zh: '其他', en: 'Other' } },
+      { value: 'scar_boundary', label: { zh: '片疤轮廓', en: 'Scar outline' } },
+      { value: 'core_edge', label: { zh: '石核边缘', en: 'Core edge' } },
+      { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
+      { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
+      // older codes: read and written as they are (edge is kept for flakes, later)
+      { value: 'edge', label: { zh: '刃缘', en: 'Edge' }, legacy: true },
+      { value: 'ridge', label: { zh: '棱脊', en: 'Ridge' }, legacy: true },
+      { value: 'other', label: { zh: '其他', en: 'Other' }, legacy: true },
     ],
   },
   {
@@ -150,6 +160,31 @@ export const REGION_FIELDS: FieldDef[] = [
 
 export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage'] as const;
 
+/**
+ * Volumetric configuration of a core (after the Logical Analytical System): the
+ * six faces of its box, their roles, and the codes of the results. These codes
+ * are written to project files and CSV; keep them. Labels are in ui/strings.ts.
+ */
+export const CONFIG_FACES = ['front', 'back', 'left', 'right', 'top', 'bottom'] as const;
+export type ConfigFace = (typeof CONFIG_FACES)[number];
+/** In the order the interface shows them. */
+export const CONFIG_ROLES = ['flaking', 'platform', 'both', 'none'] as const;
+export type ConfigRole = (typeof CONFIG_ROLES)[number];
+export const FACIAL_CHARACTERS = ['unifacial', 'bifacial', 'multifacial'] as const;
+export type FacialCharacter = (typeof FACIAL_CHARACTERS)[number];
+export const FACE_RELATIONS = ['opposite', 'adjacent', 'mixed'] as const;
+export type FaceRelation = (typeof FACE_RELATIONS)[number];
+export const PLATFORM_RELATIONS = ['peripheral', 'single', ...FACE_RELATIONS] as const;
+export type PlatformRelation = (typeof PLATFORM_RELATIONS)[number];
+export const POLARITIES = ['unipolar_longitudinal', 'bipolar_opposed', 'bipolar_orthogonal', 'multipolar_centripetal', 'multipolar_orthogonal', 'multipolar_multidirectional'] as const;
+export type Polarity = (typeof POLARITIES)[number];
+/** `unclear`: automatic only (the box is too even to tell). */
+export const SURFACE_TYPES = ['wide', 'narrow', 'unclear'] as const;
+export type SurfaceType = (typeof SURFACE_TYPES)[number];
+/** `na`: automatic only (centripetal, or no platforms on one axis). */
+export const EXPLOITATION_AXES = ['long', 'short', 'na'] as const;
+export type ExploitationAxis = (typeof EXPLOITATION_AXES)[number];
+
 function defaultsOf(fields: FieldDef[]): Record<string, AttributeValue> {
   const out: Record<string, AttributeValue> = {};
   for (const f of fields) out[f.key] = f.default;
@@ -163,6 +198,21 @@ export const defaultCurveAttributes = (): Record<string, AttributeValue> => defa
 export const fieldByKey = (key: string): FieldDef | undefined => SCAR_FIELDS.find((f) => f.key === key);
 
 export const curveFieldByKey = (key: string): FieldDef | undefined => CURVE_FIELDS.find((f) => f.key === key);
+
+/** The options offered for picking (not those kept only for older files). */
+export const offeredOptions = (f: FieldDef): FieldOption[] => (f.options ?? []).filter((o) => !o.legacy);
+
+/** A value of a field that takes the user's own text, as that text: not empty and none of its codes. */
+export const isCustomValue = (f: FieldDef, v: AttributeValue | undefined): v is string =>
+  !!f.allowCustom && typeof v === 'string' && v !== '' && !(f.options ?? []).some((o) => o.value === v);
+
+/** What to store for the user's own text: trimmed; an offered option's code when it is that code or one of its labels (any case). */
+export function customValue(f: FieldDef, text: string): string {
+  const s = text.trim();
+  const low = s.toLowerCase();
+  const preset = offeredOptions(f).find((o) => [o.value, ...Object.values(o.label)].some((x) => x.toLowerCase() === low));
+  return preset ? preset.value : s;
+}
 
 /** The enum field that number keys 1…n set on the selected item. */
 export const numberKeyField = (fields: FieldDef[] = SCAR_FIELDS): FieldDef | undefined =>

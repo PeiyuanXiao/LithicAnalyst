@@ -13,7 +13,7 @@ import {
   updateSpecimen,
 } from '../src/core/actions';
 import { assembleCurve, curveLength, curveSegments, isValidShape, midPointIndex } from '../src/core/curveGeometry';
-import { CURVE_FIELDS, defaultAttributes, defaultCurveAttributes, fieldLocked, numberKeyField, SCAR_FIELDS, shiftNumberKeyField, TERMINATION_MISSING, withAttribute } from '../src/core/fields';
+import { CURVE_FIELDS, customValue, defaultAttributes, defaultCurveAttributes, fieldLocked, isCustomValue, numberKeyField, offeredOptions, SCAR_FIELDS, shiftNumberKeyField, TERMINATION_MISSING, withAttribute } from '../src/core/fields';
 import { parseProjectFile, ProjectFileError, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import type { Vec3 } from '../src/core/types';
@@ -200,12 +200,12 @@ describe('CSV export', () => {
     const csv = scarVectorCsv(s.state, { excelBom: false });
     const lines = csv.trimEnd().split('\n');
     expect(lines[0]).toBe(
-      ['specimen_id', 'scar_id', 'start_x', 'start_y', 'start_z', 'end_x', 'end_y', 'end_z', 'length', ...SCAR_FIELDS.map((f) => f.key), 'unit'].join(','),
+      ['specimen_id', 'scar_id', 'start_x', 'start_y', 'start_z', 'end_x', 'end_y', 'end_z', 'length', ...SCAR_FIELDS.map((f) => f.key), 'platform_face', 'flaking_surface', 'unit'].join(','),
     );
-    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,unit');
+    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit');
     // the termination: empty until judged; NA once the completeness says it is missing
     expect(lines[1].startsWith('LB-1023,S1,10,0,0,30,0,0,20,point_complete,,certain,"step ""hinge"", maybe')).toBe(true);
-    expect(csv).toContain(',bulb_truncated,na,certain,,mm');
+    expect(csv).toContain(',bulb_truncated,na,certain,,,,mm');
     expect(csv.charCodeAt(0)).not.toBe(0xfeff);
     expect(scarVectorCsv(s.state, { excelBom: true }).charCodeAt(0)).toBe(0xfeff);
   });
@@ -288,7 +288,23 @@ describe('curves in the project', () => {
     expect(s.state.curves.map((c) => c.label)).toEqual(['C2']);
     s.history.undo();
     expect(s.state.curves.map((c) => c.id)).toEqual([c1.id, c2.id]);
-    expect(numberKeyField(CURVE_FIELDS)!.options!.map((o) => o.value)).toEqual(['edge', 'ridge', 'scar_boundary', 'other']);
+    // keys 1–4 the offered types, 5 the user's own text; the older codes are read but not offered
+    const type = numberKeyField(CURVE_FIELDS)!;
+    expect(offeredOptions(type).map((o) => o.value)).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint']);
+    expect(type.options!.filter((o) => o.legacy).map((o) => o.value)).toEqual(['edge', 'ridge', 'other']);
+    expect(type.allowCustom).toBe(true);
+    expect(addCurve(s, lineShape()).attributes.type).toBe('');
+  });
+
+  it("takes the user's own curve type: trimmed, a preset's code when it names one", () => {
+    const type = CURVE_FIELDS.find((f) => f.key === 'type')!;
+    expect(customValue(type, '  retouch  ')).toBe('retouch');
+    expect(customValue(type, '石核边缘')).toBe('core_edge');
+    expect(customValue(type, 'joint surface')).toBe('joint');
+    expect(customValue(type, 'CORE_EDGE')).toBe('core_edge');
+    // an older code is the user's text now (it is not offered)
+    expect(customValue(type, 'Ridge')).toBe('Ridge');
+    expect([isCustomValue(type, 'retouch'), isCustomValue(type, 'ridge'), isCustomValue(type, 'cortex'), isCustomValue(type, '')]).toEqual([true, false, false, false]);
   });
 
   it('round-trips curves through the project file and reads files without them', () => {
@@ -331,7 +347,10 @@ describe('curves in the project', () => {
     expect(lines[1]).toBe('LB-1023,C1,0,0,0,0,0,true,false,5,ridge,,mm');
     expect(lines[2]).toBe('LB-1023,C1,1,1,0,0,1,false,false,5,ridge,,mm');
     expect(lines[6]).toBe('LB-1023,C1,5,5,0,0,5,true,false,5,ridge,,mm');
-    expect(lines[7]).toBe('LB-1023,C2,0,0,0,0,0,true,true,8,other,,mm');
+    // a new curve's type is not filled in; the user's own text is written as typed
+    expect(lines[7]).toBe('LB-1023,C2,0,0,0,0,0,true,true,8,,,mm');
+    setCurveAttribute(s, s.state.curves[1].id, 'type', 'retouch, inverse');
+    expect(curveCsv(s.state, { excelBom: false }).split('\n')[7]).toBe('LB-1023,C2,0,0,0,0,0,true,true,8,"retouch, inverse",,mm');
     expect(curveCsv(s.state, { excelBom: true }).charCodeAt(0)).toBe(0xfeff);
   });
 });

@@ -1,4 +1,4 @@
-import type { Curve, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
+import type { ConfigCorrections, Curve, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
 import type { LandmarkData, ProjectStore } from './store';
 
 /**
@@ -518,6 +518,29 @@ export class SetNoduleCommand implements Command {
   }
 }
 
+/** Replace the manual corrections of the volumetric configuration. */
+export class SetConfigurationCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: ConfigCorrections,
+    private readonly after: ConfigCorrections,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setConfiguration(structuredClone(this.after));
+    store.notify({ kind: 'configuration' });
+  }
+  revert(store: ProjectStore): void {
+    store._setConfiguration(structuredClone(this.before));
+    store.notify({ kind: 'configuration' });
+  }
+}
+
+/**
+ * Edit the specimen. `config`: a change of the frame also clears the
+ * configuration's corrections by face (they name faces of the old orientation),
+ * in the same undo step.
+ */
 export class SetSpecimenCommand implements Command {
   readonly labelKey = 'cmd.editSpecimen';
   readonly createdAt = Date.now();
@@ -526,15 +549,18 @@ export class SetSpecimenCommand implements Command {
     private readonly before: SpecimenInfo,
     after: SpecimenInfo,
     private readonly mergeKey: string | null = null,
+    private config: { before: ConfigCorrections; after: ConfigCorrections } | null = null,
   ) {
     this.after = structuredClone(after);
   }
   apply(store: ProjectStore): void {
     store._setSpecimen(structuredClone(this.after));
+    if (this.config) store._setConfiguration(structuredClone(this.config.after));
     store.notify({ kind: 'specimen' });
   }
   revert(store: ProjectStore): void {
     store._setSpecimen(structuredClone(this.before));
+    if (this.config) store._setConfiguration(structuredClone(this.config.before));
     store.notify({ kind: 'specimen' });
   }
   merge(next: Command): boolean {
@@ -542,6 +568,7 @@ export class SetSpecimenCommand implements Command {
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
+    if (next.config) this.config = { before: this.config?.before ?? next.config.before, after: next.config.after };
     return true;
   }
 }

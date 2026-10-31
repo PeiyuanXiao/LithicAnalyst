@@ -9,12 +9,15 @@ import type { Curve, ProjectState, Vec3 } from '../core/types';
 import { HOT_HANDLE, pointSegment2D, type ArrowDisplay } from './arrowLayer';
 import type { Viewer } from './viewer';
 
-/** Curve colours by type; chosen to stay apart from the curvature ramp (ochre/slate) and the arrow colours. */
+/** Curve colours by type; chosen to stay apart from the curvature ramp (ochre/slate) and the arrow colours. Unset and custom types are drawn as 'other'. */
 export const CURVE_COLORS = {
   types: {
+    scar_boundary: '#b867f2',
+    core_edge: '#ff6b3d',
+    cortex: '#d0884f',
+    joint: '#5fb0ea',
     edge: '#ff5b4f',
     ridge: '#36c26a',
-    scar_boundary: '#b867f2',
     other: '#f2f5f3',
   } as Record<string, string>,
   selected: '#ffc61a',

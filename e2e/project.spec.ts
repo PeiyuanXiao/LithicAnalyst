@@ -19,7 +19,7 @@ async function annotate(page: Page): Promise<void> {
   await curveClick(page, await toScreen(page, roofPoint(9, 30)), { shift: true });
   await page.keyboard.press('Enter');
   await expect.poll(() => counts(page)).toEqual({ arrows: 1, curves: 1 });
-  await page.keyboard.press('3');
+  await page.keyboard.press('1');
   await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('scar_boundary');
 }
 

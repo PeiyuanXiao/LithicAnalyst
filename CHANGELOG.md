@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Volumetric configuration of cores (annotate mode, after the Logical Analytical System): each
+  scar with an arrow goes to a face of the model's box (the specimen frame, else the principal
+  axes) by its normal across the arrow, and gets as its platform the adjacent face it was struck
+  from (facing back along the arrow, wherever the arrow starts); faces get roles (flaking,
+  platform, both, unexploited) and flaking surfaces (F1, F2 …; faces worked round from one platform
+  are one). A floating panel over the view (switched on in Display, moved, folded, its place
+  remembered) gives facial character, flaking surfaces, their relation, platform relation, overall
+  polarity, surface type (wide / narrow) and exploitation axis (long / short), with a sketch that
+  can be turned and shows every scar's arrow (a click on one selects the scar), and a face card to
+  correct roles, joins, type and axis; the polarity can be set by hand. Scars on a face set to
+  platform or unexploited by hand make no platforms. A face that is both is drawn with a band in
+  the platform colour. Corrections are undoable and cleared (with a notice) when the orientation
+  changes. A view cube in the corner of the view turns with the camera; clicking a face there or in
+  the sketch turns the view to it and fades the arrows elsewhere. New exports `configuration.csv`
+  and `flaking_surfaces.csv` (with `also_platform`; also for the whole folder); `scar_vectors.csv`
+  gains `platform_face` and `flaking_surface` before `unit`. Project files keep the corrections
+  (`configuration`) and the result with its box and thresholds (`derived.configuration`).
+- Curve types are now scar outline (`scar_boundary`), core edge, cortex and joint surface (keys
+  1–4), or the annotator's own text (key 5, suggesting the texts used before); a new curve's type
+  is not filled in. The older types edge, ridge and other are still read, shown and exported as
+  they were. The annotate sidebar is ordered arrows, relations and sequences, curves, regions,
+  landmarks.
 - New sequences are ordered: their scars follow the relations at once (and `order_in_series` is
   filled) without ticking "Ordered within", which can still be switched off. Sequences in files
   keep their setting. With the whole folder as the export scope the dialog's button reads

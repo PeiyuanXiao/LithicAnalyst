@@ -1,15 +1,18 @@
 import { sha256Hex } from '../compute/hash';
-import { autoMeasurementsSteps, surfaceMeasuresSteps } from '../compute/measure';
+import type { ConfigBox } from '../compute/configuration';
+import { frameMeasuresSteps, surfaceMeasuresSteps } from '../compute/measure';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import type { Steps } from '../compute/steps';
 import type { AutoMeasurements } from '../core/derived';
 import type { SpecimenFrame, Vec3 } from '../core/types';
 import { centredMesh, parseMeshBuffer } from './readMesh';
 
-/** What a batch export needs from a model: its size and shape along each frame asked for, and the vertices' principal axes. */
+/** What a batch export needs from a model: its size, shape and box along each frame asked for, and the vertices' principal axes. */
 export interface MeshMeasures {
   /** One per frame asked for, in that order. */
   auto: AutoMeasurements[];
+  /** The model's box along each frame (volumetric configuration), original coordinates. */
+  boxes: ConfigBox[];
   /** Principal axes of all vertices, original coordinates. */
   vertices: PrincipalAxes;
 }
@@ -44,10 +47,15 @@ export class MeshJobs {
     const mesh = centredMesh(parseMeshBuffer(f.name, f.size, f.buffer, f.sha256));
     const base = await this.run(surfaceMeasuresSteps(mesh.positions, mesh.index));
     const auto: AutoMeasurements[] = [];
-    for (const frame of frames) auto.push(await this.run(autoMeasurementsSteps(mesh.positions, base, frame)));
+    const boxes: ConfigBox[] = [];
     const o = mesh.offset;
+    for (const frame of frames) {
+      const m = await this.run(frameMeasuresSteps(mesh.positions, base, frame, o));
+      auto.push(m.auto);
+      boxes.push(m.box);
+    }
     const mean: Vec3 = [base.vertices.mean[0] + o[0], base.vertices.mean[1] + o[1], base.vertices.mean[2] + o[2]];
-    return { auto, vertices: { ...base.vertices, mean } };
+    return { auto, boxes, vertices: { ...base.vertices, mean } };
   }
 
   drop(id: number): void {

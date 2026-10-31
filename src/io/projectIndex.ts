@@ -63,6 +63,11 @@ export class ProjectIndex {
     return entry;
   }
 
+  /** Every project file read so far. */
+  all(): IndexedProject[] {
+    return [...this.byPath.values()];
+  }
+
   get(path: string): IndexedProject | undefined {
     return this.byPath.get(path);
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { autoMeasurements, surfaceMeasures } from '../src/compute/measure';
+import { computeConfiguration } from '../src/compute/configuration';
+import { autoMeasurements, frameMeasures, surfaceMeasures } from '../src/compute/measure';
 import { runSync } from '../src/compute/steps';
 import { addLandmark, addPlane, addScarVector, updateSpecimen } from '../src/core/actions';
 import { fmtDuration } from '../src/core/format';
@@ -23,6 +24,7 @@ function specimen(id: string, size: [number, number, number], observers: Record<
     state: s.state,
     auto: autoMeasurements(b.positions, surfaceMeasures(b.positions, b.index), null),
     planes: [],
+    configuration: null,
     regions: [],
     regionTotals: null,
     nodule: null,
@@ -71,6 +73,17 @@ describe('batch outputs', () => {
     expect(iccCsv([specimen('X', [1, 1, 1], { J1: { length: 1 } }), specimen('Y', [1, 1, 1], { J1: { length: 2 } })])).toBeNull();
   });
 
+  it('the volumetric configuration: one row per configured specimen, with its file', () => {
+    const a = specimen('A', [40, 20, 10], {}, 2), b = specimen('B', [30, 20, 10]);
+    const mesh = box([40, 20, 10], 2);
+    a.configuration = computeConfiguration(a.state.scars, a.state.configuration, frameMeasures(mesh.positions, surfaceMeasures(mesh.positions, mesh.index), null).box);
+    const out = batchOutputs([a, b], { excelBom: false });
+    const text = (suffix: string) => out.find((f) => f.suffix === suffix)!.text.trim().split('\n');
+    expect(text('configuration.csv')).toEqual(['specimen_id,frame,facial_character,flaking_surface_relation,platform_relation,polarity,file', 'A,principal,unifacial,,single,unipolar_longitudinal,site/A.ply']);
+    expect(text('flaking_surfaces.csv')[0]).toBe('specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis,file');
+    expect(text('scar_vectors.csv')[0].endsWith(',note,platform_face,flaking_surface,unit')).toBe(true);
+  });
+
   it('lists the models that failed', () => {
     expect(failuresCsv([{ file: 'a/b.ply', reason: 'bad, "header"' }], false)).toBe('file,reason\na/b.ply,"bad, ""header"""\n');
   });
@@ -89,7 +102,7 @@ describe('batch outputs', () => {
       updateSpecimen(s, { id: 'box', annotator, frame: f });
       addPlane(s, 'all_vertices', [0, 0, 1]);
       addScarVector(s, { start: [0, 0, 5], end: [5, 0, 5], startNormal: [0, 0, 1], endNormal: [0, 0, 1] });
-      const raw = JSON.parse(JSON.stringify(serializeProject(s.state, version, { measurements: measured.auto[k], vertices: measured.vertices })));
+      const raw = JSON.parse(JSON.stringify(serializeProject(s.state, version, { measurements: measured.auto[k], vertices: measured.vertices, box: measured.boxes[k] })));
       return { path: `LithicAnalyst/projects/box.${annotator}.json`, state: parseProjectFile(raw), derived: raw.derived, appVersion: raw.app.version };
     };
     const ps = [project('A', null, 0), project('B', frame, 1)];
@@ -98,6 +111,8 @@ describe('batch outputs', () => {
     expect(savedResultsUsable(ps[0], '1.0.1')).toBe(false);
     expect(savedResultsUsable({ ...ps[0], derived: { ...ps[0].derived, vertices: null } }, '1.0.0')).toBe(false);
     expect(savedResultsUsable({ ...ps[0], derived: { ...ps[0].derived, measurements: null } }, '1.0.0')).toBe(false);
+    // a project with arrows needs the box of its volumetric configuration
+    expect(savedResultsUsable({ ...ps[0], derived: { ...ps[0].derived, configuration: null } }, '1.0.0')).toBe(false);
 
     const fromSaved = batchSpecimen('box.ply', { project: ps[0], measures: savedMeasures(ps[0]) }, ps.map((p) => ({ project: p, measures: savedMeasures(p) })));
     const again = await new MeshJobs(async (steps) => runSync(steps)).hash(2, file).then(async () => null);
@@ -105,11 +120,12 @@ describe('batch outputs', () => {
     const jobs2 = new MeshJobs(async (steps) => runSync(steps));
     await jobs2.hash(2, file);
     const fresh = await jobs2.measure(2, ps.map((p) => p.state.specimen.frame));
-    const fromMesh = batchSpecimen('box.ply', { project: ps[0], measures: { auto: fresh.auto[0], vertices: fresh.vertices } }, ps.map((p, k) => ({ project: p, measures: { auto: fresh.auto[k], vertices: fresh.vertices } })));
+    const measures = (k: number) => ({ auto: fresh.auto[k], vertices: fresh.vertices, box: fresh.boxes[k] });
+    const fromMesh = batchSpecimen('box.ply', { project: ps[0], measures: measures(0) }, ps.map((p, k) => ({ project: p, measures: measures(k) })));
     const opts = { excelBom: false };
     expect(batchOutputs([fromSaved], opts)).toEqual(batchOutputs([fromMesh], opts));
     const tables = batchOutputs([fromSaved], opts).map((f) => f.suffix);
-    expect(tables).toEqual(expect.arrayContaining(['measurements.csv', 'planes.csv', 'scar_vectors.csv']));
+    expect(tables).toEqual(expect.arrayContaining(['measurements.csv', 'planes.csv', 'scar_vectors.csv', 'configuration.csv', 'flaking_surfaces.csv']));
     // the two observers measured along their own frames
     expect(fromSaved.observers.get('A')!.length).toBeCloseTo(40, 4);
     expect(fromSaved.observers.get('B')!.length).not.toBeCloseTo(40, 1);

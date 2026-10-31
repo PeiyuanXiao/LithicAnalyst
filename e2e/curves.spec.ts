@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { offCrest, OFFSET, ROOF, roofPly, roofPoint, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, dist, draftLength, expect, exportAvailable, exportFile, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop } from './helpers';
+import { counts, curveClick, dist, draftLength, expect, exportAvailable, exportFile, fileMenu, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop } from './helpers';
 
 const CURVE_CSV_HEADER = 'specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note,unit';
 
@@ -38,7 +38,7 @@ test('with snapping on, points jump onto the ridge and the curve follows it', as
   await expect.poll(async () => (await counts(page)).curves).toBe(1);
 
   const c = (await state(page)).curves[0];
-  expect(c).toMatchObject({ label: 'C1', closed: false, attributes: { type: 'other', note: '' } });
+  expect(c).toMatchObject({ label: 'C1', closed: false, attributes: { type: '', note: '' } });
   expect(c.anchors).toHaveLength(2);
   for (const p of c.anchors) expect(offCrest(p)).toBeLessThan(0.4);
   // along the whole meander, not across it
@@ -51,8 +51,8 @@ test('with snapping on, points jump onto the ridge and the curve follows it', as
   await expect(page.locator('#curve-insp-label')).toHaveValue('C1');
   await expect(page.locator('#sec-curves .badge')).toHaveText('1');
   await page.keyboard.press('2');
-  await expect(page.locator('#curve-field-type-ridge')).toHaveAttribute('aria-checked', 'true');
-  expect((await state(page)).curves[0].attributes.type).toBe('ridge');
+  await expect(page.locator('#curve-field-type-core_edge')).toHaveAttribute('aria-checked', 'true');
+  expect((await state(page)).curves[0].attributes.type).toBe('core_edge');
 });
 
 test('with snapping off, points stay where clicked and the curve takes the short way', async ({ page }) => {
@@ -120,8 +120,8 @@ test('Shift skips snapping, Backspace removes a point, the first point closes th
 
   const st = await state(page);
   expect(st.curves.map((c) => [c.label, c.closed, c.attributes.type])).toEqual([
-    ['C1', true, 'other'],
-    ['C2', false, 'edge'],
+    ['C1', true, ''],
+    ['C2', false, 'scar_boundary'],
   ]);
 
   expect(await exportAvailable(page, 'curves')).toBe(true);
@@ -153,4 +153,85 @@ test('Shift skips snapping, Backspace removes a point, the first point closes th
     const closing = c.closed ? dist(c.points[c.points.length - 1], c.points[0]) : 0;
     for (const r of mine) expect(Number(r.length)).toBeCloseTo(arc + closing, 4);
   }
+});
+
+/** An open curve along the ridge, selected. */
+async function ridgeCurve(page: Page, from: number, to: number): Promise<string> {
+  const before = (await counts(page)).curves;
+  await page.keyboard.press('p');
+  await curveClick(page, await besideRidge(page, from, 3));
+  await curveClick(page, await besideRidge(page, to, 3));
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await counts(page)).curves).toBe(before + 1);
+  await page.keyboard.press('v');
+  const id = (await state(page)).curves[before].id;
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.selection())).toBe(id);
+  return id;
+}
+
+const typeOf = async (page: Page, id: string) => (await state(page)).curves.find((c) => c.id === id)!.attributes.type;
+
+test('curve types: keys 1–4, not filled in at first; 5 for the user’s own text, with what was used before', async ({ page }) => {
+  const id = await ridgeCurve(page, 4, 24);
+  expect(await typeOf(page, id)).toBe('');
+  await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('—');
+  const keys = ['scar_boundary', 'core_edge', 'cortex', 'joint'];
+  for (const [i, code] of keys.entries()) {
+    await page.keyboard.press(String(i + 1));
+    await expect.poll(() => typeOf(page, id)).toBe(code);
+    await expect(page.locator(`#curve-field-type-${code}`)).toHaveAttribute('aria-checked', 'true');
+  }
+  await expect(page.locator('#curve-inspector .opt-btn')).toHaveText(['1Scar outline', '2Core edge', '3Cortex', '4Joint surface', '5Custom']);
+  await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('Joint surface');
+
+  // 5: a box for the user's own text; Esc lets it go
+  await page.keyboard.press('5');
+  const box = page.locator('#curve-field-type-text');
+  await expect(box).toBeVisible();
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue('');
+  await box.fill('retouch');
+  await box.press('Escape');
+  await expect(box).toBeHidden();
+  expect(await typeOf(page, id)).toBe('joint');
+  await expect(page.locator('#curve-field-type-joint')).toHaveAttribute('aria-checked', 'true');
+  // Enter keeps it, trimmed
+  await page.locator('#curve-field-type-custom').click();
+  await box.fill('  retouch  ');
+  await box.press('Enter');
+  await expect.poll(() => typeOf(page, id)).toBe('retouch');
+  await expect(box).toBeHidden();
+  await expect(page.locator('#curve-field-type-custom')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#curve-field-type-custom')).toContainText('Custom · retouch');
+  await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('retouch');
+
+  // another curve: the text used before is offered; a preset's name keeps the preset's code
+  const other = await ridgeCurve(page, 30, 46);
+  await page.keyboard.press('5');
+  await expect(box).toBeFocused();
+  expect(await page.locator('#curve-field-type-suggest option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).toEqual(['retouch']);
+  await box.fill('石核边缘');
+  await box.press('Enter');
+  await expect.poll(() => typeOf(page, other)).toBe('core_edge');
+
+  // the CSV: codes for the presets, the text for the user's own
+  const rows = parseCsv((await exportFile(page, 'curves')).text);
+  expect([...new Set(rows.map((r) => `${r.curve_id}:${r.type}`))]).toEqual(['C1:retouch', 'C2:core_edge']);
+});
+
+test('older curve types are read, shown with their names and written back as they were', async ({ page }) => {
+  const id = await ridgeCurve(page, 4, 24);
+  const file = await page.evaluate(() => window.lithicanalyst.projectJson());
+  const curve = file.annotations.curves!.find((c) => c.id === id)!;
+  curve.attributes.type = 'ridge';
+  const chooser = page.waitForEvent('filechooser');
+  await fileMenu(page, '#btn-open-project');
+  await (await chooser).setFiles({ name: 'old.lithicanalyst.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
+  await expect.poll(() => typeOf(page, id)).toBe('ridge');
+  await page.locator('#curve-list .curve-row').first().click();
+  await expect(page.locator('#curve-field-type-ridge')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#curve-field-type-ridge')).toHaveText('Ridge');
+  await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('Ridge');
+  const rows = parseCsv((await exportFile(page, 'curves')).text);
+  expect(new Set(rows.map((r) => r.type))).toEqual(new Set(['ridge']));
 });

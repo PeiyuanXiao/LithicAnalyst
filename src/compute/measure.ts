@@ -1,5 +1,6 @@
 import { shapeIndices, type AutoMeasurements } from '../core/derived';
 import type { SpecimenFrame, Vec3 } from '../core/types';
+import type { ConfigBox } from './configuration';
 import { buildEdgesSteps, meshTopology, surfaceIntegralsSteps, surfacePca, vertexPcaSteps, type EdgeTable, type MeshTopology, type PrincipalAxes } from './meshGeometry';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
 
@@ -37,8 +38,8 @@ export function* surfaceMeasuresSteps(positions: ArrayLike<number>, index: Array
 export const surfaceMeasures = (positions: ArrayLike<number>, index: ArrayLike<number>): SurfaceMeasures =>
   runSync(surfaceMeasuresSteps(positions, index));
 
-/** Range of the vertices along each of three directions. */
-export function* extentsSteps(positions: ArrayLike<number>, axes: readonly Vec3[]): Steps<[number, number, number]> {
+/** Lowest and highest value of the vertices along each of three directions. */
+function* rangesSteps(positions: ArrayLike<number>, axes: readonly Vec3[]): Steps<{ lo: number[]; hi: number[] }> {
   const lo = [Infinity, Infinity, Infinity];
   const hi = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i + 2 < positions.length; i += 3) {
@@ -50,15 +51,30 @@ export function* extentsSteps(positions: ArrayLike<number>, axes: readonly Vec3[
       if (d > hi[k]) hi[k] = d;
     }
   }
+  return { lo, hi };
+}
+
+/** Range of the vertices along each of three directions. */
+export function* extentsSteps(positions: ArrayLike<number>, axes: readonly Vec3[]): Steps<[number, number, number]> {
+  const { lo, hi } = yield* rangesSteps(positions, axes);
   return [0, 1, 2].map((k) => (hi[k] >= lo[k] ? hi[k] - lo[k] : 0)) as [number, number, number];
+}
+
+/** Length, width and thickness along a frame, and the model's box in that frame. */
+export interface FrameMeasures {
+  auto: AutoMeasurements;
+  box: ConfigBox;
 }
 
 /**
  * Length, width and thickness are the ranges of the model along three axes:
  * the specimen frame's Y, X and Z when one is set (rows of its matrix), else
- * the first, second and third principal axes of the surface.
+ * the first, second and third principal axes of the surface. The same pass
+ * gives the box of the volumetric configuration (X, Y, Z: the frame's, or the
+ * first principal axis as Y, the third as Z and X = Y × Z). `offset`: the
+ * positions are relative to it (the box is in original coordinates).
  */
-export function* autoMeasurementsSteps(positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null): Steps<AutoMeasurements> {
+export function* frameMeasuresSteps(positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null, offset: Vec3 = [0, 0, 0]): Steps<FrameMeasures> {
   const m = frame?.matrix;
   const axes: Vec3[] = m
     ? [
@@ -67,17 +83,38 @@ export function* autoMeasurementsSteps(positions: ArrayLike<number>, base: Surfa
         [m[8], m[9], m[10]],
       ]
     : base.principal.axes;
-  const [length, width, thickness] = yield* extentsSteps(positions, axes);
+  const { lo, hi } = yield* rangesSteps(positions, axes);
+  const [length, width, thickness] = [0, 1, 2].map((k) => (hi[k] >= lo[k] ? hi[k] - lo[k] : 0));
+  // the measured axes are length (Y), width (X), thickness (Z): box axis k is measured axis
+  // `from[k]`, turned round when `sign[k]` is −1 (principal axes: X = Y × Z, the second axis or its opposite)
+  const [a1, a2, a3] = axes;
+  const x: Vec3 = [a1[1] * a3[2] - a1[2] * a3[1], a1[2] * a3[0] - a1[0] * a3[2], a1[0] * a3[1] - a1[1] * a3[0]];
+  const sign = m ? [1, 1, 1] : [x[0] * a2[0] + x[1] * a2[1] + x[2] * a2[2] < 0 ? -1 : 1, 1, 1];
+  const from = [1, 0, 2];
+  const boxAxes = from.map((i, k) => axes[i].map((c) => c * sign[k]) as Vec3) as [Vec3, Vec3, Vec3];
+  const shift = boxAxes.map((a) => a[0] * offset[0] + a[1] * offset[1] + a[2] * offset[2]);
+  const min = from.map((i, k) => (sign[k] > 0 ? lo[i] : -hi[i]) + shift[k]) as Vec3;
+  const max = from.map((i, k) => (sign[k] > 0 ? hi[i] : -lo[i]) + shift[k]) as Vec3;
   return {
-    frame: m ? 'specimen' : 'principal',
-    length,
-    width,
-    thickness,
-    surfaceArea: base.surfaceArea,
-    volume: base.volume,
-    ...shapeIndices(base.surfaceArea, base.volume),
-    closed: base.topology.closed,
+    auto: {
+      frame: m ? 'specimen' : 'principal',
+      length,
+      width,
+      thickness,
+      surfaceArea: base.surfaceArea,
+      volume: base.volume,
+      ...shapeIndices(base.surfaceArea, base.volume),
+      closed: base.topology.closed,
+    },
+    box: { frame: m ? 'specimen' : 'principal', axes: boxAxes, min, max },
   };
+}
+
+export const frameMeasures = (positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null, offset: Vec3 = [0, 0, 0]): FrameMeasures =>
+  runSync(frameMeasuresSteps(positions, base, frame, offset));
+
+export function* autoMeasurementsSteps(positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null): Steps<AutoMeasurements> {
+  return (yield* frameMeasuresSteps(positions, base, frame)).auto;
 }
 
 export const autoMeasurements = (positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null): AutoMeasurements =>

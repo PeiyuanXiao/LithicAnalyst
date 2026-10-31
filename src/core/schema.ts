@@ -1,9 +1,10 @@
+import { joinKey, sameAxis } from '../compute/configuration';
 import { isValidShape } from './curveGeometry';
 import { computeDerived, type DerivedResults, type MeshResults } from './derived';
-import { defaultAttributes, defaultCurveAttributes } from './fields';
+import { CONFIG_FACES, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, type ConfigFace } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, Curve, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, ConfigCorrections, Curve, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -25,6 +26,7 @@ export interface ProjectFile {
   annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[]; regions: Region[]; relations: Relation[]; sequences: Sequence[]; landmarks: Landmark[]; semilandmarks: SemilandmarkSet[] };
   nodule: ProjectState['nodule'];
   split: ProjectState['split'];
+  configuration: ConfigCorrections;
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
@@ -52,6 +54,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections), regions: structuredClone(state.regions), relations: structuredClone(state.relations), sequences: structuredClone(state.sequences), landmarks: structuredClone(state.landmarks), semilandmarks: structuredClone(state.semilandmarks) },
     nodule: structuredClone(state.nodule),
     split: structuredClone(state.split),
+    configuration: structuredClone(state.configuration),
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
@@ -316,6 +319,30 @@ function parseSemilandmarkSet(raw: unknown, i: number, landmarkIds: Set<string>)
   };
 }
 
+/** Corrections of the volumetric configuration; unknown faces and codes are dropped (a file without them has none). */
+function parseConfiguration(raw: unknown): ConfigCorrections {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const byFace = <T extends string>(v: unknown, codes: readonly T[]): Partial<Record<ConfigFace, T>> => {
+    const out: Partial<Record<ConfigFace, T>> = {};
+    if (v && typeof v === 'object')
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) if ((CONFIG_FACES as readonly string[]).includes(k) && codes.includes(x as T)) out[k as ConfigFace] = x as T;
+    return out;
+  };
+  const joins: Record<string, boolean> = {};
+  if (r.joins && typeof r.joins === 'object')
+    for (const [k, x] of Object.entries(r.joins as Record<string, unknown>)) {
+      const [a, b] = k.split('|') as ConfigFace[];
+      if (typeof x === 'boolean' && CONFIG_FACES.includes(a) && CONFIG_FACES.includes(b) && !sameAxis(a, b) && joinKey(a, b) === k) joins[k] = x;
+    }
+  return {
+    roles: byFace(r.roles, CONFIG_ROLES),
+    joins,
+    surfaceType: byFace(r.surfaceType, ['wide', 'narrow'] as const),
+    axis: byFace(r.axis, ['long', 'short'] as const),
+    polarity: POLARITIES.find((p) => p === r.polarity) ?? null,
+  };
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -379,6 +406,7 @@ export function parseProjectFile(input: unknown): ProjectState {
       if (!sp || (sp.source !== 'plane' && sp.source !== 'curve') || typeof sp.id !== 'string') return null;
       return { source: sp.source, id: sp.id, upHint: isFiniteVec(sp.upHint) ? [sp.upHint[0], sp.upHint[1], sp.upHint[2]] : [0, 0, 1] };
     })(),
+    configuration: parseConfiguration(raw.configuration),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
     nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),

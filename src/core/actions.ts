@@ -15,6 +15,7 @@ import {
   SetLandmarksCommand,
   SetNoduleCommand,
   SetRelationsCommand,
+  SetConfigurationCommand,
   SetSequencesCommand,
   SetSplitCommand,
   SetSpecimenCommand,
@@ -26,11 +27,12 @@ import {
   type Command,
 } from './commands';
 import type { CurveShape } from './curveGeometry';
+import { emptyCorrections, hasFaceCorrections, joinKey } from '../compute/configuration';
 import { orderSequences, relationInputs } from '../compute/relations';
-import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, withAttribute } from './fields';
+import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, withAttribute, type ConfigFace, type ConfigRole, type Polarity } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
-import type { AttributeValue, Curve, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, ConfigCorrections, Curve, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -636,11 +638,82 @@ export function setNoduleShown(store: ProjectStore, show: boolean): void {
 
 // ---------------------------------------------------------------- specimen
 
-/** `merge`: quick successive edits of the same fields become one undo step (typing, dragging a slider). */
-export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>, merge = true): void {
+/**
+ * `merge`: quick successive edits of the same fields become one undo step (typing, dragging a
+ * slider). A new orientation (also setting or clearing the frame) clears the configuration's
+ * corrections by face in the same step; true when it did.
+ */
+export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>, merge = true): boolean {
   const before = store.state.specimen;
   const after = { ...structuredClone(before), ...patch };
-  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  if (JSON.stringify(before) === JSON.stringify(after)) return false;
   const key = Object.keys(patch).sort().join(',');
-  store.history.execute(new SetSpecimenCommand(structuredClone(before), after, merge ? `specimen:${key}` : null));
+  const turned = JSON.stringify(before.frame?.matrix ?? null) !== JSON.stringify(after.frame?.matrix ?? null);
+  const corrections = store.state.configuration;
+  const config = turned && hasFaceCorrections(corrections) ? { before: structuredClone(corrections), after: { ...emptyCorrections(), polarity: corrections.polarity } } : null;
+  store.history.execute(new SetSpecimenCommand(structuredClone(before), after, merge ? `specimen:${key}` : null, config));
+  return !!config;
 }
+
+// ---------------------------------------------------------------- volumetric configuration
+
+function changeConfiguration(store: ProjectStore, edit: (c: ConfigCorrections) => void): void {
+  const before = store.state.configuration;
+  const after = structuredClone(before) as ConfigCorrections;
+  edit(after);
+  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  store.history.execute(new SetConfigurationCommand('cmd.editConfiguration', structuredClone(before), after));
+}
+
+/** The role of a face (null: back to the automatic one). */
+export const setConfigRole = (store: ProjectStore, face: ConfigFace, role: ConfigRole | null): void =>
+  changeConfiguration(store, (c) => {
+    if (role === null) delete c.roles[face];
+    else c.roles[face] = role;
+  });
+
+/** Whether two adjacent flaking faces are one flaking surface (null: automatic). */
+export const setConfigJoin = (store: ProjectStore, a: ConfigFace, b: ConfigFace, joined: boolean | null): void =>
+  changeConfiguration(store, (c) => {
+    if (joined === null) delete c.joins[joinKey(a, b)];
+    else c.joins[joinKey(a, b)] = joined;
+  });
+
+/** Wide or narrow (null: automatic), written to every face of the face's flaking surface (`surface`). */
+export const setConfigSurfaceType = (store: ProjectStore, face: ConfigFace, type: 'wide' | 'narrow' | null, surface: readonly ConfigFace[] = [face]): void =>
+  changeConfiguration(store, (c) => {
+    for (const f of new Set([face, ...surface])) {
+      if (type === null) delete c.surfaceType[f];
+      else c.surfaceType[f] = type;
+    }
+  });
+
+/** Long or short exploitation axis (null: automatic), written like the surface type. */
+export const setConfigAxis = (store: ProjectStore, face: ConfigFace, axis: 'long' | 'short' | null, surface: readonly ConfigFace[] = [face]): void =>
+  changeConfiguration(store, (c) => {
+    for (const f of new Set([face, ...surface])) {
+      if (axis === null) delete c.axis[f];
+      else c.axis[f] = axis;
+    }
+  });
+
+/**
+ * Back to the automatic values of a face: its role, the surface type and axis
+ * (on every face of its flaking surface, `surface`, where they were written
+ * together) and the joins with it.
+ */
+export const resetConfigFace = (store: ProjectStore, face: ConfigFace, surface: readonly ConfigFace[] = [face]): void =>
+  changeConfiguration(store, (c) => {
+    delete c.roles[face];
+    for (const f of new Set([face, ...surface])) {
+      delete c.surfaceType[f];
+      delete c.axis[f];
+    }
+    for (const k of Object.keys(c.joins)) if (k.split('|').includes(face)) delete c.joins[k];
+  });
+
+/** The overall polarity (null: automatic). */
+export const setConfigPolarity = (store: ProjectStore, polarity: Polarity | null): void =>
+  changeConfiguration(store, (c) => {
+    c.polarity = polarity;
+  });

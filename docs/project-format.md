@@ -39,6 +39,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
 | `split` | `{ source, id, upHint }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
+| `configuration` | `{ roles, joins, surfaceType, axis, polarity }` | manual corrections to the volumetric configuration, see below; files without it have none |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
@@ -147,6 +148,90 @@ fitted planes, fitted spheres, volumes ….
   plane frame (origin = centre, +Z = normal, +X = the model's first principal axis of the
   vertices projected onto the plane, or the second when the first is almost along the normal,
   with its largest component positive; +Y = Z × X).
+
+* `configuration`: the volumetric configuration of the core (null without scars with an arrow, or
+  before the mesh is measured), see the next section.
+
+## Volumetric configuration
+
+After the Logical Analytical System (Carbonell et al. 1999; Lombao et al. 2023), seven basic traits
+of a core. The automatic values are a starting point with no thresholds for counting a face (one
+scar makes a flaking surface); every one can be corrected by hand. Only scars with an arrow take part.
+
+**The box.** Three axes: the specimen frame's X, Y, Z when `specimen.frame` is set (`frame:
+"specimen"`), else the surface's principal axes (Y the first, Z the third, X = Y × Z; `frame:
+"principal"`, the same axes as length, width and thickness — this orientation is not written to
+`specimen.frame`). The box is the range of the vertices along each axis. Its six faces:
+
+| code | direction | | code | direction |
+|---|---|---|---|---|
+| `front` | +Z | | `back` | −Z |
+| `right` | +X | | `left` | −X |
+| `top` | +Y | | `bottom` | −Y |
+
+"Face order" is front, back, left, right, top, bottom.
+
+**Scars.** d = the arrow's unit direction (start → end). A scar is on the face its normal points to,
+without the normal's component along the arrow (a scar runs in its own face, so that component says
+nothing about the face; the start's normal, tilted toward the platform at the edge, no longer pulls
+the scar onto it): n = the start and end normals added and normalised (else the start normal),
+n⊥ = n − (n·d) d, and the face whose outward direction has the largest dot product with n⊥. When
+|n⊥| < 0.2 (`minNormalAcross`), the end normal without its component along d is used; when that is
+shorter than 0.2 too, the end normal itself. Its platform is the one of the four adjacent faces whose
+outward direction has the largest dot product with −d (wherever the arrow starts, so also when the
+point of percussion is missing). Ties go to the first in face order.
+
+**Roles** (`roles`): `both` (scars on it, and the platform of other scars), `flaking` (scars only),
+`platform` (a platform only), `none` (unexploited). The role used is the correction, else the
+automatic role. Which faces are flaking surfaces comes first, with the corrections: a face corrected
+to `flaking` or `both`, or, without a correction, a face with scars. Only the scars on those faces
+make their platforms platforms (so the scars of a face set to `platform` or `none` by hand make
+none). The automatic role of a face follows from its scars and from being such a platform.
+
+**Flaking surfaces.** Faces with the role `flaking` or `both` are grouped: two adjacent (not
+opposite) such faces are one surface when the correction in `joins` says so, or, without one, when a
+face with the platform role is the platform of scars on both (flaking round the core). Surfaces are
+named `F1`, `F2` … by their first face in face order; the main face of a surface has most scars
+(the first in face order when tied). A face set to `flaking` by hand without scars is a surface
+without platforms. The platforms a surface uses are its scars' platforms that have the role
+`platform` or `both`; the platform faces are all faces with one of those roles. A surface is
+`alsoPlatform` when one of its faces is a platform used by another surface.
+
+| trait | key / codes | rule |
+|---|---|---|
+| facial character | `facialCharacter`: `unifacial`, `bifacial`, `multifacial` | 1, 2, ≥ 3 surfaces; without a surface every trait is null |
+| flaking surface relation | `flakingSurfaceRelation`: `opposite`, `adjacent`, `mixed` | the main faces two by two: on one axis = opposite, else adjacent; all opposite, all adjacent or both; null with one surface |
+| platform relation | `platformRelation`: `peripheral`, `single`, `opposite`, `adjacent`, `mixed` | a surface uses ≥ 3 platforms: peripheral; else one platform face: single; else the platform faces two by two as above; null without platform faces |
+| overall polarity | `polarity` (and `autoPolarity`): `unipolar_longitudinal`, `bipolar_opposed`, `bipolar_orthogonal`, `multipolar_centripetal`, `multipolar_orthogonal`, `multipolar_multidirectional` | U = the platforms used by all surfaces. One: unipolar. Two: on one axis opposed, else orthogonal. Three or more: centripetal when a surface is; else orthogonal when ≥ 75 % of the scars (on surfaces) run, in their face, within 25° of a box axis; else multidirectional. Null without U |
+| surface type | per surface `autoType` / `type`: `wide`, `narrow`, `unclear` | thickness axis = the box's shortest side; the shorter other side / thickness < 1.25: unclear; else the main face across the thickness axis: wide, otherwise narrow |
+| exploitation axis | per surface `autoAxis` / `axis`: `long`, `short`, `na` | `na` when the surface is centripetal, uses no platform, or uses platforms on different axes; else a = the platforms' axis, b = the axis of the main face across a: long when the box is at least as long along a as along b |
+
+A surface is centripetal when it is one face, uses ≥ 3 platforms and ≥ 75 % of its scars point to the
+face's centre (in the face, the cosine between the scar's direction and start → centre exceeds 0.5).
+
+**Corrections** (`configuration` at the top level):
+
+```json
+{ "roles": { "back": "flaking" }, "joins": { "front|right": false }, "surfaceType": { "front": "narrow" }, "axis": {}, "polarity": null }
+```
+
+* `roles`: face code → role. `joins`: two adjacent face codes in face order joined by `|` →
+  whether they are one surface. `surfaceType` (`wide` / `narrow`) and `axis` (`long` / `short`):
+  written to every face of the surface; a surface takes the value of its first face (in face order)
+  that has one, else the automatic value. `polarity`: one of the polarity codes, or null.
+* Faces follow the box's orientation, so a change of `specimen.frame` (also setting or clearing it)
+  clears `roles`, `joins`, `surfaceType` and `axis` in the same undo step; `polarity` stays.
+* Unknown faces and codes are dropped when a file is read.
+
+**Derived** (`derived.configuration`): `frame`; `axes` (X, Y, Z, unit vectors in original
+coordinates) and `min` / `max` (the box: the vertices' range along each, as dot products with
+original coordinates); `thresholds` (`centripetalShare` 0.75, `centripetalCos` 0.5,
+`orthogonalToleranceDeg` 25, `orthogonalShare` 0.75, `wideRatio` 1.25, `minNormalAcross` 0.2); `scars` (`{ id, face,
+platform, surface }`, `surface` null when the face is not a flaking surface); `faces` (`{ face,
+autoRole, role, scars }`); `joins` (`{ faces, auto, joined }` for each pair of adjacent flaking
+faces); `surfaces` (`{ id, faces, mainFace, platforms, alsoPlatform, scarIds, centripetal, autoType, type,
+autoAxis, axis }`); and `facialCharacter`, `flakingSurfaceRelation`, `platformRelation`,
+`autoPolarity`, `polarity`.
 
 ## Surface region
 
@@ -338,16 +423,37 @@ Defined in `src/core/fields.ts`.
 
 | key | values |
 |---|---|
-| `type` | `edge` 刃缘 · `ridge` 棱脊 · `scar_boundary` 片疤边界 · `other` 其他 |
+| `type` | `scar_boundary` 片疤轮廓 / Scar outline · `core_edge` 石核边缘 / Core edge · `cortex` 石皮 / Cortex · `joint` 节理面 / Joint surface; empty: not filled in (new curves). Older codes `edge` 刃缘, `ridge` 棱脊 and `other` 其他 are read and written as they are but no longer offered (`edge` is kept for flakes, later). **A value that is none of these codes is the annotator's own text** (a custom type) |
 | `note` | free text |
+
+A custom type is stored trimmed; text that is a code or a name (Chinese or English, any case) of one
+of the four offered types is stored as that code. In the observer agreement, curves are matched
+within one type, a custom text being a type of its own.
 
 ## CSV export
 
 One row per scar that has a direction arrow (scars with `"vector": null` are left out;
-`termination` is empty when not judged yet):
+`termination` is empty when not judged yet; `platform_face` is the scar's platform in the volumetric
+configuration, a face code, and `flaking_surface` its flaking surface, e.g. `F1` — empty when the
+scar's face is no flaking surface, and both empty before the mesh is measured):
 
 ```
-specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,unit
+specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit
+```
+
+Volumetric configuration (`<specimen>_configuration.csv`, one row; codes as in the project file,
+empty where a trait has no value):
+
+```
+specimen_id,frame,facial_character,flaking_surface_relation,platform_relation,polarity
+```
+
+Flaking surfaces (`<specimen>_flaking_surfaces.csv`, one row per surface; `faces` and `platforms`
+are face codes joined by `;`; `also_platform` is `true` when one of its faces is a platform of
+another surface's scars):
+
+```
+specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis
 ```
 
 One row per curve point (curve CSV), in order along each curve:
@@ -484,6 +590,10 @@ either way.
 
 The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio,file` (`file`: the model, its path in a folder).
 
+In the summary export, `configuration.csv` and `flaking_surfaces.csv` hold the models that have a
+configuration (arrows on a measured model) and end with a `file` column as well. A project's stored
+box (`derived.configuration`) stands for its model like the other stored results.
+
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.
 The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
@@ -498,7 +608,7 @@ when reading, and saving writes format 2.
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
 | no `derived` | `derived` (computed results) |
-| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber`, `annotations.relations`, `annotations.sequences`, `nextSequenceNumber`, `annotations.landmarks`, `annotations.semilandmarks`, `nextLandmarkNumber`, `nextSemilandmarkNumber` |
+| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber`, `annotations.relations`, `annotations.sequences`, `nextSequenceNumber`, `annotations.landmarks`, `annotations.semilandmarks`, `nextLandmarkNumber`, `nextSemilandmarkNumber`, `configuration` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.

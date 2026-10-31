@@ -129,7 +129,7 @@ test('summary export and figures for the whole folder: new export folders, broke
   await expect(page.locator('#export-scope-specimen')).toHaveAttribute('aria-checked', 'true');
   await page.locator('.modal [data-choice="export"]').click();
   const one = await exportFolder(page, 'exports', 'box_scar_vectors.csv');
-  expect(one.files.sort()).toEqual(['box_scar_vectors.csv', 'manifest.json']);
+  expect(one.files.sort()).toEqual(['box_configuration.csv', 'box_flaking_surfaces.csv', 'box_scar_vectors.csv', 'manifest.json']);
   const m1 = JSON.parse((await folderText(page, `${one.base}/manifest.json`))!);
   expect(m1).toMatchObject({ scope: 'specimen', folder: 'flakes', specimens: [{ id: 'box', file: 'a/box.ply', annotator: 'Ann' }] });
 
@@ -149,7 +149,9 @@ test('summary export and figures for the whole folder: new export folders, broke
   await expect(page.locator('#batch-progress')).toBeHidden({ timeout: 60_000 });
   expect(all.base).not.toBe(one.base);
   const files = (await folderPaths(page)).filter((p) => p.startsWith(`${all.base}/`)).map((p) => p.slice(all.base.length + 1)).sort();
-  expect(files).toEqual(['failures.csv', 'icc.csv', 'manifest.json', 'measurements.csv', 'scar_vectors.csv']);
+  expect(files).toEqual(['configuration.csv', 'failures.csv', 'flaking_surfaces.csv', 'icc.csv', 'manifest.json', 'measurements.csv', 'scar_vectors.csv']);
+  // the volumetric configuration: only the model with arrows, with its file
+  expect(parseCsv((await folderText(page, `${all.base}/configuration.csv`))!).map((r) => [r.specimen_id, r.facial_character, r.file])).toEqual([['box', 'unifacial', 'a/box.ply']]);
   const measured = parseCsv((await folderText(page, `${all.base}/measurements.csv`))!);
   expect(measured.map((r) => [r.specimen_id, r.file, r.closed])).toEqual([
     ['box', 'a/box.ply', 'true'],
@@ -221,7 +223,7 @@ test('a read-only folder: subfolders, edits kept for the session, all projects i
   expect(downloads[0].suggestedFilename()).toMatch(/^flakes_exports_\d{4}-\d\d-\d\d_\d{6}\.zip$/);
   const zip = unzip(await readFile((await downloads[0].path())!));
   const names = Object.keys(zip).map((n) => n.replace(/^LithicAnalyst\/exports\/[^/]+\//, ''));
-  expect(names.sort()).toEqual(['manifest.json', 'measurements.csv', 'scar_vectors.csv']);
+  expect(names.sort()).toEqual(['configuration.csv', 'flaking_surfaces.csv', 'manifest.json', 'measurements.csv', 'scar_vectors.csv']);
   expect(Object.keys(zip).every((n) => n.startsWith('LithicAnalyst/exports/'))).toBe(true);
   const measured = parseCsv(Object.entries(zip).find(([n]) => n.endsWith('measurements.csv'))![1]);
   expect(measured.map((r) => [r.specimen_id, r.file])).toEqual([

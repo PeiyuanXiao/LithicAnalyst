@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
-import { autoMeasurements, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
+import { computeConfiguration, type ConfigBox, type ConfigurationResult } from '../compute/configuration';
+import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
@@ -9,12 +10,12 @@ import { addLandmark, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
-import { CURVE_FIELDS, numberKeyField, REGION_FIELDS, SCAR_FIELDS, shiftNumberKeyField } from '../core/fields';
+import { CURVE_FIELDS, isCustomValue, numberKeyField, offeredOptions, REGION_FIELDS, SCAR_FIELDS, shiftNumberKeyField, type ConfigFace, type FieldDef } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { curveCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
+import { configurationCsv, curveCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { APP_DIR, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
 import { batchOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
@@ -51,7 +52,9 @@ import { polylineEdges, regionsSteps, resolveRegions, type Partition, type Regio
 import { fitSphere, type SphereFit } from '../compute/sphere';
 import { splitByLoopSteps, splitByPlaneSteps, type VolumeSplit } from '../compute/split';
 import { fitPlane } from '../compute/meshGeometry';
-import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
+import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, viewAxes, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
+import { ConfigSketch } from '../render/configSketch';
+import { ViewCube } from '../render/viewCube';
 import { curveColor } from '../render/curveLayer';
 import { DEFAULT_LIGHT, LightRig } from '../render/lighting';
 import { MeshView } from '../render/meshView';
@@ -67,6 +70,7 @@ import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type DisplayAspect, type DisplaySettings } from './appApi';
 import { fmtCount, fmtQuantity, quantityUnit } from '../core/format';
 import { numRow, segmented, softSet, textRow, textValueRow } from './controls';
+import { floatingPanel } from './floatingPanel';
 import { Popovers, onViewport } from './popover';
 import { clear, h, icon, icon20, ICONS, ICONS20 } from './dom';
 import { Feedback } from './feedback';
@@ -89,6 +93,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   curveSnap: 'ridge',
   regions: true,
   harris: false,
+  configuration: false,
   excelBom: false,
 };
 
@@ -336,6 +341,15 @@ export class App implements AppApi {
   private measureBase: SurfaceMeasures | null = null;
   private auto: AutoMeasurements | null = null;
   private autoFrameKey = '';
+  /** The model's box along the frame (from the pass that measures length, width and thickness), and the volumetric configuration. */
+  private configBox: ConfigBox | null = null;
+  private configResult: ConfigurationResult | null = null;
+  /** The face picked in the configuration panel or the view cube: the arrows on other faces are drawn faded meanwhile. */
+  private pickedFace: ConfigFace | null = null;
+  private viewCube: ViewCube | null = null;
+  private sketch: ConfigSketch | null = null;
+  private configEl: HTMLElement | null = null;
+  private configFit: (() => void) | null = null;
   private measureToken = 0;
   private readonly meshInput: HTMLInputElement;
   private readonly projectInput: HTMLInputElement;
@@ -403,6 +417,8 @@ export class App implements AppApi {
     this.landmarkLayer = new LandmarkLayer(viewer);
     this.landmarkLayer.onLabelClick = (id) => this.selection.set(id);
     this.borderLayer = new BorderLayer(viewer);
+    this.viewCube = new ViewCube(viewer);
+    this.viewCube.onPick = (face) => this.selectConfigFace(face, true);
 
     viewer.onFrame(() => {
       this.lights!.update(viewer.camera, viewer.controls.target, viewer.diagonal * 3);
@@ -472,6 +488,7 @@ export class App implements AppApi {
     this.buildToolbar();
     this.buildEmptyState();
     this.buildHarrisPanel();
+    this.buildConfigPanel();
     this.buildDisplayControl();
     this.updateSpecimenBar();
     this.setTool('select');
@@ -485,10 +502,17 @@ export class App implements AppApi {
       if (this.store.region(this.selection.id ?? '') || this.regions?.results.length) this.paintRegions();
       this.sidebar.refresh('selection');
       this.updateHarris();
+      // the selected scar's arrow in the sketch
+      this.syncConfigViews();
       this.updateCursor();
     });
     onLangChange(() => this.rebuildChrome());
-    onThemeChange(() => this.paintThemeButton());
+    onThemeChange(() => {
+      this.paintThemeButton();
+      // the configuration's colours are the theme's
+      this.viewCube?.repaint();
+      this.sketch?.repaint();
+    });
 
     this.wireFiles();
     this.wireKeyboard();
@@ -878,6 +902,7 @@ export class App implements AppApi {
     this.buildToolbar();
     this.buildEmptyState();
     this.buildHarrisPanel();
+    this.buildConfigPanel();
     this.buildDisplayControl();
     this.updateSpecimenBar();
     this.updateUndoButtons();
@@ -905,6 +930,7 @@ export class App implements AppApi {
     this.updateSpecimenBar();
     this.sidebar.refresh('mesh');
     this.updateHarris();
+    this.updateConfigPanel();
   }
 
   private updateCursor(): void {
@@ -964,8 +990,10 @@ export class App implements AppApi {
     else if (c.kind === 'regions' || c.kind === 'scars') this.resolveRegionsNow();
     if (c.kind === 'nodule') this.updateNodule();
     if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit();
+    // the frame (specimen) changes the box: updateAuto below
+    if (['scars', 'configuration', 'reset'].includes(c.kind)) this.updateConfiguration();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
     if (c.kind === 'specimen') {
@@ -1004,6 +1032,113 @@ export class App implements AppApi {
     return new Set(st.scars.filter((s) => !inSeq.has(s.id)).map((s) => s.id));
   }
 
+  /** Scars not on the picked face of the configuration (faded while it is picked), or null. */
+  private offFace(): Set<string> | null {
+    const r = this.configResult;
+    if (!this.pickedFace || !r || this.mode !== 'annotate') return null;
+    return new Set(r.scars.filter((s) => s.face !== this.pickedFace).map((s) => s.id));
+  }
+
+  // ------------------------------------------------------------ volumetric configuration
+
+  /** Recompute the configuration (cheap) from the scars, the corrections and the box; show it in the panel, the sketch and the cube. */
+  private updateConfiguration(): void {
+    const st = this.store.state;
+    this.configResult = computeConfiguration(st.scars, st.configuration, this.configBox);
+    if (!this.configResult) this.pickedFace = null;
+    this.updateConfigPanel();
+    this.sidebar.refresh('configuration');
+  }
+
+  /** The configuration panel and the view cube are shown: switched on, in the annotate mode, with a scar with an arrow. */
+  private configShown(): boolean {
+    return this.display.configuration && this.mode === 'annotate' && this.hasMesh() && this.store.state.scars.some(hasVector);
+  }
+
+  /** Show or hide the configuration panel (and the cube); hidden, it lets go of the picked face. */
+  private updateConfigPanel(): void {
+    const shown = this.configShown();
+    const el = this.configEl;
+    if (el) {
+      const was = !el.hidden;
+      el.hidden = !shown;
+      if (shown && !was) this.configFit?.();
+    }
+    if (!shown && this.pickedFace) this.selectConfigFace(null);
+    else this.syncConfigViews();
+  }
+
+  private syncConfigViews(): void {
+    this.viewCube?.set(this.configResult, this.pickedFace, this.configShown());
+    this.sketch?.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar());
+  }
+
+  /** The volumetric configuration's panel over the view (made as the Harris matrix's), holding the sidebar's configuration content. */
+  private buildConfigPanel(): void {
+    const panel = floatingPanel({
+      id: 'config',
+      title: t('sec.configuration'),
+      pref: 'configPanel',
+      area: this.viewportEl,
+      extras: [this.sidebar.configPill],
+      onClose: () => this.setDisplay((d) => (d.configuration = false), 'configuration'),
+      // folded, it lets go of the picked face (the arrows come back)
+      onFold: (folded) => {
+        if (folded && this.pickedFace) this.selectConfigFace(null);
+      },
+    });
+    panel.body.append(this.sidebar.configEl);
+    if (this.configEl) this.configEl.replaceWith(panel.el);
+    else this.viewportEl.append(panel.el);
+    this.configEl = panel.el;
+    this.configFit = panel.fit;
+    this.updateConfigPanel();
+  }
+
+  configuration(): ConfigurationResult | null {
+    return this.configResult;
+  }
+
+  configFace(): ConfigFace | null {
+    return this.pickedFace;
+  }
+
+  selectConfigFace(face: ConfigFace | null, turn = false): void {
+    if (face && !this.configResult) return;
+    this.pickedFace = face;
+    if (face && turn) this.viewConfigFace(face);
+    this.syncConfigViews();
+    this.syncAnnotations();
+    this.sidebar.refresh('configuration');
+  }
+
+  /** Turn the view to a face of the box, square on, as the standard view of that side shows it. */
+  private viewConfigFace(face: ConfigFace): void {
+    const r = this.configResult;
+    if (!r || !this.viewer) return;
+    const [x, y, z] = r.axes;
+    const { toward, up } = viewAxes(face, { x, y, z });
+    this.viewer.viewFrom(toward, up, undefined, undefined, true);
+  }
+
+  customValues(key: string): string[] {
+    const f = CURVE_FIELDS.find((x) => x.key === key);
+    if (!f) return [];
+    // this specimen's first, then the other project files of the folder already read (none is read for this)
+    const curves = [...this.store.state.curves, ...(this.projectIndex?.all() ?? []).flatMap((p) => p.state.curves)];
+    return [...new Set(curves.map((c) => c.attributes[key]).filter((v): v is string => isCustomValue(f, v)))];
+  }
+
+  configSketch(): ConfigSketch {
+    if (!this.sketch) {
+      this.sketch = new ConfigSketch();
+      this.sketch.onPick = (face) => this.selectConfigFace(face, true);
+      this.sketch.onPickScar = (id) => this.selection.set(id);
+      this.sketch.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar());
+    }
+    return this.sketch;
+  }
+
   private syncAnnotations(): void {
     const handles = this.tools?.activeId === 'select' && this.mode === 'annotate';
     // the measure mode is about measurements: annotations are drawn faded there
@@ -1014,7 +1149,7 @@ export class App implements AppApi {
     this.arrows?.setHighlight(this.emphasis());
     // the user's own colour setting comes back when the sequence tool is left
     const sequencing = this.sequencing();
-    if (this.arrows) this.arrows.faded = sequencing ? this.unsequenced() : null;
+    if (this.arrows) this.arrows.faded = sequencing ? this.unsequenced() : this.offFace();
     this.arrows?.sync(this.store.state, this.selection.id, sequencing ? { ...this.display.arrows, colorMode: 'sequence' } : this.display.arrows, handles);
     this.showBorders();
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
@@ -1077,6 +1212,9 @@ export class App implements AppApi {
     this.setTool('select');
     this.mode = mode;
     writePref('mode', mode);
+    // the picked face belongs to the annotate mode's panel; the panel and the cube show only there
+    this.pickedFace = null;
+    this.updateConfigPanel();
     if (mode === 'present') this.viewFrame(false);
     if (mode === 'compare' && this.agreementStale) this.scheduleAgreement();
     this.viewportEl.dataset.mode = mode;
@@ -1131,6 +1269,10 @@ export class App implements AppApi {
         break;
       case 'harris':
         this.updateHarris();
+        this.sidebar.refresh('display');
+        break;
+      case 'configuration':
+        this.updateConfigPanel();
         this.sidebar.refresh('display');
         break;
       case 'snap':
@@ -1254,7 +1396,7 @@ export class App implements AppApi {
   /** `merge`: one undo step with the last change (fine turning), and no camera transition (it follows the slider). */
   private setFrame(matrix: number[] | null, source: string, merge = false): void {
     if (!matrix) return;
-    updateSpecimen(this.store, { frame: { matrix: matrix.map((x) => Math.round(x * 1e9) / 1e9), source } }, merge);
+    if (updateSpecimen(this.store, { frame: { matrix: matrix.map((x) => Math.round(x * 1e9) / 1e9), source } }, merge)) this.feedback.toast(t('config.cleared'), 'info', 4000);
     this.viewFrame(!merge);
   }
 
@@ -1291,7 +1433,7 @@ export class App implements AppApi {
   }
 
   clearFrame(): void {
-    if (this.store.state.specimen.frame) updateSpecimen(this.store, { frame: null }, false);
+    if (this.store.state.specimen.frame && updateSpecimen(this.store, { frame: null }, false)) this.feedback.toast(t('config.cleared'), 'info', 4000);
   }
 
   /** Put the camera on the specimen frame: looking at the main face, +Y up (`animate`: in a short transition). */
@@ -1479,7 +1621,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -1913,7 +2055,10 @@ export class App implements AppApi {
       primary = live;
       const positions = loaded!.geometry.getAttribute('position').array as Float32Array;
       const vertices = this.vertexAxes();
-      measure = (p) => ({ auto: autoMeasurements(positions, base!, p.state.specimen.frame), vertices });
+      measure = (p) => {
+        const m = frameMeasures(positions, base!, p.state.specimen.frame, loaded!.offset);
+        return { auto: m.auto, vertices, box: m.box };
+      };
     } else {
       const fresh: BatchProject = { path: null, state: emptyProject(), derived: {}, appVersion: __APP_VERSION__ };
       fresh.state.specimen.id = this.wsIds.get(path) ?? baseName(path).replace(/\.[^.]+$/, '');
@@ -1924,7 +2069,7 @@ export class App implements AppApi {
       } else {
         const asked = projects.length ? projects : [primary];
         const m = await measurer.measure(i, asked.map((p) => p.state.specimen.frame));
-        measure = (p) => ({ auto: m.auto[Math.max(0, asked.indexOf(p))], vertices: m.vertices });
+        measure = (p) => ({ auto: m.auto[Math.max(0, asked.indexOf(p))], vertices: m.vertices, box: m.boxes[Math.max(0, asked.indexOf(p))] });
       }
     }
     const rows = projects.map((p, k) => ({ project: p, measures: measure(p, k) }));
@@ -2037,7 +2182,9 @@ export class App implements AppApi {
     if (this.mode === 'annotate') {
       const lm = this.landmarks;
       return [
-        csv('scar-vectors', t('export.csv'), 'scar_vectors.csv', st.scars.some(hasVector), () => scarVectorCsv(st, opts)),
+        csv('scar-vectors', t('export.csv'), 'scar_vectors.csv', st.scars.some(hasVector), () => scarVectorCsv(st, opts, this.configResult)),
+        csv('configuration', t('export.configuration'), 'configuration.csv', !!this.configResult, () => configurationCsv(st, this.configResult, opts)),
+        csv('flaking-surfaces', t('export.flakingSurfaces'), 'flaking_surfaces.csv', !!this.configResult?.surfaces.length, () => flakingSurfacesCsv(st, this.configResult, opts)),
         csv('curves', t('export.curvesCsv'), 'curves.csv', st.curves.length > 0, () => curveCsv(st, opts)),
         csv('regions', t('export.regions'), 'regions.csv', !!this.regions?.results.length, () => regionsCsv(st, this.regions?.results ?? [], opts)),
         csv('relations', t('export.relations'), 'relations.csv', st.relations.length > 0, () => relationsCsv(st, opts)),
@@ -2775,97 +2922,28 @@ export class App implements AppApi {
 
   /** The Harris matrix panel: move it by its title bar, size it from its corner, fold it to one line (all remembered). */
   private buildHarrisPanel(): void {
-    const body = h('div', { class: 'harris-body', id: 'harris-body' });
-    body.addEventListener('click', (e) => {
-      const id = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
-      if (id) this.selectScar(id);
-    });
-    type Geometry = { x?: number; y?: number; w?: number; h?: number; collapsed?: boolean };
-    const geo: Geometry = { ...readPref<Geometry>('harrisPanel', {}) };
-    const fold = h('button', { type: 'button', class: 'icon-btn harris-fold', id: 'harris-fold', 'aria-label': t('harris.fold'), title: t('harris.fold') }, icon(ICONS.chevron)) as HTMLButtonElement;
-    const head = h(
-      'div',
-      { class: 'harris-head' },
-      h('span', { class: 'harris-title' }, t('harris.title')),
-      h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'harris-svg', onclick: () => this.exportHarrisSvg() }, 'SVG'),
-      fold,
-      h('button', { type: 'button', class: 'icon-btn', id: 'harris-close', 'aria-label': t('dlg.close'), onclick: () => {
+    const panel = floatingPanel({
+      id: 'harris',
+      title: t('harris.title'),
+      pref: 'harrisPanel',
+      area: this.viewportEl,
+      resizable: true,
+      extras: [h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'harris-svg', onclick: () => this.exportHarrisSvg() }, 'SVG')],
+      onClose: () => {
         // shown by the relation or sequence tool: away until the tool changes
         if (this.harrisAuto()) this.harrisAutoOff = true;
         this.setDisplay((d) => (d.harris = false), 'harris');
-      } }, icon(ICONS.close)),
-    );
-    const grip = h('div', { class: 'harris-grip', 'aria-hidden': 'true' });
-    const el = h('div', { class: 'viewport-ui harris-panel', id: 'harris-panel', hidden: true }, head, body, grip);
-    // the remembered place and size, fitted into the view as it is now (the pref keeps what was chosen)
-    const apply = () => {
-      const W = this.viewportEl.clientWidth, H = this.viewportEl.clientHeight;
-      const fits = W > 0 && H > 0;
-      const w = geo.w && fits ? Math.min(geo.w, W) : geo.w;
-      const hgt = geo.h && fits ? Math.min(geo.h, H) : geo.h;
-      if (geo.x !== undefined && geo.y !== undefined) {
-        const x = fits ? Math.max(0, Math.min(geo.x, W - (w || el.offsetWidth || 200))) : geo.x;
-        const y = fits ? Math.max(0, Math.min(geo.y, H - (hgt && !geo.collapsed ? hgt : 36))) : geo.y;
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
-        el.style.bottom = 'auto';
-      }
-      if (w && hgt) {
-        el.style.width = `${w}px`;
-        el.style.height = geo.collapsed ? '' : `${hgt}px`;
-        el.style.maxWidth = el.style.maxHeight = 'none';
-      }
-      el.classList.toggle('is-collapsed', !!geo.collapsed);
-      fold.setAttribute('aria-expanded', String(!geo.collapsed));
-    };
-    const save = () => writePref('harrisPanel', geo);
-    fold.addEventListener('click', () => {
-      geo.collapsed = !geo.collapsed;
-      apply();
-      save();
+      },
     });
-    // drag with the title bar, size with the corner; kept inside the view
-    const drag = (handle: HTMLElement, move: (dx: number, dy: number, start: DOMRect, area: DOMRect) => void) => {
-      let from: { x: number; y: number; rect: DOMRect; area: DOMRect } | null = null;
-      handle.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0 || (e.target as Element).closest('button')) return;
-        e.preventDefault();
-        handle.setPointerCapture(e.pointerId);
-        from = { x: e.clientX, y: e.clientY, rect: el.getBoundingClientRect(), area: this.viewportEl.getBoundingClientRect() };
-      });
-      handle.addEventListener('pointermove', (e) => {
-        if (from) move(e.clientX - from.x, e.clientY - from.y, from.rect, from.area);
-      });
-      const end = () => {
-        if (!from) return;
-        from = null;
-        save();
-      };
-      handle.addEventListener('pointerup', end);
-      handle.addEventListener('pointercancel', end);
-    };
-    drag(head, (dx, dy, r, area) => {
-      geo.x = Math.round(Math.max(0, Math.min(area.width - r.width, r.left - area.left + dx)));
-      geo.y = Math.round(Math.max(0, Math.min(area.height - r.height, r.top - area.top + dy)));
-      apply();
+    panel.body.addEventListener('click', (e) => {
+      const id = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
+      if (id) this.selectScar(id);
     });
-    drag(grip, (dx, dy, r, area) => {
-      geo.x ??= Math.round(r.left - area.left);
-      geo.y ??= Math.round(r.top - area.top);
-      geo.w = Math.round(Math.max(200, Math.min(area.width - geo.x, r.width + dx)));
-      geo.h = Math.round(Math.max(120, Math.min(area.height - geo.y, r.height + dy)));
-      geo.collapsed = false;
-      apply();
-    });
-    if (this.harrisEl) this.harrisEl.replaceWith(el);
-    else {
-      this.viewportEl.append(el);
-      new ResizeObserver(() => this.harrisFit?.()).observe(this.viewportEl);
-    }
-    apply();
-    this.harrisEl = el;
-    this.harrisBody = body;
-    this.harrisFit = apply;
+    if (this.harrisEl) this.harrisEl.replaceWith(panel.el);
+    else this.viewportEl.append(panel.el);
+    this.harrisEl = panel.el;
+    this.harrisBody = panel.body;
+    this.harrisFit = panel.fit;
     this.updateHarris();
   }
 
@@ -3067,6 +3145,7 @@ export class App implements AppApi {
     const token = ++this.measureToken;
     this.measureBase = null;
     this.auto = null;
+    this.configBox = null;
     this.autoFrameKey = '';
     const g = loaded.geometry;
     void runSliced(surfaceMeasuresSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array)).then((base) => {
@@ -3090,8 +3169,13 @@ export class App implements AppApi {
     const key = JSON.stringify(frame);
     if (this.auto && key === this.autoFrameKey) return;
     this.autoFrameKey = key;
-    this.auto = autoMeasurements(loaded.geometry.getAttribute('position').array as Float32Array, base, frame);
+    // the same pass gives the box of the volumetric configuration
+    const m = frameMeasures(loaded.geometry.getAttribute('position').array as Float32Array, base, frame, loaded.offset);
+    this.auto = m.auto;
+    this.configBox = m.box;
     this.sidebar.refresh('measure');
+    this.updateConfiguration();
+    if (this.pickedFace) this.syncAnnotations();
   }
 
   saveProject(): void {
@@ -3210,7 +3294,11 @@ export class App implements AppApi {
     this.planes = [];
     this.borders = [];
     this.bordersToken++;
+    this.configBox = null;
+    this.configResult = null;
+    this.pickedFace = null;
     this.loaded = null;
+    this.syncConfigViews();
   }
 
   /** `specimenId`: the ID a new project gets (in a folder, see specimenIds); else the file name without its extension. */
@@ -3583,7 +3671,10 @@ export class App implements AppApi {
           if (tool?.commit?.()) e.preventDefault();
           return;
         case 'Escape':
-          if (!this.tools?.cancel()) this.selection.set(null);
+          if (!this.tools?.cancel()) {
+            if (this.pickedFace) this.selectConfigFace(null);
+            this.selection.set(null);
+          }
           return;
         case 'Backspace':
           if (tool?.undoStep?.()) {
@@ -3655,8 +3746,16 @@ export class App implements AppApi {
         }
         const isCurve = !!this.store.curve(sel);
         const f = numberKeyField(isCurve ? CURVE_FIELDS : SCAR_FIELDS);
-        const opt = f?.options?.[Number(digit[1]) - 1];
-        if (!f || !opt) return;
+        if (!f) return;
+        const offered = offeredOptions(f);
+        // the key after the options: the user's own text
+        if (f.allowCustom && Number(digit[1]) === offered.length + 1) {
+          // not typed into the box it opens
+          e.preventDefault();
+          return this.sidebar.openCustomType();
+        }
+        const opt = offered[Number(digit[1]) - 1];
+        if (!opt) return;
         if (isCurve) setCurveAttribute(this.store, sel, f.key, opt.value);
         else setScarAttribute(this.store, sel, f.key, opt.value);
       }
@@ -3698,7 +3797,8 @@ export class App implements AppApi {
 
   /** The shortcuts: two columns (general and mouse; the modes), keys as key caps, no explanations. */
   private showHelp(): void {
-    const count = Math.max(numberKeyField(SCAR_FIELDS)?.options?.length ?? 0, numberKeyField(CURVE_FIELDS)?.options?.length ?? 0) || 5;
+    const keyCount = (f: FieldDef | undefined) => (f ? offeredOptions(f).length + (f.allowCustom ? 1 : 0) : 0);
+    const count = Math.max(keyCount(numberKeyField(SCAR_FIELDS)), keyCount(numberKeyField(CURVE_FIELDS))) || 5;
     /** Keys ("Ctrl+Z / Ctrl+Shift+Z", "1 / 2 / 3 · Delete") as key caps; `hold`: to be held down. */
     const keys = (spec: string, hold: boolean): HTMLElement => {
       const dt = h('dt', {});
@@ -3789,7 +3889,21 @@ export class App implements AppApi {
       setTool: (id: string) => this.setTool(id),
       mode: () => this.mode,
       setMode: (m: AppMode) => this.setMode(m),
-      exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }),
+      exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }, this.configResult),
+      /** The volumetric configuration (null without arrows or before the mesh is measured). */
+      configuration: () => this.configResult,
+      configFace: () => this.pickedFace,
+      selectConfigFace: (face: ConfigFace | null, turn = false) => this.selectConfigFace(face, turn),
+      /** Where a face's centre is on the page, on the view cube and on the sketch (null when it faces away). */
+      cubeFacePoint: (face: ConfigFace) => this.viewCube?.faceCentreClient(face) ?? null,
+      sketchFacePoint: (face: ConfigFace) => this.sketch?.faceCentreClient(face) ?? null,
+      /** The sketch's arrows: how many, and where the middle of a scar's is on the page (null when it faces away). */
+      sketchArrowCount: () => this.sketch?.arrowCount() ?? 0,
+      sketchArrowPoint: (id: string) => this.sketch?.arrowClient(id) ?? null,
+      /** Whether the configuration panel is shown. */
+      configPanelShown: () => !!this.configEl && !this.configEl.hidden,
+      exportConfigurationCsvText: () => configurationCsv(this.store.state, this.configResult, { excelBom: false }),
+      exportFlakingSurfacesCsvText: () => flakingSurfacesCsv(this.store.state, this.configResult, { excelBom: false }),
       exportCurvesCsvText: () => curveCsv(this.store.state, { excelBom: false }),
       autoMeasurements: () => this.auto,
       planes: () => this.planes,

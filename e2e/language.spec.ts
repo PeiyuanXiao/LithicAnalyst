@@ -45,7 +45,7 @@ test.describe('in a Chinese browser', () => {
     // exported codes do not depend on the interface language
     const zhCsv = await exportFile(page, 'scar-vectors');
     expect(zhCsv.text).toBe(enCsv.text);
-    expect(zhCsv.text).toContain(',bulb_truncated,na,certain,,mm');
+    expect(zhCsv.text).toMatch(/,bulb_truncated,na,certain,,[a-z]*,F?\d*,mm/);
 
     // the choice is kept
     await page.reload();

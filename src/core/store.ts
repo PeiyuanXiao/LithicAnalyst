@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { Curve, Landmark, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenInfo } from './types';
+import type { ConfigCorrections, Curve, Landmark, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'specimen' | 'reset';
+export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -27,6 +27,7 @@ export function emptyProject(): ProjectState {
     semilandmarks: [],
     nodule: { exclude: [], show: false },
     split: null,
+    configuration: { roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null },
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,
@@ -279,6 +280,10 @@ export class ProjectStore {
 
   _setNodule(n: ProjectState['nodule']): void {
     this._state.nodule = n;
+  }
+
+  _setConfiguration(c: ConfigCorrections): void {
+    this._state.configuration = c;
   }
 
   _setNextRegionNumber(n: number): void {
