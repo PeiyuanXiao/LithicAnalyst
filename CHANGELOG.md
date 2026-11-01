@@ -19,6 +19,25 @@
   and `flaking_surfaces.csv` (with `also_platform`; also for the whole folder); `scar_vectors.csv`
   gains `platform_face` and `flaking_surface` before `unit`. Project files keep the corrections
   (`configuration`) and the result with its box and thresholds (`derived.configuration`).
+- Bicone model of the volumetric configuration, for cores worked round one plane of intersection
+  (Levallois, discoid, prepared, centripetal): once the volume is split along a closed curve, the
+  panel switches between Box and Bicone. Two cones share the round base of the area the curve
+  encloses, each as high as a cone of that base with its side's volume; scars go to a cone by their
+  end, and each cone is a flaking surface or unflaked (correctable, kept by physical side). Only the
+  facial character and the flaking surfaces are given (no polarity, no platforms). The sketch draws
+  the cones with every scar's arrow bent along its cone, and the view cube becomes a small bicone;
+  clicking a cone looks along the base's normal from that side. An open mesh or an invalid split
+  shows only why. `configuration.csv` gains a `model` column (`box` / `bicone`); for the bicone,
+  `flaking_surfaces.csv` has one row per flaking cone (`upper` / `lower`) and `platform_face` is
+  empty.
+- Upper and lower of a volume split can be swapped (`split.swap`) from the volume panel or the
+  bicone's card; volumes, the measurement export and the bicone follow. Closed core-edge curves come
+  first among the split candidates.
+- Complete loop: an open curve along part of a core's edge (three anchors or more) is completed
+  round the edge in one undoable step, along the model's outline seen across the curve's plane and
+  snapped to the ridges; the filled-in part is dashed until its anchors are moved
+  (`curve.completion`). A curve too short or straight, no edge found or no way round leaves the curve
+  as it was, with a message.
 - Curve types are now scar outline (`scar_boundary`), core edge, cortex and joint surface (keys
   1–4), or the annotator's own text (key 5, suggesting the texts used before); a new curve's type
   is not filled in. The older types edge, ridge and other are still read, shown and exported as

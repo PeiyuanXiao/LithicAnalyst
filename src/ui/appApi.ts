@@ -38,6 +38,12 @@ export interface DisplaySettings {
 
 export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'other';
 
+/** What can be picked in the configuration: a face of the box or a cone of the bicone. */
+export type ConfigPick = import('../core/fields').ConfigFace | import('../core/fields').BiconeCone;
+
+/** Why the bicone shows nothing: the mesh is not closed, or the split gives no volumes. */
+export type ConfigStatus = 'not_closed' | 'split_invalid';
+
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
   readonly store: ProjectStore;
@@ -144,12 +150,18 @@ export interface AppApi {
   unjudgedPairs(): number;
   /** Turn the view to the next such border. */
   nextUnjudgedPair(): void;
-  /** Volumetric configuration (null without arrows, or before the mesh is measured). */
-  configuration(): import('../compute/configuration').ConfigurationResult | null;
-  /** The face picked in the configuration panel or the view cube (null: none). */
-  configFace(): import('../core/fields').ConfigFace | null;
-  /** Pick a face (null: none); `turn`: also turn the view to it. */
-  selectConfigFace(face: import('../core/fields').ConfigFace | null, turn?: boolean): void;
+  /** Volumetric configuration by the box or the bicone (null without arrows, before the mesh is measured, or for the bicone without its split). */
+  configuration(): import('../compute/bicone').CoreConfiguration | null;
+  /** Why the bicone shows nothing (null: it shows, or the box is used). */
+  configStatus(): ConfigStatus | null;
+  /** The face (box) or cone (bicone) picked in the configuration panel or the view cube (null: none). */
+  configFace(): ConfigPick | null;
+  /** Pick a face or cone (null: none); `turn`: also turn the view to it. */
+  selectConfigFace(face: ConfigPick | null, turn?: boolean): void;
+  /** Carry an open curve round the model's edge until it closes. */
+  completeLoop(id: string): void;
+  /** A curve is being completed. */
+  completingLoop(): boolean;
   /** The sketch of the configuration (its canvas goes into the panel). */
   configSketch(): import('../render/configSketch').ConfigSketch;
   /** The user's own values of a curve field used so far: in this specimen and in the folder's project files already read. */

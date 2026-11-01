@@ -67,7 +67,7 @@ const inFaceOrder = (faces: Iterable<ConfigFace>): ConfigFace[] => {
   return CONFIG_FACES.filter((f) => set.has(f));
 };
 
-export const emptyCorrections = (): ConfigCorrections => ({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null });
+export const emptyCorrections = (): ConfigCorrections => ({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } });
 
 /** Corrections stored by face (all but the polarity), which a change of orientation clears. */
 export const hasFaceCorrections = (c: Readonly<ConfigCorrections>): boolean =>
@@ -115,6 +115,7 @@ export interface FlakingSurface {
 }
 
 export interface ConfigurationResult {
+  model: 'box';
   frame: 'specimen' | 'principal';
   axes: [Vec3, Vec3, Vec3];
   min: Vec3;
@@ -318,6 +319,7 @@ export function computeConfiguration(scars: readonly Scar[], corrections: Readon
     }
   }
   return {
+    model: 'box',
     frame: box.frame,
     axes: box.axes.map((a) => [...a]) as [Vec3, Vec3, Vec3],
     min: [...box.min],

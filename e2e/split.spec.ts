@@ -40,7 +40,7 @@ test('splits the volume by a plane and by a closed curve', async ({ page }) => {
   let v = (await split(page))!;
   expect(v.lower).toBeCloseTo(6000, 2);
   expect(v.upper + v.lower).toBeCloseTo(8000, 2);
-  await page.locator('#split-flip').click();
+  await page.locator('#split-swap').click();
   await expect.poll(async () => (await split(page))?.upper ?? 0).toBeCloseTo(6000, 2);
 
   const [row] = parseCsv(await page.evaluate(() => window.lithicanalyst.exportMeasurementsCsvText()));

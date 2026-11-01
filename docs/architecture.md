@@ -70,7 +70,17 @@ off the interaction path (after loading, in idle time or a worker), never per po
   `CurvatureService` at the shading scale (what you see is what snaps), closest points from the BVH.
 * `tools/drawCurveTool.ts` places points and shows the live stretch; `tools/selectTool.ts`
   drags curve points and retraces the two neighbouring stretches.
-* `render/curveLayer.ts` draws curves as screen-space lines (`Line2`) with a dark halo.
+* `render/curveLayer.ts` draws curves as screen-space lines (`Line2`) with a dark halo; the
+  stretch a loop was completed with (`autoEdges` in `core/curveGeometry.ts`) is a second, dashed
+  set of segments (`LineSegments2`) for the core line.
+* **Complete loop**: `compute/completeLoop.ts` (pure, in steps) fits a plane to an open curve,
+  takes the outline of the model over the gap seen along its normal (the vertex furthest from the
+  centre in each stretch of about 2°), snaps those onto ridges (`snapToFeature`) and traces them
+  (`PathSearch`, ridge costs) from the curve's end back to its start; it returns vertex chains or
+  why it could not. `App.completeLoop` runs it in slices (`runSliced`), pulls each chain taut
+  (`SurfaceSnap.refine`) and applies it in one `completeCurveLoop` (an `UpdateCurveCommand`);
+  nothing changes when it fails or the curve changed meanwhile. `setCurveShape` turns moved
+  automatic anchors into the user's (`editedCompletion`).
 
 ## Adding a new annotation layer (e.g. landmarks)
 
@@ -261,6 +271,15 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   (`App.updateAuto`, again when the frame changes) and in the batch worker (`MeshMeasures.boxes`).
   It reaches the derived results through `MeshResults.box`; the principal orientation is never
   written to `specimen.frame`.
+* **Two models** (`configuration.model`): the box (below) and the bicone. `compute/bicone.ts` is
+  pure: `computeBicone` takes the base from the split curve (`biconeBase`: PCA plane oriented like
+  the split, shoelace area and centroid) and the heights from the split's volumes (already swapped),
+  puts each scar on a cone by its end, and gives the cones' roles (corrections by physical side), the
+  flaking cones and the facial character; `biconePolar` maps points over the base (angle, and the
+  share of the way to the projected curve) for drawing. `coreConfiguration` picks the model; the
+  derived results, the batch (with the project's stored split; no box needed) and the app all use
+  it. The picked face is a `ConfigPick` (a face of the box or a cone); a pick of the other model is
+  let go. `App.configStatus` says why the bicone shows nothing (an open mesh, no valid split).
 * `compute/configuration.ts` is pure: `placeScar` (face by the averaged normal without its
   component along the arrow, platform = the adjacent face facing back along the arrow),
   `computeConfiguration` (which faces are flaking surfaces first, with the corrections, so that
@@ -290,6 +309,11 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   meshes, one per part, face and whether the scars count; the selected scar's arrow is coloured per
   instance. A click within a few pixels of an arrow (in screen space) selects its scar, elsewhere on
   a face picks the face. Colours are the theme's `--cfg-*` tokens, read again when the theme changes.
+  For the bicone (`render/biconeShape.ts`, shared with the cube) it draws two transparent lathes of
+  a profile with rounded rim and apexes, the rim as two half circles turned to face the viewer at
+  each draw (moved in place, no new buffers), and each scar's arrow bent along its cone: the line
+  between its ends over the base, sampled, raised onto the cone and off it along the cone's normal,
+  as one merged mesh (tube, tail, head) coloured by its vertices, with a shadow ribbon on the cone.
 * **The view cube** (`render/viewCube.ts`) has no WebGL context of its own: after each frame of the
   main view (`Viewer.onAfterRender`) the main renderer clears a scissored corner viewport and draws
   the cube there, posed as the box's axes are seen by the camera. A board under the transparent
@@ -297,6 +321,9 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   the cube's own viewport). Clicking a face of the cube or the sketch picks it
   (`App.selectConfigFace`) and turns the view to it with the six views' directions
   (`viewAxes` in `render/figure.ts`); meanwhile `syncAnnotations` fades the arrows on other faces.
+  With the bicone the cube is a small opaque bicone posed by the base (`biconeAxes`); the picked
+  cone is outlined by a slightly larger copy closed by a cap and seen from inside, and a click on a
+  cone turns the view along the base's normal from that side, the base's `reference` up.
 
 ## Landmarks
 
@@ -383,7 +410,8 @@ chosen cortex pieces, and keeps the result for `derived.nodule` and the measurem
 triangles (clipped at the plane) on its upper side; `splitByLoopSteps` partitions along a closed
 chain of mesh edges and sums each side from the chain's centre. In both, the cap closing each
 part has zero volume relative to that reference point, so no cap is built. The app recomputes
-when the split, the planes or the curves change.
+when the split, the planes or the curves change; `split.swap` only exchanges the two
+(`swappedSplit`), so swapping reuses the last result (`App.splitRaw`). Its result feeds the bicone.
 
 ## Sections
 

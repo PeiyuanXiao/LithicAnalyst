@@ -7,7 +7,7 @@
  * touch stored coordinates.
  */
 
-import type { ConfigFace, ConfigRole, Polarity } from './fields';
+import type { BiconeRole, BiconeSide, ConfigFace, ConfigModel, ConfigRole, Polarity } from './fields';
 
 export type Vec3 = [number, number, number];
 
@@ -106,10 +106,27 @@ export interface Curve {
   anchorIndex: number[];
   /** The last point connects back to the first (which is not repeated). */
   closed: boolean;
+  /** The part of the loop filled in automatically ("Complete loop"); absent when there is none. */
+  completion?: CurveCompletion;
   /** Values for the fields in CURVE_FIELDS (src/core/fields.ts). */
   attributes: Record<string, AttributeValue>;
   createdAt: string;
   modifiedAt: string;
+}
+
+/**
+ * How an open curve was completed into a loop along the edge of the model: the
+ * anchors from `firstAutoAnchor` on were placed automatically, about every
+ * `stepDeg` degrees of the outline seen along the normal of the curve's plane.
+ * An automatic anchor the user moves is listed in `userAnchors`; once every one
+ * of them is, the completion is dropped.
+ */
+export interface CurveCompletion {
+  method: 'outline';
+  firstAutoAnchor: number;
+  stepDeg: number;
+  /** Automatic anchors since moved by the user (indices into `anchors`, ascending). */
+  userAnchors?: number[];
 }
 
 export type MeasureType = 'distance' | 'geodesic' | 'angle';
@@ -259,6 +276,10 @@ export interface ConfigCorrections {
   surfaceType: Partial<Record<ConfigFace, 'wide' | 'narrow'>>;
   axis: Partial<Record<ConfigFace, 'long' | 'short'>>;
   polarity: Polarity | null;
+  /** The model: the box (default) or the bicone on the split curve. */
+  model: ConfigModel;
+  /** The bicone's corrections by physical side (they stay with their side when upper and lower are swapped). */
+  bicone: { roles: Partial<Record<BiconeSide, BiconeRole>> };
 }
 
 export interface ProjectState {
@@ -281,9 +302,9 @@ export interface ProjectState {
   /**
    * Upper / lower volume split: by a fitted plane (upper = its normal's side)
    * or a closed curve (upper = the side its fitted plane's normal points to,
-   * oriented by `upHint`). Null when not used.
+   * oriented by `upHint`). `swap` exchanges upper and lower. Null when not used.
    */
-  split: { source: 'plane' | 'curve'; id: string; upHint: Vec3 } | null;
+  split: { source: 'plane' | 'curve'; id: string; upHint: Vec3; swap: boolean } | null;
   /** Manual corrections to the volumetric configuration (none by default). */
   configuration: ConfigCorrections;
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */

@@ -1,4 +1,4 @@
-import type { Curve, Vec3 } from './types';
+import type { Curve, CurveCompletion, Vec3 } from './types';
 import { distance } from './vec';
 
 /**
@@ -73,4 +73,47 @@ export function isValidShape(c: CurveShape): boolean {
     prev = i;
   }
   return c.anchorIndex[0] === 0 && (c.closed || c.anchorIndex[c.anchorIndex.length - 1] === n - 1);
+}
+
+/** Which anchors were placed by "Complete loop" and not moved since (all false without a completion). */
+export function autoAnchors(c: Pick<Curve, 'anchors' | 'completion'>): boolean[] {
+  const k = c.completion;
+  const moved = new Set(k?.userAnchors ?? []);
+  return c.anchors.map((_, i) => !!k && i >= k.firstAutoAnchor && !moved.has(i));
+}
+
+/** For each segment (anchor i → i + 1; a closed curve's last one back to 0): filled in automatically, i.e. an end is an automatic anchor. */
+export function autoSegments(c: Pick<Curve, 'anchors' | 'closed' | 'completion'>): boolean[] {
+  const auto = autoAnchors(c);
+  const n = c.anchors.length;
+  const count = c.closed ? n : n - 1;
+  return Array.from({ length: Math.max(0, count) }, (_, i) => auto[i] || auto[(i + 1) % n]);
+}
+
+/**
+ * The completion after the anchors changed from `before` to `after` (same
+ * count): automatic anchors that moved become the user's; none left, no
+ * completion. A change of the number of anchors drops it.
+ */
+export function editedCompletion(k: CurveCompletion | undefined, before: readonly Vec3[], after: readonly Vec3[]): CurveCompletion | undefined {
+  if (!k || before.length !== after.length) return undefined;
+  const moved = new Set(k.userAnchors ?? []);
+  for (let i = k.firstAutoAnchor; i < after.length; i++) if (distance(before[i], after[i]) > 0) moved.add(i);
+  if (moved.size >= after.length - k.firstAutoAnchor) return undefined;
+  const out: CurveCompletion = { method: k.method, firstAutoAnchor: k.firstAutoAnchor, stepDeg: k.stepDeg };
+  if (moved.size) out.userAnchors = [...moved].sort((a, b) => a - b);
+  return out;
+}
+
+/** For each edge of the polyline (point i → i + 1; a closed curve's last back to 0): on an automatic segment. Null without a completion. */
+export function autoEdges(c: Pick<Curve, 'anchors' | 'anchorIndex' | 'points' | 'closed' | 'completion'>): boolean[] | null {
+  if (!c.completion) return null;
+  const seg = autoSegments(c);
+  const n = c.points.length;
+  const out = new Array<boolean>(c.closed ? n : n - 1).fill(false);
+  for (let k = 0; k < seg.length; k++) {
+    const from = c.anchorIndex[k], to = k + 1 < c.anchorIndex.length ? c.anchorIndex[k + 1] : n;
+    for (let i = from; i < to && i < out.length; i++) out[i] = seg[k];
+  }
+  return out;
 }

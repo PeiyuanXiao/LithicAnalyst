@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
-import { computeConfiguration, type ConfigBox, type ConfigurationResult } from '../compute/configuration';
+import { coreConfiguration, isBicone, type CoreConfiguration } from '../compute/bicone';
+import { completeLoopSteps, COMPLETE_STEP_DEG, type CompleteFailure } from '../compute/completeLoop';
+import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addLandmark, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { addLandmark, completeCurveLoop, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -50,7 +52,11 @@ import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
 import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
-import { splitByLoopSteps, splitByPlaneSteps, type VolumeSplit } from '../compute/split';
+import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type VolumeSplit } from '../compute/split';
+import { assembleCurve, curveSegments } from '../core/curveGeometry';
+
+/** What "Complete loop" says when it cannot. */
+const COMPLETE_FAILURES: Record<CompleteFailure, string> = { short: 'toast.completeShort', edge: 'toast.completeEdge', loop: 'toast.completeLoop' };
 import { fitPlane } from '../compute/meshGeometry';
 import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, viewAxes, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
 import { ConfigSketch } from '../render/configSketch';
@@ -67,7 +73,7 @@ import { Selection } from '../tools/selection';
 import { SurfaceSnap } from '../tools/surfaceSnap';
 import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
-import { APP_MODES, type AppApi, type AppMode, type DisplayAspect, type DisplaySettings } from './appApi';
+import { APP_MODES, type AppApi, type AppMode, type ConfigPick, type ConfigStatus, type DisplayAspect, type DisplaySettings } from './appApi';
 import { fmtCount, fmtQuantity, quantityUnit } from '../core/format';
 import { numRow, segmented, softSet, textRow, textValueRow } from './controls';
 import { floatingPanel } from './floatingPanel';
@@ -343,9 +349,13 @@ export class App implements AppApi {
   private autoFrameKey = '';
   /** The model's box along the frame (from the pass that measures length, width and thickness), and the volumetric configuration. */
   private configBox: ConfigBox | null = null;
-  private configResult: ConfigurationResult | null = null;
-  /** The face picked in the configuration panel or the view cube: the arrows on other faces are drawn faded meanwhile. */
-  private pickedFace: ConfigFace | null = null;
+  private configResult: CoreConfiguration | null = null;
+  /** The face (box) or cone (bicone) picked in the configuration panel or the view cube: the arrows elsewhere are drawn faded meanwhile. */
+  private pickedFace: ConfigPick | null = null;
+  /** The split as computed (before `swap`), for the plane or curve it was computed from. */
+  private splitRaw: { key: string; value: VolumeSplit | null } | null = null;
+  /** A curve being completed into a loop (its id). */
+  private completing: string | null = null;
   private viewCube: ViewCube | null = null;
   private sketch: ConfigSketch | null = null;
   private configEl: HTMLElement | null = null;
@@ -989,7 +999,8 @@ export class App implements AppApi {
     if (c.kind === 'curves' || c.kind === 'reset') this.updatePartition();
     else if (c.kind === 'regions' || c.kind === 'scars') this.resolveRegionsNow();
     if (c.kind === 'nodule') this.updateNodule();
-    if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit();
+    // only the swap of upper and lower changed: no need to compute the split again
+    if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit(c.kind === 'split');
     // the frame (specimen) changes the box: updateAuto below
     if (['scars', 'configuration', 'reset'].includes(c.kind)) this.updateConfiguration();
     this.syncAnnotations();
@@ -1032,22 +1043,44 @@ export class App implements AppApi {
     return new Set(st.scars.filter((s) => !inSeq.has(s.id)).map((s) => s.id));
   }
 
-  /** Scars not on the picked face of the configuration (faded while it is picked), or null. */
+  /** Scars not on the picked face or cone of the configuration (faded while it is picked), or null. */
   private offFace(): Set<string> | null {
     const r = this.configResult;
-    if (!this.pickedFace || !r || this.mode !== 'annotate') return null;
-    return new Set(r.scars.filter((s) => s.face !== this.pickedFace).map((s) => s.id));
+    const pick = this.pickedFace;
+    if (!pick || !r || this.mode !== 'annotate') return null;
+    const off = isBicone(r) ? r.scars.filter((s) => s.cone !== pick) : r.scars.filter((s) => s.face !== pick);
+    return new Set(off.map((s) => s.id));
   }
 
   // ------------------------------------------------------------ volumetric configuration
 
-  /** Recompute the configuration (cheap) from the scars, the corrections and the box; show it in the panel, the sketch and the cube. */
+  /** Recompute the configuration (cheap) from the scars, the corrections and the box or the volume split; show it in the panel, the sketch and the cube. */
   private updateConfiguration(): void {
     const st = this.store.state;
-    this.configResult = computeConfiguration(st.scars, st.configuration, this.configBox);
-    if (!this.configResult) this.pickedFace = null;
+    this.configResult = coreConfiguration(st, this.configBox, this.split);
+    // a face of the box with the bicone, or a cone with the box: let go
+    if (this.pickedFace && !this.pickFits(this.pickedFace)) this.pickedFace = null;
     this.updateConfigPanel();
     this.sidebar.refresh('configuration');
+  }
+
+  /** A face with the box, a cone with the bicone. */
+  private pickFits(pick: ConfigPick): boolean {
+    const r = this.configResult;
+    const cone = pick === 'upper' || pick === 'lower';
+    return !!r && cone === isBicone(r);
+  }
+
+  configStatus(): ConfigStatus | null {
+    const st = this.store.state;
+    if (st.configuration.model !== 'bicone' || this.configResult || !this.hasMesh()) return null;
+    return this.measureBase?.topology.closed === false ? 'not_closed' : 'split_invalid';
+  }
+
+  /** The points of the closed curve the volume is split along (the bicone's base), or null. */
+  private splitCurvePoints(): Vec3[] | null {
+    const sp = this.store.state.split;
+    return sp?.source === 'curve' ? (this.store.curve(sp.id)?.points ?? null) : null;
   }
 
   /** The configuration panel and the view cube are shown: switched on, in the annotate mode, with a scar with an arrow. */
@@ -1070,7 +1103,7 @@ export class App implements AppApi {
 
   private syncConfigViews(): void {
     this.viewCube?.set(this.configResult, this.pickedFace, this.configShown());
-    this.sketch?.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar());
+    this.sketch?.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar(), this.splitCurvePoints());
   }
 
   /** The volumetric configuration's panel over the view (made as the Harris matrix's), holding the sidebar's configuration content. */
@@ -1095,16 +1128,16 @@ export class App implements AppApi {
     this.updateConfigPanel();
   }
 
-  configuration(): ConfigurationResult | null {
+  configuration(): CoreConfiguration | null {
     return this.configResult;
   }
 
-  configFace(): ConfigFace | null {
+  configFace(): ConfigPick | null {
     return this.pickedFace;
   }
 
-  selectConfigFace(face: ConfigFace | null, turn = false): void {
-    if (face && !this.configResult) return;
+  selectConfigFace(face: ConfigPick | null, turn = false): void {
+    if (face && !this.pickFits(face)) return;
     this.pickedFace = face;
     if (face && turn) this.viewConfigFace(face);
     this.syncConfigViews();
@@ -1112,13 +1145,86 @@ export class App implements AppApi {
     this.sidebar.refresh('configuration');
   }
 
-  /** Turn the view to a face of the box, square on, as the standard view of that side shows it. */
-  private viewConfigFace(face: ConfigFace): void {
+  /**
+   * Turn the view to a face of the box, square on, as the standard view of that side shows it;
+   * to a cone of the bicone, along the normal of its base from that cone's side, with the base's reference up.
+   */
+  private viewConfigFace(pick: ConfigPick): void {
     const r = this.configResult;
     if (!r || !this.viewer) return;
+    if (isBicone(r)) {
+      const n = r.plane.normal;
+      this.viewer.viewFrom(pick === 'lower' ? [-n[0], -n[1], -n[2]] : n, r.reference, undefined, undefined, true);
+      return;
+    }
     const [x, y, z] = r.axes;
-    const { toward, up } = viewAxes(face, { x, y, z });
+    const { toward, up } = viewAxes(pick as ConfigFace, { x, y, z });
     this.viewer.viewFrom(toward, up, undefined, undefined, true);
+  }
+
+  completingLoop(): boolean {
+    return this.completing !== null;
+  }
+
+  /**
+   * Carry an open curve on round the model's edge until it closes ("Complete loop"): the outline
+   * points snapped to the ridges and traced along them, one undo step; or a message why not,
+   * with the curve left as it was.
+   */
+  completeLoop(id: string): void {
+    const c = this.store.curve(id);
+    const snap = this.surfaceSnap;
+    const loaded = this.loaded;
+    if (!c || c.closed || c.anchors.length < 3 || !snap || !loaded || this.completing) return;
+    this.completing = id;
+    this.sidebar.refresh('curves');
+    const unchanged = () => this.surfaceSnap === snap && this.store.curve(id) === c;
+    void (async () => {
+      try {
+        const ridge = await snap.prepare('ridge');
+        if (!ridge && !(await snap.prepare('off'))) return;
+        const adjacency = snap.adjacency();
+        if (!adjacency || !unchanged()) return;
+        const mode: SnapMode = ridge ? 'ridge' : 'off';
+        const o = loaded.offset;
+        const res = await runSliced(
+          completeLoopSteps({
+            positions: loaded.geometry.getAttribute('position').array as Float32Array,
+            adjacency,
+            strength: snap.strength(mode),
+            cost: snap.cost(mode),
+            points: c.points.map((p): Vec3 => [p[0] - o[0], p[1] - o[1], p[2] - o[2]]),
+            first: snap.nearestVertex(c.anchors[0]),
+            last: snap.nearestVertex(c.anchors[c.anchors.length - 1]),
+            stepDeg: COMPLETE_STEP_DEG,
+          }),
+        );
+        if (!unchanged()) return;
+        if (!res.ok) {
+          this.feedback.toast(t(COMPLETE_FAILURES[res.reason]), 'warn', 4000);
+          return;
+        }
+        // each traced stretch pulled taut, as the drawing tool does
+        const added = await runSliced(
+          (function* () {
+            const out: Vec3[][] = [];
+            for (const chain of res.chains) {
+              out.push(snap.refine(chain, mode));
+              yield;
+            }
+            return out;
+          })(),
+        );
+        if (!unchanged()) return;
+        const anchors = [...c.anchors, ...res.anchors.map((v) => snap.point(v))];
+        const { points, anchorIndex } = assembleCurve([...curveSegments(c), ...added], true);
+        const completion = res.anchors.length ? { method: 'outline' as const, firstAutoAnchor: c.anchors.length, stepDeg: COMPLETE_STEP_DEG } : null;
+        completeCurveLoop(this.store, id, { anchors, points, anchorIndex, closed: true }, completion);
+      } finally {
+        this.completing = null;
+        this.sidebar.refresh('curves');
+      }
+    })();
   }
 
   customValues(key: string): string[] {
@@ -1134,7 +1240,7 @@ export class App implements AppApi {
       this.sketch = new ConfigSketch();
       this.sketch.onPick = (face) => this.selectConfigFace(face, true);
       this.sketch.onPickScar = (id) => this.selection.set(id);
-      this.sketch.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar());
+      this.sketch.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar(), this.splitCurvePoints());
     }
     return this.sketch;
   }
@@ -3005,18 +3111,26 @@ export class App implements AppApi {
     return this.measureBase ? this.measureBase.topology.closed : null;
   }
 
-  /** Upper / lower volumes by the chosen plane or closed curve (closed meshes only; in slices). */
-  private updateSplit(): void {
+  /**
+   * Upper / lower volumes by the chosen plane or closed curve (closed meshes only; in slices),
+   * exchanged when the split is swapped. With `reuse` the last result stands if it is of the same plane or curve.
+   */
+  private updateSplit(reuse = false): void {
     const token = ++this.splitToken;
     const sp = this.store.state.split;
     const base = this.measureBase;
     const loaded = this.loaded;
     const snap = this.surfaceSnap;
+    const key = sp ? JSON.stringify([sp.source, sp.id, sp.upHint]) : '';
     const done = (v: VolumeSplit | null) => {
       if (token !== this.splitToken) return;
-      this.split = v;
+      this.splitRaw = { key, value: v };
+      this.split = v && sp ? swappedSplit(v, sp.swap) : null;
       this.sidebar.refresh('split');
+      // the bicone stands on the split
+      this.updateConfiguration();
     };
+    if (reuse && sp && this.splitRaw?.key === key) return done(this.splitRaw.value);
     if (!sp || !base || !loaded || !base.topology.closed) return done(null);
     const g = loaded.geometry;
     const pos = g.getAttribute('position').array as Float32Array;
@@ -3055,8 +3169,6 @@ export class App implements AppApi {
     const loaded = this.loaded;
     const st = this.store.state;
     this.nodule = null;
-    this.split = null;
-    this.splitToken++;
     if (part && loaded && this.regions) {
       const used = st.regions.filter((r, i) => r.type === 'cortex' && !st.nodule.exclude.includes(r.id) && this.seedComponent[i] >= 0 && this.seedComponent.indexOf(this.seedComponent[i]) === i);
       const comps = new Set(used.map((r) => this.seedComponent[st.regions.indexOf(r)]));
@@ -3294,6 +3406,9 @@ export class App implements AppApi {
     this.planes = [];
     this.borders = [];
     this.bordersToken++;
+    this.split = null;
+    this.splitRaw = null;
+    this.splitToken++;
     this.configBox = null;
     this.configResult = null;
     this.pickedFace = null;
@@ -3892,11 +4007,14 @@ export class App implements AppApi {
       exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }, this.configResult),
       /** The volumetric configuration (null without arrows or before the mesh is measured). */
       configuration: () => this.configResult,
+      bicone: () => (isBicone(this.configResult) ? this.configResult : null),
       configFace: () => this.pickedFace,
-      selectConfigFace: (face: ConfigFace | null, turn = false) => this.selectConfigFace(face, turn),
-      /** Where a face's centre is on the page, on the view cube and on the sketch (null when it faces away). */
-      cubeFacePoint: (face: ConfigFace) => this.viewCube?.faceCentreClient(face) ?? null,
-      sketchFacePoint: (face: ConfigFace) => this.sketch?.faceCentreClient(face) ?? null,
+      selectConfigFace: (face: ConfigPick | null, turn = false) => this.selectConfigFace(face, turn),
+      /** Why the bicone shows nothing (null: it does, or the box is used). */
+      configStatus: () => this.configStatus(),
+      /** Where a face's (or a cone's) middle is on the page, on the view cube and on the sketch (null when it faces away). */
+      cubeFacePoint: (face: ConfigPick) => this.viewCube?.faceCentreClient(face) ?? null,
+      sketchFacePoint: (face: ConfigPick) => this.sketch?.faceCentreClient(face) ?? null,
       /** The sketch's arrows: how many, and where the middle of a scar's is on the page (null when it faces away). */
       sketchArrowCount: () => this.sketch?.arrowCount() ?? 0,
       sketchArrowPoint: (id: string) => this.sketch?.arrowClient(id) ?? null,

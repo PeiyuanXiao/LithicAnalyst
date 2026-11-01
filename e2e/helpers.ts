@@ -60,10 +60,13 @@ export interface LithicApi {
   observers(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }>;
   projectJson(): ProjectFile;
   configuration(): import('../src/compute/configuration').ConfigurationResult | null;
-  configFace(): import('../src/core/fields').ConfigFace | null;
-  selectConfigFace(face: import('../src/core/fields').ConfigFace | null, turn?: boolean): void;
-  cubeFacePoint(face: import('../src/core/fields').ConfigFace): { x: number; y: number } | null;
-  sketchFacePoint(face: import('../src/core/fields').ConfigFace): { x: number; y: number } | null;
+  /** The bicone's result (with the bicone model). */
+  bicone(): import('../src/compute/bicone').BiconeResult | null;
+  configStatus(): import('../src/ui/appApi').ConfigStatus | null;
+  configFace(): import('../src/ui/appApi').ConfigPick | null;
+  selectConfigFace(face: import('../src/ui/appApi').ConfigPick | null, turn?: boolean): void;
+  cubeFacePoint(face: import('../src/ui/appApi').ConfigPick): { x: number; y: number } | null;
+  sketchFacePoint(face: import('../src/ui/appApi').ConfigPick): { x: number; y: number } | null;
   sketchArrowCount(): number;
   sketchArrowPoint(id: string): { x: number; y: number } | null;
   configPanelShown(): boolean;

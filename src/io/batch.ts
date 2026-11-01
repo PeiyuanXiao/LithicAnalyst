@@ -1,5 +1,6 @@
 import { icc21 } from '../compute/agreement';
-import { computeConfiguration, storedBox, type ConfigBox, type ConfigurationResult } from '../compute/configuration';
+import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
+import { storedBox, type ConfigBox } from '../compute/configuration';
 import { landmarkTable } from '../compute/landmarks';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
@@ -18,8 +19,8 @@ export interface BatchSpecimen {
   auto: AutoMeasurements;
   /** Recomputed from the project's inputs. */
   planes: PlaneResult[];
-  /** Recomputed from the project's inputs and the model's box. */
-  configuration: ConfigurationResult | null;
+  /** Recomputed from the project's inputs and the model's box (the bicone: and the stored volume split). */
+  configuration: CoreConfiguration | null;
   /** From the project file's derived results (the values the app last computed). */
   regions: RegionResult[];
   regionTotals: RegionTotals | null;
@@ -54,6 +55,12 @@ function storedAxes(v: unknown): PrincipalAxes | null {
   return a && isVec(a.mean) && Array.isArray(a.axes) && a.axes.length === 3 && a.axes.every(isVec) && Array.isArray(a.variances) ? a : null;
 }
 
+/** The volume split as stored in a project file, or null. */
+function storedSplit(v: unknown): BatchSpecimen['split'] {
+  const s = v as BatchSpecimen['split'] | undefined;
+  return s && Number.isFinite(s.upper) && Number.isFinite(s.lower) ? { upper: s.upper, lower: s.lower, ratio: typeof s.ratio === 'number' ? s.ratio : null } : null;
+}
+
 /** The automatic measurements as stored in a project file, or null. */
 function storedAuto(v: unknown): AutoMeasurements | null {
   const m = v as AutoMeasurements | null | undefined;
@@ -64,7 +71,7 @@ function storedAuto(v: unknown): AutoMeasurements | null {
  * The results a project stored can stand for its model's (no need to read the
  * mesh): written by this version of the app, with the automatic measurements,
  * — when it has planes — the vertices' axes and — when it has arrows — the box of
- * its volumetric configuration. (The checksum is checked by the caller: the
+ * its volumetric configuration (not needed by the bicone, which uses the stored split). (The checksum is checked by the caller: the
  * project is the model's by its `mesh.sha256`.)
  */
 export function savedResultsUsable(p: BatchProject, appVersion: string): boolean {
@@ -72,7 +79,7 @@ export function savedResultsUsable(p: BatchProject, appVersion: string): boolean
     p.appVersion === appVersion &&
     !!storedAuto(p.derived.measurements) &&
     (!p.state.planes.length || !!storedAxes(p.derived.vertices)) &&
-    (!p.state.scars.some(hasVector) || !!storedBox(p.derived.configuration))
+    (!p.state.scars.some(hasVector) || p.state.configuration.model === 'bicone' || !!storedBox(p.derived.configuration))
   );
 }
 
@@ -108,11 +115,11 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     state,
     auto: primary.measures.auto,
     planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices)),
-    configuration: computeConfiguration(state.scars, state.configuration, primary.measures.box),
+    configuration: coreConfiguration(state, primary.measures.box, storedSplit(derived.split)),
     regions: (derived.regions as BatchSpecimen['regions']) ?? [],
     regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
-    split: (derived.split as BatchSpecimen['split']) ?? null,
+    split: storedSplit(derived.split),
     observers,
   };
 }

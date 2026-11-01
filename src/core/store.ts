@@ -27,7 +27,7 @@ export function emptyProject(): ProjectState {
     semilandmarks: [],
     nodule: { exclude: [], show: false },
     split: null,
-    configuration: { roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null },
+    configuration: { roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } },
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,

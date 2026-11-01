@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { midPointIndex } from '../core/curveGeometry';
+import { autoEdges, midPointIndex } from '../core/curveGeometry';
 import { defaultCurveAttributes } from '../core/fields';
 import type { Curve, ProjectState, Vec3 } from '../core/types';
 import { HOT_HANDLE, pointSegment2D, type ArrowDisplay } from './arrowLayer';
@@ -71,27 +73,36 @@ export function lineMaterial(color: string, width: number, opts: { ghost?: boole
   return m;
 }
 
-/** One curve on screen: dark halo + coloured core (+ faint copy through the surface) and a label. */
+/**
+ * One curve on screen: dark halo + coloured core (+ faint copy through the surface) and a label.
+ * The part a loop was completed with is drawn dashed (its core only).
+ */
 export class CurveVisual {
   readonly root = new THREE.Group();
   readonly label: CSS2DObject | null = null;
   private geometry: LineGeometry | null = null;
+  private parts: LineSegmentsGeometry[] = [];
   private readonly halo: Line2;
-  private readonly core: Line2;
+  private readonly core: LineSegments2;
+  private readonly dash: LineSegments2;
   private readonly ghost: Line2;
   /** Points currently drawn (original coordinates). */
   points: Vec3[] = [];
   closed = false;
+  private dashKey = '';
 
   constructor(withLabel: boolean, onLabelClick?: () => void) {
     this.halo = new Line2(undefined, lineMaterial(CURVE_COLORS.halo, WIDTH + HALO, { halo: true }));
-    this.core = new Line2(undefined, lineMaterial(CURVE_COLORS.types.other, WIDTH));
+    this.core = new LineSegments2(undefined, lineMaterial(CURVE_COLORS.types.other, WIDTH));
+    this.dash = new LineSegments2(undefined, lineMaterial(CURVE_COLORS.types.other, WIDTH, { dash: [1, 1] }));
     this.ghost = new Line2(undefined, lineMaterial(CURVE_COLORS.types.other, WIDTH, { ghost: true }));
     this.halo.renderOrder = 10;
     this.core.renderOrder = 11;
+    this.dash.renderOrder = 11;
+    this.dash.visible = false;
     this.ghost.renderOrder = 900;
-    for (const l of [this.halo, this.core, this.ghost]) l.frustumCulled = false;
-    this.root.add(this.halo, this.core, this.ghost);
+    for (const l of [this.halo, this.core, this.dash, this.ghost]) l.frustumCulled = false;
+    this.root.add(this.halo, this.core, this.dash, this.ghost);
     if (withLabel) {
       const el = document.createElement('button');
       el.type = 'button';
@@ -107,13 +118,21 @@ export class CurveVisual {
     }
   }
 
-  /** Points in original coordinates; `origin` is subtracted for float precision on the GPU. */
-  setPoints(points: Vec3[], closed: boolean, origin: Vec3): void {
-    if (points === this.points && closed === this.closed && this.geometry) return;
+  /**
+   * Points in original coordinates; `origin` is subtracted for float precision on the GPU.
+   * `dashed`: for each edge, drawn dashed (`dash` long dashes and gaps, world units).
+   */
+  setPoints(points: Vec3[], closed: boolean, origin: Vec3, dashed: boolean[] | null = null, dash = 1): void {
+    const dashKey = dashed ? `${dash}:${dashed.map(Number).join('')}` : '';
+    if (points === this.points && closed === this.closed && dashKey === this.dashKey && this.geometry) return;
     this.points = points;
     this.closed = closed;
+    this.dashKey = dashKey;
     this.geometry?.dispose();
     this.geometry = null;
+    for (const g of this.parts) g.dispose();
+    this.parts = [];
+    this.dash.visible = false;
     const n = points.length + (closed && points.length > 2 ? 1 : 0);
     this.root.visible = points.length >= 2;
     if (points.length < 2) return;
@@ -130,6 +149,24 @@ export class CurveVisual {
     this.halo.geometry = g;
     this.core.geometry = g;
     this.ghost.geometry = g;
+    if (dashed?.some(Boolean)) {
+      // the core in two sets of edges: plain and dashed
+      const pairs = (on: boolean) => {
+        const out: number[] = [];
+        for (let i = 0; i + 1 < n; i++) if (!!dashed[i] === on) for (const k of [i, i + 1]) out.push(flat[3 * k], flat[3 * k + 1], flat[3 * k + 2]);
+        return out;
+      };
+      const plain = new LineSegmentsGeometry().setPositions(pairs(false));
+      const dashes = new LineSegmentsGeometry().setPositions(pairs(true));
+      this.parts = [plain, dashes];
+      this.core.geometry = plain;
+      this.dash.geometry = dashes;
+      this.dash.computeLineDistances();
+      const m = this.dash.material as LineMaterial;
+      m.dashSize = dash;
+      m.gapSize = 0.7 * dash;
+      this.dash.visible = true;
+    }
     if (this.label) {
       const m = points[midPointIndex(points)];
       this.label.position.set(m[0] - origin[0], m[1] - origin[1], m[2] - origin[2]);
@@ -157,6 +194,14 @@ export class CurveVisual {
     ghost.color.set(color);
     ghost.linewidth = width;
     this.ghost.visible = ghostOn;
+    const dash = this.dash.material as LineMaterial;
+    dash.color.set(color);
+    dash.linewidth = width;
+    if (dash.opacity !== opacity) {
+      dash.opacity = opacity;
+      dash.transparent = opacity < 1;
+      dash.needsUpdate = true;
+    }
   }
 
   setLabel(text: string | null, color: string, selected: boolean, hovered = false): void {
@@ -177,7 +222,8 @@ export class CurveVisual {
 
   dispose(): void {
     this.geometry?.dispose();
-    for (const l of [this.halo, this.core, this.ghost]) (l.material as LineMaterial).dispose();
+    for (const g of this.parts) g.dispose();
+    for (const l of [this.halo, this.core, this.dash, this.ghost]) (l.material as LineMaterial).dispose();
     if (this.label) {
       this.label.element.remove();
       this.root.remove(this.label);
@@ -366,8 +412,10 @@ export class CurveLayer {
       }
       const isSel = c.id === selected;
       const isHov = !isSel && c.id === this.hovered;
-      const pts = this.override?.id === c.id ? this.override.points : c.points;
-      v.setPoints(pts, c.closed, this.origin);
+      const dragged = this.override?.id === c.id;
+      const pts = dragged ? this.override!.points : c.points;
+      // the stretch filled in by "Complete loop" (not while an anchor is dragged)
+      v.setPoints(pts, c.closed, this.origin, dragged ? null : autoEdges(c), this.viewer.diagonal * 0.012);
       const color = isSel ? CURVE_COLORS.selected : this.fixedColor ?? curveColor(c);
       const dim = this.dimmed && !isSel;
       v.style(color, isSel ? WIDTH_SELECTED : isHov ? WIDTH_HOVER : WIDTH, display.showHidden && !dim, dim ? 0.3 : 1);

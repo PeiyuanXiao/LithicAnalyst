@@ -2784,6 +2784,22 @@ input[type="checkbox"]:disabled {
   padding: 8px 10px 10px;
 }
 
+/* box / bicone, and why the bicone shows nothing */
+.config-model-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.config-model-row[hidden],
+.config-sketch-wrap[hidden],
+.config-traits[hidden],
+.config-status[hidden] {
+  display: none;
+}
+
 .config-sketch-wrap {
   margin-bottom: 8px;
 }

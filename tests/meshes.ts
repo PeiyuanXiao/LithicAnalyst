@@ -80,6 +80,38 @@ export function merge(...meshes: Mesh[]): Mesh {
 
 export const moved = (m: Mesh, d: Vec3): Mesh => ({ positions: m.positions.map((x, i) => x + d[i % 3]), index: m.index });
 
+/**
+ * Two cones base to base, the rim (radius r) at z = 0 and the apexes at z = up
+ * and z = −down: `segments` vertices round every ring (all at the same angles),
+ * `rings` bands from each apex to the rim. Triangles outward. `rim` is the index
+ * of the rim's first vertex (the rest follow round the ring).
+ */
+export function bicone(r: number, up: number, down: number, segments: number, rings: number): Mesh & { rim: number } {
+  const pos: number[] = [0, 0, up];
+  const ring = (rad: number, z: number) => {
+    const start = pos.length / 3;
+    for (let j = 0; j < segments; j++) pos.push(rad * Math.cos((2 * Math.PI * j) / segments), rad * Math.sin((2 * Math.PI * j) / segments), z);
+    return start;
+  };
+  const bands: number[] = [];
+  for (let k = 1; k <= rings; k++) bands.push(ring((r * k) / rings, up * (1 - k / rings)));
+  const rim = bands[bands.length - 1];
+  for (let k = rings - 1; k >= 1; k--) bands.push(ring((r * k) / rings, -down * (1 - k / rings)));
+  const bottom = pos.length / 3;
+  pos.push(0, 0, -down);
+  const idx: number[] = [];
+  const next = (j: number) => (j + 1) % segments;
+  for (let j = 0; j < segments; j++) idx.push(0, bands[0] + j, bands[0] + next(j));
+  for (let b = 0; b + 1 < bands.length; b++)
+    for (let j = 0; j < segments; j++) {
+      const a0 = bands[b] + j, a1 = bands[b] + next(j), b0 = bands[b + 1] + j, b1 = bands[b + 1] + next(j);
+      idx.push(a0, b0, b1, a0, b1, a1);
+    }
+  const last = bands[bands.length - 1];
+  for (let j = 0; j < segments; j++) idx.push(bottom, last + next(j), last + j);
+  return { positions: new Float32Array(pos), index: new Uint32Array(idx), rim };
+}
+
 /** The mesh as a binary PLY file (little endian, float positions, triangle faces). */
 export function plyBytes(m: Mesh): Uint8Array {
   const nv = m.positions.length / 3, nf = m.index.length / 3;

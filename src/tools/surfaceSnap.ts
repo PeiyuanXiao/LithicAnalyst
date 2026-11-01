@@ -89,6 +89,16 @@ export class SurfaceSnap {
     return mode === 'off' ? null : (this.fields.get(mode)?.cost ?? null);
   }
 
+  /** Feature strength per vertex in `mode` (null for 'off' or before it is prepared). */
+  strength(mode: SnapMode): Float32Array | null {
+    return mode === 'off' ? null : (this.fields.get(mode)?.strength ?? null);
+  }
+
+  /** The mesh's one-ring neighbours (null until prepared). */
+  adjacency(): Adjacency | null {
+    return this.disposed ? null : this.adj;
+  }
+
   /** A reusable path search: slot 0 for drawing, 1 and 2 for editing. */
   search(slot: number): PathSearch | null {
     if (!this.adj || this.disposed) return null;

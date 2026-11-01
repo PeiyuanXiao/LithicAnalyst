@@ -1,4 +1,4 @@
-import type { ConfigurationResult } from '../compute/configuration';
+import { isBicone, type CoreConfiguration } from '../compute/bicone';
 import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
 import type { RegionResult, RegionTotals } from '../compute/regions';
@@ -32,9 +32,10 @@ export const csvCell = (v: unknown): string => {
  * Enumerated fields are written as their codes (e.g. "bulb_truncated"), which
  * stay the same in every interface language. `platform_face` and
  * `flaking_surface` come from the volumetric configuration (empty without it,
- * or for a scar on a face that is no flaking surface).
+ * or for a scar on a face or cone that is no flaking surface; the bicone has no
+ * platforms).
  */
-export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, config: ConfigurationResult | null = null): string {
+export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, config: CoreConfiguration | null = null): string {
   const header = [
     'specimen_id',
     'scar_id',
@@ -50,7 +51,7 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
     'flaking_surface',
     'unit',
   ];
-  const placed = new Map((config?.scars ?? []).map((p) => [p.id, p]));
+  const placed = new Map<string, { platform?: string; surface: string | null }>((config?.scars ?? []).map((p) => [p.id, p]));
   const rows = state.scars.filter(hasVector).map((a) =>
     [
       csvCell(state.specimen.id),
@@ -253,11 +254,13 @@ export function seriesCsv(state: Readonly<ProjectState>, opts: CsvOptions): stri
 
 /**
  * Volumetric configuration, one row per specimen (codes; empty without a flaking surface,
- * or without arrows). `file`: the model's path, in a summary export only.
+ * or without arrows). The bicone gives no relations and no polarity. `file`: the
+ * model's path, in a summary export only.
  */
-export function configurationCsv(state: Readonly<ProjectState>, config: ConfigurationResult | null, opts: CsvOptions, file?: string): string {
-  const header = ['specimen_id', 'frame', 'facial_character', 'flaking_surface_relation', 'platform_relation', 'polarity'];
-  const row = [csvCell(state.specimen.id), config?.frame ?? '', config?.facialCharacter ?? '', config?.flakingSurfaceRelation ?? '', config?.platformRelation ?? '', config?.polarity ?? ''];
+export function configurationCsv(state: Readonly<ProjectState>, config: CoreConfiguration | null, opts: CsvOptions, file?: string): string {
+  const header = ['specimen_id', 'model', 'frame', 'facial_character', 'flaking_surface_relation', 'platform_relation', 'polarity'];
+  const box = config && !isBicone(config) ? config : null;
+  const row = [csvCell(state.specimen.id), config?.model ?? state.configuration.model, config?.frame ?? '', config?.facialCharacter ?? '', box?.flakingSurfaceRelation ?? '', box?.platformRelation ?? '', box?.polarity ?? ''];
   if (file !== undefined) {
     header.push('file');
     row.push(csvCell(file));
@@ -265,12 +268,18 @@ export function configurationCsv(state: Readonly<ProjectState>, config: Configur
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }
 
-/** One row per flaking surface: its faces and platforms (face codes joined by ";"), scars, type and exploitation axis. */
-export function flakingSurfacesCsv(state: Readonly<ProjectState>, config: ConfigurationResult | null, opts: CsvOptions, file?: string): string {
+/**
+ * One row per flaking surface: its faces and platforms (face codes joined by ";"), scars,
+ * type and exploitation axis; for the bicone, its cone (`upper` / `lower`) and scars only.
+ */
+export function flakingSurfacesCsv(state: Readonly<ProjectState>, config: CoreConfiguration | null, opts: CsvOptions, file?: string): string {
   const header = ['specimen_id', 'surface_id', 'faces', 'platforms', 'also_platform', 'n_scars', 'surface_type', 'exploitation_axis'];
   if (file !== undefined) header.push('file');
-  const rows = (config?.surfaces ?? []).map((s) => {
-    const row = [csvCell(state.specimen.id), s.id, s.faces.join(';'), s.platforms.join(';'), String(s.alsoPlatform), String(s.scarIds.length), s.type, s.axis];
+  const surfaces = !config ? [] : isBicone(config)
+    ? config.surfaces.map((s) => [s.id, s.cone, '', '', String(s.scarIds.length), '', ''])
+    : config.surfaces.map((s) => [s.id, s.faces.join(';'), s.platforms.join(';'), String(s.alsoPlatform), String(s.scarIds.length), s.type, s.axis]);
+  const rows = surfaces.map((cells) => {
+    const row = [csvCell(state.specimen.id), ...cells];
     if (file !== undefined) row.push(csvCell(file));
     return row.join(',');
   });

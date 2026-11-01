@@ -184,6 +184,18 @@ export type SurfaceType = (typeof SURFACE_TYPES)[number];
 /** `na`: automatic only (centripetal, or no platforms on one axis). */
 export const EXPLOITATION_AXES = ['long', 'short', 'na'] as const;
 export type ExploitationAxis = (typeof EXPLOITATION_AXES)[number];
+/** The model of the configuration: the box (six faces) or the bicone (two cones on the split curve). */
+export const CONFIG_MODELS = ['box', 'bicone'] as const;
+export type ConfigModel = (typeof CONFIG_MODELS)[number];
+/** The bicone's cones, upper first (`faces` in flaking_surfaces.csv). */
+export const BICONE_CONES = ['upper', 'lower'] as const;
+export type BiconeCone = (typeof BICONE_CONES)[number];
+/** Physical sides of the bicone: the side the split curve's normal points to (by its `upHint`), and the other. */
+export const BICONE_SIDES = ['positive', 'negative'] as const;
+export type BiconeSide = (typeof BICONE_SIDES)[number];
+/** In the order the interface shows them. */
+export const BICONE_ROLES = ['flaking', 'none'] as const;
+export type BiconeRole = (typeof BICONE_ROLES)[number];
 
 function defaultsOf(fields: FieldDef[]): Record<string, AttributeValue> {
   const out: Record<string, AttributeValue> = {};

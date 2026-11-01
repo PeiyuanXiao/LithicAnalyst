@@ -37,9 +37,9 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.landmarks` | array | fixed landmarks in export order (`{ id, name, point }`) |
 | `annotations.semilandmarks` | array | curve semilandmark sets (`{ id, label, curveId, count, startLandmarkId, endLandmarkId }`), see below |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
-| `split` | `{ source, id, upHint }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal |
+| `split` | `{ source, id, upHint, swap }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal; `swap: true` exchanges upper and lower (files without it: `false`) |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
-| `configuration` | `{ roles, joins, surfaceType, axis, polarity }` | manual corrections to the volumetric configuration, see below; files without it have none |
+| `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
@@ -125,8 +125,8 @@ fitted planes, fitted spheres, volumes ….
   clipped triangles on each side are summed (divergence theorem). By a closed curve: the curve's
   mesh edges split the surface in two; each side is closed by a fan from the centre of the curve
   (no volume with that centre as the reference point). Upper = the side the normal points to
-  (the plane's normal, or the normal of the plane fitted to the curve, oriented by `upHint`).
-  Closed meshes only.
+  (the plane's normal, or the normal of the plane fitted to the curve, oriented by `upHint`);
+  with `split.swap` the two are exchanged (also `ratio`). Closed meshes only.
 * `relations`: checks of the relations and sequences, by scar and sequence id:
   `{ cycles, cycleEdges, sequenceConflicts, orderConflicts, unassigned, count, direct }`.
   Only `a_cuts_b` relations take part (as `{ later, earlier }`). `cycles`: groups of scars whose
@@ -149,8 +149,9 @@ fitted planes, fitted spheres, volumes ….
   vertices projected onto the plane, or the second when the first is almost along the normal,
   with its largest component positive; +Y = Z × X).
 
-* `configuration`: the volumetric configuration of the core (null without scars with an arrow, or
-  before the mesh is measured), see the next section.
+* `configuration`: the volumetric configuration of the core by the box or the bicone (null without
+  scars with an arrow, before the mesh is measured, or for the bicone without a split by a closed
+  curve on a closed mesh), see the next section.
 
 ## Volumetric configuration
 
@@ -212,15 +213,18 @@ face's centre (in the face, the cosine between the scar's direction and start �
 **Corrections** (`configuration` at the top level):
 
 ```json
-{ "roles": { "back": "flaking" }, "joins": { "front|right": false }, "surfaceType": { "front": "narrow" }, "axis": {}, "polarity": null }
+{ "roles": { "back": "flaking" }, "joins": { "front|right": false }, "surfaceType": { "front": "narrow" }, "axis": {}, "polarity": null, "model": "box", "bicone": { "roles": {} } }
 ```
 
 * `roles`: face code → role. `joins`: two adjacent face codes in face order joined by `|` →
   whether they are one surface. `surfaceType` (`wide` / `narrow`) and `axis` (`long` / `short`):
   written to every face of the surface; a surface takes the value of its first face (in face order)
   that has one, else the automatic value. `polarity`: one of the polarity codes, or null.
+* `model`: `box` (default; files without it) or `bicone`, see below. `bicone.roles`: the bicone's
+  role corrections by physical side, `positive` / `negative` → `flaking` / `none`.
 * Faces follow the box's orientation, so a change of `specimen.frame` (also setting or clearing it)
-  clears `roles`, `joins`, `surfaceType` and `axis` in the same undo step; `polarity` stays.
+  clears `roles`, `joins`, `surfaceType` and `axis` in the same undo step; `polarity`, `model` and
+  `bicone` stay.
 * Unknown faces and codes are dropped when a file is read.
 
 **Derived** (`derived.configuration`): `frame`; `axes` (X, Y, Z, unit vectors in original
@@ -231,7 +235,39 @@ platform, surface }`, `surface` null when the face is not a flaking surface); `f
 autoRole, role, scars }`); `joins` (`{ faces, auto, joined }` for each pair of adjacent flaking
 faces); `surfaces` (`{ id, faces, mainFace, platforms, alsoPlatform, scarIds, centripetal, autoType, type,
 autoAxis, axis }`); and `facialCharacter`, `flakingSurfaceRelation`, `platformRelation`,
-`autoPolarity`, `polarity`.
+`autoPolarity`, `polarity`; `model` is `"box"`.
+
+### The bicone model
+
+For cores made of two surfaces round one plane of intersection (Levallois, discoid, prepared,
+centripetal cores): two cones sharing one round base, as large as the volume split makes them. A
+conceptual aid only: it does not tell discoid from Levallois, gives no polarity (taken as
+centripetal) and no platforms. It can be chosen when the volume is split along a closed curve
+(`split.source: "curve"`); it uses that split's volumes and nothing else is computed for it.
+
+* **Base**: the plane fitted to the split curve's points (principal components, through their
+  mean), its normal pointing to the upper side of the split (oriented by `split.upHint`, the other
+  way when `split.swap`). The curve projected onto the plane gives the area A and its area centroid
+  O (shoelace formula); R = √(A / π).
+* **Heights**: h(upper) = 3 V(upper) / A, h(lower) = 3 V(lower) / A (cones on that base with the
+  split's volumes). Stored as they are; the sketch draws each at least 0.1 R high.
+* **Scars**: a scar is on the upper cone when its end is on the upper side of the plane through O
+  (its start is on the rim and says nothing).
+* **Roles** (codes `flaking`, `none`): a cone with a scar is `flaking`, else `none`; the role used is
+  the correction, else the automatic role. Corrections are kept by physical side: `positive` is the
+  side the curve's normal points to when oriented by `split.upHint` (the upper cone unless swapped),
+  `negative` the other, so a correction stays with its cone when upper and lower are swapped.
+* **Traits**: only the facial character (one flaking cone `unifacial`, two `bifacial`, none null)
+  and the flaking surfaces: the flaking cones, upper first, `F1`, `F2`.
+* "Up" in the base (`reference`): the specimen frame's Y projected onto the plane; without a frame
+  (or when Y is nearly along the normal), the curve's first principal axis.
+
+**Derived** (`derived.configuration` with `model: "bicone"`): `frame` (`specimen` when
+`specimen.frame` is set, else `principal`); `plane` (`{ point, normal }`, the normal toward the
+upper cone); `centre` (O); `area`; `radius`; `upperHeight`, `lowerHeight` (true values);
+`reference`; `scars` (`{ id, cone, surface }`, `cone` `upper` / `lower`, `surface` null when the cone
+is not flaking); `cones` (`{ cone, side, autoRole, role, scars }`, upper then lower); `surfaces`
+(`{ id, cone, scarIds }`); `facialCharacter`.
 
 ## Surface region
 
@@ -418,6 +454,19 @@ Defined in `src/core/fields.ts`.
 * Coordinates are stored to 6 decimals.
 * `points` are kept as traced: later versions of the tracing method do not change saved curves
   until an anchor is moved.
+* `completion` (optional): the curve was closed by "Complete loop" —
+  `{ "method": "outline", "firstAutoAnchor": n, "stepDeg": 2 }`, and `userAnchors` (ascending
+  indices) when some of them were moved since. The anchors from `firstAutoAnchor` on were placed
+  automatically: the curve's points were fitted with a plane (rejected when the second principal
+  variance is under 1 % of the first); the mesh's vertex centroid projected onto it is the centre;
+  the curve had to go at least 90° round it. Seen along the plane's normal, the gap was cut into
+  stretches of about `stepDeg` degrees (centred every step from the curve's end), and in each the
+  vertex furthest from the centre taken (one more than 10 % nearer the centre than another within
+  three stretches is left out). Each was snapped onto a ridge within 5 % of its distance from the
+  centre, and they were joined by the curve tracing (ridge mode) from the curve's end round to its
+  start. An automatic anchor the user moves is added to `userAnchors`; when all are there,
+  `completion` is removed. Segments with an automatic anchor at either end are drawn dashed. A
+  `completion` that does not fit the curve's anchors is dropped when the file is read.
 
 ### Curve attributes
 
@@ -442,15 +491,18 @@ specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completenes
 ```
 
 Volumetric configuration (`<specimen>_configuration.csv`, one row; codes as in the project file,
-empty where a trait has no value):
+empty where a trait has no value; `model` is `box` or `bicone`, written for both — the bicone
+leaves the two relations and the polarity empty; with the bicone `platform_face` in the arrow CSV
+is empty and `flaking_surface` is the scar's cone's surface):
 
 ```
-specimen_id,frame,facial_character,flaking_surface_relation,platform_relation,polarity
+specimen_id,model,frame,facial_character,flaking_surface_relation,platform_relation,polarity
 ```
 
 Flaking surfaces (`<specimen>_flaking_surfaces.csv`, one row per surface; `faces` and `platforms`
 are face codes joined by `;`; `also_platform` is `true` when one of its faces is a platform of
-another surface's scars):
+another surface's scars; for the bicone, one row per flaking cone, upper first, `faces` `upper` or
+`lower` and `platforms`, `also_platform`, `surface_type`, `exploitation_axis` empty):
 
 ```
 specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis
@@ -592,7 +644,8 @@ The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cort
 
 In the summary export, `configuration.csv` and `flaking_surfaces.csv` hold the models that have a
 configuration (arrows on a measured model) and end with a `file` column as well. A project's stored
-box (`derived.configuration`) stands for its model like the other stored results.
+box (`derived.configuration`) stands for its model like the other stored results; the bicone needs
+no box and uses the project's stored split (`derived.split`).
 
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.

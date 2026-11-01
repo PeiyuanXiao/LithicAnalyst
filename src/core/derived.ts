@@ -1,4 +1,5 @@
-import { computeConfiguration, type ConfigBox, type ConfigurationResult } from '../compute/configuration';
+import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
+import type { ConfigBox } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
@@ -54,14 +55,14 @@ export interface DerivedResults {
   regionTotals: RegionTotals | null;
   /** Sphere fitted to the chosen cortex regions (null without cortex, or before the mesh is partitioned). */
   nodule: (SphereFit & { regions: string[] }) | null;
-  /** Upper and lower volume (null without a split, a closed mesh, or a valid plane / closed curve). */
+  /** Upper and lower volume, exchanged when the split is swapped (null without a split, a closed mesh, or a valid plane / closed curve). */
   split: VolumeSplit | null;
   /** Checks of the relations and sequences (scar ids), and the direct relations. */
   relations: RelationResults;
   /** Every landmark in export order (fixed, then each set's semilandmarks), the sliders, and the sets' points. */
   landmarks: LandmarkTable;
-  /** Volumetric configuration of the core (null without arrows or before the mesh is measured). */
-  configuration: ConfigurationResult | null;
+  /** Volumetric configuration of the core by the box or the bicone model (null without arrows, before the mesh is measured, or for the bicone without a split by a closed curve). */
+  configuration: CoreConfiguration | null;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -104,6 +105,6 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     split: mesh?.split ?? null,
     relations: relationResults(state),
     landmarks: landmarkTable(state),
-    configuration: computeConfiguration(state.scars, state.configuration, mesh?.box ?? null),
+    configuration: coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null),
   };
 }

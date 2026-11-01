@@ -212,3 +212,46 @@ export function sphereMesh(subdivisions = 3): Mesh {
 }
 
 export const spherePly = (): MeshFile => ({ name: 'nodule.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(sphereMesh()) });
+
+/**
+ * A discoid core as two cones base to base, axis along z, away from the origin:
+ * the rim (radius 30) at the centre's height, the apexes 10 above and 20 below.
+ * Every ring has its vertices at the same angles. `open` leaves out the lower
+ * apex's triangles (a mesh with a hole).
+ */
+export const BICONE = { center: [80, -40, 15] as Vec3, radius: 30, upper: 10, lower: 20, segments: 96, rings: 6 };
+
+/** On the bicone at angle `deg` round the axis (0° along +x), `rho` of the radius out from it, on the upper or lower cone. */
+export const biconePoint = (deg: number, rho: number, upper = true): Vec3 => {
+  const t = (deg * Math.PI) / 180;
+  const h = upper ? BICONE.upper : -BICONE.lower;
+  return [BICONE.center[0] + rho * BICONE.radius * Math.cos(t), BICONE.center[1] + rho * BICONE.radius * Math.sin(t), BICONE.center[2] + h * (1 - rho)];
+};
+
+export function biconeMesh(open = false): Mesh {
+  const { segments: n, rings } = BICONE;
+  const pos: number[] = [...biconePoint(0, 0, true)];
+  const ring = (rho: number, upper: boolean) => {
+    const start = pos.length / 3;
+    for (let j = 0; j < n; j++) pos.push(...biconePoint((360 * j) / n, rho, upper));
+    return start;
+  };
+  const bands: number[] = [];
+  for (let k = 1; k <= rings; k++) bands.push(ring(k / rings, true));
+  for (let k = rings - 1; k >= 1; k--) bands.push(ring(k / rings, false));
+  const bottom = pos.length / 3;
+  pos.push(...biconePoint(0, 0, false));
+  const idx: number[] = [];
+  const next = (j: number) => (j + 1) % n;
+  for (let j = 0; j < n; j++) idx.push(0, bands[0] + j, bands[0] + next(j));
+  for (let b = 0; b + 1 < bands.length; b++)
+    for (let j = 0; j < n; j++) {
+      const a0 = bands[b] + j, a1 = bands[b] + next(j), b0 = bands[b + 1] + j, b1 = bands[b + 1] + next(j);
+      idx.push(a0, b0, b1, a0, b1, a1);
+    }
+  const last = bands[bands.length - 1];
+  if (!open) for (let j = 0; j < n; j++) idx.push(bottom, last + next(j), last + j);
+  return { positions: new Float32Array(pos), index: new Uint32Array(idx) };
+}
+
+export const biconePly = (open = false): MeshFile => ({ name: open ? 'bicone-open.ply' : 'bicone.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(biconeMesh(open)) });

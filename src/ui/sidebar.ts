@@ -19,7 +19,9 @@ import {
   deleteSection,
   deleteRegion,
   resetConfigFace,
+  setBiconeRole,
   setConfigAxis,
+  setConfigModel,
   setConfigJoin,
   setConfigPolarity,
   setConfigRole,
@@ -27,6 +29,7 @@ import {
   setNoduleRegion,
   setNoduleShown,
   setSplit,
+  swapSplit,
   deleteScar,
   flipPlane,
   setPlaneCurve,
@@ -40,7 +43,8 @@ import {
   setScarLabel,
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
-import { CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, offeredOptions, POLARITIES, REGION_FIELDS, SCAR_FIELDS, type ConfigFace, type ConfigRole, type FieldDef, type Polarity } from '../core/fields';
+import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, offeredOptions, POLARITIES, REGION_FIELDS, SCAR_FIELDS, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity } from '../core/fields';
+import { isBicone, type BiconeResult } from '../compute/bicone';
 import type { ConfigurationResult, FlakingSurface } from '../compute/configuration';
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -289,7 +293,7 @@ function curvesSection(api: AppApi): Section {
   body.append(list, inspector);
 
   let builtFor: string | null = null;
-  let refs: { label: HTMLInputElement; setters: Array<(c: Curve) => void>; meta: HTMLElement } | null = null;
+  let refs: { label: HTMLInputElement; setters: Array<(c: Curve) => void>; meta: HTMLElement; complete: HTMLButtonElement } | null = null;
 
   const renderList = () => {
     const st = api.store.state;
@@ -379,8 +383,10 @@ function curvesSection(api: AppApi): Section {
       );
       const fields = CURVE_FIELDS.map((f) => buildField(f, c));
       const meta = h('dl', { class: 'num-grid' });
-      inspector.append(head, ...fields.map((f) => f.el), meta);
-      refs = { label, setters: fields.map((f) => f.set), meta };
+      // an open curve along part of the edge, carried on round until it closes
+      const complete = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'curve-complete', onclick: () => api.selection.id && api.completeLoop(api.selection.id) }, t('curves.complete')) as HTMLButtonElement;
+      inspector.append(head, ...fields.map((f) => f.el), meta, h('div', { class: 'btn-row' }, complete));
+      refs = { label, setters: fields.map((f) => f.set), meta, complete };
       builtFor = c.id;
     }
     softSet(refs.label, c.label);
@@ -388,6 +394,8 @@ function curvesSection(api: AppApi): Section {
     clear(refs.meta);
     const u = st.specimen.unit;
     refs.meta.append(...numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), ...textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
+    (refs.complete.parentElement as HTMLElement).hidden = c.closed;
+    refs.complete.disabled = c.anchors.length < 3 || api.completingLoop();
   };
 
   const refresh = (kind: RefreshKind) => {
@@ -923,24 +931,65 @@ const surfaceText = (s: FlakingSurface) => `${s.id} ${s.faces.map(faceName).join
 /** One value per flaking surface: "F1 Wide · F2 Narrow". */
 const perSurface = (r: ConfigurationResult, value: (s: FlakingSurface) => string) => (r.surfaces.length ? r.surfaces.map((s) => `${s.id} ${value(s)}`).join(' · ') : MISSING);
 
-/** The volumetric configuration, for the panel over the view: the sketch, the seven traits, the picked face's card; and the title bar's pill. */
+/** The bicone's flaking surfaces: "Upper", "Lower", "Upper, lower". */
+const coneSurfaces = (r: BiconeResult) =>
+  r.surfaces.length === 2 ? t('config.cones.both') : r.surfaces.length ? t(`config.cone.${r.surfaces[0].cone}`) : MISSING;
+
+/**
+ * The volumetric configuration, for the panel over the view: the model (box or bicone, when the
+ * volume is split along a closed curve), the sketch, the traits (seven for the box, two for the
+ * bicone), the picked face's or cone's card; and the title bar's pill.
+ */
 function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
   const pill = h('span', { class: 'pill', id: 'config-frame', hidden: true }, t('config.principal'));
   const el = h('div', { class: 'config-content' });
   const body = el;
+  const model = segmented('config-model', null, CONFIG_MODELS.map((v) => ({ value: v, label: t(`config.model.${v}`) })), api.store.state.configuration.model, (v) => setConfigModel(api.store, v as ConfigModel));
+  const status = h('span', { class: 'pill config-status', id: 'config-status', hidden: true });
+  const modelRow = h('div', { class: 'config-model-row', id: 'config-model-row' }, model.el, status);
   const sketch = h('div', { class: 'config-sketch-wrap' }, api.configSketch().canvas);
   const traits = h('dl', { class: 'num-grid config-traits', id: 'config-traits' });
   const card = h('div', { class: 'config-card', id: 'config-card' });
-  body.append(sketch, traits, card);
+  body.append(modelRow, sketch, traits, card);
   const polarity = h('select', { class: 'ctl-select config-polarity', id: 'config-polarity', 'aria-label': t('config.polarity') }) as HTMLSelectElement;
   polarity.addEventListener('change', () => setConfigPolarity(api.store, (polarity.value || null) as Polarity | null));
+
+  /** The picked cone: its scars, whether it was edited, its role, and the swap of upper and lower. */
+  const renderConeCard = (r: BiconeResult) => {
+    clear(card);
+    const pick = api.configFace();
+    const cone = r.cones.find((x) => x.cone === pick);
+    card.hidden = !cone;
+    if (!cone) return;
+    const edited = api.store.state.configuration.bicone.roles[cone.side] !== undefined;
+    card.dataset.face = cone.cone;
+    card.append(
+      h(
+        'div',
+        { class: 'config-card-head' },
+        h('span', { class: 'config-face-name', id: 'config-face-name' }, t(`config.cone.${cone.cone}`)),
+        h('span', { class: 'config-face-count mono' }, t('config.scars', { n: cone.scars })),
+        h('span', { class: `pill${edited ? ' pill-set' : ''}`, id: 'config-face-state' }, t(edited ? 'config.edited' : 'config.isAuto')),
+        edited ? h('button', { type: 'button', class: 'btn btn-text btn-sm', id: 'config-reset', onclick: () => setBiconeRole(api.store, cone.side, null) }, t('config.reset')) : null,
+      ),
+      segmented(
+        'config-role',
+        null,
+        BICONE_ROLES.map((v) => ({ value: v, label: t(`config.coneRole.${v}`) })),
+        cone.role,
+        (v) => setBiconeRole(api.store, cone.side, v === cone.autoRole ? null : (v as BiconeRole)),
+      ).el,
+      h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'config-swap', onclick: () => swapSplit(api.store) }, t('split.swap'))),
+    );
+  };
 
   const renderCard = (r: ConfigurationResult) => {
     clear(card);
     const st = api.store.state;
     const c = st.configuration;
     // only once a face is picked
-    const face = api.configFace();
+    const pick = api.configFace();
+    const face = pick && pick !== 'upper' && pick !== 'lower' ? pick : null;
     card.hidden = !face;
     if (!face) return;
     const fr = r.faces.find((f) => f.face === face)!;
@@ -989,13 +1038,32 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'configuration', 'arrows', 'specimen', 'mesh', 'figure'].includes(kind)) return;
+    if (!['all', 'configuration', 'arrows', 'specimen', 'mesh', 'figure', 'split'].includes(kind)) return;
     const st = api.store.state;
-    pill.hidden = !!st.specimen.frame;
-    const r = api.configuration();
+    const bicone = st.configuration.model === 'bicone';
+    pill.hidden = !!st.specimen.frame || bicone;
+    // the model can be chosen once the volume is split along a closed curve (and changed back however the split goes)
+    modelRow.hidden = st.split?.source !== 'curve' && !bicone;
+    model.set(st.configuration.model);
+    const reason = api.configStatus();
+    status.hidden = !reason;
+    status.textContent = reason ? t(reason === 'not_closed' ? 'config.notClosed' : 'config.splitInvalid') : '';
+    sketch.hidden = traits.hidden = !!reason;
+    const found = api.configuration();
     clear(traits);
     clear(card);
     clear(polarity);
+    if (bicone) {
+      const b = isBicone(found) ? found : null;
+      traits.append(
+        ...textValueRow(t('config.facial'), b?.facialCharacter ? t(`config.facial.${b.facialCharacter}`) : MISSING, 'config-facial'),
+        ...textValueRow(t('config.surfaces'), b ? coneSurfaces(b) : MISSING, 'config-surfaces'),
+      );
+      if (b) renderConeCard(b);
+      else card.hidden = true;
+      return;
+    }
+    const r = found && !isBicone(found) ? found : null;
     const code = (prefix: string, v: string | null) => (v ? t(`${prefix}.${v}`) : MISSING);
     polarity.append(
       h('option', { value: '', selected: !st.configuration.polarity }, t('config.auto', { value: code('config.polarity', r?.autoPolarity ?? null) })),
@@ -1424,13 +1492,9 @@ function splitSection(api: AppApi): Section {
   const select = h('select', { id: 'split-source', class: 'ctl-select', 'aria-label': t('split.by') }) as HTMLSelectElement;
   select.addEventListener('change', () => {
     const [source, id] = select.value.split(':');
-    setSplit(api.store, source === 'plane' || source === 'curve' ? { source, id, upHint: api.towardViewer() } : null);
+    setSplit(api.store, source === 'plane' || source === 'curve' ? { source, id, upHint: api.towardViewer(), swap: false } : null);
   });
-  const flip = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'split-flip', onclick: () => {
-    const sp = api.store.state.split;
-    if (sp?.source === 'plane') flipPlane(api.store, sp.id);
-    else if (sp) setSplit(api.store, { ...sp, upHint: [-sp.upHint[0], -sp.upHint[1], -sp.upHint[2]] });
-  } }, t('split.flip')) as HTMLButtonElement;
+  const flip = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'split-swap', onclick: () => swapSplit(api.store) }, t('split.swap')) as HTMLButtonElement;
   const meta = h('dl', { class: 'num-grid' });
   const flipRow = h('div', { class: 'btn-row' }, flip);
   body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), select), flipRow, meta);
@@ -1438,8 +1502,12 @@ function splitSection(api: AppApi): Section {
     if (!['all', 'split', 'planes', 'curves', 'mesh', 'specimen', 'measure'].includes(kind)) return;
     const st = api.store.state;
     const options: Array<[string, string]> = [['', t('split.none')]];
+    // closed core edges first: the curve a core is split along
+    const loops = st.curves.filter((c) => c.closed);
+    const edge = (c: Curve) => c.attributes.type === 'core_edge';
+    for (const c of loops.filter(edge)) options.push([`curve:${c.id}`, c.label]);
     for (const p of api.planeResults()) if (p.valid) options.push([`plane:${p.id}`, p.label]);
-    for (const c of st.curves) if (c.closed) options.push([`curve:${c.id}`, c.label]);
+    for (const c of loops.filter((x) => !edge(x))) options.push([`curve:${c.id}`, c.label]);
     // a split whose plane or curve can no longer split stays listed, so it can be seen and cleared
     const current = st.split ? `${st.split.source}:${st.split.id}` : '';
     if (st.split && !options.some(([v]) => v === current)) options.push([current, (st.split.source === 'plane' ? api.store.plane(st.split.id) : api.store.curve(st.split.id))?.label ?? '–']);

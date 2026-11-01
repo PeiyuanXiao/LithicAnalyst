@@ -1,10 +1,10 @@
 import { joinKey, sameAxis } from '../compute/configuration';
 import { isValidShape } from './curveGeometry';
 import { computeDerived, type DerivedResults, type MeshResults } from './derived';
-import { CONFIG_FACES, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, type ConfigFace } from './fields';
+import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, type BiconeRole, type BiconeSide, type ConfigFace } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, ConfigCorrections, Curve, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -163,6 +163,7 @@ function parseCurve(raw: unknown, i: number): Curve {
     isClosed = false;
   }
   const t = nowIso();
+  const completion = isClosed ? parseCompletion(r.completion, anchors.length) : undefined;
   return {
     id: str(r.id) || uuid(),
     label: str(r.label, `C${i + 1}`),
@@ -170,10 +171,24 @@ function parseCurve(raw: unknown, i: number): Curve {
     points: pts,
     anchorIndex,
     closed: isClosed,
+    ...(completion ? { completion } : {}),
     attributes: readAttributes(r.attributes, defaultCurveAttributes()),
     createdAt: str(r.createdAt, t),
     modifiedAt: str(r.modifiedAt, t),
   };
+}
+
+/** The automatic part of a completed loop; dropped when it does not fit the curve's anchors. */
+function parseCompletion(raw: unknown, anchorCount: number): CurveCompletion | undefined {
+  const k = raw as Record<string, unknown> | null | undefined;
+  if (!k || k.method !== 'outline' || typeof k.firstAutoAnchor !== 'number' || !Number.isInteger(k.firstAutoAnchor)) return undefined;
+  const first = k.firstAutoAnchor;
+  if (first < 1 || first >= anchorCount) return undefined;
+  const user = Array.isArray(k.userAnchors) ? [...new Set(k.userAnchors.filter((i): i is number => Number.isInteger(i) && i >= first && i < anchorCount))].sort((a, b) => a - b) : [];
+  if (user.length >= anchorCount - first) return undefined;
+  const out: CurveCompletion = { method: 'outline', firstAutoAnchor: first, stepDeg: typeof k.stepDeg === 'number' && k.stepDeg > 0 ? k.stepDeg : 2 };
+  if (user.length) out.userAnchors = user;
+  return out;
 }
 
 function parseMeasurement(raw: unknown, i: number): Measurement {
@@ -340,6 +355,14 @@ function parseConfiguration(raw: unknown): ConfigCorrections {
     surfaceType: byFace(r.surfaceType, ['wide', 'narrow'] as const),
     axis: byFace(r.axis, ['long', 'short'] as const),
     polarity: POLARITIES.find((p) => p === r.polarity) ?? null,
+    model: CONFIG_MODELS.find((m) => m === r.model) ?? 'box',
+    bicone: (() => {
+      const roles: ConfigCorrections['bicone']['roles'] = {};
+      const b = (r.bicone && typeof r.bicone === 'object' ? r.bicone : {}) as Record<string, unknown>;
+      if (b.roles && typeof b.roles === 'object')
+        for (const [k, x] of Object.entries(b.roles as Record<string, unknown>)) if ((BICONE_SIDES as readonly string[]).includes(k) && (BICONE_ROLES as readonly string[]).includes(x as string)) roles[k as BiconeSide] = x as BiconeRole;
+      return { roles };
+    })(),
   };
 }
 
@@ -404,7 +427,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     split: (() => {
       const sp = raw.split as Record<string, unknown> | null | undefined;
       if (!sp || (sp.source !== 'plane' && sp.source !== 'curve') || typeof sp.id !== 'string') return null;
-      return { source: sp.source, id: sp.id, upHint: isFiniteVec(sp.upHint) ? [sp.upHint[0], sp.upHint[1], sp.upHint[2]] : [0, 0, 1] };
+      return { source: sp.source, id: sp.id, upHint: isFiniteVec(sp.upHint) ? [sp.upHint[0], sp.upHint[1], sp.upHint[2]] : [0, 0, 1], swap: sp.swap === true };
     })(),
     configuration: parseConfiguration(raw.configuration),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),

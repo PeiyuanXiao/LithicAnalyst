@@ -289,7 +289,7 @@ describe('corrections of the volumetric configuration', () => {
     // reset: the face's role, the surface's type and axis, the joins with it
     setConfigJoin(store, 'front', 'right', true);
     resetConfigFace(store, 'front', ['front', 'right']);
-    expect(store.state.configuration).toEqual({ roles: { back: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_orthogonal' });
+    expect(store.state.configuration).toEqual({ roles: { back: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_orthogonal', model: 'box', bicone: { roles: {} } });
   });
 
   it('a new orientation clears the corrections by face in the same step; undo brings them back', () => {
@@ -303,7 +303,7 @@ describe('corrections of the volumetric configuration', () => {
     expect(store.state.configuration).toEqual(before);
     const frame = { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], source: 'view' };
     expect(updateSpecimen(store, { frame }, false)).toBe(true);
-    expect(store.state.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_opposed' });
+    expect(store.state.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_opposed', model: 'box', bicone: { roles: {} } });
     store.history.undo();
     expect(store.state.specimen.frame).toBeNull();
     expect(store.state.configuration).toEqual(before);
@@ -337,7 +337,7 @@ describe('corrections of the volumetric configuration', () => {
     // unknown faces and codes are dropped
     const raw = JSON.parse(JSON.stringify(file));
     raw.configuration = { roles: { front: 'flaking', side: 'flaking', top: 'edge' }, joins: { 'right|front': true, 'front|back': true, 'front|top': 1 }, polarity: 'radial' };
-    expect(parseProjectFile(raw).configuration).toEqual({ roles: { front: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: null });
+    expect(parseProjectFile(raw).configuration).toEqual({ roles: { front: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } });
     delete raw.configuration;
     expect(parseProjectFile(raw).configuration).toEqual(emptyCorrections());
     // no box (mesh not measured): no derived configuration
@@ -353,7 +353,7 @@ describe('configuration CSV', () => {
     const r = computeConfiguration(store.state.scars, store.state.configuration, columnBox);
     const opts = { excelBom: false };
     expect(configurationCsv(store.state, r, opts)).toBe(
-      'specimen_id,frame,facial_character,flaking_surface_relation,platform_relation,polarity\nC1,specimen,bifacial,opposite,opposite,bipolar_opposed\n',
+      'specimen_id,model,frame,facial_character,flaking_surface_relation,platform_relation,polarity\nC1,box,specimen,bifacial,opposite,opposite,bipolar_opposed\n',
     );
     expect(flakingSurfacesCsv(store.state, r, opts)).toBe(
       'specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis\nC1,F1,front,top,false,3,wide,long\nC1,F2,back,bottom,false,1,wide,long\n',
@@ -362,7 +362,7 @@ describe('configuration CSV', () => {
     expect(rows[0].endsWith(',note,platform_face,flaking_surface,unit')).toBe(true);
     expect(rows.slice(1).map((l) => l.split(',').slice(-3).join(','))).toEqual(['top,F1,mm', 'top,F1,mm', 'top,F1,mm', 'bottom,F2,mm']);
     // without a configuration (no mesh measured): the values are empty
-    expect(configurationCsv(store.state, null, opts).split('\n')[1]).toBe('C1,,,,,');
+    expect(configurationCsv(store.state, null, opts).split('\n')[1]).toBe('C1,box,,,,,');
     expect(scarVectorCsv(store.state, opts).split('\n')[1].endsWith(',,,mm')).toBe(true);
   });
 });

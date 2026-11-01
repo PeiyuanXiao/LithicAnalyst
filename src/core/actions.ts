@@ -26,13 +26,13 @@ import {
   UpdateScarCommand,
   type Command,
 } from './commands';
-import type { CurveShape } from './curveGeometry';
+import { editedCompletion, type CurveShape } from './curveGeometry';
 import { emptyCorrections, hasFaceCorrections, joinKey } from '../compute/configuration';
 import { orderSequences, relationInputs } from '../compute/relations';
-import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, withAttribute, type ConfigFace, type ConfigRole, type Polarity } from './fields';
+import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
-import type { AttributeValue, ConfigCorrections, Curve, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenInfo, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -192,9 +192,26 @@ function updateCurve(
   store.history.execute(new UpdateCurveCommand(labelKey, structuredClone(before), after, mergeKey));
 }
 
-/** Replace the traced geometry (after moving an anchor). */
+/** Replace the traced geometry (after moving an anchor); automatic anchors of a completed loop that moved become the user's. */
 export function setCurveShape(store: ProjectStore, id: string, shape: CurveShape): void {
-  updateCurve(store, id, 'cmd.editCurve', (c) => Object.assign(c, copyShape(shape)));
+  updateCurve(store, id, 'cmd.editCurve', (c) => {
+    const completion = shape.closed ? editedCompletion(c.completion, c.anchors, shape.anchors) : undefined;
+    Object.assign(c, copyShape(shape));
+    if (completion) c.completion = completion;
+    else delete c.completion;
+  });
+}
+
+/**
+ * Close an open curve along the edge of the model ("Complete loop"), in one step that undo
+ * takes back to the open curve; `completion` marks the anchors placed automatically (null: none).
+ */
+export function completeCurveLoop(store: ProjectStore, id: string, shape: CurveShape, completion: CurveCompletion | null): void {
+  updateCurve(store, id, 'cmd.completeLoop', (c) => {
+    Object.assign(c, copyShape(shape));
+    if (completion) c.completion = structuredClone(completion);
+    else delete c.completion;
+  });
 }
 
 export function setCurveAttribute(store: ProjectStore, id: string, key: string, value: AttributeValue): void {
@@ -650,7 +667,10 @@ export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>
   const key = Object.keys(patch).sort().join(',');
   const turned = JSON.stringify(before.frame?.matrix ?? null) !== JSON.stringify(after.frame?.matrix ?? null);
   const corrections = store.state.configuration;
-  const config = turned && hasFaceCorrections(corrections) ? { before: structuredClone(corrections), after: { ...emptyCorrections(), polarity: corrections.polarity } } : null;
+  // the polarity, the model and the bicone's corrections (by side of the split curve, not by face) stay
+  const config = turned && hasFaceCorrections(corrections)
+    ? { before: structuredClone(corrections), after: { ...emptyCorrections(), polarity: corrections.polarity, model: corrections.model, bicone: structuredClone(corrections.bicone) } }
+    : null;
   store.history.execute(new SetSpecimenCommand(structuredClone(before), after, merge ? `specimen:${key}` : null, config));
   return !!config;
 }
@@ -717,3 +737,22 @@ export const setConfigPolarity = (store: ProjectStore, polarity: Polarity | null
   changeConfiguration(store, (c) => {
     c.polarity = polarity;
   });
+
+/** The model of the configuration: the box or the bicone on the split curve. */
+export const setConfigModel = (store: ProjectStore, model: ConfigModel): void =>
+  changeConfiguration(store, (c) => {
+    c.model = model;
+  });
+
+/** The role of one of the bicone's cones, by its physical side (null: back to the automatic one). */
+export const setBiconeRole = (store: ProjectStore, side: BiconeSide, role: BiconeRole | null): void =>
+  changeConfiguration(store, (c) => {
+    if (role === null) delete c.bicone.roles[side];
+    else c.bicone.roles[side] = role;
+  });
+
+/** Exchange the upper and lower side of the volume split (also the bicone's cones). */
+export function swapSplit(store: ProjectStore): void {
+  const sp = store.state.split;
+  if (sp) setSplit(store, { ...sp, swap: !sp.swap });
+}

@@ -212,7 +212,7 @@ test('exports the configuration, the flaking surfaces and the new arrow columns'
   const face = r.scars[0].face, platform = r.scars[0].platform;
   const conf = await exportFile(page, 'configuration');
   expect(conf.name).toBe('column_configuration.csv');
-  expect(parseCsv(conf.text)).toEqual([{ specimen_id: 'column', frame: 'principal', facial_character: 'unifacial', flaking_surface_relation: '', platform_relation: 'single', polarity: 'unipolar_longitudinal' }]);
+  expect(parseCsv(conf.text)).toEqual([{ specimen_id: 'column', model: 'box', frame: 'principal', facial_character: 'unifacial', flaking_surface_relation: '', platform_relation: 'single', polarity: 'unipolar_longitudinal' }]);
   const surfaces = await exportFile(page, 'flaking-surfaces');
   expect(surfaces.name).toBe('column_flaking_surfaces.csv');
   expect(parseCsv(surfaces.text)).toEqual([{ specimen_id: 'column', surface_id: 'F1', faces: face, platforms: platform, also_platform: 'false', n_scars: '3', surface_type: 'wide', exploitation_axis: 'long' }]);
@@ -224,9 +224,10 @@ test('exports the configuration, the flaking surfaces and the new arrow columns'
   ]);
   // the project file keeps the result with its box and thresholds
   const file = await page.evaluate(() => window.lithicanalyst.projectJson());
-  expect(file.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null });
-  expect(file.derived.configuration).toMatchObject({ frame: 'principal', facialCharacter: 'unifacial', thresholds: { wideRatio: 1.25 } });
-  const size = [0, 1, 2].map((k) => file.derived.configuration!.max[k] - file.derived.configuration!.min[k]);
+  expect(file.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } });
+  expect(file.derived.configuration).toMatchObject({ model: 'box', frame: 'principal', facialCharacter: 'unifacial', thresholds: { wideRatio: 1.25 } });
+  const derivedBox = file.derived.configuration as import('../src/compute/configuration').ConfigurationResult;
+  const size = [0, 1, 2].map((k) => derivedBox.max[k] - derivedBox.min[k]);
   expect(size.map((s) => Math.round(s))).toEqual([36, 60, 24]);
 
   // a scar on the platform, struck in from the worked face: each surface is the other's platform

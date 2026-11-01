@@ -94,3 +94,7 @@ export function* splitByLoopSteps(positions: ArrayLike<number>, index: ArrayLike
   const upper = vol[up] * sign, lower = vol[1 - up] * sign;
   return { upper, lower, ratio: lower > 0 ? upper / lower : null };
 }
+
+/** The split with upper and lower exchanged when `swap` is set. */
+export const swappedSplit = (v: VolumeSplit, swap: boolean): VolumeSplit =>
+  swap ? { upper: v.lower, lower: v.upper, ratio: v.upper > 0 ? v.lower / v.upper : null } : v;

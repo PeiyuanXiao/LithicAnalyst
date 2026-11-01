@@ -956,7 +956,9 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 
 用户确定（2026-10-30）。勒瓦娄哇、盘状、预制、向心这类石核由「两个面绕一个交界面」构成，用方块概括不好。加一个双锥模型：上下两个圆锥共用一个圆底，两锥大小直接取自现有的体积切分。只提供概念构型辅助判断，不区分盘状和勒瓦娄哇；不判断极性（一律视为向心），不表达台面。做法见阶段 11 开头。
 
-### 12.1 双锥模型的选用和数据来源
+### 12.1 双锥模型的选用和数据来源 ✅ 2026-10-31
+
+> 完成：configuration.model 与「方块 / 双锥」分段按钮（按曲线切分或已选双锥时显示），不可用时只显示原因小签；split.swap（swappedSplit，交换时复用上次结果），两处「上下对调」同一个 Command；石核边缘闭合曲线排在切分候选最前。
 
 - **选用**：构型面板标题栏下方加「方块 / 双锥」（`Box` / `Bicone`）分段按钮，只在体积切分的来源是闭合曲线（`split.source === 'curve'`）时出现；默认方块；存进构型输入 `configuration.model: 'box' | 'bicone'`，旧文件按 `box`。
 - **体积**：直接用派生结果里的 `split`（上、下体积），不另外计算。
@@ -964,7 +966,9 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 - **切分曲线候选**：「上下体积」里选曲线时，`core_edge` 类型的闭合曲线排在最前。
 - **上下对调**：`split` 加可选字段 `swap`（默认 `false`），为 `true` 时上下对调，上下体积、测量导出和双锥的上下都按它；「上下体积」面板和构型面板（双锥时）各一个「上下对调 / Swap upper and lower」按钮，同一个 Command；旧文件按 `false`。
 
-### 12.2 双锥的几何（纯函数）
+### 12.2 双锥的几何（纯函数） ✅ 2026-10-31
+
+> 完成：compute/bicone.ts（biconeBase、computeBicone、biconePolar、coreConfiguration），修正按 positive / negative 保存；派生结果、批量导出（用保存的切分结果）都按所选模型计算。
 
 输入：切分曲线的点、`split` 结果和上下方向（`upHint` 与 `swap`）、片疤。
 
@@ -976,7 +980,9 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 - **只算两项**：面性（剥片锥 1 个 `unifacial`，2 个 `bifacial`）；剥片面（上 / 下 / 上、下）。剥片面关系、台面关系、总体极性、剥片面类型、剥片轴不计算。
 - **派生结果** `derived.configuration`（`model: 'bicone'` 时）：拟合平面（点、法向）、O、A、R、h上、h下（真实值）、每个片疤属于哪侧、两个锥的自动角色和最终角色、面性。
 
-### 12.3 双锥示意图和视角双锥
+### 12.3 双锥示意图和视角双锥 ✅ 2026-10-31
+
+> 完成：render/biconeShape.ts；示意图画两个透明旋转体、底边两段半圆和沿锥面弯曲的箭头（逐支合并网格），视角双锥不透明、选中的锥用闭合的放大副本描边；锥卡片含角色、恢复自动和上下对调；截图见 test-results/config-bicone/。
 
 - **形体**：两个圆锥共用半径 R 的圆底，高为 h上、h下（带显示最小值）；底边小圆角，锥顶略圆，透明，按角色着色（`--cfg-flaking` / `--cfg-none`）；底边（交界面）画一圈墨色细线，比方块棱线略明显；没有文字；拖动旋转，双击回到默认视角（斜上方约 25° 俯视）。
 - **箭头**：每个片疤一支，样式同 11.3。起点、终点投影到交界面，换成以 O 为中心的极坐标 (ρ, θ)，ρ̂ = ρ / R(θ) 并限制在 1 以内（R(θ) 为从 O 沿 θ 到投影多边形边界的距离）；锥上的位置：半径 ρ̂R，离底面高 h(1 − ρ̂)。路径：在交界面坐标里把起点到终点的直线均匀取样，每点抬到锥面并沿锥面法向加悬浮高度，用管子连起来（贴着锥面弯，不穿进锥体）。不在剥片锥上的约 45%，背面约 30%，选中联动同 11.3。
@@ -984,14 +990,18 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 - **结果只显示两行**：面性、剥片面。
 - **视角双锥**：模型为双锥时，视角方块换成小双锥：不透明，按角色着色，简单光照，选中的锥描 `--accent-line` 边，随主相机转动；点上锥，主视图沿交界面法向从上侧看，点下锥从下侧看；上方向取标本坐标系 Y 在交界面内的投影（没有定向时取曲线第一主轴），用现有的相机过渡。
 
-### 12.4 导出（双锥）
+### 12.4 导出（双锥） ✅ 2026-10-31
+
+> 完成：configuration.csv 加 model 列；双锥时 flaking_surfaces.csv 每个剥片锥一行（upper / lower），scar_vectors.csv 的 platform_face 留空。
 
 - `configuration.csv` 在 `specimen_id` 后加 `model`（`box` / `bicone`），方块也写；双锥时 `flaking_surface_relation`、`platform_relation`、`polarity` 留空，`frame` 照写。
 - `flaking_surfaces.csv` 双锥时每个剥片锥一行：`surface_id` 为 `F1`、`F2`（上锥在前），`faces` 写 `upper` 或 `lower`（新增代码），`platforms`、`also_platform`、`surface_type`、`exploitation_axis` 留空。
 - `scar_vectors.csv` 双锥时 `platform_face` 留空，`flaking_surface` 按片疤所在的锥填写（不是剥片锥时留空）。
 - 上下体积仍只在测量导出里，不重复。
 
-### 12.5 不闭合曲线：沿边缘补全一圈
+### 12.5 不闭合曲线：沿边缘补全一圈 ✅ 2026-10-31
+
+> 完成：compute/completeLoop.ts（分步）；App.completeLoop 吸附、追踪、拉紧后一个 Command 写入；completion 加 userAnchors 记录拖动过的自动锚点；自动段虚线显示；三种失败提示，不留半成品。
 
 用户只画了一段石核边缘，想得到一圈闭合曲线（用于曲线切分、表面分区、计算中心）。
 
