@@ -1,23 +1,28 @@
 import type { Region, RegionType, Vec3 } from '../core/types';
 import { edgeId, partitionFacesSteps, type EdgeTable } from './meshGeometry';
-import { YIELD_EVERY, type Steps } from './steps';
+import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /**
  * Mesh edges along a traced line, as vertex pairs (a0, b0, a1, b1, …): each
  * point goes to its nearest vertex, and consecutive vertices that are not
  * neighbours are joined by the shortest path over mesh edges (`path`).
  */
-export function polylineEdges(
+export function* polylineEdgesSteps(
   points: Vec3[],
   closed: boolean,
   nearestVertex: (p: Vec3) => number,
   edges: EdgeTable,
   path: (from: number, to: number) => ArrayLike<number> | null,
-): number[] {
-  const verts = points.map(nearestVertex);
+): Steps<number[]> {
+  const verts: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i % 64 === 0) yield;
+    verts.push(nearestVertex(points[i]));
+  }
   if (closed && verts.length > 2) verts.push(verts[0]);
   const out: number[] = [];
   for (let i = 1; i < verts.length; i++) {
+    if (i % 64 === 0) yield;
     const a = verts[i - 1], b = verts[i];
     if (a === b) continue;
     if (edgeId(edges, a, b) >= 0) {
@@ -25,11 +30,16 @@ export function polylineEdges(
       continue;
     }
     const chain = path(a, b);
+    yield;
     if (!chain) continue;
     for (let k = 1; k < chain.length; k++) out.push(chain[k - 1], chain[k]);
   }
   return out;
 }
+
+/** The same at once (tests, small meshes). */
+export const polylineEdges = (points: Vec3[], closed: boolean, nearestVertex: (p: Vec3) => number, edges: EdgeTable, path: (from: number, to: number) => ArrayLike<number> | null): number[] =>
+  runSync(polylineEdgesSteps(points, closed, nearestVertex, edges, path));
 
 export interface Partition {
   /** Region of each triangle. */

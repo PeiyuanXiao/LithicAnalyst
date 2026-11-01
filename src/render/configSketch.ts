@@ -30,8 +30,11 @@ const SHADOW_OPACITY = 0.18;
 const SHADOW_CAST = new THREE.Vector3(0.45, -1, -0.35).normalize();
 /** From the front, the right and above: the default view of the box (double click). */
 const HOME = new THREE.Vector3(1, 0.8, 1.5).normalize();
-/** From the front, about 25° above the base: the default view of the bicone. */
-const HOME_BICONE = new THREE.Vector3(0, Math.sin(THREE.MathUtils.degToRad(25)), Math.cos(THREE.MathUtils.degToRad(25)));
+/** From the front, about 35° above the base: the default view of the bicone. */
+const HOME_BICONE = new THREE.Vector3(0, Math.sin(THREE.MathUtils.degToRad(35)), Math.cos(THREE.MathUtils.degToRad(35)));
+/** In its default view the bicone's width takes this share of the canvas (its height at most OUTLINE_HEIGHT). */
+const OUTLINE_WIDTH = 0.85;
+const OUTLINE_HEIGHT = 0.92;
 /** The bicone's rim and apexes are rounded this much (share of the radius). */
 const RIM_ROUND = 0.06;
 const APEX_ROUND = 0.12;
@@ -103,6 +106,8 @@ export class ConfigSketch {
   onPick: (face: ConfigPick) => void = () => {};
   /** An arrow was clicked. */
   onPickScar: (id: string) => void = () => {};
+  /** How many times it was drawn. */
+  renders = 0;
   private renderer: THREE.WebGLRenderer | null = null;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(26, ASPECT, 0.05, 50);
@@ -222,6 +227,14 @@ export class ConfigSketch {
     return this.client(faceCentre(face, shapeSize(r, 0.2)));
   }
 
+  /** The bicone's width on the page, as it is turned now (null without a bicone). */
+  outlineWidth(): number | null {
+    const rim = this.rim;
+    if (!rim) return null;
+    const xs = rimPoints(rim.radius).map((p) => this.client(p).x);
+    return Math.max(...xs) - Math.min(...xs);
+  }
+
   /** Where the middle of a scar's arrow is on the page (null when it is not drawn or faces away). */
   arrowClient(id: string): { x: number; y: number } | null {
     const a = this.lifted.get(id);
@@ -270,6 +283,7 @@ export class ConfigSketch {
     }
     this.renderBicone(toCamera);
     r.render(this.scene, this.camera);
+    this.renders++;
   }
 
   dispose(): void {
@@ -355,6 +369,7 @@ export class ConfigSketch {
   private frame(dir: THREE.Vector3, reach: number): void {
     this.camera.position.copy(dir).multiplyScalar((reach / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2))) * 1.02);
     this.camera.lookAt(0, 0, 0);
+    this.camera.updateMatrixWorld();
   }
 
   private buildBox(res: ConfigurationResult): void {
@@ -429,7 +444,37 @@ export class ConfigSketch {
     this.root.add(shape);
     this.shape = shape;
     this.paintArrows();
-    this.frame(HOME_BICONE, Math.hypot(s.radius, Math.max(s.upper, s.lower)) + HOVER + 0.02);
+    this.frameOutline(s, geo.rim);
+  }
+
+  /**
+   * The bicone's default view, framed by its outline as projected there (the near
+   * side of the rim looks larger): as wide as OUTLINE_WIDTH of the canvas, centred,
+   * a tall one kept inside it.
+   */
+  private frameOutline(s: BiconeSize, rim: number): void {
+    const dir = HOME_BICONE;
+    const up = new THREE.Vector3(0, dir.z, -dir.y);
+    const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const outline = [...rimPoints(rim, 0, 2 * Math.PI, 48), new THREE.Vector3(0, s.upper, 0), new THREE.Vector3(0, -s.lower, 0)];
+    let distance = rim / (OUTLINE_WIDTH * tanV * ASPECT), height = 0;
+    for (let pass = 0; pass < 8; pass++) {
+      let left = 0, right = 0, top = -Infinity, bottom = Infinity;
+      for (const p of outline) {
+        const depth = distance - p.dot(dir);
+        const x = p.x / (depth * tanV * ASPECT), y = (p.dot(up) - height) / (depth * tanV);
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        top = Math.max(top, y);
+        bottom = Math.min(bottom, y);
+      }
+      height += ((top + bottom) / 2) * distance * tanV;
+      distance *= Math.max((right - left) / (2 * OUTLINE_WIDTH), (top - bottom) / (2 * OUTLINE_HEIGHT));
+    }
+    const centre = up.multiplyScalar(height);
+    this.camera.position.copy(centre).addScaledVector(dir, distance);
+    this.camera.lookAt(centre);
+    this.camera.updateMatrixWorld();
   }
 
   /**

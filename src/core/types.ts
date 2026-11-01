@@ -116,15 +116,18 @@ export interface Curve {
 
 /**
  * How an open curve was completed into a loop along the edge of the model: the
- * anchors from `firstAutoAnchor` on were placed automatically, about every
- * `stepDeg` degrees of the outline seen along the normal of the curve's plane.
- * An automatic anchor the user moves is listed in `userAnchors`; once every one
- * of them is, the completion is dropped.
+ * anchors from `firstAutoAnchor` on were placed automatically: the outline seen
+ * along the normal of the curve's plane was sampled every `stepDeg` degrees, and
+ * about one sample per `anchorStepDeg` degrees kept as an anchor (more where the
+ * line would otherwise leave the outline). An automatic anchor the user moves is
+ * listed in `userAnchors`; once every one of them is, the completion is dropped.
  */
 export interface CurveCompletion {
   method: 'outline';
   firstAutoAnchor: number;
   stepDeg: number;
+  /** Absent in curves completed before anchors were thinned (an anchor per sample). */
+  anchorStepDeg?: number;
   /** Automatic anchors since moved by the user (indices into `anchors`, ascending). */
   userAnchors?: number[];
 }

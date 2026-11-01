@@ -14,6 +14,7 @@
     npm run e2e         # 端到端测试（Playwright，e2e/；先构建，再在 Chromium 里打开 dist/index.html）
     npm run typecheck   # 类型检查
     npm run build       # 类型检查 + 生成 dist/index.html、dist/artifact.html（dist/ 不提交）
+    npm run bench       # 在程序生成的约 200 万面模型上给重计算步骤计时（scripts/bench.ts）
 
 ## 每一轮怎么做
 

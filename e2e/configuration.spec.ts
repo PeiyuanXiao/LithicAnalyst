@@ -38,7 +38,12 @@ test('a columnar core: the seven traits in the panel, the view cube and the face
   await expect(page.locator('#sec-configuration')).toHaveCount(0);
   await showConfig(page, true);
   await expect(page.locator('#config-panel')).toBeVisible();
-  await expect(page.locator('#config-panel .float-head #config-frame')).toBeVisible();
+  await expect(page.locator('#config-panel .float-head #config-frame')).toHaveText('PCA');
+  // the title on one line, whole; the polarity's list as wide as the panel lets it
+  const title = page.locator('#config-panel .float-title');
+  expect(await title.evaluate((el) => el.scrollWidth <= el.clientWidth && el.clientHeight < 26)).toBe(true);
+  const inner = (await page.locator('#config-body').boundingBox())!;
+  expect((await page.locator('#config-polarity').boundingBox())!.width).toBeGreaterThan(inner.width - 30);
   await expect(page.locator('#config-facial')).toHaveText('Unifacial');
   await expect(page.locator('#config-surfaces')).toHaveText(scarFace === 'front' ? 'F1 Front' : 'F1 Back');
   await expect(page.locator('#config-surface-relation')).toHaveText('—');
@@ -125,9 +130,20 @@ test('the panel: switched on in the display settings, moved, folded, kept inside
   const view = (await page.locator('#viewport').boundingBox())!;
   const panel = page.locator('#config-panel');
   const before = (await panel.boundingBox())!;
-  // clear of the cube
+  // lower right by default: over the coordinate readout, clear of the cube, in the right half of the view (the Harris matrix is lower left)
   const cube = (await page.locator('#view-cube').boundingBox())!;
+  const readout = (await page.locator('.status-coords').boundingBox())!;
   expect(before.y).toBeGreaterThanOrEqual(cube.y + cube.height);
+  expect(before.y + before.height).toBeLessThanOrEqual(readout.y);
+  expect(before.y + before.height).toBeGreaterThan(readout.y - 30);
+  expect(before.x + before.width).toBeCloseTo(view.x + view.width - 12, 0);
+  // and clear of the Harris matrix (lower left), which the relation tool shows
+  await page.keyboard.press('b');
+  await expect(page.locator('#harris-panel')).toBeVisible();
+  const harris = (await page.locator('#harris-panel').boundingBox())!;
+  expect(harris.x + harris.width).toBeLessThanOrEqual(before.x);
+  await page.keyboard.press('v');
+  await expect(page.locator('#harris-panel')).toBeHidden();
 
   // moved by its title bar
   const head = (await page.locator('#config-panel .float-title').boundingBox())!;

@@ -77,7 +77,8 @@ export function floatingPanel(o: FloatingPanelOptions): FloatingPanel {
       el.style.top = `${y}px`;
       el.style.right = el.style.bottom = 'auto';
     }
-    if (!o.resizable && fits && !el.hidden) el.style.maxHeight = `${Math.max(80, H - el.offsetTop - 8)}px`;
+    // (still in its default place, the stylesheet keeps it clear of what is above)
+    if (!o.resizable && fits && !el.hidden && geo.y !== undefined) el.style.maxHeight = `${Math.max(80, H - el.offsetTop - 8)}px`;
   };
   const save = () => writePref(o.pref, geo);
   fold.addEventListener('click', () => {

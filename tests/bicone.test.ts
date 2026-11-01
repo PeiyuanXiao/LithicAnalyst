@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { biconePolar, computeBicone, coreConfiguration } from '../src/compute/bicone';
+import { biconePolar, computeBicone, coreConfiguration, defaultUpHint, edgeCurves, soleEdgeCurve } from '../src/compute/bicone';
 import { buildEdges, meshTopology } from '../src/compute/meshGeometry';
 import { splitByLoopSteps, swappedSplit, type VolumeSplit } from '../src/compute/split';
 import { runSync } from '../src/compute/steps';
-import { addCurve, addScarVector, setBiconeRole, setConfigModel, setConfigRole, setSplit, swapSplit, updateSpecimen } from '../src/core/actions';
+import { addCurve, addScarVector, setBiconeRole, setBiconeSplit, setConfigModel, setConfigRole, setSplit, swapSplit, updateSpecimen } from '../src/core/actions';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { ProjectStore } from '../src/core/store';
 import type { Vec3 } from '../src/core/types';
@@ -41,6 +41,61 @@ function setup() {
   const volumes = () => swappedSplit(raw, store.state.split!.swap);
   return { store, raw, volumes, result: () => computeBicone(store.state, volumes())! };
 }
+
+describe('choosing the curve', () => {
+  const curve = (id: string, closed: boolean, type: string) => ({ id, closed, attributes: { type } });
+
+  it('lists closed curves with core edges first, and names one when it goes without saying', () => {
+    const a = curve('a', true, 'cortex'), b = curve('b', true, 'core_edge'), c = curve('c', false, 'core_edge'), d = curve('d', true, '');
+    expect(edgeCurves([a, b, c, d]).map((x) => x.id)).toEqual(['b', 'a', 'd']);
+    // no closed curve; the only one; the only core edge; none of them says
+    expect(soleEdgeCurve([c])).toBeNull();
+    expect(soleEdgeCurve([a, c])).toBe(a);
+    expect(soleEdgeCurve([a, b, c, d])).toBe(b);
+    expect(soleEdgeCurve([a, d])).toBeNull();
+    expect(soleEdgeCurve([b, curve('e', true, 'core_edge')])).toBeNull();
+  });
+
+  it('points up to the side with more scars, by their ends; when even, toward the viewer', () => {
+    const { store } = setup();
+    const above: Vec3 = [0, 0, 1], below: Vec3 = [0, 0, -1];
+    const up = (view: Vec3) => defaultUpHint(rim, store.state.scars, view)[2];
+    // no scars, or as many on each side: the view
+    expect(up(above)).toBe(1);
+    expect(up(below)).toBe(-1);
+    scarAt(store, 0, true);
+    scarAt(store, 1, false);
+    expect(up(above)).toBe(1);
+    expect(up(below)).toBe(-1);
+    // more below, whatever the view
+    scarAt(store, 2, false);
+    expect(up(above)).toBeCloseTo(-1, 6);
+    expect(up(below)).toBeCloseTo(-1, 6);
+    // more above
+    scarAt(store, 3, true);
+    scarAt(store, 4, true);
+    expect(up(below)).toBeCloseTo(1, 6);
+  });
+
+  it('sets the split and the model in one step that undo takes back whole', () => {
+    const { store } = setup();
+    setConfigModel(store, 'box');
+    const plane = { source: 'plane' as const, id: 'p', upHint: [0, 0, 1] as Vec3, swap: false };
+    setSplit(store, plane);
+    const curveId = store.state.curves[0].id;
+    setBiconeSplit(store, { source: 'curve', id: curveId, upHint: [0, 0, 1], swap: false });
+    expect(store.state.split).toMatchObject({ source: 'curve', id: curveId });
+    expect(store.state.configuration.model).toBe('bicone');
+    store.history.undo();
+    expect(store.state.split).toEqual(plane);
+    expect(store.state.configuration.model).toBe('box');
+    store.history.redo();
+    expect(store.state.configuration.model).toBe('bicone');
+    // back to the box: the split stays
+    setConfigModel(store, 'box');
+    expect(store.state.split).toMatchObject({ source: 'curve', id: curveId });
+  });
+});
 
 describe('bicone', () => {
   it('takes the base from the split curve and the heights from the volumes; swapped, they change places', () => {

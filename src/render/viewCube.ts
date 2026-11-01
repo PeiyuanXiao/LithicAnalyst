@@ -28,12 +28,16 @@ const isCone = (p: ConfigPick | null): p is BiconeCone => p === 'upper' || p ===
 export class ViewCube {
   /** A face or cone was clicked. */
   onPick: (face: ConfigPick) => void = () => {};
+  /** How many times it was drawn. */
+  draws = 0;
   /** The panel (under the canvas) and the click target (over it). */
   readonly board: HTMLElement;
   readonly hit: HTMLElement;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
   private readonly root = new THREE.Group();
+  /** The bicone as drawn (its outline is centred in each pose); null with the box. */
+  private drawnCones: { rim: number; upper: number; lower: number } | null = null;
   private palette: ConfigPalette = readPalette();
   private mesh: THREE.Mesh | null = null;
   private cones: Array<{ cone: BiconeCone; mesh: THREE.Mesh }> = [];
@@ -127,6 +131,16 @@ export class ViewCube {
   /** The shape's axes as the main camera sees them. */
   private pose(): void {
     this.root.quaternion.copy(this.viewer.camera.quaternion).invert().multiply(this.frameQ);
+    // the bicone's outline in the middle of the corner: the rim's ellipse and the two apexes, as seen now
+    const c = this.drawnCones;
+    if (c) {
+      const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(this.root.quaternion);
+      const across = (k: number) => {
+        const half = c.rim * Math.sqrt(Math.max(0, 1 - k * k));
+        return (Math.max(half, c.upper * k, -c.lower * k) + Math.min(-half, c.upper * k, -c.lower * k)) / 2;
+      };
+      this.root.position.set(-across(axis.x), -across(axis.y), 0);
+    } else this.root.position.set(0, 0, 0);
     this.root.updateMatrixWorld(true);
   }
 
@@ -145,6 +159,7 @@ export class ViewCube {
     this.mesh = null;
     this.cones = [];
     this.outline = null;
+    this.drawnCones = null;
   }
 
   private build(): void {
@@ -203,7 +218,9 @@ export class ViewCube {
         this.outline!.add(ring);
       }
     }
-    return Math.hypot(s.radius, Math.max(s.upper, s.lower)) * OUTLINE_SCALE * 1.04;
+    // framed by its outline: centred in each pose, never wider or taller than this
+    this.drawnCones = { rim: geo.rim, upper: s.upper, lower: s.lower };
+    return Math.max(geo.rim, (s.upper + s.lower) / 2) * OUTLINE_SCALE * 1.06;
   }
 
   /** After each frame of the main view: the shape in its corner. */
@@ -223,6 +240,7 @@ export class ViewCube {
     // the board shows through where the shape is not
     r.clear(true, true, false);
     r.render(this.scene, this.camera);
+    this.draws++;
     r.setScissorTest(false);
     r.setViewport(0, 0, canvas.width, canvas.height);
     r.setScissor(0, 0, canvas.width, canvas.height);

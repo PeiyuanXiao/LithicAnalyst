@@ -1,6 +1,6 @@
 import { BICONE_CONES, type BiconeCone, type BiconeRole, type BiconeSide } from '../core/fields';
 import { frameAxes } from '../core/frame';
-import { hasVector, type ProjectState, type Vec3 } from '../core/types';
+import { hasVector, type ProjectState, type Scar, type Vec3 } from '../core/types';
 import { computeConfiguration, type ConfigBox, type ConfigurationResult } from './configuration';
 import { vertexPca } from './meshGeometry';
 import type { VolumeSplit } from './split';
@@ -189,4 +189,36 @@ export function biconePolar(r: Pick<BiconeResult, 'centre' | 'plane' | 'referenc
 /** The configuration by the model the project uses: the box (from the model's box) or the bicone (from the volume split). */
 export function coreConfiguration(state: Readonly<ProjectState>, box: ConfigBox | null, volumes: VolumeSplit | null): CoreConfiguration | null {
   return state.configuration.model === 'bicone' ? computeBicone(state, volumes) : computeConfiguration(state.scars, state.configuration, box);
+}
+
+const isCoreEdge = (c: { attributes: Record<string, unknown> }) => c.attributes.type === 'core_edge';
+
+/** The closed curves a bicone can stand on: core edges first. */
+export function edgeCurves<T extends { closed: boolean; attributes: Record<string, unknown> }>(curves: readonly T[]): T[] {
+  const loops = curves.filter((c) => c.closed);
+  return [...loops.filter(isCoreEdge), ...loops.filter((c) => !isCoreEdge(c))];
+}
+
+/** The curve that goes without saying: the only closed curve, or the only closed core edge; else null. */
+export function soleEdgeCurve<T extends { closed: boolean; attributes: Record<string, unknown> }>(curves: readonly T[]): T | null {
+  const loops = curves.filter((c) => c.closed);
+  if (loops.length === 1) return loops[0];
+  const edges = loops.filter(isCoreEdge);
+  return edges.length === 1 ? edges[0] : null;
+}
+
+/**
+ * Which way "up" a new split along this curve points: to the side of its plane
+ * with more scars (by their ends, as the cones take them); when even, `view`
+ * (the direction toward the viewer).
+ */
+export function defaultUpHint(points: readonly Vec3[], scars: readonly Scar[], view: Vec3): Vec3 {
+  const base = biconeBase(points, view, false, null);
+  if (!base) return view;
+  let toward = 0, away = 0;
+  for (const s of scars.filter(hasVector)) {
+    if (dot(sub(s.vector.end, base.centre), base.plane.normal) >= 0) toward++;
+    else away++;
+  }
+  return toward === away ? view : toward > away ? base.plane.normal : neg(base.plane.normal);
 }

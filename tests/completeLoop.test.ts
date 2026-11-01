@@ -56,8 +56,38 @@ describe('complete loop', () => {
       a2 += p[0] * q[1] - q[0] * p[1];
     }
     expect(Math.abs(Math.abs(a2 / 2) / (Math.PI * R * R) - 1)).toBeLessThan(0.05);
-    // anchors about every 2°: a rim vertex every 3.75° is every other bin, so about 64 of them
-    expect(res.anchors.length).toBeGreaterThan(50);
+    // anchors about every 12° over the 240° left: a sample of the rim every 3.75°, kept near each multiple
+    expect(res.anchors.length).toBe(19);
+    const degrees = [verts[verts.length - 1], ...res.anchors, verts[0]].map((v) => (((Math.atan2(point(v)[1], point(v)[0]) * 180) / Math.PI) + 360) % 360);
+    for (let i = 1; i < degrees.length; i++) {
+      const gap = (degrees[i] - degrees[i - 1] + 360) % 360;
+      expect(gap).toBeGreaterThanOrEqual(11);
+      expect(gap).toBeLessThanOrEqual(15.1);
+    }
+  });
+
+  it('keeps more anchors where tracing straight would leave the outline', () => {
+    // a bump of the rim out at 246°, between two kept anchors; without a ridge the shortest way cuts it off
+    const SEGMENTS = 192;
+    const spiky = bicone(R, 10, 20, SEGMENTS, 24);
+    const positions = new Float32Array(spiky.positions);
+    for (let j = 0; j < SEGMENTS; j++) {
+      const deg = (360 * j) / SEGMENTS;
+      const k = 1 + (3 / R) * Math.exp(-(((deg - 246) / 2.5) ** 2));
+      positions[3 * (spiky.rim + j)] *= k;
+      positions[3 * (spiky.rim + j) + 1] *= k;
+    }
+    const verts = Array.from({ length: 65 }, (_, j) => spiky.rim + j);
+    const at = (v: number): Vec3 => [positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]];
+    const res = runSync(completeLoopSteps({ positions, adjacency: buildAdjacency(spiky.index, positions.length / 3), strength: null, cost: null, points: verts.map(at), first: verts[0], last: verts[64] }));
+    if (!res.ok) throw new Error(res.reason);
+    // the tip stays an anchor, so the line goes out to it
+    const tip = spiky.rim + Math.round((246 / 360) * SEGMENTS);
+    expect(res.anchors).toContain(tip);
+    expect(res.chains.flatMap((c) => Array.from(c))).toContain(tip);
+    // and the anchors away from it are still about 12° apart
+    expect(res.anchors.length).toBeGreaterThan(19);
+    expect(res.anchors.length).toBeLessThan(25);
   });
 
   it('goes either way round, and turns down a curve too short or too straight', () => {
@@ -90,12 +120,12 @@ describe('completed loops', () => {
   };
 
   it('dash the segments next to an automatic anchor until the user has moved them all', () => {
-    const k = { method: 'outline' as const, firstAutoAnchor: 2, stepDeg: 2 };
+    const k = { method: 'outline' as const, firstAutoAnchor: 2, stepDeg: 2, anchorStepDeg: 12 };
     expect(autoSegments({ ...shape(), completion: k })).toEqual([false, true, true, true]);
     const s = shape();
     const moved = s.anchors.map((p, i) => (i === 3 ? ([p[0], p[1], p[2] + 1] as Vec3) : p));
     const k2 = editedCompletion(k, s.anchors, moved)!;
-    expect(k2).toEqual({ method: 'outline', firstAutoAnchor: 2, stepDeg: 2, userAnchors: [3] });
+    expect(k2).toEqual({ method: 'outline', firstAutoAnchor: 2, stepDeg: 2, anchorStepDeg: 12, userAnchors: [3] });
     expect(autoSegments({ ...s, completion: k2 })).toEqual([false, true, true, false]);
     const moved2 = moved.map((p, i) => (i === 2 ? ([p[0], p[1], p[2] + 1] as Vec3) : p));
     expect(editedCompletion(k2, moved, moved2)).toBeUndefined();
@@ -108,11 +138,15 @@ describe('completed loops', () => {
     const s = shape();
     const open = { anchors: s.anchors.slice(0, 3), points: s.points.slice(0, 49), anchorIndex: [0, 24, 48], closed: false };
     const c = addCurve(store, open);
-    completeCurveLoop(store, c.id, s, { method: 'outline', firstAutoAnchor: 3, stepDeg: 2 });
+    completeCurveLoop(store, c.id, s, { method: 'outline', firstAutoAnchor: 3, stepDeg: 2, anchorStepDeg: 12 });
     expect(store.curve(c.id)!.closed).toBe(true);
-    expect(store.curve(c.id)!.completion).toEqual({ method: 'outline', firstAutoAnchor: 3, stepDeg: 2 });
+    expect(store.curve(c.id)!.completion).toEqual({ method: 'outline', firstAutoAnchor: 3, stepDeg: 2, anchorStepDeg: 12 });
     // saved and read back
-    expect(parseProjectFile(JSON.parse(JSON.stringify(serializeProject(store.state, 'test')))).curves[0].completion).toEqual({ method: 'outline', firstAutoAnchor: 3, stepDeg: 2 });
+    const saved = JSON.parse(JSON.stringify(serializeProject(store.state, 'test')));
+    expect(parseProjectFile(saved).curves[0].completion).toEqual({ method: 'outline', firstAutoAnchor: 3, stepDeg: 2, anchorStepDeg: 12 });
+    // completed before anchors were thinned: read as it is
+    delete saved.annotations.curves[0].completion.anchorStepDeg;
+    expect(parseProjectFile(saved).curves[0].completion).toEqual({ method: 'outline', firstAutoAnchor: 3, stepDeg: 2 });
     store.history.undo();
     expect(store.curve(c.id)!.closed).toBe(false);
     expect(store.curve(c.id)!.completion).toBeUndefined();

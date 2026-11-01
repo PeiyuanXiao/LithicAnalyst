@@ -68,6 +68,10 @@ export interface LithicApi {
   cubeFacePoint(face: import('../src/ui/appApi').ConfigPick): { x: number; y: number } | null;
   sketchFacePoint(face: import('../src/ui/appApi').ConfigPick): { x: number; y: number } | null;
   sketchArrowCount(): number;
+  sketchRenders(): number;
+  cubeDraws(): number;
+  /** The bicone's outline width on the page, in the sketch's default view (null: no bicone). */
+  sketchOutlineWidth(): number | null;
   sketchArrowPoint(id: string): { x: number; y: number } | null;
   configPanelShown(): boolean;
   exportConfigurationCsvText(): string;

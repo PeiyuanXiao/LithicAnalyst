@@ -100,7 +100,8 @@ export function editedCompletion(k: CurveCompletion | undefined, before: readonl
   const moved = new Set(k.userAnchors ?? []);
   for (let i = k.firstAutoAnchor; i < after.length; i++) if (distance(before[i], after[i]) > 0) moved.add(i);
   if (moved.size >= after.length - k.firstAutoAnchor) return undefined;
-  const out: CurveCompletion = { method: k.method, firstAutoAnchor: k.firstAutoAnchor, stepDeg: k.stepDeg };
+  const out: CurveCompletion = { ...k };
+  delete out.userAnchors;
   if (moved.size) out.userAnchors = [...moved].sort((a, b) => a - b);
   return out;
 }

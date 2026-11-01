@@ -20,8 +20,10 @@
   gains `platform_face` and `flaking_surface` before `unit`. Project files keep the corrections
   (`configuration`) and the result with its box and thresholds (`derived.configuration`).
 - Bicone model of the volumetric configuration, for cores worked round one plane of intersection
-  (Levallois, discoid, prepared, centripetal): once the volume is split along a closed curve, the
-  panel switches between Box and Bicone. Two cones share the round base of the area the curve
+  (Levallois, discoid, prepared, centripetal): the panel switches between Box and Bicone. With the
+  only closed curve (or the only closed core edge) Bicone sets the volume split along it in the same
+  undoable step; with several, an Edge curve list asks which, and stays there to change it. A split
+  by a plane is replaced, with a notice. Two cones share the round base of the area the curve
   encloses, each as high as a cone of that base with its side's volume; scars go to a cone by their
   end, and each cone is a flaking surface or unflaked (correctable, kept by physical side). Only the
   facial character and the flaking surfaces are given (no polarity, no platforms). The sketch draws
@@ -32,12 +34,20 @@
   empty.
 - Upper and lower of a volume split can be swapped (`split.swap`) from the volume panel or the
   bicone's card; volumes, the measurement export and the bicone follow. Closed core-edge curves come
-  first among the split candidates.
+  first among the split candidates. A new split along a curve starts with the side with more scars
+  up (as the view when even), not with the side it was seen from.
 - Complete loop: an open curve along part of a core's edge (three anchors or more) is completed
   round the edge in one undoable step, along the model's outline seen across the curve's plane and
-  snapped to the ridges; the filled-in part is dashed until its anchors are moved
-  (`curve.completion`). A curve too short or straight, no edge found or no way round leaves the curve
+  snapped to the ridges, with an anchor about every 12° (more where the outline needs them); the
+  filled-in part is dashed until its anchors are moved (`curve.completion`). A curve too short or straight, no edge found or no way round leaves the curve
   as it was, with a message.
+- The configuration panel opens lower right, over the coordinate readout (a place already saved is
+  kept), 320 px wide, with its title on one line, a short pill (PCA / 主轴) and the overall polarity on
+  a row of its own. The bicone's sketch is framed by its outline (about 85 % of the width, from 35°
+  above) and the view bicone centred on its own.
+- Faster on large models: the measure pass after opening a 2-million-triangle model no longer blocks
+  for more than a few tens of milliseconds at a time, and turning curves into mesh edges (volume split,
+  regions) runs in slices. `npm run bench` times the heavy steps on a generated model.
 - Curve types are now scar outline (`scar_boundary`), core edge, cortex and joint surface (keys
   1–4), or the annotator's own text (key 5, suggesting the texts used before); a new curve's type
   is not filled in. The older types edge, ridge and other are still read, shown and exported as

@@ -63,30 +63,32 @@ export function* buildEdgesSteps(index: ArrayLike<number>, vertexCount: number):
     sideOf[i] = s;
     if (s % YIELD_EVERY === 0) yield;
   }
-  // merge equal (v0, v1) pairs within each bucket into one edge
-  const v0: number[] = [];
-  const v1: number[] = [];
-  const faces: number[] = [];
+  // merge equal (v0, v1) pairs within each bucket into one edge (at most one per triangle side)
+  const v0 = new Uint32Array(sides);
+  const v1 = new Uint32Array(sides);
+  const faces = new Uint32Array(sides);
   const ofSide = new Uint32Array(sides);
   const firstEdge = new Uint32Array(vertexCount + 1);
+  let count = 0;
   for (let v = 0; v < vertexCount; v++) {
-    firstEdge[v] = v0.length;
-    const begin = v0.length;
+    firstEdge[v] = count;
+    const begin = count;
     for (let i = offsets[v]; i < offsets[v + 1]; i++) {
       let e = begin;
-      while (e < v0.length && v1[e] !== other[i]) e++;
-      if (e === v0.length) {
-        v0.push(v);
-        v1.push(other[i]);
-        faces.push(0);
+      while (e < count && v1[e] !== other[i]) e++;
+      if (e === count) {
+        v0[e] = v;
+        v1[e] = other[i];
+        count++;
       }
       faces[e]++;
       ofSide[sideOf[i]] = e;
     }
     if (v % YIELD_EVERY === 0) yield;
   }
-  firstEdge[vertexCount] = v0.length;
-  return { v0: Uint32Array.from(v0), v1: Uint32Array.from(v1), faces: Uint32Array.from(faces), ofSide, firstEdge };
+  firstEdge[vertexCount] = count;
+  yield;
+  return { v0: v0.slice(0, count), v1: v1.slice(0, count), faces: faces.slice(0, count), ofSide, firstEdge };
 }
 
 /** Edge id joining vertices a and b, or −1 when they are not joined by an edge. */
@@ -133,12 +135,17 @@ export interface MeshTopology {
 }
 
 export function meshTopology(index: ArrayLike<number>, vertexCount: number, edges = buildEdges(index, vertexCount)): MeshTopology {
+  return runSync(meshTopologySteps(index, vertexCount, edges));
+}
+
+export function* meshTopologySteps(index: ArrayLike<number>, vertexCount: number, edges: EdgeTable): Steps<MeshTopology> {
   const parts = new UnionFind(vertexCount);
   const rims = new UnionFind(vertexCount);
   const onRim = new Uint8Array(vertexCount);
   let boundaryEdges = 0;
   let nonManifoldEdges = 0;
   for (let e = 0; e < edges.v0.length; e++) {
+    if (e % YIELD_EVERY === 0) yield;
     const a = edges.v0[e], b = edges.v1[e];
     parts.union(a, b);
     if (edges.faces[e] === 1) {
@@ -148,10 +155,14 @@ export function meshTopology(index: ArrayLike<number>, vertexCount: number, edge
     } else if (edges.faces[e] > 2) nonManifoldEdges++;
   }
   const used = new Uint8Array(vertexCount);
-  for (let i = 0; i < index.length - (index.length % 3); i++) used[index[i]] = 1;
+  for (let i = 0; i < index.length - (index.length % 3); i++) {
+    if (i % YIELD_EVERY === 0) yield;
+    used[index[i]] = 1;
+  }
   let components = 0;
   let boundaryLoops = 0;
   for (let v = 0; v < vertexCount; v++) {
+    if (v % YIELD_EVERY === 0) yield;
     if (used[v] && parts.find(v) === v) components++;
     if (onRim[v] && rims.find(v) === v) boundaryLoops++;
   }

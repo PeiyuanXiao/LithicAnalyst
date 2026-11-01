@@ -1,7 +1,7 @@
 import { shapeIndices, type AutoMeasurements } from '../core/derived';
 import type { SpecimenFrame, Vec3 } from '../core/types';
 import type { ConfigBox } from './configuration';
-import { buildEdgesSteps, meshTopology, surfaceIntegralsSteps, surfacePca, vertexPcaSteps, type EdgeTable, type MeshTopology, type PrincipalAxes } from './meshGeometry';
+import { buildEdgesSteps, meshTopologySteps, surfaceIntegralsSteps, surfacePca, vertexPcaSteps, type EdgeTable, type MeshTopology, type PrincipalAxes } from './meshGeometry';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /** What the automatic measurements need from the mesh; computed once per mesh. */
@@ -22,8 +22,7 @@ export function* surfaceMeasuresSteps(positions: ArrayLike<number>, index: Array
   const integrals = yield* surfaceIntegralsSteps(positions, index);
   const vertexCount = Math.floor(positions.length / 3);
   const edges = yield* buildEdgesSteps(index, vertexCount);
-  yield;
-  const topology = meshTopology(index, vertexCount, edges);
+  const topology = yield* meshTopologySteps(index, vertexCount, edges);
   const vertices = yield* vertexPcaSteps(positions);
   return {
     surfaceArea: integrals.area,

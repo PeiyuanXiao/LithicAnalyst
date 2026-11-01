@@ -41,8 +41,8 @@ export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap
 /** What can be picked in the configuration: a face of the box or a cone of the bicone. */
 export type ConfigPick = import('../core/fields').ConfigFace | import('../core/fields').BiconeCone;
 
-/** Why the bicone shows nothing: the mesh is not closed, or the split gives no volumes. */
-export type ConfigStatus = 'not_closed' | 'split_invalid';
+/** Why the bicone shows nothing: its split is being computed, the mesh is not closed, or the split gives no volumes. */
+export type ConfigStatus = 'computing' | 'not_closed' | 'split_invalid';
 
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
@@ -154,6 +154,10 @@ export interface AppApi {
   configuration(): import('../compute/bicone').CoreConfiguration | null;
   /** Why the bicone shows nothing (null: it shows, or the box is used). */
   configStatus(): ConfigStatus | null;
+  /** Which way up a new split along this curve points: the side with more scars, when even toward the viewer. */
+  splitUpHint(curveId: string): Vec3;
+  /** Stand the bicone on this closed curve: the split along it and the model, in one step. */
+  useEdgeCurve(curveId: string): void;
   /** The face (box) or cone (bicone) picked in the configuration panel or the view cube (null: none). */
   configFace(): ConfigPick | null;
   /** Pick a face or cone (null: none); `turn`: also turn the view to it. */

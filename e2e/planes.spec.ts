@@ -39,8 +39,9 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
   await page.locator('#plane-add').click();
   await expect(page.locator('#plane-list .plane-row')).toHaveCount(1);
   await expect(page.locator('#plane-method')).toHaveValue('all_vertices');
+  // it needs the vertices' axes, from the pass that measures the model after it opens
+  await expect.poll(async () => (await plane(page, 'P1')).valid).toBe(true);
   let p1 = await plane(page, 'P1');
-  expect(p1.valid).toBe(true);
   expect(dot(p1.normal!, [0, 0, 1])).toBeCloseTo(1, 6);
   p1.center!.forEach((x, k) => expect(x).toBeCloseTo(BOX.center[k], 3));
   // the frame: +X along the length of the box, +Y = Z × X
@@ -50,6 +51,7 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
 
   // P1 → scar origins; leave out "both ends missing"
   await page.locator('#plane-method').selectOption('scar_starts');
+  await expect.poll(async () => (await plane(page, 'P1')).inputCount).toBe(4);
   p1 = await plane(page, 'P1');
   expect(p1).toMatchObject({ method: 'scar_starts', valid: true, inputCount: 4 });
   expect(p1.center![2]).toBeCloseTo(BOX.center[2] + 5, 3);
@@ -78,8 +80,8 @@ test('fits planes by all four methods, follows their inputs, and exports them', 
   // P3: scar directions
   await page.locator('#plane-add').click();
   await page.locator('#plane-method').selectOption('scar_directions');
+  await expect.poll(async () => (await plane(page, 'P3')).valid).toBe(true);
   const p3 = await plane(page, 'P3');
-  expect(p3.valid).toBe(true);
   expect(p3.normal![2]).toBeCloseTo(1, 4);
 
   // planes follow their inputs: deleting an arrow (annotate mode) refits P1

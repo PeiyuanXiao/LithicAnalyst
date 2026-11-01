@@ -32,6 +32,40 @@ async function traceRim(page: Page, degrees: number[], closed: boolean): Promise
   await expect.poll(async () => (await state(page)).curves.length).toBe(before + 1);
 }
 
+/** A closed curve round the bicone at `rho` of the radius (on a ring of the mesh), on the upper cone. */
+function ringCurve(id: string, label: string, rho: number, type: string) {
+  const points = Array.from({ length: BICONE.segments }, (_, j) => biconePoint((360 * j) / BICONE.segments, rho));
+  return { id, label, anchors: [points[0], points[32], points[64]], points, anchorIndex: [0, 32, 64], closed: true, attributes: { type, note: '' } };
+}
+
+/** A scar from near the rim inward, at this angle, on one cone. */
+const scarOn = (id: string, deg: number, upper: boolean) => ({
+  id,
+  label: id.toUpperCase(),
+  vector: { start: biconePoint(deg, 0.95, upper), end: biconePoint(deg, 0.45, upper), startNormal: [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180), 0], endNormal: [0, 0, upper ? 1 : -1] },
+  attributes: {},
+});
+
+/** The closed bicone with this project on it (its scars, curves …), measured. */
+async function openProject(page: Page, annotations: Record<string, unknown>, extra: Record<string, unknown> = {}): Promise<void> {
+  const ply = biconePly();
+  await openApp(page);
+  await loadMesh(page, ply);
+  await expect.poll(() => page.evaluate(() => !!window.lithicanalyst.autoMeasurements())).toBe(true);
+  const project = {
+    format: 'lithicanalyst-project',
+    formatVersion: 2,
+    specimen: { id: 'bicone', annotator: '', unit: 'mm', notes: '', frame: null },
+    mesh: { fileName: ply.name, sha256: createHash('sha256').update(ply.buffer).digest('hex') },
+    annotations,
+    ...extra,
+  };
+  const chooser = page.waitForEvent('filechooser');
+  await fileMenu(page, '#btn-open-project');
+  await (await chooser).setFiles({ name: 'bicone.lithicanalyst.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)) });
+  await expect.poll(async () => (await state(page)).scars.length).toBe((annotations.scars as unknown[]).length);
+}
+
 /** Distance of a point from the rim circle. */
 const offRim = (p: Vec3) => Math.hypot(Math.hypot(p[0] - BICONE.center[0], p[1] - BICONE.center[1]) - BICONE.radius, p[2] - BICONE.center[2]);
 
@@ -146,6 +180,124 @@ test('a discoid core as a bicone: split along the core edge, two traits, swapped
   expect(await page.evaluate(() => window.lithicanalyst.configFace())).toBeNull();
 });
 
+test('one closed core edge and no split yet: Bicone does both in one step, and undo takes both back', async ({ page }) => {
+  // the scars are on the upper cone; seen from below, that side is still upper
+  await openProject(page, { scars: [scarOn('s1', 0, true), scarOn('s2', 120, true)], curves: [ringCurve('rim', 'C1', 1, 'core_edge')] });
+  await page.evaluate(() => window.lithicanalyst.view([0, -0.6, -0.8], [0, 0, 1]));
+  await showConfig(page);
+  await expect(page.locator('#config-model-box')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#config-edge-row')).toBeHidden();
+  await page.locator('#config-model-bicone').click();
+  await expect(page.locator('#config-model-bicone')).toHaveAttribute('aria-checked', 'true');
+  const st = await state(page);
+  expect(st.split).toMatchObject({ source: 'curve', id: 'rim', swap: false });
+  expect(st.split!.upHint[2]).toBeGreaterThan(0.9);
+  expect(st.configuration.model).toBe('bicone');
+  await expect(page.locator('#config-surfaces')).toHaveText('Upper');
+  await expect(page.locator('#config-edge-curve')).toHaveValue('rim');
+  // the sketch has every arrow, and is drawn (an empty canvas compresses to next to nothing)
+  expect(await page.evaluate(() => window.lithicanalyst.sketchArrowCount())).toBe(2);
+  await expect.poll(async () => (await page.locator('#config-sketch').screenshot()).length).toBeGreaterThan(8000);
+  // one undo step for both
+  await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await state(page)).split).toBeNull();
+  expect((await state(page)).configuration.model).toBe('box');
+  await expect(page.locator('#config-model-box')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#config-edge-row')).toBeHidden();
+});
+
+test('two closed curves: the edge curve is asked for first; it can be changed there, and the box keeps the split', async ({ page }) => {
+  await openProject(page, { scars: [scarOn('s1', 0, true)], curves: [ringCurve('rim', 'C1', 1, 'core_edge'), ringCurve('ring', 'C2', 4 / 6, 'core_edge')] });
+  await showConfig(page);
+  await page.locator('#config-model-bicone').click();
+  // nothing changes until one is chosen
+  await expect(page.locator('#config-edge-row')).toBeVisible();
+  await expect(page.locator('#config-edge-curve')).toHaveValue('');
+  await expect(page.locator('#config-edge-curve option:not([hidden])')).toHaveText(['C1', 'C2']);
+  await expect(page.locator('#config-model-box')).toHaveAttribute('aria-checked', 'true');
+  expect((await state(page)).split).toBeNull();
+  expect((await state(page)).configuration.model).toBe('box');
+  await page.locator('#config-edge-curve').selectOption('rim');
+  await expect(page.locator('#config-model-bicone')).toHaveAttribute('aria-checked', 'true');
+  expect((await state(page)).split).toMatchObject({ source: 'curve', id: 'rim' });
+  expect((await state(page)).configuration.model).toBe('bicone');
+  await expect(page.locator('#config-edge-curve')).toHaveValue('rim');
+  await expect.poll(async () => (await bicone(page))?.lowerHeight ?? 0).toBeCloseTo(BICONE.lower, 0);
+  // changed directly: the same setting as the volume panel's
+  await page.locator('#config-edge-curve').selectOption('ring');
+  await expect.poll(async () => (await state(page)).split?.id).toBe('ring');
+  await expect.poll(async () => (await bicone(page))?.radius ?? 0).toBeLessThan(BICONE.radius * 0.8);
+  await page.keyboard.press('m');
+  await expect(page.locator('#split-source')).toHaveValue('curve:ring');
+  await page.evaluate(() => window.lithicanalyst.setMode('annotate'));
+  // back to the box: the split stays
+  await page.locator('#config-model-box').click();
+  expect((await state(page)).split).toMatchObject({ source: 'curve', id: 'ring' });
+  await expect(page.locator('#config-edge-row')).toBeHidden();
+});
+
+test('a split by a plane is replaced, and it says so', async ({ page }) => {
+  await openProject(
+    page,
+    { scars: [scarOn('s1', 0, true)], curves: [ringCurve('rim', 'C1', 1, '')], planes: [{ id: 'p1', label: 'P1', method: 'all_vertices', upHint: [0, 0, 1], visible: true }] },
+    { split: { source: 'plane', id: 'p1', upHint: [0, 0, 1] } },
+  );
+  await showConfig(page);
+  await page.locator('#config-model-bicone').click();
+  await expect(page.locator('.toast').filter({ hasText: 'Upper / lower volume is now split along C1' })).toBeVisible();
+  expect((await state(page)).split).toMatchObject({ source: 'curve', id: 'rim' });
+  expect((await state(page)).configuration.model).toBe('bicone');
+  await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await state(page)).split?.source).toBe('plane');
+  expect((await state(page)).configuration.model).toBe('box');
+});
+
+test('a new split along a curve: the side with more scars is up, wherever it is seen from', async ({ page }) => {
+  await openProject(page, { scars: [scarOn('s1', 0, true), scarOn('s2', 100, false), scarOn('s3', 200, false), scarOn('s4', 300, false)], curves: [ringCurve('rim', 'C1', 1, 'core_edge')] });
+  // looking from above, at the side with fewer scars
+  await fromAbove(page);
+  await nextFrames(page);
+  await page.keyboard.press('m');
+  await page.locator('#split-source').selectOption('curve:rim');
+  expect((await state(page)).split!.upHint[2]).toBeLessThan(-0.9);
+  const area = (96 / 2) * BICONE.radius ** 2 * Math.sin((2 * Math.PI) / 96);
+  await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.volumeSplit()))?.upper ?? 0).toBeCloseTo((area * BICONE.lower) / 3, 0);
+});
+
+test('without a closed curve the bicone cannot be chosen, and says why', async ({ page }) => {
+  await openProject(page, { scars: [scarOn('s1', 0, true)] });
+  await showConfig(page);
+  const button = page.locator('#config-model-bicone');
+  await expect(button).toHaveAttribute('aria-disabled', 'true');
+  await button.hover();
+  await expect(page.locator('.tip')).toHaveText('Needs a closed curve');
+  await button.click({ force: true });
+  await expect(page.locator('#config-model-box')).toHaveAttribute('aria-checked', 'true');
+  expect((await state(page)).configuration.model).toBe('box');
+  await expect(page.locator('#config-edge-row')).toBeHidden();
+});
+
+test('the sketch is not drawn while the main view turns; the view bicone is, framed by its outline', async ({ page }) => {
+  await openProject(page, { scars: [scarOn('s1', 0, true), scarOn('s2', 180, false)], curves: [ringCurve('rim', 'C1', 1, 'core_edge')] });
+  await showConfig(page);
+  await page.locator('#config-model-bicone').click();
+  await expect(page.locator('#config-surfaces')).toHaveText('Upper, lower');
+  await nextFrames(page, 3);
+  const before = await page.evaluate(() => ({ sketch: window.lithicanalyst.sketchRenders(), cube: window.lithicanalyst.cubeDraws() }));
+  for (const toward of [[1, 0, 0.3], [0, 1, 0.3], [-1, 0, 0.3], [0, -1, 0.3]]) {
+    await page.evaluate((t) => window.lithicanalyst.view(t as Vec3, [0, 0, 1]), toward);
+    await nextFrames(page, 2);
+  }
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.cubeDraws())).toBeGreaterThan(before.cube);
+  expect(await page.evaluate(() => window.lithicanalyst.sketchRenders())).toBe(before.sketch);
+  // the base's width nearly fills the sketch in its default view
+  const sketch = (await page.locator('#config-sketch').boundingBox())!;
+  const upper = (await page.evaluate(() => window.lithicanalyst.sketchFacePoint('upper')))!;
+  expect(upper.x).toBeGreaterThan(sketch.x);
+  expect(await page.evaluate(() => window.lithicanalyst.sketchOutlineWidth())).toBeGreaterThan(0.8 * sketch.width);
+  expect(await page.evaluate(() => window.lithicanalyst.sketchOutlineWidth())).toBeLessThan(0.9 * sketch.width);
+});
+
 test('an open mesh: the bicone shows only why it cannot', async ({ page }) => {
   const ply = biconePly(true);
   await openApp(page);
@@ -197,9 +349,17 @@ test('an open curve along part of the edge, completed round the rim in one step'
   await page.locator('#curve-complete').click();
   await expect.poll(async () => (await state(page)).curves[0].closed, { timeout: 20000 }).toBe(true);
   const c = (await state(page)).curves[0];
-  expect(c.completion).toEqual({ method: 'outline', firstAutoAnchor: 3, stepDeg: 2 });
+  expect(c.completion).toEqual({ method: 'outline', firstAutoAnchor: 3, stepDeg: 2, anchorStepDeg: 12 });
   expect(c.anchors.slice(0, 3)).toEqual(open.anchors);
-  expect(c.anchors.length).toBeGreaterThan(20);
+  // automatic anchors about 12° apart round the 240° that were missing (the rim has a vertex every 3.75°)
+  const round = c.anchors.slice(2).concat([c.anchors[0]]).map((p) => (Math.atan2(p[1] - BICONE.center[1], p[0] - BICONE.center[0]) * 180) / Math.PI);
+  const gaps = round.slice(1).map((d, i) => (d - round[i] + 720) % 360);
+  expect(gaps.reduce((a, b) => a + b, 0)).toBeGreaterThan(220);
+  for (const g of gaps) {
+    expect(g).toBeGreaterThan(7);
+    expect(g).toBeLessThan(19);
+  }
+  expect(gaps.reduce((a, b) => a + b, 0) / gaps.length).toBeCloseTo(12, -0.5);
   for (const p of c.points) expect(offRim(p)).toBeLessThan(4);
   let a2 = 0;
   for (let i = 0; i < c.points.length; i++) {

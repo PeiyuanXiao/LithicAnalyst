@@ -924,7 +924,8 @@ kbd {
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-.seg-btn:disabled {
+.seg-btn:disabled,
+.seg-btn.is-disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -2104,9 +2105,17 @@ input[type="checkbox"]:disabled {
 }
 
 .float-title {
-  margin-right: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--step--1);
   font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.float-head > :not(.float-title) {
+  flex: none;
 }
 
 .float-grip {
@@ -2743,8 +2752,11 @@ input[type="checkbox"]:disabled {
     width: 80px;
     height: 80px;
   }
+  /* the display button is at the bottom here: below the cube instead */
   .config-panel {
     top: 104px;
+    bottom: auto;
+    max-height: calc(100% - 112px);
   }
 }
 
@@ -2772,12 +2784,13 @@ input[type="checkbox"]:disabled {
   cursor: pointer;
 }
 
-/* the panel over the view: below the cube, clear of the display button and of the Harris matrix (lower left) */
+/* the panel over the view: lower right, over the coordinate readout and under the cube (the Harris matrix is lower left) */
 .config-panel {
-  top: 170px;
   right: max(12px, env(safe-area-inset-right, 0px));
-  width: 300px;
+  bottom: 44px;
+  width: 320px;
   max-width: calc(100% - 24px);
+  max-height: max(160px, calc(100% - 214px));
 }
 
 .config-body {
@@ -2793,7 +2806,23 @@ input[type="checkbox"]:disabled {
   margin-bottom: 8px;
 }
 
+/* the curve the bicone stands on */
+.config-edge-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.config-edge-row .ctl-select {
+  min-height: 26px;
+  padding: 2px 6px;
+  font-size: var(--step--1);
+}
+
 .config-model-row[hidden],
+.config-edge-row[hidden],
 .config-sketch-wrap[hidden],
 .config-traits[hidden],
 .config-status[hidden] {
@@ -2824,6 +2853,16 @@ input[type="checkbox"]:disabled {
 
 .config-traits dd.text {
   grid-column: auto;
+}
+
+/* a row of its own: the label above, its control the full width */
+.config-traits .config-wide,
+.config-traits dd.text.config-wide {
+  grid-column: 1 / -1;
+}
+
+.config-traits dd.config-wide .ctl-select {
+  width: 100%;
 }
 
 .config-polarity {

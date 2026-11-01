@@ -751,6 +751,18 @@ export const setBiconeRole = (store: ProjectStore, side: BiconeSide, role: Bicon
     else c.bicone.roles[side] = role;
   });
 
+/** Split the volume along a closed curve and use the bicone on it, in one step that undo takes back whole. */
+export function setBiconeSplit(store: ProjectStore, split: NonNullable<ProjectState['split']>): void {
+  const before = store.state.configuration;
+  const after = { ...(structuredClone(before) as ConfigCorrections), model: 'bicone' as const };
+  store.history.execute(
+    new CompoundCommand('cmd.useBicone', [
+      new SetSplitCommand(structuredClone(store.state.split), structuredClone(split)),
+      new SetConfigurationCommand('cmd.editConfiguration', structuredClone(before), after),
+    ]),
+  );
+}
+
 /** Exchange the upper and lower side of the volume split (also the bicone's cones). */
 export function swapSplit(store: ProjectStore): void {
   const sp = store.state.split;

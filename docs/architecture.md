@@ -76,8 +76,10 @@ off the interaction path (after loading, in idle time or a worker), never per po
 * **Complete loop**: `compute/completeLoop.ts` (pure, in steps) fits a plane to an open curve,
   takes the outline of the model over the gap seen along its normal (the vertex furthest from the
   centre in each stretch of about 2°), snaps those onto ridges (`snapToFeature`) and traces them
-  (`PathSearch`, ridge costs) from the curve's end back to its start; it returns vertex chains or
-  why it could not. `App.completeLoop` runs it in slices (`runSliced`), pulls each chain taut
+  (`PathSearch`, ridge costs) from the curve's end back to its start; then it keeps about one of
+  those stops per 12° and traces again between them, keeping more where that runs more than two mean
+  edge lengths from the dense line (splitting at the stop furthest from it). It returns vertex
+  chains or why it could not. `App.completeLoop` runs it in slices (`runSliced`), pulls each chain taut
   (`SurfaceSnap.refine`) and applies it in one `completeCurveLoop` (an `UpdateCurveCommand`);
   nothing changes when it fails or the curve changed meanwhile. `setCurveShape` turns moved
   automatic anchors into the user's (`editedCompletion`).
@@ -279,7 +281,12 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   share of the way to the projected curve) for drawing. `coreConfiguration` picks the model; the
   derived results, the batch (with the project's stored split; no box needed) and the app all use
   it. The picked face is a `ConfigPick` (a face of the box or a cone); a pick of the other model is
-  let go. `App.configStatus` says why the bicone shows nothing (an open mesh, no valid split).
+  let go. `App.configStatus` says why the bicone shows nothing (its split still being computed, an
+  open mesh, no valid split). Choosing the bicone from the panel needs no visit to the volume panel:
+  `soleEdgeCurve` names the curve when it goes without saying, else the panel asks (`edgeCurves`);
+  `App.useEdgeCurve` applies `setBiconeSplit` (split and model in one `CompoundCommand`), with
+  `defaultUpHint` (the side with more scars up; when even, toward the viewer), which the volume panel
+  uses too.
 * `compute/configuration.ts` is pure: `placeScar` (face by the averaged normal without its
   component along the arrow, platform = the adjacent face facing back along the arrow),
   `computeConfiguration` (which faces are flaking surfaces first, with the corrections, so that
@@ -296,7 +303,7 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   it did (the app then says so once).
 * **The panel** is a floating viewport panel (`ui/floatingPanel.ts`, the Harris matrix's too;
   place and fold in the `configPanel` pref, never in the project file) holding the sidebar module's
-  configuration content (`Sidebar.configEl`, refreshed with the sidebar; the "Principal axes" pill
+  configuration content (`Sidebar.configEl`, refreshed with the sidebar; the principal-axes pill
   `Sidebar.configPill` sits in its title bar). The display setting `configuration` switches it and
   the view cube on (`App.configShown`: annotate mode, a model, a scar with an arrow);
   `App.updateConfigPanel` shows or hides both, and lets go of the picked face when hidden or folded.
@@ -314,6 +321,11 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   each draw (moved in place, no new buffers), and each scar's arrow bent along its cone: the line
   between its ends over the base, sampled, raised onto the cone and off it along the cone's normal,
   as one merged mesh (tube, tail, head) coloured by its vertices, with a shadow ribbon on the cone.
+  Its default view is framed by the outline as projected there (`frameOutline`: about 85 % of the
+  canvas wide, centred). The sketch is drawn only when its content changes or it is turned, never
+  because the main view turned (`ConfigSketch.renders`, checked in the end-to-end tests); when it was
+  hidden meanwhile the sidebar asks for a draw on showing it (a size that changes and changes back
+  within a frame reaches no `ResizeObserver`).
 * **The view cube** (`render/viewCube.ts`) has no WebGL context of its own: after each frame of the
   main view (`Viewer.onAfterRender`) the main renderer clears a scissored corner viewport and draws
   the cube there, posed as the box's axes are seen by the camera. A board under the transparent
@@ -321,9 +333,10 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   the cube's own viewport). Clicking a face of the cube or the sketch picks it
   (`App.selectConfigFace`) and turns the view to it with the six views' directions
   (`viewAxes` in `render/figure.ts`); meanwhile `syncAnnotations` fades the arrows on other faces.
-  With the bicone the cube is a small opaque bicone posed by the base (`biconeAxes`); the picked
-  cone is outlined by a slightly larger copy closed by a cap and seen from inside, and a click on a
-  cone turns the view along the base's normal from that side, the base's `reference` up.
+  With the bicone the cube is a small opaque bicone posed by the base (`biconeAxes`), its outline
+  (the rim's ellipse and the apexes) centred in each pose; the picked cone is outlined by a slightly
+  larger copy closed by a cap and seen from inside, and a click on a cone turns the view along the
+  base's normal from that side, the base's `reference` up.
 
 ## Landmarks
 
@@ -412,6 +425,8 @@ chain of mesh edges and sums each side from the chain's centre. In both, the cap
 part has zero volume relative to that reference point, so no cap is built. The app recomputes
 when the split, the planes or the curves change; `split.swap` only exchanges the two
 (`swappedSplit`), so swapping reuses the last result (`App.splitRaw`). Its result feeds the bicone.
+Turning a curve into mesh edges (`polylineEdgesSteps`, for the split and the regions) runs in
+slices too.
 
 ## Sections
 
@@ -478,6 +493,10 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   checkpoint, so moving the slider only recomputes the passes since the nearest one.
 * The BVH build reorders the index buffer in place, so `buildLoadedMesh` always works on
   its own copy.
+* `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
+  triangles, each with its total and its longest stretch between two yields: the measure pass, the
+  box, the configuration, the volume split, the bicone and "Complete loop". The longest stretch is what
+  design principle 10 limits to about 100 ms.
 
 ## Hosting
 
@@ -498,3 +517,6 @@ and falls back to a copy dialog.
   SwiftShader when there is no GPU). Test models are generated by `e2e/fixtures/meshes.ts`; the
   tests read the project state and map model coordinates to screen positions through
   `window.lithicanalyst` (end of `ui/app.ts`). Add methods there when a new feature needs them.
+  Software rendering spreads each browser over all the cores, so more workers only compete:
+  `playwright.config.ts` fixes 2 locally and 1 on CI (the measurements are in a comment there). Tests
+  wait for a state (`expect.poll`, an element appearing), never a fixed time.

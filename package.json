@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "tsc --noEmit -p e2e && npm run build && playwright test",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
+    "bench": "rolldown scripts/bench.ts --platform node --format esm --file node_modules/.cache/lithicanalyst-bench.mjs && node node_modules/.cache/lithicanalyst-bench.mjs"
   },
   "license": "MIT",
   "dependencies": {

@@ -44,7 +44,7 @@ import {
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
 import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, offeredOptions, POLARITIES, REGION_FIELDS, SCAR_FIELDS, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity } from '../core/fields';
-import { isBicone, type BiconeResult } from '../compute/bicone';
+import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
 import type { ConfigurationResult, FlakingSurface } from '../compute/configuration';
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -944,13 +944,42 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
   const pill = h('span', { class: 'pill', id: 'config-frame', hidden: true }, t('config.principal'));
   const el = h('div', { class: 'config-content' });
   const body = el;
-  const model = segmented('config-model', null, CONFIG_MODELS.map((v) => ({ value: v, label: t(`config.model.${v}`) })), api.store.state.configuration.model, (v) => setConfigModel(api.store, v as ConfigModel));
+  /** Bicone was asked for and which curve it stands on cannot be told: the choice is open. */
+  let choosing = false;
+  const noCurve = () => !api.store.state.curves.some((c) => c.closed) && api.store.state.configuration.model !== 'bicone';
+  const chooseModel = (v: ConfigModel) => {
+    const st = api.store.state;
+    choosing = false;
+    if (v === 'box') setConfigModel(api.store, 'box');
+    else if (!noCurve()) {
+      const sp = st.split;
+      if (st.configuration.model === 'bicone' || (sp?.source === 'curve' && api.store.curve(sp.id)?.closed)) setConfigModel(api.store, 'bicone');
+      else {
+        const sole = soleEdgeCurve(st.curves);
+        if (sole) api.useEdgeCurve(sole.id);
+        else choosing = true;
+      }
+    }
+    refresh('configuration');
+  };
+  const model = segmented('config-model', null, CONFIG_MODELS.map((v) => ({ value: v, label: t(`config.model.${v}`) })), api.store.state.configuration.model, (v) => chooseModel(v as ConfigModel));
+  // not `disabled`: the reason has to show on hover in every browser
+  const biconeBtn = model.el.querySelector('#config-model-bicone') as HTMLElement;
+  tips.attach(biconeBtn, () => (noCurve() ? { label: t('config.needsCurve') } : null));
   const status = h('span', { class: 'pill config-status', id: 'config-status', hidden: true });
   const modelRow = h('div', { class: 'config-model-row', id: 'config-model-row' }, model.el, status);
+  const edgeSelect = h('select', { class: 'ctl-select', id: 'config-edge-curve', 'aria-label': t('config.edgeCurve') }) as HTMLSelectElement;
+  edgeSelect.addEventListener('change', () => {
+    if (!edgeSelect.value) return;
+    choosing = false;
+    api.useEdgeCurve(edgeSelect.value);
+    refresh('configuration');
+  });
+  const edgeRow = h('label', { class: 'config-edge-row', id: 'config-edge-row' }, h('span', { class: 'ctl-label' }, t('config.edgeCurve')), edgeSelect);
   const sketch = h('div', { class: 'config-sketch-wrap' }, api.configSketch().canvas);
   const traits = h('dl', { class: 'num-grid config-traits', id: 'config-traits' });
   const card = h('div', { class: 'config-card', id: 'config-card' });
-  body.append(modelRow, sketch, traits, card);
+  body.append(modelRow, edgeRow, sketch, traits, card);
   const polarity = h('select', { class: 'ctl-select config-polarity', id: 'config-polarity', 'aria-label': t('config.polarity') }) as HTMLSelectElement;
   polarity.addEventListener('change', () => setConfigPolarity(api.store, (polarity.value || null) as Polarity | null));
 
@@ -1038,17 +1067,30 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'configuration', 'arrows', 'specimen', 'mesh', 'figure', 'split'].includes(kind)) return;
+    if (!['all', 'configuration', 'arrows', 'specimen', 'mesh', 'figure', 'split', 'curves'].includes(kind)) return;
     const st = api.store.state;
     const bicone = st.configuration.model === 'bicone';
     pill.hidden = !!st.specimen.frame || bicone;
-    // the model can be chosen once the volume is split along a closed curve (and changed back however the split goes)
-    modelRow.hidden = st.split?.source !== 'curve' && !bicone;
     model.set(st.configuration.model);
+    const off = noCurve();
+    biconeBtn.setAttribute('aria-disabled', String(off));
+    biconeBtn.classList.toggle('is-disabled', off);
+    // the curve under the bicone: always with the bicone, and while one has to be chosen for it
+    const loops = edgeCurves(st.curves);
+    if (bicone || off) choosing = false;
+    edgeRow.hidden = !bicone && !choosing;
+    const current = st.split?.source === 'curve' && loops.some((c) => c.id === st.split!.id) ? st.split.id : '';
+    clear(edgeSelect);
+    edgeSelect.append(h('option', { value: '', hidden: true }, MISSING), ...loops.map((c) => h('option', { value: c.id }, c.label)));
+    edgeSelect.value = bicone ? current : '';
     const reason = api.configStatus();
     status.hidden = !reason;
-    status.textContent = reason ? t(reason === 'not_closed' ? 'config.notClosed' : 'config.splitInvalid') : '';
+    const reasons = { computing: 'config.computing', not_closed: 'config.notClosed', split_invalid: 'config.splitInvalid' } as const;
+    status.textContent = reason ? t(reasons[reason]) : '';
+    const wasHidden = sketch.hidden;
     sketch.hidden = traits.hidden = !!reason;
+    // shown again: what was built while it was hidden has not been drawn (and the size may not have changed in between)
+    if (wasHidden && !sketch.hidden) api.configSketch().resize();
     const found = api.configuration();
     clear(traits);
     clear(card);
@@ -1075,8 +1117,8 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
       ...textValueRow(t('config.surfaces'), r?.surfaces.length ? r.surfaces.map(surfaceText).join(' · ') : MISSING, 'config-surfaces'),
       ...textValueRow(t('config.surfaceRelation'), code('config.relation', r?.flakingSurfaceRelation ?? null), 'config-surface-relation'),
       ...textValueRow(t('config.platformRelation'), code('config.relation', r?.platformRelation ?? null), 'config-platform-relation'),
-      h('dt', {}, t('config.polarity')),
-      h('dd', { class: 'text', id: 'config-polarity-cell' }, polarity),
+      h('dt', { class: 'config-wide' }, t('config.polarity')),
+      h('dd', { class: 'text config-wide', id: 'config-polarity-cell' }, polarity),
       ...textValueRow(t('config.surfaceType'), r ? perSurface(r, (s) => t(`config.type.${s.type}`)) : MISSING, 'config-type-value'),
       ...textValueRow(t('config.axis'), r ? perSurface(r, (s) => t(`config.axis.${s.axis}`)) : MISSING, 'config-axis-value'),
     );
@@ -1492,7 +1534,9 @@ function splitSection(api: AppApi): Section {
   const select = h('select', { id: 'split-source', class: 'ctl-select', 'aria-label': t('split.by') }) as HTMLSelectElement;
   select.addEventListener('change', () => {
     const [source, id] = select.value.split(':');
-    setSplit(api.store, source === 'plane' || source === 'curve' ? { source, id, upHint: api.towardViewer(), swap: false } : null);
+    // a new curve: the side with more scars up
+    if (source === 'curve') setSplit(api.store, { source, id, upHint: api.splitUpHint(id), swap: false });
+    else setSplit(api.store, source === 'plane' ? { source, id, upHint: api.towardViewer(), swap: false } : null);
   });
   const flip = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'split-swap', onclick: () => swapSplit(api.store) }, t('split.swap')) as HTMLButtonElement;
   const meta = h('dl', { class: 'num-grid' });

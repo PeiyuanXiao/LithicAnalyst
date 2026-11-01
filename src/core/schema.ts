@@ -187,6 +187,7 @@ function parseCompletion(raw: unknown, anchorCount: number): CurveCompletion | u
   const user = Array.isArray(k.userAnchors) ? [...new Set(k.userAnchors.filter((i): i is number => Number.isInteger(i) && i >= first && i < anchorCount))].sort((a, b) => a - b) : [];
   if (user.length >= anchorCount - first) return undefined;
   const out: CurveCompletion = { method: 'outline', firstAutoAnchor: first, stepDeg: typeof k.stepDeg === 'number' && k.stepDeg > 0 ? k.stepDeg : 2 };
+  if (typeof k.anchorStepDeg === 'number' && k.anchorStepDeg > 0) out.anchorStepDeg = k.anchorStepDeg;
   if (user.length) out.userAnchors = user;
   return out;
 }

@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
-import { coreConfiguration, isBicone, type CoreConfiguration } from '../compute/bicone';
-import { completeLoopSteps, COMPLETE_STEP_DEG, type CompleteFailure } from '../compute/completeLoop';
+import { coreConfiguration, defaultUpHint, isBicone, type CoreConfiguration } from '../compute/bicone';
+import { completeLoopSteps, COMPLETE_ANCHOR_STEP_DEG, COMPLETE_STEP_DEG, type CompleteFailure } from '../compute/completeLoop';
 import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addLandmark, completeCurveLoop, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { addLandmark, completeCurveLoop, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -50,7 +50,7 @@ import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLa
 import { uuid } from '../core/ids';
 import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
-import { polylineEdges, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
+import { polylineEdgesSteps, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
 import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type VolumeSplit } from '../compute/split';
 import { assembleCurve, curveSegments } from '../core/curveGeometry';
@@ -354,6 +354,8 @@ export class App implements AppApi {
   private pickedFace: ConfigPick | null = null;
   /** The split as computed (before `swap`), for the plane or curve it was computed from. */
   private splitRaw: { key: string; value: VolumeSplit | null } | null = null;
+  /** The split is being computed (the bicone waits for it). */
+  private splitBusy = false;
   /** A curve being completed into a loop (its id). */
   private completing: string | null = null;
   private viewCube: ViewCube | null = null;
@@ -1074,7 +1076,26 @@ export class App implements AppApi {
   configStatus(): ConfigStatus | null {
     const st = this.store.state;
     if (st.configuration.model !== 'bicone' || this.configResult || !this.hasMesh()) return null;
-    return this.measureBase?.topology.closed === false ? 'not_closed' : 'split_invalid';
+    if (!this.measureBase || this.splitBusy) return 'computing';
+    return this.measureBase.topology.closed === false ? 'not_closed' : 'split_invalid';
+  }
+
+  splitUpHint(curveId: string): Vec3 {
+    const c = this.store.curve(curveId);
+    return defaultUpHint(c?.points ?? [], this.store.state.scars, this.towardViewer());
+  }
+
+  useEdgeCurve(curveId: string): void {
+    const st = this.store.state;
+    const c = this.store.curve(curveId);
+    if (!c?.closed) return;
+    const sp = st.split;
+    if (sp?.source === 'curve' && sp.id === curveId) return setConfigModel(this.store, 'bicone');
+    const split = { source: 'curve' as const, id: curveId, upHint: this.splitUpHint(curveId), swap: false };
+    if (st.configuration.model === 'bicone') setSplit(this.store, split);
+    else setBiconeSplit(this.store, split);
+    // a plane's split has gone: say so, once
+    if (sp?.source === 'plane') this.feedback.toast(t('split.replaced', { curve: c.label }), 'info', 4000);
   }
 
   /** The points of the closed curve the volume is split along (the bicone's base), or null. */
@@ -1197,6 +1218,7 @@ export class App implements AppApi {
             first: snap.nearestVertex(c.anchors[0]),
             last: snap.nearestVertex(c.anchors[c.anchors.length - 1]),
             stepDeg: COMPLETE_STEP_DEG,
+            anchorStepDeg: COMPLETE_ANCHOR_STEP_DEG,
           }),
         );
         if (!unchanged()) return;
@@ -1218,7 +1240,7 @@ export class App implements AppApi {
         if (!unchanged()) return;
         const anchors = [...c.anchors, ...res.anchors.map((v) => snap.point(v))];
         const { points, anchorIndex } = assembleCurve([...curveSegments(c), ...added], true);
-        const completion = res.anchors.length ? { method: 'outline' as const, firstAutoAnchor: c.anchors.length, stepDeg: COMPLETE_STEP_DEG } : null;
+        const completion = res.anchors.length ? { method: 'outline' as const, firstAutoAnchor: c.anchors.length, stepDeg: COMPLETE_STEP_DEG, anchorStepDeg: COMPLETE_ANCHOR_STEP_DEG } : null;
         completeCurveLoop(this.store, id, { anchors, points, anchorIndex, closed: true }, completion);
       } finally {
         this.completing = null;
@@ -1800,14 +1822,17 @@ export class App implements AppApi {
     if (this.loaded !== loaded) return null;
     const search = snap.search(3);
     const barrier: number[] = [];
-    for (const c of curves)
-      barrier.push(
-        ...polylineEdges(c.points, c.closed, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
+    for (const c of curves) {
+      const chain = await runSliced(
+        polylineEdgesSteps(c.points, c.closed, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
           if (!search) return null;
           search.start(a, null);
           return search.reach(b) ? search.path(b) : null;
         }),
       );
+      if (this.loaded !== loaded) return null;
+      for (const v of chain) barrier.push(v);
+    }
     const g = loaded.geometry;
     const part = await runSliced(regionsSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, barrier));
     return this.loaded === loaded ? part : null;
@@ -3122,8 +3147,10 @@ export class App implements AppApi {
     const loaded = this.loaded;
     const snap = this.surfaceSnap;
     const key = sp ? JSON.stringify([sp.source, sp.id, sp.upHint]) : '';
+    this.splitBusy = true;
     const done = (v: VolumeSplit | null) => {
       if (token !== this.splitToken) return;
+      this.splitBusy = false;
       this.splitRaw = { key, value: v };
       this.split = v && sp ? swappedSplit(v, sp.swap) : null;
       this.sidebar.refresh('split');
@@ -3147,14 +3174,17 @@ export class App implements AppApi {
     if (!c || !fit || !snap) return done(null);
     let normal = fit.normal;
     if (normal[0] * sp.upHint[0] + normal[1] * sp.upHint[1] + normal[2] * sp.upHint[2] < 0) normal = [-normal[0], -normal[1], -normal[2]];
-    void snap.prepare('off').then(() => {
+    void snap.prepare('off').then(async () => {
       if (token !== this.splitToken) return;
       const search = snap.search(3);
-      const chain = polylineEdges(c.points, true, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
-        if (!search) return null;
-        search.start(a, null);
-        return search.reach(b) ? search.path(b) : null;
-      });
+      const chain = await runSliced(
+        polylineEdgesSteps(c.points, true, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
+          if (!search) return null;
+          search.start(a, null);
+          return search.reach(b) ? search.path(b) : null;
+        }),
+      );
+      if (token !== this.splitToken) return;
       void runSliced(splitByLoopSteps(pos, idx, base.edges, chain, normal)).then(done);
     });
   }
@@ -3408,6 +3438,7 @@ export class App implements AppApi {
     this.bordersToken++;
     this.split = null;
     this.splitRaw = null;
+    this.splitBusy = false;
     this.splitToken++;
     this.configBox = null;
     this.configResult = null;
@@ -4017,6 +4048,10 @@ export class App implements AppApi {
       sketchFacePoint: (face: ConfigPick) => this.sketch?.faceCentreClient(face) ?? null,
       /** The sketch's arrows: how many, and where the middle of a scar's is on the page (null when it faces away). */
       sketchArrowCount: () => this.sketch?.arrowCount() ?? 0,
+      /** How many times the sketch and the view cube were drawn (the sketch only when it changes or is turned). */
+      sketchRenders: () => this.sketch?.renders ?? 0,
+      sketchOutlineWidth: () => this.sketch?.outlineWidth() ?? null,
+      cubeDraws: () => this.viewCube?.draws ?? 0,
       sketchArrowPoint: (id: string) => this.sketch?.arrowClient(id) ?? null,
       /** Whether the configuration panel is shown. */
       configPanelShown: () => !!this.configEl && !this.configEl.hidden,

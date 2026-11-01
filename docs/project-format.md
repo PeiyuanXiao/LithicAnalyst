@@ -37,7 +37,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.landmarks` | array | fixed landmarks in export order (`{ id, name, point }`) |
 | `annotations.semilandmarks` | array | curve semilandmark sets (`{ id, label, curveId, count, startLandmarkId, endLandmarkId }`), see below |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
-| `split` | `{ source, id, upHint, swap }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal; `swap: true` exchanges upper and lower (files without it: `false`) |
+| `split` | `{ source, id, upHint, swap }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal (set when the split is chosen: toward the side of the curve's plane with more scars by their ends, when even toward the viewer); `swap: true` exchanges upper and lower (files without it: `false`) |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
 | `derived` | object | latest computed results, see below |
@@ -455,17 +455,21 @@ Defined in `src/core/fields.ts`.
 * `points` are kept as traced: later versions of the tracing method do not change saved curves
   until an anchor is moved.
 * `completion` (optional): the curve was closed by "Complete loop" —
-  `{ "method": "outline", "firstAutoAnchor": n, "stepDeg": 2 }`, and `userAnchors` (ascending
-  indices) when some of them were moved since. The anchors from `firstAutoAnchor` on were placed
-  automatically: the curve's points were fitted with a plane (rejected when the second principal
-  variance is under 1 % of the first); the mesh's vertex centroid projected onto it is the centre;
-  the curve had to go at least 90° round it. Seen along the plane's normal, the gap was cut into
-  stretches of about `stepDeg` degrees (centred every step from the curve's end), and in each the
-  vertex furthest from the centre taken (one more than 10 % nearer the centre than another within
-  three stretches is left out). Each was snapped onto a ridge within 5 % of its distance from the
-  centre, and they were joined by the curve tracing (ridge mode) from the curve's end round to its
-  start. An automatic anchor the user moves is added to `userAnchors`; when all are there,
-  `completion` is removed. Segments with an automatic anchor at either end are drawn dashed. A
+  `{ "method": "outline", "firstAutoAnchor": n, "stepDeg": 2, "anchorStepDeg": 12 }`, and
+  `userAnchors` (ascending indices) when some of them were moved since. The anchors from
+  `firstAutoAnchor` on were placed automatically: the curve's points were fitted with a plane
+  (rejected when the second principal variance is under 1 % of the first); the mesh's vertex
+  centroid projected onto it is the centre; the curve had to go at least 90° round it. Seen along
+  the plane's normal, the gap was sampled: cut into stretches of about `stepDeg` degrees (centred
+  every step from the curve's end), and in each the vertex furthest from the centre taken (one more
+  than 10 % nearer the centre than another within three stretches is left out). Each sample was
+  snapped onto a ridge within 5 % of its distance from the centre, and they were joined by the curve
+  tracing (ridge mode) from the curve's end round to its start. Then the anchors were thinned: the
+  sample nearest each multiple of `anchorStepDeg` degrees stays, and the line is traced again between
+  those; where it runs more than 2 mean edge lengths of the mesh from the line through all samples,
+  the sample furthest from it stays too (and so on). Curves completed before this have no
+  `anchorStepDeg`: an anchor for every sample. An automatic anchor the user moves is added to
+  `userAnchors`; when all are there, `completion` is removed. Segments with an automatic anchor at either end are drawn dashed. A
   `completion` that does not fit the curve's anchors is dropped when the file is read.
 
 ### Curve attributes

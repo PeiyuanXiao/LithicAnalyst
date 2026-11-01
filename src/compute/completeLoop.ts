@@ -9,12 +9,19 @@ import { PathSearch, snapToFeature } from './surfacePath';
  * round the edge until it closes. Seen along the normal of the curve's plane,
  * the model's outline in the stretch the curve does not cover gives a point
  * every few degrees; each is moved onto the ridge nearby and they are joined by
- * the curve tracing, from the curve's end back to its start. Pure functions on
- * typed arrays, in steps (a 2-million-triangle scan does not freeze the view).
+ * the curve tracing, from the curve's end back to its start. Of those points
+ * only about one per COMPLETE_ANCHOR_STEP_DEG stays as an anchor (easy to edit),
+ * more where tracing straight between them would leave the outline. Pure
+ * functions on typed arrays, in steps (a 2-million-triangle scan does not
+ * freeze the view).
  */
 
 /** One outline point per this many degrees of the gap. */
 export const COMPLETE_STEP_DEG = 2;
+/** The outline points kept as anchors: about one per this many degrees. */
+export const COMPLETE_ANCHOR_STEP_DEG = 12;
+/** A stretch between kept anchors may run this many mean edge lengths from the traced outline; further, more anchors stay there. */
+export const COMPLETE_MAX_DEVIATION = 2;
 /** A curve this close to a straight line (second over first principal variance) has no plane to go round in. */
 export const COMPLETE_MIN_SPREAD = 0.01;
 /** The curve must already go this far round the centre (degrees). */
@@ -41,6 +48,7 @@ export interface CompleteLoopInput {
   first: number;
   last: number;
   stepDeg?: number;
+  anchorStepDeg?: number;
 }
 
 export type CompleteLoopResult =
@@ -57,6 +65,45 @@ export type CompleteLoopResult =
 const TRACE_BUDGET = 20_000;
 
 const wrap = (a: number) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+
+/** The mean length of the mesh's edges (from at most about 100 000 vertices, evenly picked). */
+function* meanEdgeSteps(pos: ArrayLike<number>, adj: Adjacency): Steps<number> {
+  const n = adj.offsets.length - 1;
+  const stride = Math.max(1, Math.floor(n / 100_000));
+  let sum = 0, count = 0;
+  for (let v = 0, i = 0; v < n; v += stride, i++) {
+    if (i % YIELD_EVERY === 0) yield;
+    for (let e = adj.offsets[v]; e < adj.offsets[v + 1]; e++) {
+      const u = adj.neighbors[e];
+      sum += Math.hypot(pos[3 * u] - pos[3 * v], pos[3 * u + 1] - pos[3 * v + 1], pos[3 * u + 2] - pos[3 * v + 2]);
+      count++;
+    }
+  }
+  return count ? sum / count : 0;
+}
+
+/** Distance from vertex `v` to the polyline through `chain`. */
+function toChain(pos: ArrayLike<number>, v: number, chain: ArrayLike<number>): number {
+  const x = pos[3 * v], y = pos[3 * v + 1], z = pos[3 * v + 2];
+  let best = Infinity;
+  for (let i = 0; i < chain.length; i++) {
+    const a = 3 * chain[i], b = 3 * chain[Math.min(i + 1, chain.length - 1)];
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const wx = x - pos[a], wy = y - pos[a + 1], wz = z - pos[a + 2];
+    const len2 = ux * ux + uy * uy + uz * uz;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, (wx * ux + wy * uy + wz * uz) / len2)) : 0;
+    best = Math.min(best, Math.hypot(wx - t * ux, wy - t * uy, wz - t * uz));
+  }
+  return best;
+}
+
+/** How far two chains run apart: the largest distance from a vertex of one to the other. */
+function chainsApart(pos: ArrayLike<number>, a: ArrayLike<number>, b: ArrayLike<number>): number {
+  let worst = 0;
+  for (let i = 0; i < a.length; i++) worst = Math.max(worst, toChain(pos, a[i], b));
+  for (let i = 0; i < b.length; i++) worst = Math.max(worst, toChain(pos, b[i], a));
+  return worst;
+}
 
 export function* completeLoopSteps(input: CompleteLoopInput): Steps<CompleteLoopResult> {
   const { positions: pos, adjacency, strength, cost, points } = input;
@@ -81,13 +128,9 @@ export function* completeLoopSteps(input: CompleteLoopInput): Steps<CompleteLoop
   const m: Vec3 = [0, 1, 2].map((k) => mean[k] / count + ref[k]) as Vec3;
   const lift = (m[0] - c[0]) * n[0] + (m[1] - c[1]) * n[1] + (m[2] - c[2]) * n[2];
   const o: Vec3 = [m[0] - lift * n[0], m[1] - lift * n[1], m[2] - lift * n[2]];
-  const flat = (x: number, y: number, z: number): [number, number] => {
-    const dx = x - o[0], dy = y - o[1], dz = z - o[2];
-    return [dx * e1[0] + dy * e1[1] + dz * e1[2], dx * e2[0] + dy * e2[1] + dz * e2[2]];
-  };
   const angle = (p: Vec3) => {
-    const [x, y] = flat(p[0], p[1], p[2]);
-    return Math.atan2(y, x);
+    const dx = p[0] - o[0], dy = p[1] - o[1], dz = p[2] - o[2];
+    return Math.atan2(dx * e2[0] + dy * e2[1] + dz * e2[2], dx * e1[0] + dy * e1[1] + dz * e1[2]);
   };
   // how far the curve goes round the centre, and which way
   let turn = 0;
@@ -105,7 +148,8 @@ export function* completeLoopSteps(input: CompleteLoopInput): Steps<CompleteLoop
   if (bins > 1)
     for (let v = 0; v < count; v++) {
       if (v % YIELD_EVERY === 0) yield;
-      const [x, y] = flat(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]);
+      const dx = pos[3 * v] - o[0], dy = pos[3 * v + 1] - o[1], dz = pos[3 * v + 2] - o[2];
+      const x = dx * e1[0] + dy * e1[1] + dz * e1[2], y = dx * e2[0] + dy * e2[1] + dz * e2[2];
       let along = dir * (Math.atan2(y, x) - from);
       along -= 2 * Math.PI * Math.floor(along / (2 * Math.PI));
       const k = Math.round(along / width);
@@ -121,23 +165,75 @@ export function* completeLoopSteps(input: CompleteLoopInput): Steps<CompleteLoop
   const outline = found.filter((p) => found.every((q) => Math.abs(q.k - p.k) > OUTLINE_REACH || p.r >= OUTLINE_KEEP * q.r));
   if (bins > 1 && !outline.length) return { ok: false, reason: 'edge' };
   // ④ onto the ridge nearby
-  const anchors: number[] = [];
+  const stops = [input.last];
+  const around = [0];
   for (const { v, r } of outline) {
     const s = strength ? snapToFeature(v, COMPLETE_SNAP_SHARE * r, strength, pos, adjacency) : v;
-    if (s !== input.first && s !== input.last && s !== anchors[anchors.length - 1]) anchors.push(s);
+    if (s !== input.first && s !== input.last && s !== stops[stops.length - 1]) {
+      stops.push(s);
+      // how far round from the curve's end it is, now that it is on the ridge
+      const a = dir * (angle([pos[3 * s], pos[3 * s + 1], pos[3 * s + 2]]) - from);
+      around.push(a - 2 * Math.PI * Math.floor(a / (2 * Math.PI)));
+    }
     yield;
   }
+  stops.push(input.first);
+  around.push(gap);
   // ⑤ traced from the curve's end through them back to its start
   const search = new PathSearch(pos, adjacency);
-  const stops = [input.last, ...anchors, input.first];
-  const chains: Uint32Array[] = [];
-  for (let i = 1; i < stops.length; i++) {
-    search.start(stops[i - 1], cost);
-    while (!search.reach(stops[i], TRACE_BUDGET)) {
-      if (search.unreachable(stops[i])) return { ok: false, reason: 'loop' };
+  const trace = function* (from: number, to: number): Steps<Uint32Array | null> {
+    search.start(from, cost);
+    while (!search.reach(to, TRACE_BUDGET)) {
+      if (search.unreachable(to)) return null;
       yield;
     }
-    chains.push(search.path(stops[i])!);
+    return search.path(to);
+  };
+  const dense: Uint32Array[] = [];
+  for (let i = 1; i < stops.length; i++) {
+    const chain = yield* trace(stops[i - 1], stops[i]);
+    if (!chain) return { ok: false, reason: 'loop' };
+    dense.push(chain);
+    yield;
+  }
+  // ⑥ about one stop per anchor step stays, the one nearest each multiple of the step…
+  const stretches = Math.max(1, Math.round(gap / ((input.anchorStepDeg ?? COMPLETE_ANCHOR_STEP_DEG) * Math.PI) * 180));
+  const kept = [0];
+  for (let j = 1; j < stretches; j++) {
+    const target = (gap * j) / stretches;
+    let near = -1, nearest = Infinity;
+    for (let i = kept[kept.length - 1] + 1; i < stops.length - 1; i++) {
+      const d = Math.abs(around[i] - target);
+      if (d < nearest) [near, nearest] = [i, d];
+    }
+    if (near >= 0) kept.push(near);
+  }
+  kept.push(stops.length - 1);
+  // …traced again between those; where that leaves the dense line, the stop furthest from it stays too
+  const tolerance = COMPLETE_MAX_DEVIATION * (yield* meanEdgeSteps(pos, adjacency));
+  const todo: Array<[number, number]> = [];
+  for (let j = kept.length - 1; j > 0; j--) todo.push([kept[j - 1], kept[j]]);
+  const anchors: number[] = [];
+  const chains: Uint32Array[] = [];
+  while (todo.length) {
+    const [a, b] = todo.pop()!;
+    let chain: Uint32Array | null = dense[a];
+    if (b - a > 1) {
+      chain = yield* trace(stops[a], stops[b]);
+      const line = dense.slice(a, b).flatMap((d, i) => Array.from(i ? d.subarray(1) : d));
+      if (!chain || chainsApart(pos, line, chain) > tolerance) {
+        let split = (a + b) >> 1, far = -1;
+        for (let i = a + 1; chain && i < b; i++) {
+          const d = toChain(pos, stops[i], chain);
+          if (d > far) [split, far] = [i, d];
+        }
+        todo.push([split, b], [a, split]);
+        yield;
+        continue;
+      }
+    }
+    chains.push(chain);
+    if (b < stops.length - 1) anchors.push(stops[b]);
     yield;
   }
   return { ok: true, anchors, chains };
