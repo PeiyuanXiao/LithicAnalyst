@@ -195,6 +195,41 @@ test('the panel: switched on in the display settings, moved, folded, kept inside
   await expect(page.locator('#config-show')).not.toBeChecked();
 });
 
+test.describe('in a low window', () => {
+  test.use({ viewport: { width: 1366, height: 650 } });
+
+  test('a picked face shows its card whole, compact: the sketch gives way, then the traits scroll', async ({ page }) => {
+    await threeScars(page);
+    await showConfig(page, true);
+    const face = (await config(page))!.scars[0].face;
+    const body = page.locator('#config-body');
+    await page.evaluate((f) => window.lithicanalyst.selectConfigFace(f), face);
+    await expect(page.locator('#config-card')).toBeVisible();
+    // the panel itself needs no scrolling; the card is all there, under the sketch and the traits
+    await expect.poll(() => body.evaluate((b) => b.scrollHeight - b.clientHeight)).toBeLessThanOrEqual(1);
+    const b = (await body.boundingBox())!;
+    const card = (await page.locator('#config-card').boundingBox())!;
+    expect(card.y).toBeGreaterThanOrEqual(b.y);
+    expect(card.y + card.height).toBeLessThanOrEqual(b.y + b.height);
+    expect((await page.locator('#config-sketch').boundingBox())!.height).toBeGreaterThanOrEqual(100);
+    // the traits are reached by their own scrolling
+    const traits = page.locator('#config-traits');
+    expect(await traits.evaluate((t) => t.scrollHeight > t.clientHeight)).toBe(true);
+    await traits.evaluate((t) => (t.scrollTop = t.scrollHeight));
+    await expect(page.locator('#config-axis-value')).toBeInViewport();
+    // type and axis side by side, each group on one row
+    const type = (await page.locator('#config-type-wide').boundingBox())!, axis = (await page.locator('#config-axis-long').boundingBox())!;
+    expect(axis.y).toBe(type.y);
+    expect(axis.x).toBeGreaterThan(type.x + type.width);
+    const role = (await page.locator('#config-role-flaking').boundingBox())!, none = (await page.locator('#config-role-none').boundingBox())!;
+    expect(none.y).toBe(role.y);
+    // the card closed: the traits are whole again
+    await page.evaluate(() => window.lithicanalyst.selectConfigFace(null));
+    await expect(page.locator('#config-card')).toBeHidden();
+    await expect.poll(() => traits.evaluate((t) => t.scrollHeight - t.clientHeight)).toBeLessThanOrEqual(1);
+  });
+});
+
 test('the sketch draws one arrow per scar; a click on one selects its scar', async ({ page }) => {
   await threeScars(page);
   await showConfig(page, true);

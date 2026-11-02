@@ -124,9 +124,15 @@ interface Observer {
   table: LandmarkTable | null;
 }
 
+/** Arrow settings as saved, without the thickness earlier versions kept. */
+function withoutThickness(arrows: Partial<DisplaySettings['arrows']> & { thickness?: unknown } = {}): Partial<DisplaySettings['arrows']> {
+  const { thickness: _thickness, ...rest } = arrows;
+  return rest;
+}
+
 function loadDisplay(): DisplaySettings {
   // settings of earlier versions that are no longer kept: the view's background (the theme
-  // decides it now), gloss and the fill light (fixed)
+  // decides it now), gloss, the fill light and the arrows' thickness (fixed)
   const { background: _background, gloss: _gloss, ...saved } = readPref<Partial<DisplaySettings> & { background?: unknown; gloss?: unknown }>('display', {});
   return {
     ...DEFAULT_DISPLAY,
@@ -134,7 +140,7 @@ function loadDisplay(): DisplaySettings {
     shading: saved.shading === 'curvature' ? 'curvature' : 'plain',
     curvScale: Math.max(0, Math.min(100, Math.round(saved.curvScale ?? DEFAULT_DISPLAY.curvScale))),
     light: { ...DEFAULT_LIGHT, ...(saved.light ?? {}), fillIntensity: DEFAULT_LIGHT.fillIntensity },
-    arrows: { ...DEFAULT_ARROW_DISPLAY, ...(saved.arrows ?? {}) },
+    arrows: { ...DEFAULT_ARROW_DISPLAY, ...withoutThickness(saved.arrows) },
     curveSnap: SNAP_MODES.includes(saved.curveSnap as SnapMode) ? (saved.curveSnap as SnapMode) : DEFAULT_DISPLAY.curveSnap,
   };
 }
@@ -1155,6 +1161,10 @@ export class App implements AppApi {
 
   configFace(): ConfigPick | null {
     return this.pickedFace;
+  }
+
+  fitConfigPanel(): void {
+    this.configFit?.();
   }
 
   selectConfigFace(face: ConfigPick | null, turn = false): void {
@@ -4039,6 +4049,7 @@ export class App implements AppApi {
       /** The volumetric configuration (null without arrows or before the mesh is measured). */
       configuration: () => this.configResult,
       bicone: () => (isBicone(this.configResult) ? this.configResult : null),
+      light: () => ({ ...this.display.light }),
       configFace: () => this.pickedFace,
       selectConfigFace: (face: ConfigPick | null, turn = false) => this.selectConfigFace(face, turn),
       /** Why the bicone shows nothing (null: it does, or the box is used). */
@@ -4051,6 +4062,7 @@ export class App implements AppApi {
       /** How many times the sketch and the view cube were drawn (the sketch only when it changes or is turned). */
       sketchRenders: () => this.sketch?.renders ?? 0,
       sketchOutlineWidth: () => this.sketch?.outlineWidth() ?? null,
+      sketchOutlineBox: () => this.sketch?.outlineBox() ?? null,
       cubeDraws: () => this.viewCube?.draws ?? 0,
       sketchArrowPoint: (id: string) => this.sketch?.arrowClient(id) ?? null,
       /** Whether the configuration panel is shown. */

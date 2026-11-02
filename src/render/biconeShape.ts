@@ -81,6 +81,50 @@ export function rimPoints(r: number, a0 = 0, a1 = 2 * Math.PI, count = 72): THRE
   });
 }
 
+/** The points a bicone's outline on the page comes from: it is the hull of its rim and apexes. */
+export function biconeOutline(s: BiconeSize, rim: number): THREE.Vector3[] {
+  return [...rimPoints(rim, 0, 2 * Math.PI, 48), new THREE.Vector3(0, s.upper, 0), new THREE.Vector3(0, -s.lower, 0)];
+}
+
+/** A perspective camera's axes (`dir` from the scene toward it) and field of view. */
+export interface OutlineView {
+  right: THREE.Vector3;
+  up: THREE.Vector3;
+  dir: THREE.Vector3;
+  /** Tangent of half the vertical field of view. */
+  tanV: number;
+  aspect: number;
+}
+
+/**
+ * Where the camera stands to frame `points`: `x` and `y` along its right and up,
+ * `distance` along its `dir`. As projected they are centred and take `width` of the
+ * canvas's width or `height` of its height, whichever comes first; a `minDistance`
+ * keeps the camera that far off, and then they are only centred.
+ */
+export function fitOutline(points: readonly THREE.Vector3[], view: OutlineView, width: number, height: number, minDistance = 0): { x: number; y: number; distance: number } {
+  const tanH = view.tanV * view.aspect;
+  const reach = Math.max(...points.map((p) => p.length()));
+  let x = 0, y = 0;
+  // from where all of it is in front of the camera; the near side looks larger, so it takes a few passes
+  let distance = Math.max(minDistance, reach / Math.min(width * tanH, height * view.tanV));
+  for (let pass = 0; pass < 8; pass++) {
+    let left = Infinity, right = -Infinity, top = -Infinity, bottom = Infinity;
+    for (const p of points) {
+      const depth = distance - p.dot(view.dir);
+      const sx = (p.dot(view.right) - x) / (depth * tanH), sy = (p.dot(view.up) - y) / (depth * view.tanV);
+      left = Math.min(left, sx);
+      right = Math.max(right, sx);
+      top = Math.max(top, sy);
+      bottom = Math.min(bottom, sy);
+    }
+    x += ((left + right) / 2) * distance * tanH;
+    y += ((top + bottom) / 2) * distance * view.tanV;
+    distance = Math.max(minDistance, distance * Math.max((right - left) / (2 * width), (top - bottom) / (2 * height)));
+  }
+  return { x, y, distance };
+}
+
 /** On a cone of the drawing: the point over (x, z) of the base and the cone's outward normal there. */
 export function onCone(s: BiconeSize, cone: BiconeCone, x: number, z: number): { point: THREE.Vector3; normal: THREE.Vector3 } {
   const h = cone === 'upper' ? s.upper : s.lower;

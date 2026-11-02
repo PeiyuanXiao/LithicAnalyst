@@ -1,3 +1,4 @@
+import { lightFromDisc } from '../render/lighting';
 import type { SurfaceHit } from '../render/viewer';
 import type { HitProvider, Tool, ToolContext } from './tool';
 
@@ -125,9 +126,8 @@ export class ToolController {
       const half = 0.5 * Math.min(r.width, r.height);
       const dx = (e.clientX - (r.left + r.width / 2)) / half;
       const dy = -(e.clientY - (r.top + r.height / 2)) / half;
-      const az = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
-      const el = 90 - 85 * Math.min(1, Math.hypot(dx, dy));
-      this.onLightAdjust(az, el);
+      const light = lightFromDisc(dx, dy);
+      this.onLightAdjust(light.azimuthDeg, light.elevationDeg);
       return;
     }
     this.active.pointerMove(e, hit);

@@ -9,7 +9,6 @@ export type ArrowColorMode = 'uniform' | 'completeness' | 'certainty' | 'directi
 
 export interface ArrowDisplay {
   /** Multiplier on the default shaft radius. */
-  thickness: number;
   /** Display-only lift of the endpoints along the surface normal, as a fraction of the model diagonal. */
   lift: number;
   /** Draw arrows hidden behind the surface as faint ghosts. */
@@ -19,7 +18,6 @@ export interface ArrowDisplay {
 }
 
 export const DEFAULT_ARROW_DISPLAY: ArrowDisplay = {
-  thickness: 1,
   lift: 0.004,
   showHidden: true,
   labels: true,
@@ -264,7 +262,7 @@ export class ArrowLayer {
   }
 
   get radius(): number {
-    return this.viewer.diagonal * 0.0028 * (this.last?.display.thickness ?? 1);
+    return this.viewer.diagonal * 0.0028;
   }
 
   private liftDistance(display: ArrowDisplay): number {
@@ -275,7 +273,7 @@ export class ArrowLayer {
   sync(state: Readonly<ProjectState>, selected: string | null, display: ArrowDisplay, showHandles: boolean): void {
     this.last = { state, selected, display, handles: showHandles };
     const seen = new Set<string>();
-    const radius = this.viewer.diagonal * 0.0028 * display.thickness;
+    const radius = this.viewer.diagonal * 0.0028;
     const lift = this.liftDistance(display);
     const seq = display.colorMode === 'sequence' ? sequenceColors(state.sequences) : null;
     const hl = this.highlight;
@@ -347,7 +345,7 @@ export class ArrowLayer {
   private updateHandles(hot: 'start' | 'end' | null = null): void {
     const last = this.last;
     const v = last && last.selected && last.handles ? this.visuals.get(last.selected) : undefined;
-    const r = (last ? this.viewer.diagonal * 0.0028 * last.display.thickness : 1) * 2.4;
+    const r = (last ? this.viewer.diagonal * 0.0028 : 1) * 2.4;
     this.handles.forEach((h, i) => {
       h.visible = !!v;
       if (!v) return;
@@ -389,7 +387,7 @@ export class ArrowLayer {
       return;
     }
     this.hoverDot.color.set(color);
-    const size = this.viewer.diagonal * 0.0065 * (this.last?.display.thickness ?? 1);
+    const size = this.viewer.diagonal * 0.0065;
     this.hover.position.copy(point).addScaledVector(normal, this.viewer.diagonal * 0.0008);
     this.hover.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
     this.hover.scale.setScalar(size);

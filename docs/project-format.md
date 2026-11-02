@@ -93,7 +93,6 @@ fitted planes, fitted spheres, volumes ….
     "frame": "principal",
     "length": 61.204, "width": 38.551, "thickness": 14.093,
     "surfaceArea": 4410.25, "volume": 19873.6,
-    "surfaceToVolumeRatio": 6.006, "wadellSphericity": 0.806,
     "closed": true
   },
   "manualMeasurements": [
@@ -106,9 +105,9 @@ fitted planes, fitted spheres, volumes ….
   ranges of the model along three axes, the specimen frame's Y, X and Z when `specimen.frame` is
   set (`frame: "specimen"`), else the first, second and third principal axes of the surface
   (area-weighted PCA; `frame: "principal"`). `surfaceArea` is in unit², `volume` in unit³ and
-  only computed when the mesh is closed (otherwise null, as are the two indices; holes are not
-  filled). `surfaceToVolumeRatio` = A / V^(2/3) (dimensionless); `wadellSphericity` =
-  π^(1/3) (6V)^(2/3) / A.
+  only computed when the mesh is closed (otherwise null; holes are not filled). Files saved earlier
+  also have `surfaceToVolumeRatio` and `wadellSphericity` here; `derived` is not read back, so they
+  are simply gone when the file is saved again.
 * `vertices`: the principal axes of all mesh vertices (`{ mean, axes, variances }`, original
   coordinates; the `all_vertices` plane and the plane frames use them), or null.
 * `manualMeasurements`: the value of each manual measurement (length in the specimen unit, or
@@ -525,7 +524,7 @@ the segment back to the first point).
 Automatic measurements (`<specimen>_measurements.csv`, one row):
 
 ```
-specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed
+specimen_id,unit,frame,length,width,thickness,surface_area,volume,closed
 ```
 
 Manual measurements (`<specimen>_manual_measurements.csv`, one row each; unused points empty,

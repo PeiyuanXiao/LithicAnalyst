@@ -20,10 +20,6 @@ export interface AutoMeasurements {
   surfaceArea: number;
   /** Null when the mesh is not closed (no hole filling). */
   volume: number | null;
-  /** A / V^(2/3), dimensionless. */
-  surfaceToVolumeRatio: number | null;
-  /** Wadell sphericity π^(1/3) (6V)^(2/3) / A. */
-  wadellSphericity: number | null;
   closed: boolean;
 }
 
@@ -75,15 +71,6 @@ export interface MeshResults {
   split?: VolumeSplit | null;
   /** The model's box along the specimen frame or the principal axes (volumetric configuration). */
   box?: ConfigBox | null;
-}
-
-/** Volume-based shape indices; null when the volume is unknown. */
-export function shapeIndices(area: number, volume: number | null): { surfaceToVolumeRatio: number | null; wadellSphericity: number | null } {
-  if (volume === null || !(volume > 0) || !(area > 0)) return { surfaceToVolumeRatio: null, wadellSphericity: null };
-  return {
-    surfaceToVolumeRatio: area / Math.pow(volume, 2 / 3),
-    wadellSphericity: (Math.cbrt(Math.PI) * Math.pow(6 * volume, 2 / 3)) / area,
-  };
 }
 
 export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults | null = null): DerivedResults {

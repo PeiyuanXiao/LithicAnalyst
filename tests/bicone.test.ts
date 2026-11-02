@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { biconePolar, computeBicone, coreConfiguration, defaultUpHint, edgeCurves, soleEdgeCurve } from '../src/compute/bicone';
 import { buildEdges, meshTopology } from '../src/compute/meshGeometry';
@@ -8,6 +9,7 @@ import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { ProjectStore } from '../src/core/store';
 import type { Vec3 } from '../src/core/types';
 import { configurationCsv, flakingSurfacesCsv, scarVectorCsv } from '../src/io/csv';
+import { biconeOutline, biconeSize, fitOutline } from '../src/render/biconeShape';
 import { bicone } from './meshes';
 
 const R = 30, UP = 10, DOWN = 20, SEG = 96;
@@ -226,4 +228,67 @@ describe('bicone', () => {
     // without a result (no split volumes): the model still
     expect(configurationCsv(store.state, null, opts).split('\n')[1]).toBe('B1,bicone,,,,,');
   });
+});
+
+describe('framing the sketch by the outline', () => {
+  const view = { right: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0), dir: new THREE.Vector3(0, 0, 1), tanV: Math.tan((13 * Math.PI) / 180), aspect: 300 / 160 };
+  const tanH = view.tanV * view.aspect;
+  const W = 0.85, H = 0.92;
+  const v = (x: number, y: number, z = 0) => new THREE.Vector3(x, y, z);
+  /** The points' bounds on the canvas (−1 to 1), the camera standing as fitted. */
+  const bounds = (points: THREE.Vector3[], f: { x: number; y: number; distance: number }) => {
+    const sx = points.map((p) => (p.x - f.x) / ((f.distance - p.z) * tanH)), sy = points.map((p) => (p.y - f.y) / ((f.distance - p.z) * view.tanV));
+    return { left: Math.min(...sx), right: Math.max(...sx), top: Math.max(...sy), bottom: Math.min(...sy) };
+  };
+
+  it('takes the share of the width or of the height, whichever comes first', () => {
+    // all at one depth, so no perspective: 2 wide on a canvas wider than high
+    expect(fitOutline([v(-1, 0), v(1, 0), v(0, 0.1), v(0, -0.1)], view, W, H).distance).toBeCloseTo(1 / (W * tanH), 6);
+    expect(fitOutline([v(-1, 0), v(1, 0), v(0, 1), v(0, -1)], view, W, H).distance).toBeCloseTo(1 / (H * view.tanV), 6);
+  });
+
+  it('centres what is off centre, also nearer the camera', () => {
+    const f = fitOutline([v(-1, -3), v(3, 1)], view, W, H);
+    expect(f.x).toBeCloseTo(1, 6);
+    expect(f.y).toBeCloseTo(-1, 6);
+    const near = [v(0, 2, 1), v(0, 0, -1), v(1, 1, 0), v(-1, 1, 0)];
+    const b = bounds(near, fitOutline(near, view, W, H));
+    expect(b.top + b.bottom).toBeCloseTo(0, 6);
+    expect(b.left + b.right).toBeCloseTo(0, 6);
+  });
+
+  it('keeps the distance it is given, and then only centres', () => {
+    const points = [v(-1, -2), v(1, 0)];
+    const f = fitOutline(points, view, W, H, 50);
+    expect(f.distance).toBe(50);
+    expect(f.y).toBeCloseTo(-1, 6);
+    expect(fitOutline(points, view, W, H, 0.001).distance).toBeCloseTo(1 / (H * view.tanV), 6);
+  });
+
+  // from a flat discoid to one cone twelve times the other, and a tall spindle
+  for (const [radius, upperHeight, lowerHeight] of [[30, 5, 5], [30, 10, 30], [30, 8, 48], [25, 5, 60], [10, 40, 40]]) {
+    it(`a bicone of radius ${radius}, heights ${upperHeight} and ${lowerHeight} stays inside and centred however it is turned`, () => {
+      const s = biconeSize({ radius, upperHeight, lowerHeight });
+      const outline = biconeOutline(s, s.radius);
+      const home = fitOutline(outline, view, W, H).distance;
+      const q = new THREE.Quaternion();
+      let leastShare = 1;
+      for (let a = 0; a < 12; a++)
+        for (let b = 0; b < 12; b++) {
+          q.setFromEuler(new THREE.Euler((a * Math.PI) / 6, (b * Math.PI) / 6, (a * b * Math.PI) / 18));
+          const turned = outline.map((p) => p.clone().applyQuaternion(q));
+          const f = fitOutline(turned, view, W, H, home);
+          // never drawn larger than in the default view
+          expect(f.distance).toBeGreaterThanOrEqual(home);
+          const o = bounds(turned, f);
+          expect(o.right).toBeLessThanOrEqual(W + 1e-3);
+          expect(o.top).toBeLessThanOrEqual(H + 1e-3);
+          expect(o.left + o.right).toBeCloseTo(0, 3);
+          expect(o.top + o.bottom).toBeCloseTo(0, 3);
+          leastShare = Math.min(leastShare, home / f.distance);
+        }
+      // only as much smaller as it must be: a diameter-limited shape seen face on loses the width it had to spare
+      expect(leastShare).toBeGreaterThan(0.45);
+    });
+  }
 });

@@ -125,7 +125,10 @@ keeps the selection and the undo history.
   language menu (`LANGS` in `ui/i18n.ts`), the theme switch and the shortcuts. Menus and small
   panels (`ui/popover.ts`, one `Popovers` shared through `AppApi.popovers`) close on a press
   outside or Esc. The display settings are a panel over the view
-  (`Sidebar.displayEl`, mounted by `App.buildDisplayControl`); the sidebar's left edge resizes
+  (`Sidebar.displayEl`, mounted by `App.buildDisplayControl`): rows of a label and its control, with
+  the switches of the configuration and Harris panels (annotate mode), and the light ball
+  (`ui/lightBall.ts`, a 2D canvas drawn only when the light changes; it shares `lightFromDisc` in
+  `render/lighting.ts` with the L key in `tools/toolController.ts`). The sidebar's left edge resizes
   it (`sidebarWidth` preference).
 * **Labels**: after each render `render/labelLayout.ts` moves labels that would cover each
   other apart by priority (selected first, hidden-behind-the-surface last) and hides those
@@ -147,7 +150,8 @@ keeps the selection and the undo history.
 * **Tooltips** (`ui/tooltip.ts`): one shared `tips` instance. `tips.attach(el, content)` shows a
   name and a key cap below an element after 300 ms of hover (at once on keyboard focus);
   `tips.showAt(x, y, …)` shows one next to the cursor. Toolbar, mode and top-bar buttons use
-  them instead of `title`.
+  them instead of `title`, as do `iconButton` and `plusButton` (`ui/controls.ts`): a button whose
+  icon says what it does shows no words; its name is in the tooltip and in `aria-label`.
 * **Hover** (select tool): `SelectTool` picks at most once a frame with the same pick as a click
   (arrows, curves, landmarks, measurements; BVH rays only) and tells each layer
   (`setHoverItem`) and the app (`ToolContext.hovered`, which shows "label · kind" after a pause).
@@ -307,6 +311,12 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   `Sidebar.configPill` sits in its title bar). The display setting `configuration` switches it and
   the view cube on (`App.configShown`: annotate mode, a model, a scar with an arrow);
   `App.updateConfigPanel` shows or hides both, and lets go of the picked face when hidden or folded.
+  Short of room, the content gives way before the panel scrolls: the panel, its body and the content
+  are nested flex columns in which the sketch's wrapper shrinks first (to about 100 px; the canvas
+  fills it absolutely and `ConfigSketch.resize` follows, framing the bicone again), then the traits,
+  which scroll on their own; the card never shrinks. Moved by hand, it
+  is placed from its remembered position again whenever its content changes (`fitConfigPanel`), so it
+  goes up as far as needed and comes back; the remembered position does not change.
 * **The sketch** (`render/configSketch.ts`) is a small canvas of its own in the panel, drawn only
   when its content changes or it is turned: a transparent `RoundedBoxGeometry` (inside, then near
   side, neither writing depth), the edge midlines as fat lines and, on faces that are both, a band
@@ -321,8 +331,10 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   each draw (moved in place, no new buffers), and each scar's arrow bent along its cone: the line
   between its ends over the base, sampled, raised onto the cone and off it along the cone's normal,
   as one merged mesh (tube, tail, head) coloured by its vertices, with a shadow ribbon on the cone.
-  Its default view is framed by the outline as projected there (`frameOutline`: about 85 % of the
-  canvas wide, centred). The sketch is drawn only when its content changes or it is turned, never
+  It is framed by its outline as projected now, again on every turn (`frameOutline`, `fitOutline` in
+  `render/biconeShape.ts`): the camera moves sideways and back, never turns, so the outline stays
+  centred; as large as in the default view (about 85 % of the canvas wide), smaller only as far as it
+  must be to stay inside. Another model starts from its default view. The sketch is drawn only when its content changes or it is turned, never
   because the main view turned (`ConfigSketch.renders`, checked in the end-to-end tests); when it was
   hidden meanwhile the sidebar asks for a draw on showing it (a size that changes and changes back
   within a frame reaches no `ResizeObserver`).

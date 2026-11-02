@@ -1,4 +1,5 @@
-import { h, icon20, ICONS20 } from './dom';
+import { h, icon, icon20, ICONS20 } from './dom';
+import { tip } from './tooltip';
 
 export interface SliderOpts {
   id: string;
@@ -165,6 +166,20 @@ export function softSet(input: HTMLInputElement | HTMLTextAreaElement, value: st
 /** "Add …" at the end of a list: a dashed, full-width button with a plus. */
 export function addButton(label: string, onClick: () => void, id?: string): HTMLButtonElement {
   return h('button', { type: 'button', class: 'add-btn', id, onclick: onClick }, icon20(ICONS20.plus), h('span', {}, label)) as HTMLButtonElement;
+}
+
+/** The same with only the plus, where the section it is in says what it adds; the name is in its tooltip. */
+export function plusButton(label: string, onClick: () => void, id?: string): HTMLButtonElement {
+  const b = h('button', { type: 'button', class: 'add-btn add-btn-plus', id, 'aria-label': label, onclick: onClick }, icon20(ICONS20.plus)) as HTMLButtonElement;
+  tip(b, label);
+  return b;
+}
+
+/** A button that is only an icon: its name is in its tooltip and for screen readers. */
+export function iconButton(path: string, label: string, onClick: () => void, o: { id?: string; danger?: boolean; disabled?: boolean } = {}): HTMLButtonElement {
+  const b = h('button', { type: 'button', class: o.danger ? 'icon-btn icon-btn-danger' : 'icon-btn', id: o.id, 'aria-label': label, disabled: o.disabled, onclick: onClick }, icon(path)) as HTMLButtonElement;
+  tip(b, label);
+  return b;
 }
 
 /**

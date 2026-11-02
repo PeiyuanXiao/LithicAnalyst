@@ -63,10 +63,14 @@ import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import { LANDMARK_COLORS } from '../render/landmarkLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode } from './appApi';
-import { addButton, checkbox, coordRow, numRow, optionList, segmented, selectRow, slider, softSet, textRow, textValueRow } from './controls';
+import { addButton, checkbox, coordRow, iconButton, numRow, optionList, plusButton, segmented, selectRow, slider, softSet, textRow, textValueRow } from './controls';
 import { clear, h, icon, ICONS, revealInList } from './dom';
 import { t, tl } from './i18n';
+import { lightBall } from './lightBall';
 import { tip, tips } from './tooltip';
+
+/** The trash can, in the danger colour. */
+const deleteButton = (id: string, onClick: () => void) => iconButton(ICONS.trash, t('arrows.delete'), onClick, { id, danger: true });
 
 export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
@@ -251,7 +255,7 @@ function arrowsSection(api: AppApi): Section {
         { class: 'insp-head' },
         label,
         h('button', { type: 'button', class: 'icon-btn', id: 'insp-focus', title: t('arrows.focus'), 'aria-label': t('arrows.focus'), onclick: () => api.selection.id && api.focusArrow(api.selection.id) }, icon(ICONS.target)),
-        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteScar(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
+        deleteButton('insp-delete', () => api.selection.id && deleteScar(api.store, api.selection.id)),
       );
       const fields = [...SCAR_FIELDS.map((f) => buildField(f, a)), sequenceField()];
       const coordsEl = h('dl', { class: 'coord-grid', id: 'arrow-coords' });
@@ -379,7 +383,7 @@ function curvesSection(api: AppApi): Section {
         { class: 'insp-head' },
         label,
         h('button', { type: 'button', class: 'icon-btn', id: 'curve-insp-focus', title: t('arrows.focus'), 'aria-label': t('arrows.focus'), onclick: () => api.selection.id && api.focusCurve(api.selection.id) }, icon(ICONS.target)),
-        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'curve-insp-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteCurve(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')),
+        deleteButton('curve-insp-delete', () => api.selection.id && deleteCurve(api.store, api.selection.id)),
       );
       const fields = CURVE_FIELDS.map((f) => buildField(f, c));
       const meta = h('dl', { class: 'num-grid' });
@@ -497,19 +501,9 @@ function displaySection(api: AppApi): Section {
   });
   const curvGroup = h('div', { class: 'subgroup' }, curvLegend, curvScale.el, curvContrast.el);
 
-  const az = slider({
-    id: 'light-az', label: t('display.lightAz'), min: 0, max: 360, step: 1, value: d.light.azimuthDeg,
-    format: (v) => `${Math.round(v)}°`, onInput: (v) => api.setDisplay((x) => (x.light.azimuthDeg = v), 'light'),
-  });
-  const elv = slider({
-    id: 'light-el', label: t('display.lightEl'), min: 5, max: 90, step: 1, value: d.light.elevationDeg,
-    format: (v) => `${Math.round(v)}°`, onInput: (v) => api.setDisplay((x) => (x.light.elevationDeg = v), 'light'),
-  });
+  const ball = lightBall(d.light.azimuthDeg, d.light.elevationDeg, (azimuthDeg, elevationDeg) => api.setDisplay((x) => Object.assign(x.light, { azimuthDeg, elevationDeg }), 'light'));
+  const lightRow = h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, t('display.light')), ball.el);
 
-  const thickness = slider({
-    id: 'arrow-thickness', label: t('display.arrowSize'), min: 0.4, max: 3, step: 0.1, value: d.arrows.thickness,
-    format: (v) => `×${v.toFixed(1)}`, onInput: (v) => api.setDisplay((x) => (x.arrows.thickness = v), 'arrows'),
-  });
   const colorMode = selectRow('arrow-color', t('display.arrowColor'), [
     { value: 'uniform', label: t('color.uniform') },
     { value: 'completeness', label: t('color.completeness') },
@@ -520,29 +514,29 @@ function displaySection(api: AppApi): Section {
   const labels = checkbox('arrow-labels', t('display.labels'), d.arrows.labels, (v) => api.setDisplay((x) => (x.arrows.labels = v), 'arrows'));
   const hidden = checkbox('arrow-hidden', t('display.hidden'), d.arrows.showHidden, (v) => api.setDisplay((x) => (x.arrows.showHidden = v), 'arrows'));
   const regions = checkbox('display-regions', t('display.regions'), d.regions, (v) => api.setDisplay((x) => (x.regions = v), 'regions'));
-  const config = checkbox('config-show', t('sec.configuration'), d.configuration, (v) => api.setDisplay((x) => (x.configuration = v), 'configuration'));
+  /** A panel over the view, switched on or off: a row like the others, its label on the left. */
+  const panelRow = (id: string, label: string, checked: boolean, onChange: (v: boolean) => void) => {
+    const input = h('input', { type: 'checkbox', id, checked }) as HTMLInputElement;
+    input.addEventListener('change', () => onChange(input.checked));
+    return { el: h('label', { class: 'ctl', for: id }, h('span', { class: 'ctl-label' }, label), h('span', { class: 'ctl-check' }, input)), input };
+  };
+  const config = panelRow('config-show', t('sec.configuration'), d.configuration, (v) => api.setDisplay((x) => (x.configuration = v), 'configuration'));
+  const harris = panelRow('harris-show', t('harris.title'), d.harris, (v) => api.setDisplay((x) => (x.harris = v), 'harris'));
 
-  // shading; the light; the arrows; what is drawn
-  body.append(
-    shading.el,
-    curvGroup,
-    h('div', { class: 'ctl-grid' }, az.el, elv.el),
-    h('div', { class: 'ctl-grid' }, thickness.el, colorMode.el),
-    h('div', { class: 'check-row' }, labels, hidden, regions, config),
-  );
+  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, h('div', { class: 'check-row' }, labels, hidden, regions));
 
   const refresh = (kind: RefreshKind) => {
-    // the configuration panel belongs to the annotate mode (as the Harris matrix)
-    config.hidden = api.mode !== 'annotate';
-    (config.querySelector('input') as HTMLInputElement).checked = api.display.configuration;
+    // these panels belong to the annotate mode
+    config.el.hidden = harris.el.hidden = api.mode !== 'annotate';
+    config.input.checked = api.display.configuration;
+    harris.input.checked = api.display.harris;
     if (kind !== 'all' && kind !== 'display' && kind !== 'mesh') return;
     shading.set(api.display.shading);
     const scanBtn = shading.el.querySelector('[data-value="scan"]') as HTMLButtonElement | null;
     if (scanBtn) scanBtn.disabled = !api.hasScanColors();
     curvGroup.hidden = api.display.shading !== 'curvature';
     curvBusy.hidden = !api.curvatureBusy();
-    az.set(api.display.light.azimuthDeg);
-    elv.set(api.display.light.elevationDeg);
+    ball.set(api.display.light.azimuthDeg, api.display.light.elevationDeg);
   };
   refresh('all');
   return { el, refresh };
@@ -570,8 +564,6 @@ function measureAutoSection(api: AppApi): Section {
       ...textValueRow(t('measure.axes'), t(`measure.axes.${m.frame}`), 'auto-frame'),
       ...row('area', t('measure.area'), 'area', m.surfaceArea),
       ...(m.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'auto-volume') : row('volume', t('measure.volume'), 'volume', m.volume)),
-      ...row('svr', t('measure.svr'), 'ratio', m.surfaceToVolumeRatio),
-      ...row('sphericity', t('measure.sphericity'), 'ratio', m.wadellSphericity),
     );
   };
   refresh('all');
@@ -582,7 +574,7 @@ function measureManualSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('measure-manual', t('sec.measureManual'), badge);
   const list = h('ol', { class: 'arrow-list num-list', id: 'measure-list', role: 'listbox', 'aria-label': t('sec.measureManual') });
-  const del = h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'measure-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => api.selection.id && deleteMeasurement(api.store, api.selection.id) }, icon(ICONS.trash), t('arrows.delete')) as HTMLButtonElement;
+  const del = deleteButton('measure-delete', () => api.selection.id && deleteMeasurement(api.store, api.selection.id));
   const actions = h('div', { class: 'btn-row' }, del);
   body.append(list, actions);
   const refresh = (kind: RefreshKind) => {
@@ -618,7 +610,7 @@ const PLANE_METHODS: PlaneMethod[] = ['all_vertices', 'scar_directions', 'scar_s
 function planesSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('planes', t('sec.planes'), badge);
-  const add = addButton(t('plane.add'), () => api.addPlane(), 'plane-add');
+  const add = plusButton(t('plane.add'), () => api.addPlane(), 'plane-add');
   const list = h('ol', { class: 'arrow-list', id: 'plane-list', role: 'listbox', 'aria-label': t('sec.planes') });
   const inspector = h('div', { class: 'inspector', id: 'plane-inspector' });
   body.append(list, add, inspector);
@@ -647,9 +639,9 @@ function planesSection(api: AppApi): Section {
     const actions = h(
       'div',
       { class: 'btn-row' },
-      h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'plane-flip', onclick: () => flipPlane(api.store, p.id) }, t('plane.flip')),
-      h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'plane-view', onclick: () => api.viewAlongPlane(p.id) }, icon(ICONS.target), t('plane.view')),
-      h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'plane-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deletePlane(api.store, p.id) }, icon(ICONS.trash), t('arrows.delete')),
+      iconButton(ICONS.swap, t('plane.flip'), () => flipPlane(api.store, p.id), { id: 'plane-flip' }),
+      iconButton(ICONS.target, t('plane.view'), () => api.viewAlongPlane(p.id), { id: 'plane-view' }),
+      deleteButton('plane-delete', () => deletePlane(api.store, p.id)),
     );
     inspector.append(method.el, inputs, actions);
   };
@@ -907,7 +899,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
       const ctl = optionList('region-type', tl(typeField.label), typeField.options!.map((o, i) => ({ value: o.value, label: tl(o.label), key: String(i + 1) })), r.type, (v) => setType(r.id, v));
       inspector.append(
         ctl.el,
-        h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'region-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteRegion(api.store, r.id) }, icon(ICONS.trash), t('arrows.delete'))),
+        h('div', { class: 'btn-row' }, deleteButton('region-delete', () => deleteRegion(api.store, r.id))),
       );
     }
     clear(totals);
@@ -975,11 +967,21 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     api.useEdgeCurve(edgeSelect.value);
     refresh('configuration');
   });
-  const edgeRow = h('label', { class: 'config-edge-row', id: 'config-edge-row' }, h('span', { class: 'ctl-label' }, t('config.edgeCurve')), edgeSelect);
+  const swap = h('button', { type: 'button', class: 'icon-btn', id: 'config-swap', 'aria-label': t('split.swap'), onclick: () => swapSplit(api.store) }, icon(ICONS.swap)) as HTMLButtonElement;
+  tip(swap, t('split.swap'));
+  const edgeRow = h('div', { class: 'config-edge-row', id: 'config-edge-row' }, h('label', { class: 'ctl-label', for: 'config-edge-curve' }, t('config.edgeCurve')), edgeSelect, swap);
   const sketch = h('div', { class: 'config-sketch-wrap' }, api.configSketch().canvas);
   const traits = h('dl', { class: 'num-grid config-traits', id: 'config-traits' });
   const card = h('div', { class: 'config-card', id: 'config-card' });
   body.append(modelRow, edgeRow, sketch, traits, card);
+  /** A card just opened or changed face comes into view, even in a very low window. */
+  let cardFor: string | null = null;
+  const fit = () => {
+    api.fitConfigPanel();
+    const pick = card.hidden ? null : api.configFace();
+    if (pick && pick !== cardFor) card.scrollIntoView({ block: 'nearest' });
+    cardFor = pick;
+  };
   const polarity = h('select', { class: 'ctl-select config-polarity', id: 'config-polarity', 'aria-label': t('config.polarity') }) as HTMLSelectElement;
   polarity.addEventListener('change', () => setConfigPolarity(api.store, (polarity.value || null) as Polarity | null));
 
@@ -999,7 +1001,7 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
         h('span', { class: 'config-face-name', id: 'config-face-name' }, t(`config.cone.${cone.cone}`)),
         h('span', { class: 'config-face-count mono' }, t('config.scars', { n: cone.scars })),
         h('span', { class: `pill${edited ? ' pill-set' : ''}`, id: 'config-face-state' }, t(edited ? 'config.edited' : 'config.isAuto')),
-        edited ? h('button', { type: 'button', class: 'btn btn-text btn-sm', id: 'config-reset', onclick: () => setBiconeRole(api.store, cone.side, null) }, t('config.reset')) : null,
+        edited ? iconButton(ICONS.rotateLeft, t('config.reset'), () => setBiconeRole(api.store, cone.side, null), { id: 'config-reset' }) : null,
       ),
       segmented(
         'config-role',
@@ -1008,7 +1010,6 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
         cone.role,
         (v) => setBiconeRole(api.store, cone.side, v === cone.autoRole ? null : (v as BiconeRole)),
       ).el,
-      h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'config-swap', onclick: () => swapSplit(api.store) }, t('split.swap'))),
     );
   };
 
@@ -1032,7 +1033,7 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
         h('span', { class: 'config-face-name', id: 'config-face-name' }, faceName(face)),
         h('span', { class: 'config-face-count mono' }, t('config.scars', { n: fr.scars })),
         h('span', { class: `pill${edited ? ' pill-set' : ''}`, id: 'config-face-state' }, t(edited ? 'config.edited' : 'config.isAuto')),
-        edited ? h('button', { type: 'button', class: 'btn btn-text btn-sm', id: 'config-reset', onclick: () => resetConfigFace(api.store, face, surface?.faces ?? [face]) }, t('config.reset')) : null,
+        edited ? iconButton(ICONS.rotateLeft, t('config.reset'), () => resetConfigFace(api.store, face, surface?.faces ?? [face]), { id: 'config-reset' }) : null,
       ),
       segmented(
         'config-role',
@@ -1045,24 +1046,27 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     if (!surface) return;
     // type and axis act on the whole flaking surface; an automatic "unclear" or "—" lights neither
     card.append(
-      segmented(
+      h('div', { class: 'config-card-pair' }, segmented(
         'config-type',
         null,
         (['wide', 'narrow'] as const).map((v) => ({ value: v, label: t(`config.type.${v}`) })),
         surface.type,
         (v) => setConfigSurfaceType(api.store, face, v === surface.autoType ? null : (v as 'wide' | 'narrow'), surface.faces),
-      ).el,
-      segmented(
+      ).el, segmented(
         'config-axis',
         null,
         (['long', 'short'] as const).map((v) => ({ value: v, label: t(`config.axis.${v}`) })),
         surface.axis,
         (v) => setConfigAxis(api.store, face, v === surface.autoAxis ? null : (v as 'long' | 'short'), surface.faces),
-      ).el,
+      ).el),
     );
-    for (const j of r.joins.filter((x) => x.faces.includes(face))) {
+    const joins = r.joins.filter((x) => x.faces.includes(face));
+    if (!joins.length) return;
+    const joinRow = h('div', { class: 'config-card-joins' });
+    card.append(joinRow);
+    for (const j of joins) {
       const other = j.faces[0] === face ? j.faces[1] : j.faces[0];
-      card.append(checkbox(`config-join-${other}`, t('config.joined', { face: faceName(other) }), j.joined, (on) => setConfigJoin(api.store, face, other, on === j.auto ? null : on)));
+      joinRow.append(checkbox(`config-join-${other}`, t('config.joined', { face: faceName(other) }), j.joined, (on) => setConfigJoin(api.store, face, other, on === j.auto ? null : on)));
     }
   };
 
@@ -1083,6 +1087,7 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     clear(edgeSelect);
     edgeSelect.append(h('option', { value: '', hidden: true }, MISSING), ...loops.map((c) => h('option', { value: c.id }, c.label)));
     edgeSelect.value = bicone ? current : '';
+    swap.hidden = !bicone || !current;
     const reason = api.configStatus();
     status.hidden = !reason;
     const reasons = { computing: 'config.computing', not_closed: 'config.notClosed', split_invalid: 'config.splitInvalid' } as const;
@@ -1103,6 +1108,7 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
       );
       if (b) renderConeCard(b);
       else card.hidden = true;
+      fit();
       return;
     }
     const r = found && !isBicone(found) ? found : null;
@@ -1124,6 +1130,7 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     );
     if (r) renderCard(r);
     else card.hidden = true;
+    fit();
   };
   refresh('all');
   return { el, refresh, pill };
@@ -1136,10 +1143,9 @@ function relationsSection(api: AppApi): Section {
   const problems = h('ol', { class: 'problem-list', id: 'relation-problem-list' });
   const list = h('ol', { class: 'arrow-list', id: 'relation-list', role: 'listbox', 'aria-label': t('sec.relations') });
   const inspector = h('div', { class: 'inspector', id: 'relation-inspector' });
-  const addSeq = addButton(t('sequence.add'), () => api.selection.set(addSequence(api.store).id), 'sequence-add');
+  const addSeq = plusButton(t('sequence.add'), () => api.selection.set(addSequence(api.store).id), 'sequence-add');
   const seqList = h('ol', { class: 'arrow-list num-list', id: 'sequence-list', role: 'listbox', 'aria-label': t('sequence.title') });
   const seqInspector = h('div', { class: 'inspector', id: 'sequence-inspector' });
-  const harris = checkbox('harris-show', t('harris.title'), api.display.harris, (on) => api.setDisplay((d) => (d.harris = on), 'harris'));
   const checksRow = h('div', { class: 'checks-row' }, h('span', { class: 'ctl-label' }, t('relation.checks')), checks);
   // the relation tool: bordering scars with nothing recorded yet
   const unjudgedText = h('span', { class: 'ctl-label', id: 'relation-unjudged-count' });
@@ -1147,7 +1153,7 @@ function relationsSection(api: AppApi): Section {
     'div',
     { class: 'checks-row', id: 'relation-unjudged', hidden: true },
     unjudgedText,
-    h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'relation-next-pair', onclick: () => api.nextUnjudgedPair() }, t('relation.nextPair')),
+    iconButton(ICONS.next, t('relation.nextPair'), () => api.nextUnjudgedPair(), { id: 'relation-next-pair' }),
   );
   body.append(
     checksRow,
@@ -1159,7 +1165,6 @@ function relationsSection(api: AppApi): Section {
     seqList,
     addSeq,
     seqInspector,
-    harris,
   );
 
   const scarLabel = (id: string) => api.store.scar(id)?.label ?? '?';
@@ -1254,9 +1259,9 @@ function relationsSection(api: AppApi): Section {
       h(
         'div',
         { class: 'btn-row' },
-        moveButton({ class: 'btn btn-quiet btn-sm', id: 'sequence-earlier', onclick: () => moveSequence(api.store, q.id, -1) }, t('sequence.earlier'), earlierReason, [icon(ICONS.up), document.createTextNode(t('sequence.earlier'))], !prev || !!earlierReason),
-        moveButton({ class: 'btn btn-quiet btn-sm', id: 'sequence-later', onclick: () => moveSequence(api.store, q.id, 1) }, t('sequence.later'), laterReason, [icon(ICONS.down), document.createTextNode(t('sequence.later'))], !next || !!laterReason),
-        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'sequence-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSequence(api.store, q.id) }, icon(ICONS.trash), t('arrows.delete')),
+        moveButton({ class: 'icon-btn', id: 'sequence-earlier', onclick: () => moveSequence(api.store, q.id, -1) }, t('sequence.earlier'), earlierReason, [icon(ICONS.up)], !prev || !!earlierReason),
+        moveButton({ class: 'icon-btn', id: 'sequence-later', onclick: () => moveSequence(api.store, q.id, 1) }, t('sequence.later'), laterReason, [icon(ICONS.down)], !next || !!laterReason),
+        deleteButton('sequence-delete', () => deleteSequence(api.store, q.id)),
       ),
     );
   };
@@ -1268,7 +1273,6 @@ function relationsSection(api: AppApi): Section {
     badge.textContent = String(st.relations.length);
     // nothing to check or draw before something is recorded
     checksRow.hidden = !st.relations.length && !st.sequences.length;
-    harris.hidden = !st.relations.length;
     // checks
     const found = relationProblems(api.relationChecks());
     checks.textContent = found.length ? `⚠ ${found.length}` : '✓';
@@ -1304,7 +1308,7 @@ function relationsSection(api: AppApi): Section {
         else if (v === 'ba') setRelation(api.store, r.b, r.a, 'a_cuts_b');
         else setRelation(api.store, r.a, r.b, 'indeterminate');
       });
-      inspector.append(kind.el, h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'relation-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteRelation(api.store, r.id) }, icon(ICONS.trash), t('arrows.delete'))));
+      inspector.append(kind.el, h('div', { class: 'btn-row' }, deleteButton('relation-delete', () => deleteRelation(api.store, r.id))));
     }
     // sequences
     clear(seqList);
@@ -1322,7 +1326,6 @@ function relationsSection(api: AppApi): Section {
       ),
     );
     renderSequence();
-    (harris.querySelector('input') as HTMLInputElement).checked = api.display.harris;
   };
   refresh('all');
   return { el, refresh };
@@ -1334,7 +1337,7 @@ function landmarksSection(api: AppApi): Section {
   const names = h('div', { class: 'checks-row', id: 'landmark-names' });
   const list = h('ol', { class: 'arrow-list', id: 'landmark-list', role: 'listbox', 'aria-label': t('sec.landmarks') });
   const inspector = h('div', { class: 'inspector', id: 'landmark-inspector' });
-  const addSet = addButton(t('semi.add'), () => {
+  const addSet = plusButton(t('semi.add'), () => {
     const st = api.store.state;
     const sel = api.selection.id;
     const curve = (sel && api.store.curve(sel)) || st.curves[0];
@@ -1436,9 +1439,9 @@ function landmarksSection(api: AppApi): Section {
         h(
           'div',
           { class: 'btn-row' },
-          h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-up', disabled: i === 0, onclick: () => reorderLandmark(api.store, l.id, i - 1) }, icon(ICONS.up), t('landmark.up')),
-          h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-down', disabled: i === st.landmarks.length - 1, onclick: () => reorderLandmark(api.store, l.id, i + 1) }, icon(ICONS.down), t('landmark.down')),
-          h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'landmark-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteLandmark(api.store, l.id) }, icon(ICONS.trash), t('arrows.delete')),
+          iconButton(ICONS.up, t('landmark.up'), () => reorderLandmark(api.store, l.id, i - 1), { id: 'landmark-up', disabled: i === 0 }),
+          iconButton(ICONS.down, t('landmark.down'), () => reorderLandmark(api.store, l.id, i + 1), { id: 'landmark-down', disabled: i === st.landmarks.length - 1 }),
+          deleteButton('landmark-delete', () => deleteLandmark(api.store, l.id)),
         ),
       );
     }
@@ -1493,7 +1496,7 @@ function landmarksSection(api: AppApi): Section {
         select('semilandmark-start', t('semi.start'), lms, q.startLandmarkId ?? '', (v) => updateSemilandmarkSet(api.store, q.id, { startLandmarkId: v || null })),
         select('semilandmark-end', t('semi.end'), lms, q.endLandmarkId ?? '', (v) => updateSemilandmarkSet(api.store, q.id, { endLandmarkId: v || null })),
       ),
-      h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'semilandmark-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSemilandmarkSet(api.store, q.id) }, icon(ICONS.trash), t('arrows.delete'))),
+      h('div', { class: 'btn-row' }, deleteButton('semilandmark-delete', () => deleteSemilandmarkSet(api.store, q.id))),
     );
   };
   refresh('all');
@@ -1538,10 +1541,9 @@ function splitSection(api: AppApi): Section {
     if (source === 'curve') setSplit(api.store, { source, id, upHint: api.splitUpHint(id), swap: false });
     else setSplit(api.store, source === 'plane' ? { source, id, upHint: api.towardViewer(), swap: false } : null);
   });
-  const flip = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'split-swap', onclick: () => swapSplit(api.store) }, t('split.swap')) as HTMLButtonElement;
+  const flip = iconButton(ICONS.swap, t('split.swap'), () => swapSplit(api.store), { id: 'split-swap' });
   const meta = h('dl', { class: 'num-grid' });
-  const flipRow = h('div', { class: 'btn-row' }, flip);
-  body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), select), flipRow, meta);
+  body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), h('div', { class: 'split-source-row' }, select, flip)), meta);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'split', 'planes', 'curves', 'mesh', 'specimen', 'measure'].includes(kind)) return;
     const st = api.store.state;
@@ -1558,7 +1560,7 @@ function splitSection(api: AppApi): Section {
     clear(select);
     for (const [value, label] of options) select.append(h('option', { value }, label));
     select.value = current;
-    flipRow.hidden = !st.split;
+    flip.hidden = !st.split;
     clear(meta);
     const u = st.specimen.unit;
     const closed = api.meshClosed();
@@ -1621,7 +1623,7 @@ function sectionsSection(api: AppApi): Section {
         { class: 'btn-row' },
         h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'section-png', onclick: () => api.exportSection(s.id, 'png') }, 'PNG'),
         h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'section-svg', onclick: () => api.exportSection(s.id, 'svg') }, 'SVG'),
-        h('button', { type: 'button', class: 'btn btn-danger btn-sm', id: 'section-delete', title: `${t('arrows.delete')} (Delete)`, onclick: () => deleteSection(api.store, s.id) }, icon(ICONS.trash), t('arrows.delete')),
+        deleteButton('section-delete', () => deleteSection(api.store, s.id)),
       ),
     );
   };
@@ -1643,12 +1645,12 @@ function workspaceSection(api: AppApi): Section {
   const prev = h('button', { type: 'button', class: 'icon-btn', id: 'workspace-prev', title: `${t('workspace.prev')} (PageUp)`, 'aria-label': t('workspace.prev'), onclick: () => api.stepWorkspace(-1) }, icon(ICONS.up)) as HTMLButtonElement;
   const next = h('button', { type: 'button', class: 'icon-btn', id: 'workspace-next', title: `${t('workspace.next')} (PageDown)`, 'aria-label': t('workspace.next'), onclick: () => api.stepWorkspace(1) }, icon(ICONS.down)) as HTMLButtonElement;
   const nextNew = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'workspace-next-new', title: `${t('workspace.nextNew')} (Shift+PageDown)`, onclick: () => api.nextUnstarted() }, t('workspace.nextNew')) as HTMLButtonElement;
-  const download = h('button', { type: 'button', class: 'btn btn-sm', id: 'workspace-download', onclick: () => void api.downloadProjects() }, icon(ICONS.download), t('workspace.downloadProjects')) as HTMLButtonElement;
+  const download = iconButton(ICONS.download, t('workspace.downloadProjects'), () => void api.downloadProjects(), { id: 'workspace-download' });
   const bar = h('progress', { id: 'batch-progress', max: 1, value: 0 }) as HTMLProgressElement;
   const barText = h('span', { class: 'mono', id: 'batch-status' });
-  const cancel = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'batch-cancel', onclick: () => api.cancelBatch() }, t('dlg.cancel'));
+  const cancel = iconButton(ICONS.close, t('dlg.cancel'), () => api.cancelBatch(), { id: 'batch-cancel' });
   const progress = h('div', { class: 'batch-row' }, barText, bar, cancel);
-  body.append(name, filter, list, h('div', { class: 'workspace-nav' }, prev, next, nextNew), download, progress);
+  body.append(name, filter, list, h('div', { class: 'workspace-nav' }, prev, next, nextNew, download), progress);
 
   let shown: number[] = [];
   let lastIndex = -2;

@@ -128,7 +128,9 @@ test('records relations by clicking arrows, checks them against the sequences li
   expect((await state(page)).relations.every((r) => r.kind === 'a_cuts_b')).toBe(true);
 
   // Harris matrix: later scars higher, only direct relations drawn
+  await displayPanel(page);
   await page.locator('#harris-show').check();
+  await page.locator('#btn-display').click();
   await expect(page.locator('#harris-panel')).toBeVisible();
   await expect(page.locator('#harris-body .hm-node')).toHaveCount(3);
   let y = await nodes(page);
@@ -281,7 +283,9 @@ test('picks a scar known only by its region, and selects the region from the mat
   st = await state(page);
   expect(await relations(page)).toEqual([[arrow, area, 'a_cuts_b']]);
 
+  await displayPanel(page);
   await page.locator('#harris-show').check();
+  await page.locator('#btn-display').click();
   await page.locator('#harris-body .hm-node', { hasText: 'S1' }).click();
   expect(await selection(page)).toBe(st.regions[0].id);
   await expect(page.locator('#harris-body .hm-node', { hasText: 'S1' }).locator('rect')).toHaveAttribute('stroke-width', '3');

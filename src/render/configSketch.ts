@@ -7,7 +7,7 @@ import type { ConfigurationResult } from '../compute/configuration';
 import type { BiconeCone, ConfigFace } from '../core/fields';
 import type { Scar, Vec3 } from '../core/types';
 import type { ConfigPick } from '../ui/appApi';
-import { arrowPath, biconeArrows, biconeGeometries, biconeSize, onCone, rimPoints, type BiconeArrow, type BiconeSize } from './biconeShape';
+import { arrowPath, biconeArrows, biconeGeometries, biconeOutline, biconeSize, fitOutline, onCone, rimPoints, type BiconeArrow, type BiconeSize } from './biconeShape';
 import { edgeBand, edgeMidlines, faceCentre, faceNormal, facesViewer, fatLine, GROUP_FACES, radiusOf, readPalette, roleColor, roundedBox, shapeSize, sketchArrows, type ConfigPalette, type SketchArrow } from './configShape';
 
 /** Opacity of a face of each role (both = a flaking surface, with a platform band). */
@@ -32,7 +32,7 @@ const SHADOW_CAST = new THREE.Vector3(0.45, -1, -0.35).normalize();
 const HOME = new THREE.Vector3(1, 0.8, 1.5).normalize();
 /** From the front, about 35° above the base: the default view of the bicone. */
 const HOME_BICONE = new THREE.Vector3(0, Math.sin(THREE.MathUtils.degToRad(35)), Math.cos(THREE.MathUtils.degToRad(35)));
-/** In its default view the bicone's width takes this share of the canvas (its height at most OUTLINE_HEIGHT). */
+/** The bicone's width takes at most this share of the canvas, its height at most OUTLINE_HEIGHT (as large as that in its default view). */
 const OUTLINE_WIDTH = 0.85;
 const OUTLINE_HEIGHT = 0.92;
 /** The bicone's rim and apexes are rounded this much (share of the radius). */
@@ -44,6 +44,8 @@ const RIM_SEEN = 0.6;
 const RIM_BEHIND = 0.2;
 const RIM_SEGMENTS = 36;
 const ASPECT = 330 / 210;
+/** The bicone is wide and low: so is its canvas. */
+const ASPECT_BICONE = 300 / 160;
 /** A click this close to an arrow (CSS pixels) picks its scar. */
 const PICK_PX = 6;
 
@@ -97,8 +99,8 @@ const isCone = (p: ConfigPick | null): p is BiconeCone => p === 'upper' || p ===
  * role, or for the bicone two cones on one base; and one arrow floating over
  * its face or cone for every scar with an arrow. Drawn only when it changes or
  * is turned (its own small canvas, not the main loop). Drag turns it, a double
- * click goes back to the default view, a click on an arrow picks its scar,
- * elsewhere on a face (or cone) the face.
+ * click or another model goes back to the default view, a click on an arrow
+ * picks its scar, elsewhere on a face (or cone) the face.
  */
 export class ConfigSketch {
   readonly canvas: HTMLCanvasElement;
@@ -130,6 +132,8 @@ export class ConfigSketch {
   private selected: ConfigPick | null = null;
   private selectedScar: string | null = null;
   private key = '';
+  /** The model drawn last (kept while there is nothing to draw): another one starts from its default view. */
+  private model: 'box' | 'bicone' | null = null;
   private readonly shadowMap = shadowTexture();
   private readonly mats = {
     ...arrowMaterials(false),
@@ -175,6 +179,11 @@ export class ConfigSketch {
     this.result = result;
     this.scars = scars;
     this.selected = selected;
+    const model = isBicone(result) ? 'bicone' : result ? 'box' : this.model;
+    if (model !== this.model) {
+      this.model = model;
+      this.root.quaternion.identity();
+    }
     const arrows = scars.filter((s) => s.vector).map((s) => [s.id, s.vector!.start, s.vector!.end]);
     let key = '';
     if (isBicone(result))
@@ -185,6 +194,7 @@ export class ConfigSketch {
       this.curve = curve;
       this.selectedScar = selectedScar;
       this.build();
+      this.resize();
     } else if (selectedScar !== this.selectedScar) {
       this.selectedScar = selectedScar;
       this.paintArrows();
@@ -202,6 +212,7 @@ export class ConfigSketch {
   /** Back to the default view: the box from the front, the right and above (+Y up); the bicone from the front, a little above. */
   home(): void {
     this.root.quaternion.identity();
+    this.frameOutline();
     this.render();
   }
 
@@ -235,6 +246,13 @@ export class ConfigSketch {
     return Math.max(...xs) - Math.min(...xs);
   }
 
+  /** The bicone's whole outline on the page, as it is turned now (null without a bicone). */
+  outlineBox(): { left: number; right: number; top: number; bottom: number } | null {
+    if (!this.rim || !this.drawn) return null;
+    const ps = biconeOutline(this.drawn, this.rim.radius).map((p) => this.client(p));
+    return { left: Math.min(...ps.map((p) => p.x)), right: Math.max(...ps.map((p) => p.x)), top: Math.min(...ps.map((p) => p.y)), bottom: Math.max(...ps.map((p) => p.y)) };
+  }
+
   /** Where the middle of a scar's arrow is on the page (null when it is not drawn or faces away). */
   arrowClient(id: string): { x: number; y: number } | null {
     const a = this.lifted.get(id);
@@ -242,17 +260,23 @@ export class ConfigSketch {
     return this.client(midpoint(a.points));
   }
 
-  /** Fit the canvas to its width (the height follows the aspect). */
+  /**
+   * Fit the canvas to the room it gets: as wide as its wrapper, as high as the
+   * shape's aspect asks for when the panel has the room, less when it has not.
+   */
   resize(): void {
-    const w = this.canvas.parentElement?.clientWidth ?? 0;
-    if (!this.renderer || w <= 0) return;
-    const h = Math.round(w / ASPECT);
+    const wrap = this.canvas.parentElement;
+    const w = wrap?.clientWidth ?? 0;
+    if (!this.renderer || !wrap || w <= 0) return;
+    wrap.style.flexBasis = `${Math.round(w / (isBicone(this.result) ? ASPECT_BICONE : ASPECT))}px`;
+    const h = wrap.clientHeight;
     const now = this.renderer.getSize(new THREE.Vector2());
-    if (now.x !== w || now.y !== h) {
+    if (h > 0 && (now.x !== w || now.y !== h)) {
       this.renderer.setSize(w, h, false);
-      this.canvas.style.height = `${h}px`;
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
+      // the bicone is framed by its outline on this canvas
+      this.frameOutline();
     }
     // also when it is shown again (what changed while it was folded was not drawn)
     this.render();
@@ -444,35 +468,24 @@ export class ConfigSketch {
     this.root.add(shape);
     this.shape = shape;
     this.paintArrows();
-    this.frameOutline(s, geo.rim);
+    this.frameOutline();
   }
 
   /**
-   * The bicone's default view, framed by its outline as projected there (the near
-   * side of the rim looks larger): as wide as OUTLINE_WIDTH of the canvas, centred,
-   * a tall one kept inside it.
+   * The bicone framed by its outline as projected now: centred however it is turned,
+   * as large as in its default view, and smaller only as far as it must be to stay
+   * inside the canvas. The camera moves sideways and back; it never turns.
    */
-  private frameOutline(s: BiconeSize, rim: number): void {
+  private frameOutline(): void {
+    if (!this.drawn || !this.rim) return;
     const dir = HOME_BICONE;
-    const up = new THREE.Vector3(0, dir.z, -dir.y);
-    const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
-    const outline = [...rimPoints(rim, 0, 2 * Math.PI, 48), new THREE.Vector3(0, s.upper, 0), new THREE.Vector3(0, -s.lower, 0)];
-    let distance = rim / (OUTLINE_WIDTH * tanV * ASPECT), height = 0;
-    for (let pass = 0; pass < 8; pass++) {
-      let left = 0, right = 0, top = -Infinity, bottom = Infinity;
-      for (const p of outline) {
-        const depth = distance - p.dot(dir);
-        const x = p.x / (depth * tanV * ASPECT), y = (p.dot(up) - height) / (depth * tanV);
-        left = Math.min(left, x);
-        right = Math.max(right, x);
-        top = Math.max(top, y);
-        bottom = Math.min(bottom, y);
-      }
-      height += ((top + bottom) / 2) * distance * tanV;
-      distance *= Math.max((right - left) / (2 * OUTLINE_WIDTH), (top - bottom) / (2 * OUTLINE_HEIGHT));
-    }
-    const centre = up.multiplyScalar(height);
-    this.camera.position.copy(centre).addScaledVector(dir, distance);
+    const view = { right: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, dir.z, -dir.y), dir, tanV: Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)), aspect: this.camera.aspect };
+    const outline = biconeOutline(this.drawn, this.rim.radius);
+    const { distance } = fitOutline(outline, view, OUTLINE_WIDTH, OUTLINE_HEIGHT);
+    for (const p of outline) p.applyQuaternion(this.root.quaternion);
+    const fit = fitOutline(outline, view, OUTLINE_WIDTH, OUTLINE_HEIGHT, distance);
+    const centre = new THREE.Vector3().addScaledVector(view.right, fit.x).addScaledVector(view.up, fit.y);
+    this.camera.position.copy(centre).addScaledVector(dir, fit.distance);
     this.camera.lookAt(centre);
     this.camera.updateMatrixWorld();
   }
@@ -641,6 +654,7 @@ export class ConfigSketch {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
       const q = new THREE.Quaternion().setFromAxisAngle(up, dx * 0.012).multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * 0.012));
       this.root.quaternion.premultiply(q);
+      this.frameOutline();
       this.render();
     });
     const end = (e: PointerEvent) => {

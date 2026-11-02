@@ -19,6 +19,22 @@ export const DEFAULT_LIGHT: LightSettings = {
 };
 
 /**
+ * The light from a point of a disc round the viewer's axis (the view under the L key, the light
+ * ball): x right, y up, 1 at the rim. The direction it lies in is the azimuth; the height falls from
+ * 90° at the centre to 5° (raking) at the rim, and stays there beyond it.
+ */
+export function lightFromDisc(x: number, y: number): { azimuthDeg: number; elevationDeg: number } {
+  return { azimuthDeg: ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360, elevationDeg: 90 - 85 * Math.min(1, Math.hypot(x, y)) };
+}
+
+/** Where on that disc a light is (the inverse of lightFromDisc). */
+export function discFromLight(azimuthDeg: number, elevationDeg: number): { x: number; y: number } {
+  const r = (90 - elevationDeg) / 85;
+  const a = (azimuthDeg * Math.PI) / 180;
+  return { x: r * Math.cos(a), y: r * Math.sin(a) };
+}
+
+/**
  * Key light fixed relative to the viewer (as a lamp on the desk would be), so
  * turning the specimen moves the relief under a constant light — the usual way
  * of reading ripples and negative bulbs.

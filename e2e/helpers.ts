@@ -62,6 +62,7 @@ export interface LithicApi {
   configuration(): import('../src/compute/configuration').ConfigurationResult | null;
   /** The bicone's result (with the bicone model). */
   bicone(): import('../src/compute/bicone').BiconeResult | null;
+  light(): import('../src/render/lighting').LightSettings;
   configStatus(): import('../src/ui/appApi').ConfigStatus | null;
   configFace(): import('../src/ui/appApi').ConfigPick | null;
   selectConfigFace(face: import('../src/ui/appApi').ConfigPick | null, turn?: boolean): void;
@@ -72,6 +73,7 @@ export interface LithicApi {
   cubeDraws(): number;
   /** The bicone's outline width on the page, in the sketch's default view (null: no bicone). */
   sketchOutlineWidth(): number | null;
+  sketchOutlineBox(): { left: number; right: number; top: number; bottom: number } | null;
   sketchArrowPoint(id: string): { x: number; y: number } | null;
   configPanelShown(): boolean;
   exportConfigurationCsvText(): string;

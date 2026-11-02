@@ -523,17 +523,6 @@ kbd {
   border-color: transparent;
 }
 
-.btn-danger {
-  background: transparent;
-  color: var(--danger);
-  border-color: var(--danger-line);
-}
-
-.btn-danger:hover {
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  border-color: var(--danger-line);
-}
-
 /* a quiet way to undo a setting: danger-coloured text, no frame */
 .btn-text-danger {
   background: transparent;
@@ -586,6 +575,14 @@ kbd {
   cursor: default;
 }
 
+.icon-btn-danger {
+  color: var(--danger);
+}
+
+.icon-btn-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .btn-row {
   display: flex;
   flex-wrap: wrap;
@@ -614,6 +611,10 @@ kbd {
 .add-btn .icon20 {
   width: 16px;
   height: 16px;
+}
+
+.add-btn-plus {
+  justify-content: center;
 }
 
 .add-btn:hover:not(:disabled) {
@@ -2268,6 +2269,17 @@ input[type="checkbox"]:disabled {
   font-size: 11px;
 }
 
+.split-source-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.split-source-row select {
+  flex: 1;
+  min-width: 0;
+}
+
 .workspace-nav {
   display: flex;
   align-items: center;
@@ -2379,9 +2391,10 @@ input[type="checkbox"]:disabled {
 
 /* ------------------------------------------------------------ view controls */
 
+/* its panel over everything else on the view (floating panels, the relation chip) */
 .vp-display {
   position: absolute;
-  z-index: 7;
+  z-index: 9;
   top: 12px;
   right: max(12px, env(safe-area-inset-right, 0px));
 }
@@ -2405,16 +2418,48 @@ input[type="checkbox"]:disabled {
 .display-panel {
   left: auto;
   right: 0;
-  width: min(360px, calc(100vw - 32px));
+  width: min(420px, calc(100vw - 32px));
   max-height: min(70vh, 640px);
   overflow-y: auto;
   padding: 14px;
 }
 
+/* rows of the same rank: a label (as wide as the longest, in this language) and its control */
 .display-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 12px;
+}
+
+.display-body > .ctl {
+  display: contents;
+}
+
+.display-body > .ctl[hidden],
+.display-body > .subgroup[hidden] {
+  display: none;
+}
+
+.display-body > :not(.ctl) {
+  grid-column: 1 / -1;
+}
+
+/* drag on it: the point under the cursor is where the light comes from */
+.light-ball {
+  display: block;
+  border-radius: 50%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.light-ball:active {
+  cursor: grabbing;
+}
+
+.light-ball:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
 }
 
 /* sidebar width */
@@ -2794,7 +2839,27 @@ input[type="checkbox"]:disabled {
 }
 
 .config-body {
-  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px 8px;
+}
+
+/* short of room, the sketch gives way first, then the traits scroll on their own: the card stays in view; only then does the body scroll */
+.config-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.config-content > * {
+  flex: none;
+}
+
+.config-content > .config-traits {
+  flex: 0 1 auto;
+  min-height: 40px;
+  overflow-y: auto;
 }
 
 /* box / bicone, and why the bicone shows nothing */
@@ -2803,16 +2868,20 @@ input[type="checkbox"]:disabled {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 /* the curve the bicone stands on */
 .config-edge-row {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.config-edge-row .icon-btn[hidden] {
+  display: none;
 }
 
 .config-edge-row .ctl-select {
@@ -2829,13 +2898,19 @@ input[type="checkbox"]:disabled {
   display: none;
 }
 
-.config-sketch-wrap {
-  margin-bottom: 8px;
+.config-content > .config-sketch-wrap {
+  position: relative;
+  flex: 0 1000 190px;
+  min-height: 100px;
+  margin-bottom: 6px;
 }
 
 .config-sketch {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
+  height: 100%;
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--ink) 4%, transparent);
   cursor: grab;
@@ -2879,11 +2954,39 @@ input[type="checkbox"]:disabled {
 .config-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 8px;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px 8px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
+}
+
+/* compact controls, each group on one row */
+.config-card .seg {
+  flex-wrap: nowrap;
+  padding: 2px;
+}
+
+.config-card .seg-btn {
+  min-height: 24px;
+  padding: 2px 6px;
+}
+
+.config-card .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.config-card-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.config-card-joins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 
 .config-card-head {

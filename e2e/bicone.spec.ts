@@ -298,6 +298,66 @@ test('the sketch is not drawn while the main view turns; the view bicone is, fra
   expect(await page.evaluate(() => window.lithicanalyst.sketchOutlineWidth())).toBeLessThan(0.9 * sketch.width);
 });
 
+/** How much of the panel's content is hidden (it would have to be scrolled to). */
+const hiddenInPanel = (page: Page) => page.locator('#config-body').evaluate((b) => b.scrollHeight - b.clientHeight);
+
+test.describe('in a low window', () => {
+  test.use({ viewport: { width: 1366, height: 650 } });
+
+  test('the bicone and its card are shown whole: the sketch gives way, and swapping needs no cone picked', async ({ page }) => {
+    await openProject(page, { scars: [scarOn('s1', 0, true), scarOn('s2', 180, false)], curves: [ringCurve('rim', 'C1', 1, 'core_edge')] });
+    await showConfig(page);
+    await page.locator('#config-model-bicone').click();
+    await expect(page.locator('#config-surfaces')).toHaveText('Upper, lower');
+    await expect(page.locator('#config-swap')).toBeVisible();
+    const whole = (await page.locator('#config-sketch').boundingBox())!;
+    await page.evaluate(() => window.lithicanalyst.selectConfigFace('upper'));
+    await expect(page.locator('#config-card')).toBeVisible();
+    await expect(page.locator('#config-card #config-swap')).toHaveCount(0);
+    await expect.poll(() => hiddenInPanel(page)).toBeLessThanOrEqual(1);
+    const sketch = (await page.locator('#config-sketch').boundingBox())!;
+    expect(sketch.height).toBeLessThan(whole.height);
+    expect(sketch.height).toBeGreaterThanOrEqual(100);
+    // still clear of the cube and the readout, and drawn at its new size, whole
+    const panel = (await page.locator('#config-panel').boundingBox())!;
+    const cube = (await page.locator('#view-cube').boundingBox())!;
+    const readout = (await page.locator('.status-coords').boundingBox())!;
+    expect(panel.y).toBeGreaterThanOrEqual(cube.y + cube.height);
+    expect(panel.y + panel.height).toBeLessThanOrEqual(readout.y);
+    await expect.poll(() => page.locator('#config-sketch').evaluate((c: HTMLCanvasElement) => c.height / devicePixelRatio - c.clientHeight)).toBe(0);
+    expect(await page.evaluate(() => window.lithicanalyst.sketchOutlineWidth())).toBeLessThanOrEqual(0.9 * sketch.width);
+    // swapped from the row of the edge curve, with no cone picked either
+    await page.evaluate(() => window.lithicanalyst.selectConfigFace(null));
+    await page.locator('#config-swap').click();
+    await expect.poll(async () => (await state(page)).split!.swap).toBe(true);
+  });
+});
+
+test('moved low by hand, the panel goes up when its card opens, and back when it closes', async ({ page }) => {
+  await openProject(page, { scars: [scarOn('s1', 0, true), scarOn('s2', 180, false)], curves: [ringCurve('rim', 'C1', 1, 'core_edge')] });
+  await showConfig(page);
+  await page.locator('#config-model-bicone').click();
+  await expect(page.locator('#config-surfaces')).toHaveText('Upper, lower');
+  const view = (await page.locator('#viewport').boundingBox())!;
+  const panel = page.locator('#config-panel');
+  const head = (await page.locator('#config-panel .float-title').boundingBox())!;
+  // as far down as it goes
+  await page.mouse.move(head.x + 10, head.y + head.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(head.x - 100, head.y + 4000, { steps: 5 });
+  await page.mouse.up();
+  const low = (await panel.boundingBox())!;
+  expect(low.y + low.height).toBeGreaterThan(view.y + view.height - 12);
+  await page.evaluate(() => window.lithicanalyst.selectConfigFace('upper'));
+  await expect(page.locator('#config-card')).toBeVisible();
+  await expect.poll(async () => (await panel.boundingBox())!.y).toBeLessThan(low.y - 40);
+  const open = (await panel.boundingBox())!;
+  expect(open.y + open.height).toBeLessThanOrEqual(view.y + view.height);
+  expect(await hiddenInPanel(page)).toBeLessThanOrEqual(1);
+  await page.evaluate(() => window.lithicanalyst.selectConfigFace(null));
+  await expect.poll(async () => Math.round((await panel.boundingBox())!.y)).toBe(Math.round(low.y));
+});
+
 test('an open mesh: the bicone shows only why it cannot', async ({ page }) => {
   const ply = biconePly(true);
   await openApp(page);
@@ -388,4 +448,70 @@ test('a curve too short to go round is left as it is', async ({ page }) => {
   await page.locator('#curve-complete').click();
   await expect(page.locator('.toast').filter({ hasText: 'Curve too short or straight to complete' })).toBeVisible();
   expect((await state(page)).curves[0]).toEqual(before);
+});
+
+test('the sketch keeps the bicone inside and centred however it is turned, and each model starts from its default view', async ({ page }) => {
+  await openProject(page, { scars: [scarOn('s1', 0, true), scarOn('s2', 180, false)], curves: [ringCurve('rim', 'C1', 1, 'core_edge')] });
+  await showConfig(page);
+  const sketch = page.locator('#config-sketch');
+  const turn = async (dx: number, dy: number) => {
+    const b = (await sketch.boundingBox())!;
+    const x = b.x + b.width / 2, y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 4 });
+    await page.mouse.up();
+  };
+  const outline = async () => (await page.evaluate(() => window.lithicanalyst.sketchOutlineBox()))!;
+  // turned as a box first: the bicone does not take that over
+  await turn(30, 60);
+  await page.locator('#config-model-bicone').click();
+  await expect(page.locator('#config-surfaces')).toHaveText('Upper, lower');
+  await nextFrames(page, 2);
+  const home = await outline();
+  await sketch.dblclick();
+  const again = await outline();
+  expect(Math.abs(again.bottom - again.top - (home.bottom - home.top))).toBeLessThan(1);
+  expect(Math.abs(again.right - again.left - (home.right - home.left))).toBeLessThan(1);
+
+  const b = (await sketch.boundingBox())!;
+  let leastWidth = Infinity;
+  for (const [dx, dy] of [[0, -50], [0, -50], [0, -50], [70, 0], [0, 120], [-40, 40]]) {
+    await turn(dx, dy);
+    const o = await outline();
+    expect(o.left).toBeGreaterThanOrEqual(b.x);
+    expect(o.right).toBeLessThanOrEqual(b.x + b.width);
+    expect(o.top).toBeGreaterThanOrEqual(b.y);
+    expect(o.bottom).toBeLessThanOrEqual(b.y + b.height);
+    expect(Math.abs((o.left + o.right) / 2 - (b.x + b.width / 2))).toBeLessThan(2);
+    expect(Math.abs((o.top + o.bottom) / 2 - (b.y + b.height / 2))).toBeLessThan(2);
+    leastWidth = Math.min(leastWidth, o.right - o.left);
+  }
+  // seen from above, the round base had to be drawn smaller; back in the default view it is as large as before
+  expect(leastWidth).toBeLessThan(0.9 * (home.right - home.left));
+  await sketch.dblclick();
+  const back = await outline();
+  expect(Math.abs(back.right - back.left - (home.right - home.left))).toBeLessThan(1);
+
+  // turned, then to the box and back
+  await turn(0, -60);
+  await page.locator('#config-model-box').click();
+  await page.locator('#config-model-bicone').click();
+  await expect(page.locator('#config-surfaces')).toHaveText('Upper, lower');
+  await nextFrames(page, 2);
+  const third = await outline();
+  expect(Math.abs(third.bottom - third.top - (home.bottom - home.top))).toBeLessThan(1);
+});
+
+test('buttons with an icon show no words: their name is in the tooltip', async ({ page }) => {
+  await openProject(page, { scars: [scarOn('s1', 0, true), scarOn('s2', 180, false)], curves: [ringCurve('rim', 'C1', 1, 'core_edge')] });
+  await page.locator('#sec-arrows .arrow-row', { hasText: 'S1' }).click();
+  const del = page.locator('#insp-delete');
+  await expect(del).toHaveText('');
+  await expect(del).toHaveAttribute('aria-label', 'Delete');
+  await del.hover();
+  // once: no key cap saying it again
+  await expect(page.locator('.tip')).toHaveText('Delete');
+  await del.click();
+  await expect.poll(async () => (await state(page)).scars.length).toBe(1);
 });

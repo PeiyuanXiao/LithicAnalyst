@@ -1,4 +1,4 @@
-import { shapeIndices, type AutoMeasurements } from '../core/derived';
+import type { AutoMeasurements } from '../core/derived';
 import type { SpecimenFrame, Vec3 } from '../core/types';
 import type { ConfigBox } from './configuration';
 import { buildEdgesSteps, meshTopologySteps, surfaceIntegralsSteps, surfacePca, vertexPcaSteps, type EdgeTable, type MeshTopology, type PrincipalAxes } from './meshGeometry';
@@ -102,7 +102,6 @@ export function* frameMeasuresSteps(positions: ArrayLike<number>, base: SurfaceM
       thickness,
       surfaceArea: base.surfaceArea,
       volume: base.volume,
-      ...shapeIndices(base.surfaceArea, base.volume),
       closed: base.topology.closed,
     },
     box: { frame: m ? 'specimen' : 'principal', axes: boxAxes, min, max },

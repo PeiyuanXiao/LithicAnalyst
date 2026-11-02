@@ -22,9 +22,6 @@ describe('automatic measurements', () => {
     expect(m.thickness).toBeCloseTo(10, 3);
     expect(m.surfaceArea).toBeCloseTo(2800, 2);
     expect(m.volume!).toBeCloseTo(8000, 1);
-    // A / V^(2/3) = 2800 / 400
-    expect(m.surfaceToVolumeRatio!).toBeCloseTo(7, 4);
-    expect(m.wadellSphericity!).toBeCloseTo((Math.cbrt(Math.PI) * Math.pow(48000, 2 / 3)) / 2800, 4);
     expect(m.closed).toBe(true);
   });
 
@@ -32,8 +29,8 @@ describe('automatic measurements', () => {
     const s = sphere(5, 4);
     const base = await runSliced(surfaceMeasuresSteps(s.positions, s.index), 1);
     const m = autoMeasurements(s.positions, base, null);
-    expect(m.wadellSphericity!).toBeCloseTo(1, 2);
-    expect(m.surfaceToVolumeRatio! / Math.cbrt(36 * Math.PI)).toBeCloseTo(1, 2);
+    expect(m.surfaceArea / (4 * Math.PI * 25)).toBeCloseTo(1, 1);
+    expect(m.volume! / ((4 / 3) * Math.PI * 125)).toBeCloseTo(1, 1);
 
     // a box turned 90° in the frame: length along the frame's Y = the box's X
     const b = box([40, 20, 10], 2);
@@ -53,10 +50,10 @@ describe('automatic measurements', () => {
     const m = autoMeasurements(open.positions, surfaceMeasures(open.positions, open.index), null);
     expect(m.closed).toBe(false);
     expect(m.surfaceArea).toBeCloseTo(20, 6);
-    expect([m.volume, m.surfaceToVolumeRatio, m.wadellSphericity]).toEqual([null, null, null]);
+    expect(m.volume).toBeNull();
     const st = emptyProject();
     st.specimen.id = 'open';
-    expect(measurementsCsv(st, m, { excelBom: false }).split('\n')[1]).toBe('open,mm,principal,2,2,2,20,,,,false,,,,,,,,,,,');
+    expect(measurementsCsv(st, m, { excelBom: false }).split('\n')[1]).toBe('open,mm,principal,2,2,2,20,,false,,,,,,,,,,,');
   });
 });
 

@@ -3,7 +3,7 @@ import { boxPly, boxPoint, roofPly, type Vec3 } from './fixtures/meshes';
 import { download, expect, exportAvailable, exportFile, fileMenu, loadMesh, measureDraftLength, nextFrames, openApp, parseCsv, setUnit, state, test, toScreen, waitForMesh } from './helpers';
 
 const MEASUREMENTS_HEADER =
-  'specimen_id,unit,frame,length,width,thickness,surface_area,volume,surface_to_volume_ratio,wadell_sphericity,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio,file';
+  'specimen_id,unit,frame,length,width,thickness,surface_area,volume,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio,file';
 const MANUAL_HEADER = 'specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p3_z';
 
 async function measureMode(page: Page): Promise<void> {
@@ -43,10 +43,6 @@ test('measures the size and shape of a closed model and exports them', async ({ 
   await expect(page.locator('#auto-area-unit')).toHaveText('mm²');
   await expect(page.locator('#auto-volume')).toHaveText('8000.00');
   await expect(page.locator('#auto-volume-unit')).toHaveText('mm³');
-  await expect(page.locator('#auto-svr')).toHaveText('7.000');
-  await expect(page.locator('#auto-svr-unit')).toHaveText('');
-  const psi = (Math.cbrt(Math.PI) * Math.pow(48000, 2 / 3)) / 2800;
-  await expect(page.locator('#auto-sphericity')).toHaveText(psi.toFixed(3));
 
   // the unit is only a declaration: values stay, the unit label follows
   await setUnit(page, 'cm');
@@ -63,8 +59,6 @@ test('measures the size and shape of a closed model and exports them', async ({ 
   expect(Number(row.thickness)).toBeCloseTo(10, 4);
   expect(Number(row.surface_area)).toBeCloseTo(2800, 3);
   expect(Number(row.volume)).toBeCloseTo(8000, 2);
-  expect(Number(row.surface_to_volume_ratio)).toBeCloseTo(7, 5);
-  expect(Number(row.wadell_sphericity)).toBeCloseTo(psi, 5);
 });
 
 test('leaves the volume empty when the model is not closed', async ({ page }) => {
@@ -72,10 +66,8 @@ test('leaves the volume empty when the model is not closed', async ({ page }) =>
   await loadMesh(page, roofPly());
   await measureMode(page);
   await expect(page.locator('#auto-volume')).toHaveText('Not closed');
-  await expect(page.locator('#auto-svr')).toHaveText('—');
-  await expect(page.locator('#auto-sphericity')).toHaveText('—');
   const [row] = parseCsv(await page.evaluate(() => window.lithicanalyst.exportMeasurementsCsvText()));
-  expect(row).toMatchObject({ volume: '', surface_to_volume_ratio: '', wadell_sphericity: '', closed: 'false' });
+  expect(row).toMatchObject({ volume: '', closed: 'false' });
   expect(Number(row.surface_area)).toBeGreaterThan(0);
 });
 

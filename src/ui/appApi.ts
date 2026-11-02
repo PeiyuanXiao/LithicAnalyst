@@ -154,6 +154,8 @@ export interface AppApi {
   configuration(): import('../compute/bicone').CoreConfiguration | null;
   /** Why the bicone shows nothing (null: it shows, or the box is used). */
   configStatus(): ConfigStatus | null;
+  /** The configuration panel's content changed: keep it inside the view. */
+  fitConfigPanel(): void;
   /** Which way up a new split along this curve points: the side with more scars, when even toward the viewer. */
   splitUpHint(curveId: string): Vec3;
   /** Stand the bicone on this closed curve: the split along it and the model, in one step. */

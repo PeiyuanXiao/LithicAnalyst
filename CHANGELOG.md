@@ -33,7 +33,7 @@
   `flaking_surfaces.csv` has one row per flaking cone (`upper` / `lower`) and `platform_face` is
   empty.
 - Upper and lower of a volume split can be swapped (`split.swap`) from the volume panel or the
-  bicone's card; volumes, the measurement export and the bicone follow. Closed core-edge curves come
+  bicone's edge curve row; volumes, the measurement export and the bicone follow. Closed core-edge curves come
   first among the split candidates. A new split along a curve starts with the side with more scars
   up (as the view when even), not with the side it was seen from.
 - Complete loop: an open curve along part of a core's edge (three anchors or more) is completed
@@ -45,6 +45,26 @@
   kept), 320 px wide, with its title on one line, a short pill (PCA / 主轴) and the overall polarity on
   a row of its own. The bicone's sketch is framed by its outline (about 85 % of the width, from 35°
   above) and the view bicone centred on its own.
+- The configuration panel no longer cuts its content off: in a low window the sketch gives way first
+  (down to about 100 px), then the list of traits scrolls on its own, so the card stays in view. The
+  face card is much lower (type and axis side by side, the joins in a row), the bicone's canvas is
+  lower, swapping is a small button by the edge curve, and a panel moved low by hand goes up when its
+  content grows, and back when it shrinks.
+- Display panel: rows of one rank, shading, light, arrow colour, and the switches of the volumetric
+  configuration and of the Harris matrix (moved here from the relations section; both in the annotate
+  mode only). A light ball replaces the light direction and height sliders: the point on it is where
+  the light comes from, by the same rule as holding L over the view; a double click goes back to the
+  default. The arrow thickness setting is gone (fixed at 1.0). The panel now stays above the relation
+  chip.
+- Surface-to-Volume Ratio and Wadell sphericity are gone from the measure mode and from
+  `measurements.csv` (columns after `volume` move up two places): both follow from `surface_area` and
+  `volume`; the README gives the formulas.
+- The bicone in the configuration sketch stays whole and centred however it is turned, drawn smaller
+  only when it must be. Switching between Box and Bicone goes back to the default view.
+- Fewer words on buttons: delete, move up and down, flip, view along normal, swap, reset, next pair,
+  download all and cancel show only their icon, with the name in a tooltip; add plane, sequence and
+  semilandmarks show only a plus. Swap moved next to the split's list, download next to the workspace's
+  navigation.
 - Faster on large models: the measure pass after opening a 2-million-triangle model no longer blocks
   for more than a few tens of milliseconds at a time, and turning curves into mesh edges (volume split,
   regions) runs in slices. `npm run bench` times the heavy steps on a generated model.
@@ -165,7 +185,7 @@
   the selection and the undo history, and the last mode is remembered.
 - Measure mode. Automatic measurements when a model opens: length, width and thickness (along the
   specimen frame, or the principal axes of the surface), surface area, volume (closed meshes only;
-  no hole filling), Surface-to-Volume Ratio and Wadell sphericity. Manual measurements (D / G / N):
+  no hole filling). Manual measurements (D / G / N):
   straight distance, distance along the surface and angle, labelled M1, M2 …, undoable and saved in
   the project file. Exports: `<specimen>_measurements.csv` and `<specimen>_manual_measurements.csv`.
 - Fitted planes (measure mode): all vertices (Lin et al. 2024), scar directions (Xiao et al. 2026),

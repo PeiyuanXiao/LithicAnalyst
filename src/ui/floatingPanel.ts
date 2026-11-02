@@ -67,12 +67,13 @@ export function floatingPanel(o: FloatingPanelOptions): FloatingPanel {
     }
     el.classList.toggle('is-collapsed', !!geo.collapsed);
     fold.setAttribute('aria-expanded', String(!geo.collapsed));
-    // a panel not sized by hand is as tall as its content, at most down to the view's bottom (then it scrolls)
-    if (!o.resizable) el.style.maxHeight = '';
+    // a panel not sized by hand is as tall as its content; moved by hand, it goes up as far as that needs
+    // (the remembered place stays) and scrolls only when the view is too low for it
+    if (!o.resizable) el.style.maxHeight = geo.y !== undefined ? 'none' : '';
     if (geo.x !== undefined && geo.y !== undefined) {
       const pw = w || el.offsetWidth || 200, ph = Math.min((hgt && !geo.collapsed ? hgt : el.offsetHeight) || 36, H);
       const x = fits ? Math.max(0, Math.min(geo.x, W - pw)) : geo.x;
-      const y = fits ? Math.max(0, Math.min(geo.y, H - ph)) : geo.y;
+      const y = fits ? Math.max(0, Math.min(geo.y, H - ph - (o.resizable ? 0 : 8))) : geo.y;
       el.style.left = `${x}px`;
       el.style.top = `${y}px`;
       el.style.right = el.style.bottom = 'auto';
