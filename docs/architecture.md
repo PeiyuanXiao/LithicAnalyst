@@ -215,6 +215,15 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   are located with the BVH (closest triangle). `render/regionLayer.ts` paints the pieces with
   one mesh each, sharing the scan's vertex buffer; it sits in the scene (not the annotation
   overlay), so figures can include the colours.
+* `App.curveChains` joins open curves to others they stop just short of (`joinOpenEndsSteps`), or the two sides would run together through the gap.
+* **Two layers**: the type says the layer (`isUpperRegion`). `App.updatePartition` cuts twice: the lower layer along all the curves' mesh edges,
+  the upper along those of the boundary curves (`isBoundaryCurve`, by the specimen's type), kept while they do not change. Since one set of edges holds
+  the other, each lower piece lies in one upper piece (`overPiecesSteps`), so a lower region has one parent. `App.seedComponent` and
+  `App.upperComponent` hold the piece of each region in its own layer, −1 in the other; `resolveRegions` takes the upper layer as `UpperLayer`. A second, fainter
+  `RegionLayer` paints the upper layer under the lower one (both under `regionRoot`, which figures show or hide). A click with the region
+  tool on a part not divided further selects the part itself.
+* Regions with `auto: true` are made and removed in the commands that complete or break their inputs (`autoRegionChanges`); their pieces are
+  derived (`upperComponents`, `flakeFacePieces`, `outlineSeed`), so undo cannot set off a new command.
 * `addRegion` / `setRegionType` create a scar without a direction in the same undo step when a
   scar region has no arrow, and remove it again when it is no longer used (`CompoundCommand`).
 * The curve tool snaps points onto existing curves (T-junctions) so curves can close regions.
@@ -364,9 +373,8 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
   left and right of the platform ends (`platformSides`) need no mesh.
 * **Sections**: `compute/meshSection.ts` cuts as `intersectPlane` does, and keeps the triangle of each stretch (`SectionLine.faces`), which says what
   is on the platform. It takes the triangles from `PlaneCandidates`: `render/bvhPlane.ts` hands them over from the BVH, tests and the batch do without.
-* **Platform region**: a `Region` with `auto: true` comes and goes with the outline in the same command (`setCurveType`, `deleteCurve`); its piece is
-  derived, not stored, so undo cannot set off a new command: `App.updatePlatformAuto` partitions along the outline alone (`smallerPieceSteps`: of the
-  pieces the line touches) and `resolveRegionsNow` gives the region that piece's component in the full partition, unless a typed region is there.
+* **Platform region**: `App.updatePlatformAuto` partitions along the outline alone (`smallerPieceSteps`: of the pieces the line touches); `upperComponents`
+  takes the piece of the upper layer holding that point, unless a typed region is there. Scars drawn on the platform therefore do not cut it.
 * **Measurements**: `compute/flake.ts` is pure. `morphDimensionsSteps` (`compute/convexHull.ts`; a point within 1e−4 of the set's size of the hull
   counts as inside, which also thins a smooth convex scan, and the result is settled on all the vertices) runs once per mesh; `flakeMeasuresSteps` takes
   the frame, the ends and the platform's triangles, and `platformProfile` does the section's part. `compute/regionPath.ts` is the path within a region.
@@ -375,6 +383,22 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
 * **Profile panel** (`ui/profilePanel.ts`, a `floatingPanel`): SVG drawings of `FlakeResult.section` and of the cross-section, one scale for both;
   `App.moveProfile` cuts at most once a frame (`crossSectionAt`), `ringLayer` (a solid `BorderLayer`) shows it on the model. Its place and the
   position of the slider are view state, never in the file.
+
+## Edge angles
+
+`compute/edgeAngle.ts` is pure: `referenceCurve`, then per station a section (`sectionByPlane` with a `SectionReach`: the BVH, `render/bvhPlane.ts`, also prunes by the
+sphere), A on it and the two ways along the line. `App.updateEdgeAngles` runs it in slices, per curve and only when the curve or the unit changed, and keeps the results
+in `App.edgeResults`; they go to `derived.edgeAngles`, which the summary export reads as it does the regions. In the measure mode the selected curve is drawn by `render/edgeAngleLayer.ts` (`Line2`
+with vertex colours, one hue, along the curve's own points by `valuesAlongCurve`: straight lines between stations would cut through the mesh; the curve layer then draws only its label, `drawnElsewhere`, since two lines at one depth fight) with a scale of two numbers (`#edge-legend`), and `ui/edgeAngleChart.ts` draws the angle along it in the section
+of the edge angles.
+
+## Retouch layers
+
+`compute/retouchAngle.ts` is pure, and shares the stations with the edge angles (`stationPlan`). It takes the partition's piece of each triangle and the pieces in a layer: `SectionLine.faces` says which triangle each stretch of a section lies in, so a layer's ends come from the regions themselves, with no choice of curves to make. `App.updateRetouchAngles` runs after the regions are resolved, in slices, only for what changed (`partitionVersion` and the pieces are in the key), and only when there is a retouch region: the section there is the whole plane, not the sphere of the edge angles.
+
+## Sharp edge
+
+`compute/sharpEdge.ts` is pure, and needs no mesh: the stretches come from the stored stations and the rule, so the summary export can judge every model by the folder's rule. `ProjectState.sharpEdge` is a Command like any other; in a folder `App.keepFolderSharp` copies it to `LithicAnalyst/sharp-edge.json` (read-only folder: `App.folderSharp` for the session, and in the ZIP of projects), and `applyProject` puts the folder's rule into each project opened, without marking it as edited. `ui/edgeAngleChart.ts` takes its lines as `ChartSeries`, built by the sidebar: distances in categorical hues, retouch layers in one ordered hue with dashes.
 
 ## Landmarks
 
@@ -533,7 +557,7 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   its own copy.
 * `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
-  box, the configuration, the volume split, the bicone, "Complete loop" and a flake's frame, hull, sections and paths. The longest stretch is what
+  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge. The longest stretch is what
   design principle 10 limits to about 100 ms.
 
 ## Hosting

@@ -41,6 +41,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
 | `flake` | `{ axis, otherFrame }` | a flake's own data, see "Flakes"; files without it: none |
+| `sharpEdge` | `{ method, distance, threshold }` | what counts as a sharp edge, see "Sharp edge"; files without it: three points at 2 mm, no threshold |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
@@ -117,10 +118,12 @@ fitted planes, fitted spheres, volumes ….
   coordinates; the `all_vertices` plane and the plane frames use them), or null.
 * `manualMeasurements`: the value of each manual measurement (length in the specimen unit, or
   degrees for angles).
-* `regions`: each region as found on the mesh: `{ id, label, type, scarId, area, conflict }`
+* `regions`: each region as found on the mesh: `{ id, label, type, scarId, area, conflict, parent, retouchLayer }`
   (area in unit², null when the seed is off the mesh; `conflict` when another seed lies in the
-  same piece). `regionTotals`: `{ scar, cortex, joint, damage, cortexRatio }` — areas by type
-  (each piece counted once, for the first region in it) and cortex area / total surface area.
+  same piece of its layer; `parent`: the id of the upper region a lower region lies in, else null; `retouchLayer`: of a retouch region, else null).
+  `regionTotals`: `{ scar, cortex, joint, damage, retouch, flaking_surface, platform, ventral, dorsal, cortexRatio }` — areas
+  by type (in each layer, each piece counted once, for the first region in it; the layers overlap, so the sum means nothing; the annotator's
+  own types have no total) and cortex area / total surface area.
 * `nodule`: the sphere fitted to the chosen cortex regions: `{ center, radius, rms, count, regions }`
   (least squares on their vertices — algebraic fit, then Gauss–Newton on the distances; at most
   about 200 000 vertices, evenly picked), or null.
@@ -157,6 +160,9 @@ fitted planes, fitted spheres, volumes ….
   without scars with an arrow, before the mesh is measured, or for the bicone without a split by a
   closed curve on a closed mesh), see the next section.
 * `flake`: a flake's measurements, see "Flakes" (null for a core, or before they are computed).
+* `edgeAngles`: the edge angles of the curves measured, see "Edge angles" (null: none).
+* `retouchAngles`: the retouch layers along those curves, see "Retouch layers" (null: none).
+* `sharpEdge`: their sharp stretches, see "Sharp edge" (null without a threshold, or without edge angles).
 
 ## Volumetric configuration
 
@@ -305,9 +311,13 @@ the type deletes nothing: the other type's data stay in the file and come back w
   exports they are named `platform_left` (−X) and `platform_right` (+X) of the technical frame (with both on one
   side, by X), without an axis `platform_end`. Landmarks with a `code` are shown and exported only for flakes.
 * The platform: the curve of type `platform_outline` (one per flake; a new one takes the place of the old in
-  one step; closed) parts the surface in two. The region with `auto: true` is the smaller of the two; its `seed`
-  says nothing, it follows the outline. Given another type by hand it becomes an ordinary region at that place; a
-  region the user has typed in that piece stands instead. All regions of type `platform` make the platform region.
+  one step; closed) parts the surface in two. The region of type `platform` with `auto: true` is the smaller of the two. All
+  regions of type `platform` make the platform region.
+* The faces: with an `edge` curve and a technical frame, the regions of type `ventral` and `dorsal` with `auto: true`: among the pieces of the
+  upper layer, the one under the axis's end, and the largest other than it and the platform (at least 5 % of the surface; else the edge
+  does not part the two, and neither is assigned).
+* A region with `auto: true` follows those annotations, and its `seed` says nothing. Given another type by hand it becomes an ordinary region
+  at that place; a region the user has typed in that piece stands instead. These regions are the flake's: a core neither shows nor exports them.
 
 **Derived** (`derived.flake`): `parameters`, `frameSource`, `measures` and `geometry` (points of the measures, for the
 profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ventral`, `ventralLine`).
@@ -345,6 +355,52 @@ what needs them is not measured.
 * `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `FIT_RESAMPLE_COUNT` 200,
   `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND` [0.25, 0.75].
 
+## Edge angles
+
+After Schunk et al. 2023 (3D-EdgeAngle). Measured on curves with `edgeAngle: true`, or, without that key, on a flake's `edge` and a core's
+`core_edge` curves. Lengths are in the coordinate unit; without a stated unit nothing is measured.
+
+* **Reference curve**: the curve resampled every 1 mm, then a moving average `SMOOTH_WINDOW_MM` long (a closed curve goes round; an open
+  one takes fewer points near its ends, which stay). It only sets the sections' direction.
+* **Stations**: every `EDGE_ANGLE_STEP_MM` along it from its start; once round a closed curve (⌈length / step⌉), to the end of an open one (⌊length / step⌋ + 1).
+* **At each station**: the section by the plane through the reference point, square to the reference curve, within 1.5 × the largest distance of
+  it. A: the plane's crossing of the original curve nearest the reference point, on the section line nearest it (the station has no values when there is
+  no crossing, or the line is over 3 mean edge lengths away). Q1, Q2: arc length d from A along the line each way, d in `EDGE_ANGLE_DISTANCES_MM`.
+* `three_points`: the angle Q1 A Q2. `two_lines`: the angle between the chords `TWO_LINES_LENGTH_MM` long centred on Q1 and Q2, pointing away from A.
+* Empty (null) where the line ends before d, or, on a closed line, where the two ways would meet.
+
+**Derived** (`derived.edgeAngles`): `parameters` (`SMOOTH_WINDOW_MM` 5, `EDGE_ANGLE_STEP_MM` 1, `EDGE_ANGLE_DISTANCES_MM` [2, 5, 10],
+`TWO_LINES_LENGTH_MM` 0.5); `curves`: `{ curveId, distances, length, stations }`, `distances` and `length` (of the reference curve) in the coordinate unit, each station `{ position, point, three_points, two_lines }` (`position`
+along the reference curve, `point` A in original coordinates, the angles in the order of `distances`).
+
+## Retouch layers
+
+A region of type `retouch` has a `retouchLayer` (integer from 1; 1 is the layer nearest the edge). Along the curves measured for edge angles, at the same
+stations: the whole section by the same plane, followed from A both ways across the retouch regions it meets, without leaving them. A stretch shorter than
+2 mean edge lengths is no layer, and two regions of one layer in a row are one (region borders follow mesh edges, so the points are good to about one edge).
+For each layer: Pk its outer end, s the length from A along the section, Q the point at s on the other side.
+
+* `three_points`: the angle Pk A Q. `two_lines`: the angle between the chords `TWO_LINES_LENGTH_MM` long centred on Pk and Q, pointing away from A.
+* `layer_face`: the angle between this layer's own chord (its inner end to Pk) and the chord A to Q.
+* Null where the other side ends before s, or, on a closed line, where the two ways would meet. A station without a layer has no stretch for it.
+
+**Derived** (`derived.retouchAngles`): `curves`: `{ curveId, stations }`, each station `{ position, point, stretches }`, each stretch `{ region, layer, distance, three_points, two_lines, layer_face }`
+(`region`: the id of the region where the layer begins; `distance`: s).
+
+## Sharp edge
+
+```json
+"sharpEdge": { "method": "three_points", "distance": 2, "threshold": 45 }
+```
+
+`method`: `three_points` or `two_lines`; `distance`: in mm, one of `EDGE_ANGLE_DISTANCES_MM`; `threshold`: degrees, the user's, null until set. In a folder the rule is the
+folder's: `LithicAnalyst/sharp-edge.json` holds it, and it stands in for the value in each project, so every model is judged alike.
+
+A station is sharp when its angle in that series is at most the threshold (no value: not sharp). Gaps of at most `SHARP_MERGE_GAP_MM` (2) are filled, then
+stretches shorter than `SHARP_MIN_RUN_MM` (3) dropped; the ends of an open curve are no gaps. Round a closed curve a stretch may go on past the start (`start` after `end`).
+
+**Derived** (`derived.sharpEdge`): `rule`, `parameters` (those two, and `SHARP_AUTO_BIN_DEG`, `SHARP_AUTO_MIN_GAP_DEG`, `SHARP_AUTO_MAX_VALLEY` of the suggested threshold), `curves`: `{ curveId, length, segments }`, each segment `{ start, end, length }` in the coordinate unit.
+
 ## Surface region
 
 ```json
@@ -354,7 +410,7 @@ what needs them is not measured.
 * The curves split the surface into pieces: each curve is turned into mesh edges (each point to
   its nearest vertex, gaps joined by shortest paths over mesh edges), and triangles are grouped
   across all other edges. A region is the piece that holds its `seed` (the clicked surface point).
-* `type`: `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`, `platform` (a flake's, see "Flakes"). A scar region links
+* `type`, in two layers. **Lower** (the pieces between all the curves): `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`, `retouch` (see "Retouch layers"); **a value that is none of the codes is the annotator's own text**, a type of the lower layer. **Upper** (the pieces between the boundary curves alone): `flaking_surface` and `platform` on a core, whose boundary curves are its `core_edge` curves; `platform`, `ventral` and `dorsal` on a flake, whose boundary curves are its `edge` and `platform_outline` curves. The lower layer is cut along every curve the upper one is, so a lower region lies wholly in one upper piece; a scar crossing a boundary is two pieces (two regions, which may name the same `scarId`). Two regions in one piece of the same layer are a conflict; a region and the part it lies in are not. A scar region links
   to a scar (`scarId`): the one whose arrow starts in it, or a scar without a direction created
   with the region.
 
@@ -555,8 +611,10 @@ Defined in `src/core/fields.ts`.
 
 | key | values |
 |---|---|
-| `type` | `scar_boundary` 片疤轮廓 / Scar outline · `core_edge` 石核边缘 / Core edge (offered for cores) · `edge` 边缘 / Edge (flakes) · `cortex` 石皮 / Cortex · `joint` 节理面 / Joint surface · `platform_outline` 台面轮廓 / Platform outline (flakes; closed, one per flake); empty: not filled in (new curves). Older codes `ridge` 棱脊 and `other` 其他 are read and written as they are but no longer offered; a code of the other type of specimen is shown but not offered. **A value that is none of these codes is the annotator's own text** (a custom type) |
+| `type` | `scar_boundary` 片疤轮廓 / Scar outline · `core_edge` 石核边缘 / Core edge (offered for cores; bounds the upper layer of regions) · `edge` 边缘 / Edge (flakes; bounds it too) · `cortex` 石皮 / Cortex · `joint` 节理面 / Joint surface · `platform_outline` 台面轮廓 / Platform outline (flakes; closed, one per flake; bounds it too) · `retouch` 修理 / Retouch; empty: not filled in (new curves). Older codes `ridge` 棱脊 and `other` 其他 are read and written as they are but no longer offered; a code of the other type of specimen is shown but not offered. **A value that is none of these codes is the annotator's own text** (a custom type) |
 | `note` | free text |
+
+`edgeAngle` (optional, on the curve): whether its edge angles are measured; without it, as its type says (see "Edge angles").
 
 A custom type is stored trimmed; text that is a code or a name (Chinese or English, any case) of one
 of the four offered types is stored as that code. In the observer agreement, curves are matched
@@ -629,10 +687,30 @@ Fitted planes (`<specimen>_planes.csv`, one row each; numbers empty for an inval
 specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_z,m00,m01,…,m33
 ```
 
-Surface regions (`<specimen>_regions.csv`, one row each):
+Surface regions (`<specimen>_regions.csv`, one row each; `type` a code or the annotator's own text; `parent_region`: the upper region a lower one lies in, by its `region_id`, else empty):
 
 ```
-specimen_id,region_id,type,scar_id,area,unit
+specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer
+```
+
+`retouch_layer`: of a retouch region, else empty.
+
+Retouch layers (`<specimen>_retouch_angles.csv`, long format: one row per station, layer and method; see "Retouch layers"; `retouch_region`: where the layer begins; `distance`: from the edge to the layer's outer end, along the section; `method` `three_points`, `two_lines` or `layer_face`):
+
+```
+specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg
+```
+
+Sharp edge (`<specimen>_edge_sharp.csv`, one row per sharp stretch, under the rule; see "Sharp edge"; `distance` in the coordinate unit, `segment` from 1):
+
+```
+specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length
+```
+
+Edge angles (`<specimen>_edge_angles.csv`, long format: one row per station, distance and method of each curve measured; `station` counts from 0, `position` along the reference curve, `distance` d in the coordinate unit; `method` `three_points` or `two_lines`; `angle_deg` empty where there is none; see "Edge angles"):
+
+```
+specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg
 ```
 
 Relations (`<specimen>_relations.csv`, one row each; scars by label; `relation` is `a_cuts_b`
@@ -694,6 +772,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
 <folder>/
   …models (in subfolders too; folders starting with "." are left out)
   LithicAnalyst/
+    sharp-edge.json                               what counts as a sharp edge in this folder
     projects/<model path>.lithicanalyst.json     e.g. projects/site1/EXP03.ply.lithicanalyst.json
     exports/<YYYY-MM-DD_HHMMSS>/                  one new folder per export, never overwritten
       manifest.json, failures.csv (only when something failed)
@@ -715,7 +794,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
 * A read-only folder (a directory upload) gets the same layout in one ZIP to unpack into it: the
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app`, `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options`, `parameters` (`flake`: the named parameters of the flake measurements), `specimens` (`id`, `file` = model path, `sha256`, `project`
+  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `sharpEdge`: the named parameters of the flake measurements, the edge angles and the sharp edge, with its `rule`), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 

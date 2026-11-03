@@ -290,24 +290,25 @@ describe('curves in the project', () => {
     expect(s.state.curves.map((c) => c.id)).toEqual([c1.id, c2.id]);
     // keys 1–4 the offered types, 5 the user's own text; the older codes are read but not offered
     const type = numberKeyField(CURVE_FIELDS)!;
-    expect(offeredOptions(type).map((o) => o.value)).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint']);
+    expect(offeredOptions(type).map((o) => o.value)).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint', 'retouch']);
     expect(type.options!.filter((o) => o.legacy).map((o) => o.value)).toEqual(['ridge', 'other']);
-    // a flake's: the edge and, after "custom", the platform outline
-    expect(keyedOptions(type, 'flake').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'edge', 'cortex', 'joint', 'custom', 'platform_outline']);
-    expect(keyedOptions(type, 'core').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint', 'custom']);
+    // a flake's: the edge and the platform outline; the user's own text is always the last
+    expect(keyedOptions(type, 'flake').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'edge', 'cortex', 'joint', 'platform_outline', 'retouch', 'custom']);
+    expect(keyedOptions(type, 'core').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint', 'retouch', 'custom']);
     expect(type.allowCustom).toBe(true);
     expect(addCurve(s, lineShape()).attributes.type).toBe('');
   });
 
   it("takes the user's own curve type: trimmed, a preset's code when it names one", () => {
     const type = CURVE_FIELDS.find((f) => f.key === 'type')!;
-    expect(customValue(type, '  retouch  ')).toBe('retouch');
+    expect(customValue(type, '  use wear  ')).toBe('use wear');
+    expect(customValue(type, '修理')).toBe('retouch');
     expect(customValue(type, '石核边缘')).toBe('core_edge');
     expect(customValue(type, 'joint surface')).toBe('joint');
     expect(customValue(type, 'CORE_EDGE')).toBe('core_edge');
     // an older code is the user's text now (it is not offered)
     expect(customValue(type, 'Ridge')).toBe('Ridge');
-    expect([isCustomValue(type, 'retouch'), isCustomValue(type, 'ridge'), isCustomValue(type, 'cortex'), isCustomValue(type, '')]).toEqual([true, false, false, false]);
+    expect([isCustomValue(type, 'use wear'), isCustomValue(type, 'ridge'), isCustomValue(type, 'cortex'), isCustomValue(type, '')]).toEqual([true, false, false, false]);
   });
 
   it('round-trips curves through the project file and reads files without them', () => {

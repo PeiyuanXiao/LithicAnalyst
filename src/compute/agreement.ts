@@ -207,10 +207,10 @@ export function curveDistance(a: { points: readonly Vec3[]; closed: boolean }, b
 // ---------------------------------------------------------------- comparison
 
 /** Region type codes of the triangles in FaceLabels. */
-export const FACE_TYPES = ['', 'scar', 'cortex', 'joint', 'damage', 'platform'] as const;
+export const FACE_TYPES: readonly string[] = ['', 'scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'retouch'];
 
 export interface FaceLabels {
-  /** Region type of each triangle (index into FACE_TYPES; 0 = none). */
+  /** Region type of each triangle (index into the comparison's `faceTypes`; 0 = none). */
   type: Uint8Array;
   /** The observer's region (index in its `regions`) each triangle belongs to, or −1. */
   region: Int32Array;
@@ -221,8 +221,10 @@ export interface ObserverData {
   state: Readonly<ProjectState>;
   /** The observer's fitted planes, computed from its inputs. */
   planes: PlaneResult[];
-  /** Region of each triangle (null without regions or before the mesh is partitioned). */
+  /** Region of each triangle, lower layer (null without regions or before the mesh is partitioned). */
   faces: FaceLabels | null;
+  /** The same for the upper layer; compared by type (null: none). */
+  upper?: FaceLabels | null;
   /** Values that depend on the observer: length, width, thickness (its frame), region areas, cortex ratio. */
   measures: Record<string, number | null>;
 }
@@ -241,6 +243,8 @@ export interface CompareOptions {
   gate: number;
   /** Area of each triangle (weights for the region statistics). */
   faceArea: ArrayLike<number> | null;
+  /** What the numbers in FaceLabels stand for: FACE_TYPES, and after them the observers' own texts. */
+  faceTypes?: readonly string[];
 }
 
 /** Scar matching between two observers: scar id of A → scar id of B. */
@@ -287,8 +291,26 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
 
   // regions (per triangle, weighted by area)
   const fa = A.faces, fb = B.faces, area = opts.faceArea;
+  const faceTypes = opts.faceTypes ?? FACE_TYPES;
+  // the upper layer by type: how far each part coincides
+  if (A.upper && B.upper && area) {
+    const k = faceTypes.length;
+    const inter = new Float64Array(k), inA = new Float64Array(k), inB = new Float64Array(k);
+    for (let f = 0; f < A.upper.type.length; f++) {
+      const w = area[f], ta = A.upper.type[f], tb = B.upper.type[f];
+      inA[ta] += w;
+      inB[tb] += w;
+      if (ta === tb) inter[ta] += w;
+    }
+    for (let t = 1; t < k; t++) {
+      const union = inA[t] + inB[t] - inter[t];
+      if (!(union > 0)) continue;
+      row('region', faceTypes[t], 'iou', inter[t] / union);
+      row('region', faceTypes[t], 'dice', (2 * inter[t]) / (inA[t] + inB[t]));
+    }
+  }
   if (fa && fb && area) {
-    const k = FACE_TYPES.length;
+    const k = faceTypes.length;
     const inter = new Float64Array(k), inA = new Float64Array(k), inB = new Float64Array(k);
     const confusion = new Float64Array(k * k);
     const overlap = new Map<number, number>();
@@ -309,8 +331,8 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
     for (let t = 1; t < k; t++) {
       const union = inA[t] + inB[t] - inter[t];
       if (!(union > 0)) continue;
-      row('region', FACE_TYPES[t], 'iou', inter[t] / union);
-      row('region', FACE_TYPES[t], 'dice', (2 * inter[t]) / (inA[t] + inB[t]));
+      row('region', faceTypes[t], 'iou', inter[t] / union);
+      row('region', faceTypes[t], 'dice', (2 * inter[t]) / (inA[t] + inB[t]));
     }
     // type agreement where both typed the surface
     const pairs: Array<[string, string]> = [];
@@ -318,7 +340,7 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
     for (let ta = 1; ta < k; ta++)
       for (let tb = 1; tb < k; tb++)
         if (confusion[ta * k + tb] > 0) {
-          pairs.push([FACE_TYPES[ta], FACE_TYPES[tb]]);
+          pairs.push([faceTypes[ta], faceTypes[tb]]);
           w.push(confusion[ta * k + tb]);
         }
     const ag = cohenKappa(pairs, w);
@@ -509,11 +531,11 @@ export function compareObservers(observers: readonly ObserverData[], opts: Compa
     const groups = new Map<string, number>();
     for (let f = 0; f < faces[0].type.length; f++) {
       if (faces.some((x) => x.type[f] === 0)) continue;
-      const key = faces.map((x) => x.type[f]).join('');
+      const key = faces.map((x) => x.type[f]).join(',');
       groups.set(key, (groups.get(key) ?? 0) + area[f]);
     }
     for (const [key, weight] of groups) {
-      ratings.push([...key].map((c) => FACE_TYPES[Number(c)]));
+      ratings.push(key.split(',').map((c) => (opts.faceTypes ?? FACE_TYPES)[Number(c)]));
       w.push(weight);
     }
     const ag = fleissKappa(ratings, w);

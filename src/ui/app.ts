@@ -6,20 +6,20 @@ import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
-import { runSliced } from '../compute/steps';
+import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addLandmark, completeCurveLoop, deleteTechnicalAxis, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { addLandmark, completeCurveLoop, deleteTechnicalAxis, setRegionRetouchLayer, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
-import { CURVE_FIELDS, isCustomValue, keyedOptions, numberKeyField, offeredOptions, PLATFORM_OUTLINE, REGION_FIELDS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
-import { parseProjectFile, serializeProject } from '../core/schema';
+import { CURVE_FIELDS, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
+import { parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type TechnicalAxis, type Vec3 } from '../core/types';
+import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { configurationCsv, curveCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
+import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, retouchAnglesCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
-import { APP_DIR, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
+import { APP_DIR, SHARP_EDGE_FILE, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
 import { batchOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
 import { ProjectIndex, type IndexedProject } from '../io/projectIndex';
 import { createMeasurer, type MeshMeasurer } from '../io/meshMeasurer';
@@ -43,6 +43,10 @@ import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjace
 import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
 import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
+import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_PARAMETERS, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleResult } from '../compute/edgeAngle';
+import { retouchAnglesSteps, type RetouchAngleResult, type RetouchPiece } from '../compute/retouchAngle';
+import { ruleValues, SHARP_EDGE_PARAMETERS, sharpOfCurve, suggestThreshold, type SharpResult } from '../compute/sharpEdge';
+import { EDGE_ANGLE_FLAT_DEG, EDGE_ANGLE_RAMP, EdgeAngleLayer, rampPaint, SHARP_COLORS, sharpPaint } from '../render/edgeAngleLayer';
 import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
 import { technicalFrameSteps } from '../compute/technicalFrame';
 import { frameSource } from '../core/derived';
@@ -57,7 +61,7 @@ import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLa
 import { uuid } from '../core/ids';
 import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
-import { facesOfPiecesSteps, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
+import { facesOfPiecesSteps, flakeFacePieces, overPiecesSteps, pieceSeedSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
 import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type VolumeSplit } from '../compute/split';
 import { assembleCurve, curveSegments } from '../core/curveGeometry';
@@ -80,8 +84,8 @@ import { Selection } from '../tools/selection';
 import { SurfaceSnap } from '../tools/surfaceSnap';
 import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
-import { APP_MODES, type AppApi, type AppMode, type ConfigPick, type ConfigStatus, type DisplayAspect, type DisplaySettings } from './appApi';
-import { fmtCount, fmtQuantity, quantityUnit } from '../core/format';
+import { APP_MODES, type AppApi, type AppMode, type EdgeChartMethod, type ConfigPick, type ConfigStatus, type DisplayAspect, type DisplaySettings } from './appApi';
+import { fmtCount, fmtNum, fmtQuantity, quantityUnit } from '../core/format';
 import { numRow, segmented, softSet, textRow, textValueRow } from './controls';
 import { floatingPanel } from './floatingPanel';
 import { Popovers, onViewport } from './popover';
@@ -128,7 +132,7 @@ interface Observer {
   color: string;
   layers: { arrows: ArrowLayer; curves: CurveLayer; landmarks: LandmarkLayer } | null;
   /** Region of each triangle, and what it was computed from. */
-  faces: { key: string; labels: FaceLabels | null } | null;
+  faces: { key: string; labels: FaceLabels | null; upper: FaceLabels | null } | null;
   table: LandmarkTable | null;
 }
 
@@ -258,7 +262,15 @@ export class App implements AppApi {
   private partition: Partition | null = null;
   private partitionToken = 0;
   private regions: { results: RegionResult[]; totals: RegionTotals } | null = null;
+  /** The piece of the lower layer holding each region's seed (−1: none, or an upper region). */
   private seedComponent: number[] = [];
+  /** The upper layer: pieces between the boundary curves, the upper piece of each lower piece, and the piece of each upper region (−1: none, or a lower region). */
+  private upper: { key: string; partition: Partition; over: Int32Array } | null = null;
+  private upperComponent: number[] = [];
+  private upperLayer: RegionLayer | null = null;
+  private regionRoot: THREE.Group | null = null;
+  /** The smaller piece along each platform outline, by the outline's points. */
+  private outlineSeeds = new Map<string, Vec3 | null>();
   private conflictKey = '';
   private nodule: (SphereFit & { regions: string[] }) | null = null;
   private noduleMesh: THREE.Mesh | null = null;
@@ -287,6 +299,8 @@ export class App implements AppApi {
   private agreementStale = true;
   private agreementToken = 0;
   private agreementTimer = 0;
+  /** What the numbers in FaceLabels stand for (the codes, then the observers' own texts). */
+  private faceTypes: string[] = [...FACE_TYPES];
   private faceAreas: Float32Array | null = null;
   /** Largest distance for matching arrows and curves (null: a tenth of the model's diagonal). */
   private gate: number | null = null;
@@ -356,6 +370,7 @@ export class App implements AppApi {
   private measureSeg: ToolRow | null = null;
   private presentSeg: ToolRow | null = null;
   private toolSep: HTMLElement | null = null;
+  private orientBtn: HTMLButtonElement | null = null;
   private themeBtn: HTMLButtonElement | null = null;
   private hoverTipTimer = 0;
   private measureBase: SurfaceMeasures | null = null;
@@ -389,6 +404,24 @@ export class App implements AppApi {
   private profileCross: CrossSection | null = null;
   private profileFrame = 0;
   private ringLayer: BorderLayer | null = null;
+  /** Each measured curve's edge angles, and what they were computed from. */
+  private edgeResults = new Map<string, { key: string; result: EdgeAngleResult | null }>();
+  private edgeToken = 0;
+  private edgeTimer = 0;
+  edgeMethod: EdgeChartMethod = 'three_points';
+  /** Which line the chart shows and the curve is coloured by: 'all', a distance (d2) or a layer (L1). */
+  edgeSeries = 'all';
+  edgeColorMode: 'angle' | 'sharp' = 'angle';
+  private retouchResults = new Map<string, { key: string; result: RetouchAngleResult | null }>();
+  private retouchTimer = 0;
+  private retouchToken = 0;
+  /** Counts the partitions made: the retouch layers go by the pieces. */
+  private partitionVersion = 0;
+  /** The folder's rule for a sharp edge (null: none yet, or no folder open). */
+  private folderSharp: SharpEdgeRule | null = null;
+  private edgeLayer: EdgeAngleLayer | null = null;
+  private edgeLegend: HTMLElement | null = null;
+  private edgeColorKey = '';
   /** The split as computed (before `swap`), for the plane or curve it was computed from. */
   private splitRaw: { key: string; value: VolumeSplit | null } | null = null;
   /** The split is being computed (the bicone waits for it). */
@@ -462,11 +495,17 @@ export class App implements AppApi {
     this.measures.onLabelClick = (id) => this.selection.set(id);
     this.planesLayer = new PlaneLayer(viewer);
     this.sectionLayer = new SectionLayer(viewer);
-    this.regionLayer = new RegionLayer(viewer.scene);
+    this.regionRoot = new THREE.Group();
+    viewer.scene.add(this.regionRoot);
+    this.upperLayer = new RegionLayer(this.regionRoot, true);
+    this.regionLayer = new RegionLayer(this.regionRoot);
     this.landmarkLayer = new LandmarkLayer(viewer);
     this.landmarkLayer.onLabelClick = (id) => this.selection.set(id);
     this.borderLayer = new BorderLayer(viewer);
     this.ringLayer = new BorderLayer(viewer, true);
+    this.edgeLayer = new EdgeAngleLayer(viewer);
+    this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
+    this.viewportEl.append(this.edgeLegend);
     this.viewCube = new ViewCube(viewer);
     this.viewCube.onPick = (face) => this.selectConfigFace(face, true);
 
@@ -856,14 +895,14 @@ export class App implements AppApi {
     const select = { value: 'select', icon: ICONS20.select, name: t('mode.select'), key: 'V' };
     this.modeSeg = this.toolRow('mode', t('appMode.annotate'), [
       select,
+      { value: 'axis', icon: ICONS20.axis, name: t('tool.axis'), key: 'T' },
       { value: 'draw', icon: ICONS20.arrow, name: t('mode.draw'), key: 'A' },
       { value: 'curve', icon: ICONS20.curve, name: t('mode.curve'), key: 'P' },
+      { value: 'platform-end', icon: ICONS20.platformEnd, name: t('tool.platformEnd'), key: 'E' },
       { value: 'region', icon: ICONS20.region, name: t('tool.region'), key: 'R' },
       { value: 'relation', icon: ICONS20.relation, name: t('tool.relation'), key: 'B' },
       { value: 'sequence', icon: ICONS20.sequence, name: t('tool.sequence'), key: 'Q' },
       { value: 'landmark', icon: ICONS20.landmark, name: t('tool.landmark'), key: 'K' },
-      { value: 'axis', icon: ICONS20.axis, name: t('tool.axis'), key: 'T' },
-      { value: 'platform-end', icon: ICONS20.platformEnd, name: t('tool.platformEnd'), key: 'E' },
     ]);
     this.measureSeg = this.toolRow('measure-tool', t('appMode.measure'), [select, ...MEASURE_TOOLS.map(([value, key, k, ic]) => ({ value, icon: ic, name: t(key), key: k }))]);
     this.presentSeg = this.toolRow('present-tool', t('appMode.present'), [select, { value: 'section', icon: ICONS20.section, name: t('tool.section'), key: 'X' }]);
@@ -876,7 +915,11 @@ export class App implements AppApi {
     this.toolSep = h('span', { class: 'tb-sep', 'aria-hidden': 'true' });
     const fit = h('button', { type: 'button', class: 'tool-btn', id: 'btn-fit', 'aria-label': `${t('view.fit')} (H)`, onclick: () => this.viewer?.viewAll(true) }, icon20(ICONS20.fit), h('span', { class: 'tool-key', 'aria-hidden': 'true' }, 'H'));
     tip(fit, t('view.fit'), 'H');
-    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.toolSep, fit, this.snapEl);
+    // a flake: the dorsal face toward the viewer, the platform down
+    const orient = h('button', { type: 'button', class: 'tool-btn', id: 'btn-orient', 'aria-label': `${t('view.orient')} (F)`, onclick: () => this.orientToAxis() }, icon20(ICONS20.orient), h('span', { class: 'tool-key', 'aria-hidden': 'true' }, 'F')) as HTMLButtonElement;
+    tips.attach(orient, () => ({ label: t(this.store.state.flake.axis?.matrix ? 'view.orient' : 'view.orientNone'), key: 'F' }));
+    this.orientBtn = orient;
+    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.toolSep, fit, orient, this.snapEl);
     // the sequences, under the toolbar while the sequence tool is in use
     const bar = h('div', { class: 'viewport-ui vp-seqbar', id: 'sequence-bar', role: 'radiogroup', 'aria-label': t('sequence.title'), hidden: true });
     if (this.sequenceBarEl) this.sequenceBarEl.replaceWith(bar);
@@ -900,6 +943,10 @@ export class App implements AppApi {
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
     if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
     if (this.toolSep) this.toolSep.hidden = this.mode === 'compare';
+    if (this.orientBtn) {
+      this.orientBtn.hidden = !this.isFlake() || this.mode === 'compare';
+      this.orientBtn.disabled = !this.store.state.flake.axis?.matrix;
+    }
     if (this.snapEl) this.snapEl.hidden = !annotate || !['curve', 'landmark', 'axis'].includes(this.tools?.activeId ?? '');
     this.updateSequenceBar();
   }
@@ -1095,9 +1142,14 @@ export class App implements AppApi {
     this.specimenKey = specimenKey;
     if (['flake', 'landmarks', 'regions', 'reset'].includes(c.kind) || specimenCounts) this.scheduleFlake();
     // a flake has a platform outline to follow, a core does not
-    if (specimenCounts) void this.updatePlatformAuto().then(() => this.resolveRegionsNow());
+    if (specimenCounts) {
+      this.updatePartition();
+      this.scheduleEdgeAngles();
+    }
+    if (c.kind === 'curves' || c.kind === 'reset') this.scheduleEdgeAngles();
+    if (c.kind === 'sharpEdge') this.keepFolderSharp();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { flake: 'flake', scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
     if (c.kind === 'specimen') {
@@ -1105,7 +1157,10 @@ export class App implements AppApi {
       this.sidebar.refresh('curves');
       this.sidebar.refresh('measurements');
     }
-    if (c.kind === 'flake') this.updateSpecimenBar();
+    if (c.kind === 'flake') {
+      this.updateSpecimenBar();
+      this.updateToolbar();
+    }
     if (c.kind === 'specimen' || c.kind === 'reset') {
       this.updateSpecimenBar();
       this.updateAuto();
@@ -1347,12 +1402,11 @@ export class App implements AppApi {
     })();
   }
 
-  customValues(key: string): string[] {
-    const f = CURVE_FIELDS.find((x) => x.key === key);
-    if (!f) return [];
+  customValues(f: FieldDef): string[] {
     // this specimen's first, then the other project files of the folder already read (none is read for this)
-    const curves = [...this.store.state.curves, ...(this.projectIndex?.all() ?? []).flatMap((p) => p.state.curves)];
-    return [...new Set(curves.map((c) => c.attributes[key]).filter((v): v is string => isCustomValue(f, v)))];
+    const states = [this.store.state, ...(this.projectIndex?.all() ?? []).map((p) => p.state)];
+    const values = REGION_FIELDS.includes(f) ? states.flatMap((s) => s.regions.map((r) => r.type)) : states.flatMap((s) => s.curves.map((c) => c.attributes[f.key]));
+    return [...new Set(values.filter((v): v is string => isCustomValue(f, v)))];
   }
 
   configSketch(): ConfigSketch {
@@ -1380,6 +1434,8 @@ export class App implements AppApi {
     if (this.arrows) this.arrows.faded = sequencing ? this.unsequenced() : this.offFace();
     this.arrows?.sync(this.store.state, this.selection.id, sequencing ? { ...this.display.arrows, colorMode: 'sequence' } : this.display.arrows, handles);
     this.showBorders();
+    this.syncEdgeColors();
+    if (this.curves) this.curves.drawnElsewhere = this.edgeColorKey ? this.selection.id : null;
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
     this.landmarkLayer?.sync(this.labelledLandmarks(), this.landmarks.sets, this.selection.id, this.display.arrows.labels, this.display.arrows.showHidden);
@@ -1409,7 +1465,7 @@ export class App implements AppApi {
     if (this.arrows) this.arrows.group.visible = shown(f.arrows);
     if (this.curves) this.curves.group.visible = shown(f.curves);
     if (this.landmarkLayer) this.landmarkLayer.group.visible = shown(f.landmarks);
-    if (this.regionLayer) this.regionLayer.group.visible = shown(f.regions);
+    if (this.regionRoot) this.regionRoot.visible = shown(f.regions);
     this.viewer?.requestRender();
   }
 
@@ -1696,7 +1752,7 @@ export class App implements AppApi {
       overlay: v.overlay,
       mesh: v.mesh,
       lights: this.lights,
-      regions: this.regionLayer?.group,
+      regions: this.regionRoot ?? undefined,
       positions: loaded.geometry.getAttribute('position').array as Float32Array,
       offset: loaded.offset,
       diagonal: loaded.diagonal,
@@ -1730,6 +1786,7 @@ export class App implements AppApi {
     const settings = only ? { ...this.figure, views: [] } : this.figure;
     this.applyClipping(false);
     this.regionLayer?.useFigureStyle(true);
+    this.upperLayer?.useFigureStyle(true);
     try {
       return renderFigure(ctx, frame, st.specimen.unit, settings, {
         arrows: (() => {
@@ -1749,6 +1806,7 @@ export class App implements AppApi {
       });
     } finally {
       this.regionLayer?.useFigureStyle(false);
+      this.upperLayer?.useFigureStyle(false);
       this.applyClipping();
     }
   }
@@ -1855,7 +1913,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves() };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -1894,6 +1952,16 @@ export class App implements AppApi {
       this.selection.set(existing.id);
       return;
     }
+    // a part of the specimen not divided further: the part itself
+    const up = this.upper?.partition;
+    if (up) {
+      const u = up.region[face];
+      const j = this.upperComponent.indexOf(u);
+      if (j >= 0 && Math.abs(up.areas[u] - part.areas[c]) <= 1e-9 * part.areas[c]) {
+        this.selection.set(this.store.state.regions[j].id);
+        return;
+      }
+    }
     const r = addRegion(this.store, [point.x, point.y, point.z], 'scar', this.scarStartingIn(c));
     this.selection.set(r.id);
   }
@@ -1905,21 +1973,50 @@ export class App implements AppApi {
   private setRegionTypeFor(id: string, type: RegionType): void {
     const r = this.store.region(id);
     if (!r) return;
-    // the region that followed the platform outline stays where it is, the user's from now on
-    const seed = r.auto ? this.platformAuto?.seed : undefined;
+    // a region that followed other annotations stays where it is, the user's from now on
+    const seed = r.auto ? this.autoRegionSeed(this.store.state.regions.indexOf(r)) : undefined;
     setRegionType(this.store, id, type, type === 'scar' ? this.scarStartingIn(this.componentAt(seed ?? r.seed)) : null, seed);
   }
 
-  /** Split the surface along the curves (in slices), then find the regions again. */
+  /** Where a region that follows other annotations lies (original coordinates). */
+  private autoRegionSeed(i: number): Vec3 | undefined {
+    const up = this.upper, loaded = this.loaded;
+    const c = this.upperComponent[i];
+    if (!up || !loaded || c === undefined || c < 0) return undefined;
+    const g = loaded.geometry;
+    const s = runSync(pieceSeedSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, up.partition, c));
+    const o = loaded.offset;
+    return [s[0] + o[0], s[1] + o[1], s[2] + o[2]];
+  }
+
+  /**
+   * Split the surface (in slices): the lower layer along all the curves, the upper along the boundary curves alone;
+   * a lower piece thus lies wholly in one upper piece. Then find the regions again.
+   */
   private updatePartition(): void {
     const token = ++this.partitionToken;
-    void this.partitionFor(this.store.state.curves).then(async (part) => {
-      if (!part || token !== this.partitionToken) return;
+    void (async () => {
+      const base = this.measureBase, loaded = this.loaded;
+      const st = this.store.state;
+      const chains = await this.curveChains(st.curves);
+      if (!chains || !base || !loaded || token !== this.partitionToken) return;
+      const g = loaded.geometry;
+      const pos = g.getAttribute('position').array as Float32Array;
+      const idx = g.index!.array as Uint32Array;
+      const part = await runSliced(regionsSteps(pos, idx, base.edges, chains.flat()));
+      if (token !== this.partitionToken || this.loaded !== loaded) return;
+      const boundary = chains.filter((_, i) => isBoundaryCurve(st.curves[i].attributes.type, st.specimen.type)).flat();
+      const key = JSON.stringify(boundary);
+      const upperPart = this.upper?.key === key ? this.upper.partition : await runSliced(regionsSteps(pos, idx, base.edges, boundary));
+      const over = await runSliced(overPiecesSteps(part, upperPart));
+      if (token !== this.partitionToken || this.loaded !== loaded) return;
       this.partition = part;
+      this.partitionVersion++;
+      this.upper = { key, partition: upperPart, over };
       await this.updatePlatformAuto();
       if (token !== this.partitionToken) return;
       this.resolveRegionsNow();
-    });
+    })();
   }
 
   /** The closed platform outline of a flake. */
@@ -1939,16 +2036,58 @@ export class App implements AppApi {
     }
     const key = JSON.stringify(outline.points);
     if (this.platformAuto?.key === key) return;
+    const seed = await this.outlineSeed(outline);
+    if (token !== this.platformToken || this.loaded !== loaded) return;
+    this.platformAuto = seed ? { key, seed } : null;
+  }
+
+  /** The smaller of the two pieces a closed platform outline makes: a point in it, original coordinates (once per outline; observers' outlines too). */
+  private async outlineSeed(outline: Curve): Promise<Vec3 | null> {
+    const base = this.measureBase, loaded = this.loaded;
+    const key = JSON.stringify(outline.points);
+    const known = this.outlineSeeds.get(key);
+    if (known !== undefined) return known;
+    if (!base || !loaded) return null;
     const barrier = await this.barrierFor([outline]);
-    if (!barrier || token !== this.platformToken || this.loaded !== loaded) return;
+    if (!barrier || this.loaded !== loaded) return null;
     const g = loaded.geometry;
     const pos = g.getAttribute('position').array as Float32Array;
     const idx = g.index!.array as Uint32Array;
     const part = await runSliced(regionsSteps(pos, idx, base.edges, barrier));
     const found = await runSliced(smallerPieceSteps(pos, idx, base.edges, barrier, part));
-    if (token !== this.platformToken || this.loaded !== loaded) return;
+    if (this.loaded !== loaded) return null;
     const o = loaded.offset;
-    this.platformAuto = found ? { key, seed: [found.seed[0] + o[0], found.seed[1] + o[1], found.seed[2] + o[2]] } : null;
+    const seed: Vec3 | null = found ? [found.seed[0] + o[0], found.seed[1] + o[1], found.seed[2] + o[2]] : null;
+    this.outlineSeeds.set(key, seed);
+    return seed;
+  }
+
+  /** A piece of an upper partition holding a point. */
+  private pieceAt(part: Partition, p: Vec3): number {
+    const f = this.faceAt(p);
+    return f >= 0 ? part.region[f] : -1;
+  }
+
+  /** The piece of each upper region of a project (−1: none, or a lower region): by its seed, or, one that follows other annotations, as they say, unless a region the user typed is there. */
+  private upperComponents(st: Readonly<ProjectState>, part: Partition, platformSeed: Vec3 | null): number[] {
+    const out = st.regions.map((r) => (isUpperRegion(r.type) && !r.auto ? this.pieceAt(part, r.seed) : -1));
+    if (st.specimen.type !== 'flake') return out;
+    const platform = platformSeed ? this.pieceAt(part, platformSeed) : -1;
+    const hint = st.flake.axis?.matrix ? this.pieceAt(part, st.flake.axis.end) : -1;
+    const faces = flakeFacePieces(part, platform, hint);
+    st.regions.forEach((r, i) => {
+      if (!r.auto) return;
+      const c = r.type === 'platform' ? platform : r.type === 'ventral' ? faces.ventral : r.type === 'dorsal' ? faces.dorsal : -1;
+      if (c >= 0 && !out.includes(c)) out[i] = c;
+    });
+    return out;
+  }
+
+  facesOpen(): boolean {
+    const st = this.store.state;
+    if (st.specimen.type !== 'flake' || !this.upper) return false;
+    const faces = st.regions.flatMap((r, i) => (r.auto && (r.type === 'ventral' || r.type === 'dorsal') ? [i] : []));
+    return faces.length > 0 && faces.every((i) => this.upperComponent[i] < 0);
   }
 
   /** The point of the platform outline nearest to a point; null without an outline (closed or not, a click can be placed on it). */
@@ -1980,6 +2119,14 @@ export class App implements AppApi {
 
   flakeMeasures(): FlakeMeasures | null {
     return this.isFlake() ? (this.flake?.measures ?? null) : null;
+  }
+
+  /** Look at the flake as the technical frame says, the whole of it: the dorsal face toward the viewer, the platform down. Only the camera moves. */
+  private orientToAxis(): void {
+    const m = this.isFlake() ? this.store.state.flake.axis?.matrix : null;
+    if (!m || !this.viewer) return;
+    const a = frameAxes(m);
+    this.viewer.viewFrom(a.z, a.y, undefined, undefined, true);
   }
 
   /** The technical axis drawn: its frame found on the mesh (in slices), then one undo step with the arrow. */
@@ -2015,11 +2162,11 @@ export class App implements AppApi {
 
   /** The flake's platform region: the pieces of surface of its `platform` regions, and their area. */
   private platformPieces(): { pieces: Set<number>; area: number } | null {
-    const part = this.partition;
+    const part = this.upper?.partition;
     if (!part) return null;
     const pieces = new Set<number>();
     this.store.state.regions.forEach((r, i) => {
-      const c = this.seedComponent[i];
+      const c = this.upperComponent[i];
       if (r.type === 'platform' && c >= 0) pieces.add(c);
     });
     if (!pieces.size) return null;
@@ -2048,7 +2195,7 @@ export class App implements AppApi {
       this.flakeMorph = { loaded, value };
     }
     const plat = this.platformPieces();
-    const faces = plat ? await runSliced(facesOfPiecesSteps(this.partition!, plat.pieces)) : null;
+    const faces = plat ? await runSliced(facesOfPiecesSteps(this.upper!.partition, plat.pieces)) : null;
     if (token !== this.flakeToken) return;
     const axis = st.flake.axis;
     // the longitudinal section changes only with the axis
@@ -2082,6 +2229,243 @@ export class App implements AppApi {
       this.scheduleAutosave();
       this.scheduleFolderSave();
     }
+  }
+
+  // ------------------------------------------------------------ edge angles
+
+  edgeAngleResult(curveId: string): EdgeAngleResult | null {
+    return this.edgeResults.get(curveId)?.result ?? null;
+  }
+
+  setEdgeSeries(series: string): void {
+    this.edgeSeries = series;
+    this.syncEdgeColors();
+    this.syncAnnotations();
+    this.sidebar.refresh('edge');
+  }
+
+  setEdgeColorMode(mode: 'angle' | 'sharp'): void {
+    this.edgeColorMode = mode;
+    this.syncEdgeColors();
+    this.syncAnnotations();
+    this.sidebar.refresh('edge');
+  }
+
+  retouchAngleResult(curveId: string): RetouchAngleResult | null {
+    const r = this.retouchResults.get(curveId)?.result ?? null;
+    return r?.stations.some((s) => s.stretches.length) ? r : null;
+  }
+
+  /** The curve's sharp stretches under the rule (null without a threshold, or without angles). */
+  sharpOf(curveId: string): SharpResult | null {
+    const c = this.store.curve(curveId), r = this.edgeAngleResult(curveId);
+    return c && r ? sharpOfCurve(r, c.closed, this.store.state.sharpEdge, this.store.state.specimen.unit) : null;
+  }
+
+  /** A threshold from the angles themselves: of this model, or, in a folder, of every model. */
+  async suggestSharpEdge(): Promise<void> {
+    const st = this.store.state;
+    const rule = st.sharpEdge;
+    const live = this.edgeAngleCurves();
+    const values = live.flatMap((r) => ruleValues(r, rule));
+    if (this.workspace && this.projectIndex) {
+      await this.projectIndex.ready();
+      for (const p of this.projectIndex.all()) {
+        if (p.sha256 && p.sha256 === st.mesh?.sha256) continue;
+        const curves = (p.derived.edgeAngles as { curves?: EdgeAngleResult[] } | null | undefined)?.curves ?? [];
+        for (const r of curves) values.push(...ruleValues(r, rule));
+      }
+    }
+    const threshold = suggestThreshold(values.filter((v): v is number => v !== null));
+    if (threshold === null) {
+      this.feedback.toast(t('toast.sharpNoSplit'), 'warn', 4000);
+      return;
+    }
+    const value = Math.round(threshold * 10) / 10;
+    setSharpEdge(this.store, { threshold: value });
+    this.edgeSeries = `d${rule.distance}`;
+    this.edgeMethod = rule.method;
+    this.setEdgeColorMode('sharp');
+    this.feedback.toast(t('toast.sharpSuggested', { value: fmtNum(value, 1) }));
+  }
+
+  /** In a folder the rule is the folder's: kept in its file (read-only folder: for the session, and with the projects to download). */
+  private keepFolderSharp(): void {
+    const ws = this.workspace;
+    if (!ws) return;
+    const rule = { ...this.store.state.sharpEdge };
+    if (JSON.stringify(rule) === JSON.stringify(this.folderSharp)) return;
+    this.folderSharp = rule;
+    if (ws.writable) void ws.write(SHARP_EDGE_FILE, JSON.stringify(rule, null, 2)).catch((e) => this.feedback.toast(t('workspace.saveFailed', { msg: (e as Error).message }), 'error'));
+  }
+
+  /** The folder's rule, when it has one. */
+  private async readFolderSharp(ws: Workspace): Promise<SharpEdgeRule | null> {
+    try {
+      return (await ws.exists(SHARP_EDGE_FILE)) ? parseSharpEdge(JSON.parse(await (await ws.read(SHARP_EDGE_FILE)).text())) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private scheduleRetouchAngles(): void {
+    clearTimeout(this.retouchTimer);
+    this.retouchTimer = window.setTimeout(() => void this.updateRetouchAngles(), 60);
+  }
+
+  /** The retouch layers along the curves measured (in slices): only of those whose curve, unit, pieces or layers changed; the last request wins. */
+  private async updateRetouchAngles(): Promise<void> {
+    const token = ++this.retouchToken;
+    const base = this.measureBase, loaded = this.loaded, part = this.partition;
+    if (!base || !loaded || !part) return;
+    const st = this.store.state;
+    const pieces = new Map<number, RetouchPiece>();
+    st.regions.forEach((r, i) => {
+      const c = this.seedComponent[i];
+      if (r.type === 'retouch' && c >= 0 && !pieces.has(c)) pieces.set(c, { region: r.id, layer: r.retouchLayer ?? 1 });
+    });
+    const piecesKey = JSON.stringify([this.partitionVersion, [...pieces]]);
+    const curves = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type));
+    let changed = false;
+    for (const id of [...this.retouchResults.keys()]) {
+      if (curves.some((c) => c.id === id)) continue;
+      this.retouchResults.delete(id);
+      changed = true;
+    }
+    const g = loaded.geometry;
+    const candidates = bvhPlaneCandidates(g);
+    for (const c of curves) {
+      const key = JSON.stringify([c.points, c.closed, st.specimen.unit, piecesKey]);
+      if (this.retouchResults.get(c.id)?.key === key) continue;
+      const result = pieces.size
+        ? await runSliced(retouchAnglesSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates, pieceOfFace: part.region, pieces }))
+        : null;
+      if (token !== this.retouchToken || this.loaded !== loaded) return;
+      this.retouchResults.set(c.id, { key, result });
+      changed = true;
+    }
+    if (!changed) return;
+    this.sidebar.refresh('edge');
+    this.syncAnnotations();
+    if (this.unsaved) {
+      this.scheduleAutosave();
+      this.scheduleFolderSave();
+    }
+  }
+
+  /** The curves' retouch layers as the derived results hold them. */
+  private retouchAngleCurves(): Array<RetouchAngleResult & { curveId: string }> {
+    return this.store.state.curves.flatMap((c) => {
+      const r = this.retouchAngleResult(c.id);
+      return r ? [{ curveId: c.id, ...r }] : [];
+    });
+  }
+
+  /** The values a curve is coloured by, at its stations: a distance or a layer in the method shown, or whether it is sharp (1, 0). */
+  private edgeColorStations(c: Curve, r: EdgeAngleResult, sharp: SharpResult | null): Array<{ position: number; point: Vec3 | null; value: number | null }> {
+    if (sharp) {
+      const values = ruleValues(r, this.store.state.sharpEdge);
+      return r.stations.map((s, k) => ({ position: s.position, point: s.point, value: values[k] === null && !sharp.mask[k] ? null : sharp.mask[k] ? 1 : 0 }));
+    }
+    const series = this.edgeSeries;
+    const retouch = this.retouchAngleResult(c.id);
+    const m = this.edgeMethod === 'layer_face' && !retouch ? 'three_points' : this.edgeMethod;
+    const layers = retouch?.stations.flatMap((s) => s.stretches.map((x) => x.layer)) ?? [];
+    const chosen = series.startsWith('L') ? Number(series.slice(1)) : null;
+    // no line chosen, or one that is not there: the middle distance, or (of layer faces) the layer nearest the edge
+    const layer = chosen !== null && layers.includes(chosen) ? chosen : m === 'layer_face' ? Math.min(...layers) : null;
+    if (layer !== null) {
+      return r.stations.map((s, k) => ({ position: s.position, point: s.point, value: retouch?.stations[k]?.stretches.find((x) => x.layer === layer)?.[m] ?? null }));
+    }
+    const mm = /^d(\d+)$/.exec(series);
+    const d = EDGE_ANGLE_DISTANCES_MM.indexOf((mm ? Number(mm[1]) : 5) as (typeof EDGE_ANGLE_DISTANCES_MM)[number]);
+    return r.stations.map((s) => ({ position: s.position, point: s.point, value: m === 'layer_face' ? null : s[m][d] }));
+  }
+
+  setEdgeMethod(method: EdgeChartMethod): void {
+    this.edgeMethod = method;
+    this.syncEdgeColors();
+    this.syncAnnotations();
+    this.sidebar.refresh('edge');
+  }
+
+  private scheduleEdgeAngles(): void {
+    clearTimeout(this.edgeTimer);
+    this.edgeTimer = window.setTimeout(() => void this.updateEdgeAngles(), 40);
+  }
+
+  /** The edge angles of the curves measured (in slices): only of those that changed; the last request wins. */
+  private async updateEdgeAngles(): Promise<void> {
+    const token = ++this.edgeToken;
+    const base = this.measureBase, loaded = this.loaded;
+    if (!base || !loaded) return;
+    const st = this.store.state;
+    const curves = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type));
+    for (const id of [...this.edgeResults.keys()]) if (!curves.some((c) => c.id === id)) this.edgeResults.delete(id);
+    const g = loaded.geometry;
+    const candidates = bvhPlaneCandidates(g);
+    for (const c of curves) {
+      const key = JSON.stringify([c.points, c.closed, st.specimen.unit]);
+      if (this.edgeResults.get(c.id)?.key === key) continue;
+      const result = await runSliced(edgeAnglesSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates }));
+      if (token !== this.edgeToken || this.loaded !== loaded) return;
+      this.edgeResults.set(c.id, { key, result });
+    }
+    this.sidebar.refresh('edge');
+    this.syncAnnotations();
+    if (this.unsaved) {
+      this.scheduleAutosave();
+      this.scheduleFolderSave();
+    }
+  }
+
+  /** The curves' edge angles as the derived results hold them. */
+  private edgeAngleCurves(): Array<EdgeAngleResult & { curveId: string }> {
+    return this.store.state.curves.flatMap((c) => {
+      const r = this.edgeResults.get(c.id)?.result;
+      return r ? [{ curveId: c.id, ...r }] : [];
+    });
+  }
+
+  /** The measure mode: the selected curve drawn by its angles (the middle distance), with the two ends of the scale beside it. */
+  private syncEdgeColors(): void {
+    const layer = this.edgeLayer, legend = this.edgeLegend, loaded = this.loaded;
+    const c = this.mode === 'measure' ? this.store.curve(this.selection.id ?? '') : undefined;
+    const r = c && measuresEdgeAngle(c, this.store.state.specimen.type) ? this.edgeAngleResult(c.id) : null;
+    const rule = this.store.state.sharpEdge;
+    const sharp = c && r && this.edgeColorMode === 'sharp' ? this.sharpOf(c.id) : null;
+    const stations = c && r ? this.edgeColorStations(c, r, sharp) : [];
+    const values = stations.flatMap((s) => (s.value !== null && s.point ? [s.value] : []));
+    if (!layer || !legend || !loaded || !c || values.length < 2) {
+      if (this.edgeColorKey) layer?.clear();
+      this.edgeColorKey = '';
+      if (legend) legend.hidden = true;
+      return;
+    }
+    const key = `${c.id}|${this.edgeMethod}|${this.edgeSeries}|${sharp ? JSON.stringify(rule) : ''}|${this.edgeResults.get(c.id)?.key}|${this.retouchResults.get(c.id)?.key}`;
+    if (key === this.edgeColorKey) return;
+    this.edgeColorKey = key;
+    const lo = Math.min(...values), hi = Math.max(...values);
+    layer.sync(valuesAlongCurve(c.points, c.closed, stations), c.closed, loaded.offset, sharp ? sharpPaint : rampPaint(lo, hi));
+    const ramp = hi - lo < EDGE_ANGLE_FLAT_DEG ? EDGE_ANGLE_RAMP[2] : `linear-gradient(to right,${EDGE_ANGLE_RAMP.join(',')})`;
+    clear(legend);
+    if (sharp) {
+      const swatch = (color: string) => h('span', { class: 'edge-legend-swatch', style: `background:${color}` });
+      legend.append(
+        swatch(SHARP_COLORS.sharp),
+        h('span', { class: 'edge-legend-value', id: 'edge-legend-sharp' }, `≤ ${fmtNum(rule.threshold!, 1)}°`),
+        swatch(SHARP_COLORS.other),
+        h('span', { class: 'edge-legend-value', id: 'edge-legend-other' }, `> ${fmtNum(rule.threshold!, 1)}°`),
+      );
+      legend.hidden = false;
+      return;
+    }
+    legend.append(
+      h('span', { class: 'edge-legend-value', id: 'edge-legend-min' }, `${fmtQuantity('angle', lo)}°`),
+      h('span', { class: 'edge-legend-ramp', style: `background:${ramp}` }),
+      h('span', { class: 'edge-legend-value', id: 'edge-legend-max' }, `${fmtQuantity('angle', hi)}°`),
+    );
+    legend.hidden = false;
   }
 
   // ------------------------------------------------------------ profile panel
@@ -2191,6 +2575,11 @@ export class App implements AppApi {
 
   /** The mesh edges along these curves (in slices), as vertex pairs; null when the mesh is not ready or changed meanwhile. */
   private async barrierFor(curves: readonly Curve[]): Promise<number[] | null> {
+    return (await this.curveChains(curves))?.flat() ?? null;
+  }
+
+  /** The mesh edges along each of these curves (in slices), as vertex pairs; null when the mesh is not ready or changed meanwhile. */
+  private async curveChains(curves: readonly Curve[]): Promise<number[][] | null> {
     const base = this.measureBase;
     const loaded = this.loaded;
     const snap = this.surfaceSnap;
@@ -2198,19 +2587,19 @@ export class App implements AppApi {
     await snap.prepare('off');
     if (this.loaded !== loaded) return null;
     const search = snap.search(3);
-    const barrier: number[] = [];
+    const path = (a: number, b: number) => {
+      if (!search) return null;
+      search.start(a, null);
+      return search.reach(b) ? search.path(b) : null;
+    };
+    const chains: number[][] = [];
     for (const c of curves) {
-      const chain = await runSliced(
-        polylineEdgesSteps(c.points, c.closed, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
-          if (!search) return null;
-          search.start(a, null);
-          return search.reach(b) ? search.path(b) : null;
-        }),
-      );
+      const chain = await runSliced(polylineEdgesSteps(c.points, c.closed, (p) => snap.nearestVertex(p), base.edges, path));
       if (this.loaded !== loaded) return null;
-      for (const v of chain) barrier.push(v);
+      chains.push(chain);
     }
-    return barrier;
+    const joined = await runSliced(joinOpenEndsSteps(chains, curves.map((c) => !c.closed), loaded.geometry.getAttribute('position').array as Float32Array, JOIN_REACH_EDGES * base.meanEdge, path));
+    return this.loaded === loaded ? joined : null;
   }
 
   /** Which piece each region's seed falls in; areas, totals and conflicts; repaint. */
@@ -2219,14 +2608,10 @@ export class App implements AppApi {
     const base = this.measureBase;
     if (!part || !base) return;
     const st = this.store.state;
-    this.seedComponent = st.regions.map((r) => (r.auto ? -1 : this.componentAt(r.seed)));
-    // the region that follows the platform outline: the smaller piece, unless the user typed that piece
-    const auto = st.regions.findIndex((r) => r.auto);
-    if (auto >= 0 && this.platformAuto && this.isFlake()) {
-      const c = this.componentAt(this.platformAuto.seed);
-      if (!this.seedComponent.includes(c)) this.seedComponent[auto] = c;
-    }
-    this.regions = resolveRegions(st.regions, this.seedComponent, part, base.surfaceArea);
+    this.seedComponent = st.regions.map((r) => (isUpperRegion(r.type) ? -1 : this.componentAt(r.seed)));
+    const up = this.upper;
+    this.upperComponent = up ? this.upperComponents(st, up.partition, this.platformOutline() ? (this.platformAuto?.seed ?? null) : null) : st.regions.map(() => -1);
+    this.regions = resolveRegions(st.regions, this.seedComponent, part, base.surfaceArea, up ? { component: this.upperComponent, partition: up.partition, over: up.over } : null);
     const conflicts = this.regions.results.filter((r) => r.conflict).map((r) => r.id).join(',');
     if (conflicts && conflicts !== this.conflictKey) this.feedback.toast(t('toast.regionConflict'), 'warn', 4000);
     this.conflictKey = conflicts;
@@ -2235,6 +2620,7 @@ export class App implements AppApi {
     this.updateBorders();
     this.updateRegionFits();
     this.scheduleFlake();
+    this.scheduleRetouchAngles();
     this.sidebar.refresh('regions');
   }
 
@@ -2255,13 +2641,16 @@ export class App implements AppApi {
     void (async () => {
       const fits = new Map<string, { centroid: Vec3; normal: Vec3; count: number }>();
       for (const p of planes) {
-        const pieces = new Set<number>();
+        const pieces = new Set<number>(), upperPieces = new Set<number>();
         for (const id of p.regionIds) {
-          const c = this.seedComponent[st.regions.findIndex((r) => r.id === id)];
-          if (c !== undefined && c >= 0) pieces.add(c);
+          const i = st.regions.findIndex((r) => r.id === id);
+          if (this.seedComponent[i] >= 0) pieces.add(this.seedComponent[i]);
+          if (this.upperComponent[i] >= 0) upperPieces.add(this.upperComponent[i]);
         }
-        if (!pieces.size) continue;
-        const faces = await runSliced(facesOfPiecesSteps(part, pieces));
+        if (!pieces.size && !upperPieces.size) continue;
+        const lower = await runSliced(facesOfPiecesSteps(part, pieces));
+        const above = this.upper && upperPieces.size ? await runSliced(facesOfPiecesSteps(this.upper.partition, upperPieces)) : new Uint32Array(0);
+        const faces = Uint32Array.from(new Set([...lower, ...above]));
         const fit = await runSliced(regionPlaneSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, faces, loaded.offset));
         if (token !== this.regionFitToken) return;
         if (fit) fits.set(p.id, fit);
@@ -2329,6 +2718,7 @@ export class App implements AppApi {
     this.projectIndex = new ProjectIndex(() => ws.projects, async (p) => (await ws.read(p)).text());
     this.sessionProjects.clear();
     this.undownloaded.clear();
+    this.folderSharp = await this.readFolderSharp(ws);
     this.sidebar.refresh('workspace');
     // the list shows each model's type: every project file is read once, in the background
     const index = this.projectIndex;
@@ -2456,7 +2846,9 @@ export class App implements AppApi {
     if (!this.sessionProjects.size) return;
     const enc = new TextEncoder();
     const name = `${fileStem(ws.name, 'folder')}_projects.zip`;
-    const outcome = await saveFile(name, zipStored([...this.sessionProjects].map(([p, text]) => ({ name: projectPathFor(p), data: enc.encode(text) }))), 'application/zip');
+    const files = [...this.sessionProjects].map(([p, text]) => ({ name: projectPathFor(p), data: enc.encode(text) }));
+    if (this.folderSharp) files.push({ name: SHARP_EDGE_FILE, data: enc.encode(JSON.stringify(this.folderSharp, null, 2)) });
+    const outcome = await saveFile(name, zipStored(files), 'application/zip');
     if (outcome === 'saved') {
       this.undownloaded.clear();
       this.feedback.toast(t('toast.saved', { name }));
@@ -2525,7 +2917,7 @@ export class App implements AppApi {
       folder: this.workspace?.name ?? null,
       kind,
       options,
-      parameters: { flake: FLAKE_PARAMETERS },
+      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge } },
       duplicateNames: this.wsDuplicates,
     };
   }
@@ -2574,7 +2966,10 @@ export class App implements AppApi {
       }
       if (batch.cancelled) return;
       const sink = await this.exportSink('exports');
-      for (const f of batchOutputs(specimens, { excelBom: bom })) await sink.put(f.suffix, f.text);
+      // the folder's rule judges every model of it
+      const sharp = this.folderSharp;
+      const judged = sharp ? specimens.map((s) => ({ ...s, state: { ...s.state, sharpEdge: sharp } })) : specimens;
+      for (const f of batchOutputs(judged, { excelBom: bom })) await sink.put(f.suffix, f.text);
       if (failures.length) await sink.put('failures.csv', failuresCsv(failures, bom));
       const where = await sink.finish({ ...this.manifestBase('folder', 'tables', { excelBom: bom, worker: measurer.inWorker }), specimens: listed, failures });
       this.batchToast(specimens.length, failures, where);
@@ -2609,7 +3004,7 @@ export class App implements AppApi {
       const live: BatchProject = {
         path: primary?.path ?? own,
         state: structuredClone(this.store.state) as ProjectState,
-        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null },
+        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() } },
         appVersion: __APP_VERSION__,
       };
       projects = projects.map((p) => (p === primary ? live : p));
@@ -2764,6 +3159,9 @@ export class App implements AppApi {
     if (this.mode === 'measure')
       return [
         ...(this.isFlake() ? [csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts))] : []),
+        csv('edge-angles', t('export.edgeAngles'), 'edge_angles.csv', this.edgeAngleCurves().length > 0, () => edgeAnglesCsv(st, this.edgeAngleCurves(), opts)),
+        csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts)),
+        csv('edge-sharp', t('export.edgeSharp'), 'edge_sharp.csv', st.sharpEdge.threshold !== null && this.edgeAngleCurves().length > 0, () => edgeSharpCsv(st, this.edgeAngleCurves(), opts)),
         csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile())),
         csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
         csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
@@ -3083,29 +3481,44 @@ export class App implements AppApi {
     this.agreementTimer = window.setTimeout(() => void this.updateAgreement(), 200);
   }
 
-  /** Region of each triangle by an observer's curves and region seeds (cached until they change). */
-  private async observerFaces(o: Observer, st: Readonly<ProjectState>): Promise<FaceLabels | null> {
+  /** The number of a region type in FaceLabels: the codes, then the observers' own texts as they turn up. */
+  private faceTypeIndex(type: string): number {
+    let i = this.faceTypes.indexOf(type);
+    if (i < 0) i = this.faceTypes.push(type) - 1;
+    return i;
+  }
+
+  /** Region of each triangle by an observer's curves and region seeds, in the two layers (cached until they change). */
+  private async observerFaces(o: Observer, st: Readonly<ProjectState>): Promise<{ labels: FaceLabels | null; upper: FaceLabels | null } | null> {
     if (!st.regions.length) return null;
-    const key = JSON.stringify([st.curves.map((c) => [c.points, c.closed]), st.regions.map((r) => [r.seed, r.type])]);
-    if (o.faces?.key === key) return o.faces.labels;
+    const key = JSON.stringify([st.specimen.type, st.flake.axis?.end, st.curves.map((c) => [c.points, c.closed, c.attributes.type]), st.regions.map((r) => [r.seed, r.type, r.auto])]);
+    if (o.faces?.key === key) return o.faces;
     const part = await this.partitionFor(st.curves);
     if (!part) return null;
-    const owner = new Int32Array(part.count).fill(-1);
-    st.regions.forEach((r, i) => {
-      const f = this.faceAt(r.seed);
-      const c = f >= 0 ? part.region[f] : -1;
-      if (c >= 0 && owner[c] < 0) owner[c] = i;
-    });
-    const n = part.region.length;
-    const labels: FaceLabels = { type: new Uint8Array(n), region: new Int32Array(n).fill(-1) };
-    for (let f = 0; f < n; f++) {
-      const i = owner[part.region[f]];
-      if (i < 0) continue;
-      labels.type[f] = FACE_TYPES.indexOf(st.regions[i].type);
-      labels.region[f] = i;
+    const label = (p: Partition, component: readonly number[]): FaceLabels => {
+      const owner = new Int32Array(p.count).fill(-1);
+      component.forEach((c, i) => {
+        if (c >= 0 && owner[c] < 0) owner[c] = i;
+      });
+      const n = p.region.length;
+      const labels: FaceLabels = { type: new Uint8Array(n), region: new Int32Array(n).fill(-1) };
+      for (let f = 0; f < n; f++) {
+        const i = owner[p.region[f]];
+        if (i < 0) continue;
+        labels.type[f] = this.faceTypeIndex(st.regions[i].type);
+        labels.region[f] = i;
+      }
+      return labels;
+    };
+    const labels = label(part, st.regions.map((r) => (isUpperRegion(r.type) ? -1 : this.pieceAt(part, r.seed))));
+    let upper: FaceLabels | null = null;
+    if (st.regions.some((r) => isUpperRegion(r.type))) {
+      const above = await this.partitionFor(st.curves.filter((c) => isBoundaryCurve(c.attributes.type, st.specimen.type)));
+      const outline = st.specimen.type === 'flake' ? st.curves.find((c) => c.attributes.type === PLATFORM_OUTLINE && c.closed) : undefined;
+      if (above) upper = label(above, this.upperComponents(st, above, outline ? await this.outlineSeed(outline) : null));
     }
-    o.faces = { key, labels };
-    return labels;
+    o.faces = { key, labels, upper };
+    return o.faces;
   }
 
   private triangleAreas(): Float32Array | null {
@@ -3145,21 +3558,26 @@ export class App implements AppApi {
     const data: ObserverData[] = [];
     for (const o of included) {
       const st = o.state ?? this.store.state;
-      const faces = await this.observerFaces(o, st);
+      const layers = await this.observerFaces(o, st);
+      const faces = layers?.labels ?? null;
       if (token !== this.agreementToken) return;
       const auto = autoMeasurements(positions, base, st.specimen.frame);
       const measures: Record<string, number | null> = { length: auto.length, width: auto.width, thickness: auto.thickness };
       if (faces && areas) {
-        const sums = new Float64Array(FACE_TYPES.length);
-        for (let f = 0; f < areas.length; f++) sums[faces.type[f]] += areas[f];
+        const sums = new Float64Array(this.faceTypes.length);
+        for (let f = 0; f < areas.length; f++) {
+          sums[faces.type[f]] += areas[f];
+          if (layers?.upper) sums[layers.upper.type[f]] += areas[f];
+        }
+        // (the user's own types are compared as regions, not as measurements)
         FACE_TYPES.forEach((type, i) => i > 0 && (measures[`area_${type}`] = sums[i]));
         measures.cortex_ratio = base.surfaceArea > 0 ? sums[2] / base.surfaceArea : null;
       }
-      data.push({ label: labels.get(o.id)!, state: st, planes: st.planes.map((p) => computePlane(p, st, axes)), faces, measures });
+      data.push({ label: labels.get(o.id)!, state: st, planes: st.planes.map((p) => computePlane(p, st, axes)), faces, upper: layers?.upper ?? null, measures });
       await nextFrame();
       if (token !== this.agreementToken) return;
     }
-    const rows = compareObservers(data, { gate: this.compareGate(), faceArea: areas });
+    const rows = compareObservers(data, { gate: this.compareGate(), faceArea: areas, faceTypes: this.faceTypes });
     if (token !== this.agreementToken) return;
     this.agreement = { rows, summary: summarize(rows) };
     this.agreementFocused = null;
@@ -3698,6 +4116,17 @@ export class App implements AppApi {
       : [];
     const g = loaded?.geometry;
     layer.sync((g?.getAttribute('position') as THREE.BufferAttribute) ?? null, g?.index?.array ?? null, this.partition?.region ?? null, paints, loaded?.offset ?? [0, 0, 0]);
+    // the upper layer, fainter, under them
+    if (this.upperLayer) {
+      this.upperLayer.dimmed = this.mode === 'measure';
+      const above = this.display.regions
+        ? results.flatMap((r, i) => {
+            const c = this.upperComponent[i];
+            return c >= 0 && this.upperComponent.indexOf(c) === i ? [{ component: c, color: regionColorOf(r, st.scars, seq), selected: r.id === this.selection.id }] : [];
+          })
+        : [];
+      this.upperLayer.sync((g?.getAttribute('position') as THREE.BufferAttribute) ?? null, g?.index?.array ?? null, this.upper?.partition.region ?? null, above, loaded?.offset ?? [0, 0, 0]);
+    }
     this.viewer?.requestRender();
   }
 
@@ -3735,6 +4164,7 @@ export class App implements AppApi {
       this.updatePartition();
       this.updateSplit();
       this.syncAnnotations();
+      this.scheduleEdgeAngles();
     });
   }
 
@@ -3863,10 +4293,14 @@ export class App implements AppApi {
     this.planesLayer?.clearAll();
     this.sectionLayer?.clearAll();
     this.regionLayer?.clear();
+    this.upperLayer?.clear();
     this.borderLayer?.clear();
     this.partition = null;
     this.regions = null;
     this.seedComponent = [];
+    this.upper = null;
+    this.upperComponent = [];
+    this.outlineSeeds.clear();
     this.partitionToken++;
     this.nodule = null;
     this.cuts.clear();
@@ -3882,6 +4316,12 @@ export class App implements AppApi {
     this.pickedFace = null;
     this.flake = null;
     this.flakeToken++;
+    this.edgeResults.clear();
+    this.retouchResults.clear();
+    this.edgeToken++;
+    this.edgeLayer?.clear();
+    this.edgeColorKey = '';
+    if (this.edgeLegend) this.edgeLegend.hidden = true;
     this.flakeMorph = null;
     this.flakeSection = null;
     this.platformAuto = null;
@@ -3934,6 +4374,7 @@ export class App implements AppApi {
       type: readPref<string>('specimenType', prev.specimen.type) === 'flake' ? 'flake' : 'core',
     };
     this.selection.set(null);
+    if (this.workspace && this.folderSharp) fresh.sharpEdge = { ...this.folderSharp };
     this.store.reset(fresh);
     this.startMeasuring(loaded);
     this.applyShading();
@@ -3989,6 +4430,7 @@ export class App implements AppApi {
     state.mesh = this.store.state.mesh;
     this.tools?.cancel();
     this.selection.set(null);
+    if (this.workspace && this.folderSharp) state.sharpEdge = { ...this.folderSharp };
     this.store.reset(state);
     if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state) }));
   }
@@ -4247,6 +4689,9 @@ export class App implements AppApi {
         case 'KeyE':
           if (this.hasMesh() && this.mode === 'annotate' && this.isFlake()) this.setTool('platform-end');
           return;
+        case 'KeyF':
+          if (this.hasMesh() && this.mode !== 'compare') this.orientToAxis();
+          return;
         case 'KeyX':
           if (this.hasMesh() && this.mode === 'present') this.setTool('section');
           return;
@@ -4334,8 +4779,14 @@ export class App implements AppApi {
         return;
       }
       if (digit && sel && this.mode === 'annotate') {
-        // Shift + 1–5: the selected arrow's termination
+        // Shift + 1–5: the selected arrow's termination, or the selected retouch region's layer
         if (e.shiftKey) {
+          const region = this.store.region(sel);
+          if (region?.type === 'retouch') {
+            const layer = Number(digit[1]);
+            if ((RETOUCH_LAYERS as readonly number[]).includes(layer)) setRegionRetouchLayer(this.store, sel, layer);
+            return;
+          }
           const f = shiftNumberKeyField(SCAR_FIELDS);
           const opt = f?.options?.[Number(digit[1]) - 1];
           if (f && opt && this.store.scar(sel)) setScarAttribute(this.store, sel, f.key, opt.value);
@@ -4344,7 +4795,12 @@ export class App implements AppApi {
         const specimenType = this.store.state.specimen.type;
         if (this.store.region(sel)) {
           const field = numberKeyField(REGION_FIELDS);
-          const opt = field ? offeredOptions(field, specimenType)[Number(digit[1]) - 1] : undefined;
+          const opt = field ? keyedOptions(field, specimenType)[Number(digit[1]) - 1] : undefined;
+          if (opt === 'custom') {
+            // not typed into the box it opens
+            e.preventDefault();
+            return this.sidebar.openCustomType();
+          }
           if (opt) this.setRegionTypeFor(sel, opt.value as RegionType);
           return;
         }
@@ -4403,9 +4859,9 @@ export class App implements AppApi {
 
   /** The shortcuts: two columns (general and mouse; the modes), keys as key caps, no explanations. */
   private showHelp(): void {
-    const keyCount = (f: FieldDef | undefined) => (f ? offeredOptions(f).length + (f.allowCustom ? 1 : 0) : 0);
-    const flakeKeys = this.isFlake() ? keyedOptions(CURVE_FIELDS[0], 'flake').length : 0;
-    const count = Math.max(keyCount(numberKeyField(SCAR_FIELDS)), keyCount(numberKeyField(CURVE_FIELDS)), flakeKeys) || 5;
+    const specimen = this.store.state.specimen.type;
+    const keyCount = (f: FieldDef | undefined) => (f ? keyedOptions(f, specimen).length : 0);
+    const count = Math.max(keyCount(numberKeyField(SCAR_FIELDS)), keyCount(numberKeyField(CURVE_FIELDS)), keyCount(numberKeyField(REGION_FIELDS))) || 5;
     /** Keys ("Ctrl+Z / Ctrl+Shift+Z", "1 / 2 / 3 · Delete") as key caps; `hold`: to be held down. */
     const keys = (spec: string, hold: boolean): HTMLElement => {
       const dt = h('dt', {});
@@ -4452,13 +4908,14 @@ export class App implements AppApi {
       'div',
       { class: 'help-col' },
       ...group(t('appMode.annotate'), [
+        ...(this.isFlake() ? ([['T', 'help.k.axis'], ['F', 'help.k.orient']] as Row[]) : []),
         ['A', 'help.k.draw'],
         ['P', 'help.k.curve'],
+        ...(this.isFlake() ? ([['E', 'help.k.platformEnd']] as Row[]) : []),
         ['R', 'help.k.region'],
         ['B', 'help.k.relation'],
         ['Q', 'help.k.sequence'],
         ['K', 'help.k.landmark'],
-        ...(this.isFlake() ? ([['T', 'help.k.axis'], ['E', 'help.k.platformEnd']] as Row[]) : []),
         ['1 / 2 / 3 · Delete', 'help.k.relationPick'],
         ['1 – 9 / N', 'help.k.sequencePick'],
         [`1 – ${count}`, 'help.k.complete'],
@@ -4513,6 +4970,15 @@ export class App implements AppApi {
         ring: this.ringLayer?.group.children.length ?? 0,
       }),
       exportFlakesCsvText: () => flakesCsv(this.store.state, this.flake?.measures ?? null, { excelBom: false }),
+      /** A curve's edge angles (null: not measured, or no unit stated). */
+      edgeAngles: (curveId: string) => this.edgeAngleResult(curveId),
+      /** What the edge-angle colours show (null: none), and the two ends of their scale. */
+      edgeColors: () => (this.edgeColorKey ? { key: this.edgeColorKey, min: this.edgeLegend?.querySelector('#edge-legend-min')?.textContent ?? null, max: this.edgeLegend?.querySelector('#edge-legend-max')?.textContent ?? null } : null),
+      exportEdgeAnglesCsvText: () => edgeAnglesCsv(this.store.state, this.edgeAngleCurves(), { excelBom: false }),
+      retouchAngles: (curveId: string) => this.retouchAngleResult(curveId),
+      sharpEdge: (curveId: string) => this.sharpOf(curveId),
+      exportRetouchAnglesCsvText: () => retouchAnglesCsv(this.store.state, this.retouchAngleCurves(), { excelBom: false }),
+      exportEdgeSharpCsvText: () => edgeSharpCsv(this.store.state, this.edgeAngleCurves(), { excelBom: false }),
       /** The volumetric configuration (null without arrows or before the mesh is measured). */
       configuration: () => this.configResult,
       bicone: () => (isBicone(this.configResult) ? this.configResult : null),

@@ -1,10 +1,11 @@
+import { EDGE_ANGLE_DISTANCES_MM } from '../compute/edgeAngle';
 import { joinKey, sameAxis } from '../compute/configuration';
 import { isValidShape } from './curveGeometry';
 import { computeDerived, type DerivedResults, type MeshResults } from './derived';
 import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, SPECIMEN_TYPES, type BiconeRole, type BiconeSide, type ConfigFace } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, FlakeData, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import { DEFAULT_SHARP_EDGE, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -28,6 +29,7 @@ export interface ProjectFile {
   split: ProjectState['split'];
   configuration: ConfigCorrections;
   flake: FlakeData;
+  sharpEdge: SharpEdgeRule;
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
@@ -57,6 +59,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     split: structuredClone(state.split),
     configuration: structuredClone(state.configuration),
     flake: structuredClone(state.flake),
+    sharpEdge: { ...state.sharpEdge },
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
@@ -174,6 +177,7 @@ function parseCurve(raw: unknown, i: number): Curve {
     anchorIndex,
     closed: isClosed,
     ...(completion ? { completion } : {}),
+    ...(typeof r.edgeAngle === 'boolean' ? { edgeAngle: r.edgeAngle } : {}),
     attributes: readAttributes(r.attributes, defaultCurveAttributes()),
     createdAt: str(r.createdAt, t),
     modifiedAt: str(r.modifiedAt, t),
@@ -258,14 +262,13 @@ function parseSection(raw: unknown, i: number): Section {
   };
 }
 
-const REGION_TYPE_CODES: RegionType[] = ['scar', 'cortex', 'joint', 'damage', 'platform'];
-
 function parseRegion(raw: unknown, i: number): Region {
   if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Region ${i + 1} is not an object.`);
   const r = raw as Record<string, unknown>;
   if (!isFiniteVec(r.seed)) throw new ProjectFileError(`Region ${i + 1} needs a numeric "seed" [x, y, z].`);
+  // a value that is no code is the annotator's own text
   const type = r.type as RegionType;
-  if (!REGION_TYPE_CODES.includes(type)) throw new ProjectFileError(`Region ${i + 1}: unknown type "${String(r.type)}".`);
+  if (typeof type !== 'string' || !type.trim()) throw new ProjectFileError(`Region ${i + 1} needs a type.`);
   const t = nowIso();
   return {
     id: str(r.id) || uuid(),
@@ -273,9 +276,21 @@ function parseRegion(raw: unknown, i: number): Region {
     seed: [r.seed[0], r.seed[1], r.seed[2]],
     type,
     scarId: typeof r.scarId === 'string' ? r.scarId : null,
+    ...(type === 'retouch' ? { retouchLayer: Number.isInteger(r.retouchLayer) && (r.retouchLayer as number) >= 1 ? (r.retouchLayer as number) : 1 } : {}),
     ...(r.auto === true ? { auto: true } : {}),
     createdAt: str(r.createdAt, t),
     modifiedAt: str(r.modifiedAt, t),
+  };
+}
+
+/** The rule for a sharp edge (of a project file, or of a folder's file); what is not understood takes its default. */
+export function parseSharpEdge(raw: unknown): SharpEdgeRule {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const distance = r.distance as (typeof EDGE_ANGLE_DISTANCES_MM)[number];
+  return {
+    method: r.method === 'two_lines' ? 'two_lines' : DEFAULT_SHARP_EDGE.method,
+    distance: EDGE_ANGLE_DISTANCES_MM.includes(distance) ? distance : DEFAULT_SHARP_EDGE.distance,
+    threshold: typeof r.threshold === 'number' && Number.isFinite(r.threshold) ? r.threshold : null,
   };
 }
 
@@ -463,6 +478,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     })(),
     configuration: parseConfiguration(raw.configuration),
     flake: parseFlake(raw.flake),
+    sharpEdge: parseSharpEdge(raw.sharpEdge),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
     nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),

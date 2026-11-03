@@ -13,14 +13,20 @@ export interface SectionLine {
  * Hands over the triangles a plane may cut (the app's come from the BVH); all of
  * them when there is none. Called with the plane, and a function to call per triangle.
  */
-export type PlaneCandidates = (point: Vec3, normal: Vec3, visit: (triangle: number) => void) => void;
+export type PlaneCandidates = (point: Vec3, normal: Vec3, visit: (triangle: number) => void, within?: SectionReach | null) => void;
+
+/** Only this near a point: triangles further away are left out of a section. */
+export interface SectionReach {
+  center: Vec3;
+  radius: number;
+}
 
 /**
  * Where the plane through `point` with normal `normal` cuts the mesh. Vertices on
  * the plane count as being on its positive side, so every crossing is a proper
  * edge crossing (as in intersectPlane); the triangle of each stretch is kept.
  */
-export function sectionByPlane(positions: ArrayLike<number>, index: ArrayLike<number>, point: Vec3, normal: Vec3, candidates: PlaneCandidates | null = null): SectionLine[] {
+export function sectionByPlane(positions: ArrayLike<number>, index: ArrayLike<number>, point: Vec3, normal: Vec3, candidates: PlaneCandidates | null = null, within: SectionReach | null = null): SectionLine[] {
   const vertexCount = Math.floor(positions.length / 3);
   const [px, py, pz] = point;
   const [nx, ny, nz] = normal;
@@ -52,17 +58,27 @@ export function sectionByPlane(positions: ArrayLike<number>, index: ArrayLike<nu
       linkFaces[2 * x + 1] = t;
     }
   };
+  // whether a triangle may reach into the sphere: by the sphere round its middle
+  const nearReach = (t: number): boolean => {
+    const { center: o, radius } = within!;
+    const a = 3 * index[3 * t], b = 3 * index[3 * t + 1], c = 3 * index[3 * t + 2];
+    const mx = (positions[a] + positions[b] + positions[c]) / 3, my = (positions[a + 1] + positions[b + 1] + positions[c + 1]) / 3, mz = (positions[a + 2] + positions[b + 2] + positions[c + 2]) / 3;
+    let r2 = 0;
+    for (const v of [a, b, c]) r2 = Math.max(r2, (positions[v] - mx) ** 2 + (positions[v + 1] - my) ** 2 + (positions[v + 2] - mz) ** 2);
+    return Math.hypot(mx - o[0], my - o[1], mz - o[2]) <= radius + Math.sqrt(r2);
+  };
   const visit = (t: number) => {
     const a = index[3 * t], b = index[3 * t + 1], c = index[3 * t + 2];
     const sa = dist(a) >= 0, sb = dist(b) >= 0, sc = dist(c) >= 0;
     if (sa === sb && sb === sc) return;
+    if (within && !nearReach(t)) return;
     // the two sides that change: the odd corner's
     const [u, v, w] = sa === sb ? [c, a, b] : sa === sc ? [b, c, a] : [a, b, c];
     const e = edgeOf(u, v), f = edgeOf(u, w);
     link(e, f, t);
     link(f, e, t);
   };
-  if (candidates) candidates(point, normal, visit);
+  if (candidates) candidates(point, normal, visit, within);
   else for (let t = 0, n = Math.floor(index.length / 3); t < n; t++) visit(t);
 
   const crossing = (e: number): Vec3 => {

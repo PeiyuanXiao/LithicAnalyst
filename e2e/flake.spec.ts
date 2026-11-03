@@ -32,7 +32,7 @@ async function drawAxis(page: Page): Promise<void> {
   await expect.poll(async () => (await flake(page))?.axis?.matrix ?? null).not.toBeNull();
 }
 
-/** Draw the platform outline round the P–E face, seen square on, and give it its type (key 6). */
+/** Draw the platform outline round the P–E face, seen square on, and give it its type (key 5). */
 async function drawOutline(page: Page): Promise<void> {
   await page.evaluate(() => window.lithicanalyst.view([0, -0.98, 0.196], [0, 0.196, 0.98]));
   await nextFrames(page);
@@ -49,7 +49,7 @@ async function drawOutline(page: Page): Promise<void> {
   await expect.poll(async () => (await state(page)).curves.length).toBe(1);
   expect((await state(page)).curves[0].closed).toBe(true);
   await page.keyboard.press('v');
-  await page.keyboard.press('6');
+  await page.keyboard.press('5');
   await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('platform_outline');
 }
 
@@ -71,6 +71,23 @@ async function annotate(page: Page): Promise<void> {
   await placeEnds(page);
   await page.keyboard.press('v');
 }
+
+/** Along the boundary of the ventral face, from one platform end round to the other; the type by its key. */
+async function drawEdge(page: Page): Promise<void> {
+  // the flake lying across the view, nothing over its corners
+  if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
+  await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [-1, 0, 0]));
+  await nextFrames(page);
+  await page.keyboard.press('p');
+  for (const p of [[-14.7, 0.3, 0], [-14.7, 59.7, 0], [14.7, 59.7, 0], [14.7, 0.3, 0]] as Vec3[]) await curveClick(page, await toScreen(page, p), { shift: true });
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await state(page)).curves.length).toBe(2);
+  await page.keyboard.press('v');
+  await page.keyboard.press('2');
+  await expect.poll(async () => (await state(page)).curves[1].attributes.type).toBe('edge');
+}
+
+const regionsOf = (page: Page) => page.evaluate(() => window.lithicanalyst.regions());
 
 test.beforeEach(async ({ page }) => {
   await openApp(page);
@@ -187,6 +204,11 @@ test('switching to a core and back: nothing lost, each shows its own', async ({ 
   expect(core.flake.axis).toEqual(before.flake.axis);
   expect((await page.evaluate(() => window.lithicanalyst.landmarkTable())).rows).toEqual([]);
   expect(parseCsv(await page.evaluate(() => window.lithicanalyst.exportCsvText()))[0].tech_angle_deg).toBe('');
+  // the flake's automatic parts wait for it too
+  expect(core.regions.some((r) => r.auto)).toBe(true);
+  await openSection(page, 'regions');
+  await expect(page.locator('#region-list li')).toHaveCount(0);
+  expect(parseCsv(await page.evaluate(() => window.lithicanalyst.exportRegionsCsvText()))).toEqual([]);
   // the volumetric configuration comes back
   await displayPanel(page);
   await expect(page.locator('#profile-show')).toBeHidden();
@@ -283,7 +305,7 @@ test('the type: stays with the project file, the next new model starts with it, 
   await page.keyboard.up('Shift');
   await expect.poll(async () => (await state(page)).curves.length).toBe(2);
   await page.keyboard.press('v');
-  await page.keyboard.press('6');
+  await page.keyboard.press('5');
   await expect.poll(async () => (await state(page)).curves.length).toBe(1);
   // the region follows: the smaller piece is now that triangle
   await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.regions()))?.totals.platform ?? 0).toBeLessThan(120);
@@ -359,4 +381,122 @@ test('a folder: the list shows and filters the type; the summary has flakes.csv 
   expect(Number(row.tech_length)).toBeCloseTo(60, 0);
   const manifest = JSON.parse((await folderText(page, (await find('manifest\\.json'))!))!);
   expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75] });
+});
+
+test('the toolbar: the axis after Select, the platform ends after the curve; the automatic measurements are the flake\'s', async ({ page }) => {
+  await setType(page, 'flake');
+  const order = await page.locator('.tool-group[aria-label="Annotate"] .tool-btn').evaluateAll((els) => els.filter((e) => !(e as HTMLElement).hidden).map((e) => e.id));
+  expect(order).toEqual(['mode-select', 'mode-axis', 'mode-draw', 'mode-curve', 'mode-platform-end', 'mode-region', 'mode-relation', 'mode-sequence', 'mode-landmark']);
+  await page.locator('#app-mode-measure').click();
+  await expect(page.locator('#sec-measure-auto')).toBeHidden();
+  await expect(page.locator('#sec-flake .panel-title')).toHaveText('Automatic measurements');
+  await expect(page.locator('#flake-tech_length')).toBeAttached();
+  // a core keeps its own
+  await page.locator('#app-mode-annotate').click();
+  await setType(page, 'core');
+  await page.locator('#app-mode-measure').click();
+  await expect(page.locator('#sec-measure-auto')).toBeVisible();
+  await expect(page.locator('#sec-flake')).toBeHidden();
+});
+
+test('F: the dorsal face toward the viewer, the platform down, from wherever the view is; nothing changes in the data', async ({ page }) => {
+  await setType(page, 'flake');
+  await expect(page.locator('#btn-orient')).toBeDisabled();
+  await drawAxis(page);
+  await expect(page.locator('#btn-orient')).toBeEnabled();
+  await page.keyboard.press('v');
+  await page.evaluate(() => window.lithicanalyst.view([1, -1, 0.3], [0, 0, 1]));
+  await nextFrames(page);
+  const before = JSON.stringify(await state(page));
+  await page.keyboard.press('f');
+  await nextFrames(page);
+  const toward = (await page.evaluate(() => window.lithicanalyst.towardViewer()))!;
+  const up = (await page.evaluate(() => window.lithicanalyst.cameraUp()))!;
+  expect(toward[2]).toBeCloseTo(1, 2);
+  expect(up[1]).toBeCloseTo(1, 2);
+  expect(JSON.stringify(await state(page))).toBe(before);
+  // the button does the same; a core has none
+  await page.evaluate(() => window.lithicanalyst.view([1, 0, 0], [0, 0, 1]));
+  await nextFrames(page);
+  await page.locator('#btn-orient').click();
+  await nextFrames(page);
+  expect((await page.evaluate(() => window.lithicanalyst.towardViewer()))![2]).toBeCloseTo(1, 2);
+  await setType(page, 'core');
+  await expect(page.locator('#btn-orient')).toBeHidden();
+});
+
+test('a flake\'s faces follow from the edge and the axis; a scar on the dorsal face lies in it; the user\'s own type is the last key', async ({ page }) => {
+  await setType(page, 'flake');
+  await drawAxis(page);
+  await drawOutline(page);
+  await drawEdge(page);
+  await expect.poll(async () => (await state(page)).regions.filter((r) => r.auto).map((r) => r.type).sort()).toEqual(['dorsal', 'platform', 'ventral']);
+  // the three parts, each with its whole area
+  await expect.poll(async () => (await regionsOf(page))?.totals.ventral ?? 0).toBeGreaterThan(1500);
+  const totals = (await regionsOf(page))!.totals;
+  expect(Math.abs(totals.ventral - 60 * 30)).toBeLessThan(120);
+  expect(Math.abs(totals.platform - 30 * Math.sqrt(104))).toBeLessThan(40);
+  expect(totals.dorsal).toBeGreaterThan(2000);
+  await expect(page.locator('#region-faces-open')).toBeHidden();
+
+  // a scar on the dorsal face, seen from above it
+  await page.evaluate(() => window.lithicanalyst.view([0, 0.16, 0.99], [0, 1, 0]));
+  await nextFrames(page);
+  await page.keyboard.press('p');
+  const dorsal = (y: number, x: number): Vec3 => [x, y, (10 * (60 - y)) / 62];
+  const corners = [dorsal(20, -5), dorsal(20, 5), dorsal(32, 5), dorsal(32, -5)];
+  for (const p of corners) await curveClick(page, await toScreen(page, p), { shift: true });
+  const first = await toScreen(page, corners[0]);
+  await page.mouse.move(first.x, first.y, { steps: 3 });
+  await page.keyboard.down('Shift');
+  await page.mouse.click(first.x, first.y);
+  await page.keyboard.up('Shift');
+  await expect.poll(async () => (await state(page)).curves.length).toBe(3);
+  await page.keyboard.press('v');
+  await page.keyboard.press('1');
+  await page.keyboard.press('r');
+  const inside = await toScreen(page, dorsal(26, 0));
+  await page.mouse.click(inside.x, inside.y);
+  await expect.poll(async () => (await regionsOf(page))?.results.some((r) => r.type === 'scar' && r.parent !== null) ?? false).toBe(true);
+  const res = (await regionsOf(page))!;
+  const scar = res.results.find((r) => r.type === 'scar')!;
+  const dors = res.results.find((r) => r.type === 'dorsal')!;
+  expect(scar.parent).toBe(dors.id);
+  // the dorsal face keeps its area, the scar's is its own
+  expect(Math.abs(res.totals.dorsal - totals.dorsal)).toBeLessThan(1);
+  expect(scar.area!).toBeGreaterThan(80);
+  expect(scar.area!).toBeLessThan(160);
+  await expect(page.locator('#region-scar')).toBeVisible();
+  // the user's own type is the last key
+  await page.keyboard.press('9');
+  await expect(page.locator('#region-type-text')).toBeVisible();
+  await page.locator('#region-type-text').fill('retouch, fine');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await state(page)).regions.find((r) => r.id === scar.id)?.type).toBe('retouch, fine');
+  await page.locator('#app-mode-annotate').click();
+  const rows = parseCsv(await page.evaluate(() => window.lithicanalyst.exportRegionsCsvText()));
+  const row = rows.find((r) => r.type === 'retouch, fine')!;
+  expect(row.parent_region).toBe(dors.label);
+  expect(rows.find((r) => r.type === 'dorsal')!.parent_region).toBe('');
+});
+
+test('an edge that does not close leaves the two faces unnamed, and says so', async ({ page }) => {
+  await setType(page, 'flake');
+  await drawAxis(page);
+  await drawOutline(page);
+  // only a part of the way: the ventral and dorsal faces stay one piece
+  await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
+  await nextFrames(page);
+  await page.keyboard.press('p');
+  for (const p of [[-14.9, 20, 0], [14.9, 20, 0]] as Vec3[]) await curveClick(page, await toScreen(page, p), { shift: true });
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await state(page)).curves.length).toBe(2);
+  await page.keyboard.press('v');
+  await page.keyboard.press('2');
+  await expect.poll(async () => (await state(page)).regions.filter((r) => r.auto).length).toBe(3);
+  await openSection(page, 'regions');
+  await expect(page.locator('#region-faces-open')).toBeVisible();
+  const totals = (await regionsOf(page))!.totals;
+  expect(totals.ventral).toBe(0);
+  expect(totals.dorsal).toBe(0);
 });

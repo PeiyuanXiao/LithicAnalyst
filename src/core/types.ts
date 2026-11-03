@@ -110,6 +110,8 @@ export interface Curve {
   closed: boolean;
   /** The part of the loop filled in automatically ("Complete loop"); absent when there is none. */
   completion?: CurveCompletion;
+  /** Measure its edge angles; absent: as its type says (edgeAngleByDefault). */
+  edgeAngle?: boolean;
   /** Values for the fields in CURVE_FIELDS (src/core/fields.ts). */
   attributes: Record<string, AttributeValue>;
   createdAt: string;
@@ -198,7 +200,9 @@ export interface Section {
   modifiedAt: string;
 }
 
-export type RegionType = 'scar' | 'cortex' | 'joint' | 'damage' | 'platform';
+export type RegionCode = 'scar' | 'cortex' | 'joint' | 'damage' | 'flaking_surface' | 'platform' | 'ventral' | 'dorsal' | 'retouch';
+/** One of the codes, or the user's own text. */
+export type RegionType = RegionCode | (string & {});
 
 /**
  * A surface region, stored as a seed: the clicked surface point and its type.
@@ -213,7 +217,13 @@ export interface Region {
   type: RegionType;
   /** The scar this region belongs to (type scar), or null. */
   scarId: string | null;
-  /** The platform region that follows the platform outline: the smaller of the two pieces it makes (the seed is not used). Gone once the user gives it a type. */
+  /** The retouch layer (type retouch): 1 is the nearest the edge. */
+  retouchLayer?: number;
+  /**
+   * A part of a flake that follows from other annotations (the seed is not used): the platform is the smaller of the two pieces
+   * the platform outline makes, the ventral face the piece under the technical axis, the dorsal face the largest other one.
+   * Gone once the user gives it a type.
+   */
   auto?: boolean;
   createdAt: string;
   modifiedAt: string;
@@ -319,6 +329,15 @@ export interface FlakeData {
   otherFrame: SpecimenFrame | null;
 }
 
+/** What counts as the sharp part of an edge: the stations at most `threshold` degrees in one series of the edge angles (`distance` in mm). The threshold is the user's: null until set. */
+export interface SharpEdgeRule {
+  method: 'three_points' | 'two_lines';
+  distance: number;
+  threshold: number | null;
+}
+
+export const DEFAULT_SHARP_EDGE: SharpEdgeRule = { method: 'three_points', distance: 2, threshold: null };
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -345,6 +364,8 @@ export interface ProjectState {
   /** Manual corrections to the volumetric configuration (none by default). */
   configuration: ConfigCorrections;
   flake: FlakeData;
+  /** In a folder, the folder's own: every model of it is judged alike. */
+  sharpEdge: SharpEdgeRule;
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */

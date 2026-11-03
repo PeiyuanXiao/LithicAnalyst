@@ -1,3 +1,4 @@
+import type { RetouchAngleCurve } from '../core/derived';
 import { isBicone, type CoreConfiguration } from '../compute/bicone';
 import { FLAKE_MEASURES, type FlakeMeasures } from '../compute/flake';
 import { techAngleDeg } from '../compute/technicalFrame';
@@ -5,7 +6,10 @@ import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AgreementRow, SummaryRow } from '../compute/agreement';
-import { frameSource, type AutoMeasurements } from '../core/derived';
+import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS } from '../compute/edgeAngle';
+import { RETOUCH_ANGLE_METHODS } from '../compute/retouchAngle';
+import { sharpOfCurve } from '../compute/sharpEdge';
+import { frameSource, type AutoMeasurements, type EdgeAngleCurve } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
@@ -77,6 +81,57 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
   );
   const body = [header.join(','), ...rows].join('\n') + '\n';
   return (opts.excelBom ? '﻿' : '') + body;
+}
+
+/** Long format: one row per station, distance and method of each curve measured (`angle_deg` empty where the section ends before the distance). */
+export function edgeAnglesCsv(state: Readonly<ProjectState>, curves: readonly EdgeAngleCurve[], opts: CsvOptions): string {
+  const header = 'specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg';
+  const rows: string[] = [];
+  for (const r of curves) {
+    const c = state.curves.find((x) => x.id === r.curveId);
+    if (!c) continue;
+    r.stations.forEach((s, k) => {
+      r.distances.forEach((d, i) => {
+        for (const m of EDGE_ANGLE_METHODS) rows.push([csvCell(state.specimen.id), csvCell(c.label), csvCell(c.attributes.type), String(k), fmt(s.position), fmt(d), m, cell(s[m][i])].join(','));
+      });
+    });
+  }
+  return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
+}
+
+/**
+ * Long format: one row per station, retouch layer and method of each curve measured. `distance`: from the edge to the layer's
+ * outer end, along the section; `retouch_region`: the region where the layer begins; `angle_deg` empty where the other side ends first.
+ */
+export function retouchAnglesCsv(state: Readonly<ProjectState>, curves: readonly RetouchAngleCurve[], opts: CsvOptions): string {
+  const header = 'specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg';
+  const rows: string[] = [];
+  for (const r of curves) {
+    const c = state.curves.find((x) => x.id === r.curveId);
+    if (!c) continue;
+    r.stations.forEach((s, k) => {
+      for (const x of s.stretches) {
+        const region = state.regions.find((g) => g.id === x.region)?.label ?? '';
+        for (const m of RETOUCH_ANGLE_METHODS) rows.push([csvCell(state.specimen.id), csvCell(c.label), String(k), fmt(s.position), csvCell(region), String(x.layer), fmt(x.distance), m, cell(x[m])].join(','));
+      }
+    });
+  }
+  return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
+}
+
+/** One row per sharp stretch of each curve measured, under the project's rule (none without a threshold); lengths in the coordinate unit. */
+export function edgeSharpCsv(state: Readonly<ProjectState>, curves: readonly EdgeAngleCurve[], opts: CsvOptions): string {
+  const header = 'specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length';
+  const rows: string[] = [];
+  const rule = state.sharpEdge;
+  for (const r of curves) {
+    const c = state.curves.find((x) => x.id === r.curveId);
+    const sharp = c ? sharpOfCurve(r, c.closed, rule, state.specimen.unit) : null;
+    if (!c || !sharp) continue;
+    const distance = r.distances[EDGE_ANGLE_DISTANCES_MM.indexOf(rule.distance as (typeof EDGE_ANGLE_DISTANCES_MM)[number])] ?? null;
+    sharp.segments.forEach((s, k) => rows.push([csvCell(state.specimen.id), csvCell(c.label), rule.method, cell(distance), cell(rule.threshold), String(k + 1), fmt(s.start), fmt(s.end), fmt(s.length)].join(',')));
+  }
+  return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
 }
 
 /** One row per flake: where its frame came from, and its measurements (empty where there is no value; lengths in the specimen's unit). */
@@ -228,10 +283,13 @@ export function planesCsv(state: Readonly<ProjectState>, planes: PlaneResult[], 
 
 /** One row per surface region; `scar_id` is the label of the scar it belongs to; area in unit². */
 export function regionsCsv(state: Readonly<ProjectState>, regions: RegionResult[], opts: CsvOptions): string {
-  const header = ['specimen_id', 'region_id', 'type', 'scar_id', 'area', 'unit'];
-  const rows = regions.map((r) => {
+  const header = ['specimen_id', 'region_id', 'type', 'scar_id', 'area', 'unit', 'parent_region', 'retouch_layer'];
+  // those that follow a flake's annotations belong to the flake
+  const hidden = state.specimen.type === 'flake' ? [] : state.regions.filter((r) => r.auto).map((r) => r.id);
+  const rows = regions.filter((r) => !hidden.includes(r.id)).map((r) => {
     const scar = r.scarId ? state.scars.find((s) => s.id === r.scarId)?.label ?? '' : '';
-    return [csvCell(state.specimen.id), csvCell(r.label), r.type, csvCell(scar), cell(r.area), csvCell(state.specimen.unit)].join(',');
+    const parent = r.parent ? regions.find((x) => x.id === r.parent)?.label ?? '' : '';
+    return [csvCell(state.specimen.id), csvCell(r.label), csvCell(r.type), csvCell(scar), cell(r.area), csvCell(state.specimen.unit), csvCell(parent), cell(r.retouchLayer ?? null)].join(',');
   });
   return (opts.excelBom ? '\uFEFF' : '') + [header.join(','), ...rows].join('\n') + '\n';
 }

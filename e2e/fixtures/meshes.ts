@@ -5,9 +5,9 @@
  * traced curve that stays on the ridge shows that snapping worked.
  */
 
-import { ellipsoid, flakeT1, flakeT2, T1 } from '../../tests/meshes';
+import { bicone, ellipsoid, flakeT1, flakeT2, heightAt, steppedTool, T1 } from '../../tests/meshes';
 
-export { T1 };
+export { heightAt, T1 };
 
 export type Vec3 = [number, number, number];
 
@@ -169,6 +169,18 @@ function cuboidMesh(center: Vec3, size: Vec3, n: number): Mesh {
 
 export const t1Ply = (): MeshFile => ({ name: 't1.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(flakeT1()) });
 export const t2Ply = (): MeshFile => ({ name: 't2.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(flakeT2()) });
+/** T4: the bicone of the edge angles (edge radius 30, cones 8 and 5 high). */
+export const T4 = { radius: 30, upper: 8, lower: 5 };
+export const t4Ply = (): MeshFile => ({ name: 't4.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(bicone(T4.radius, T4.upper, T4.lower, 96, 8)) });
+/** A tool with two tiers of retouch above a flat ventral face (edge radius 30; the tiers end at radius 24 and 12). */
+export const toolPly = (): MeshFile => ({ name: 'tool.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(steppedTool()) });
+/** The bicone of T4 with its cones three times as high on one half: an edge of two angles, about 24.4° and 65.2°. */
+export function twoAnglePly(): MeshFile {
+  const m = bicone(T4.radius, T4.upper, T4.lower, 240, 12);
+  const p = m.positions;
+  for (let i = 0; i < p.length; i += 3) if (p[i + 1] < -1e-6) p[i + 2] *= 3;
+  return { name: 'two.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(m) };
+}
 export const t3Ply = (): MeshFile => ({ name: 't3.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(ellipsoid(40, 25, 8)) });
 
 export const boxPly = (): MeshFile => ({ name: 'box.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(boxMesh()) });

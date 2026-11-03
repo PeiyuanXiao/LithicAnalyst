@@ -97,6 +97,7 @@ export function icon20(markup: string): SVGSVGElement {
 
 /** Icons of the view toolbar, the mode switch and the shell (20 × 20 grid). */
 export const ICONS20 = {
+  orient: '<rect x="5" y="3.5" width="10" height="13" rx="1.5"/><path d="M10 13.5 V6.5"/><path d="M7.5 9 L10 6.5 L12.5 9"/>',
   axis: '<circle cx="10" cy="16.5" r="2"/><path d="M10 14.5 V3.5"/><path d="M6.5 7 L10 3.5 L13.5 7"/><path d="M4 16.5 H6 M14 16.5 H16"/>',
   platformEnd: '<path d="M3 13.5 H17"/><circle cx="4.5" cy="13.5" r="2" fill="currentColor"/><circle cx="15.5" cy="13.5" r="2" fill="currentColor"/><path d="M10 13.5 V6"/>',
   select: '<path d="M5 3 L15 10.5 L10.2 11.4 L12.6 16.6 L10.8 17.4 L8.4 12.2 L5 15.2 Z"/>',

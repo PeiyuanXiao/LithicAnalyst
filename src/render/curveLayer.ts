@@ -20,6 +20,7 @@ export const CURVE_COLORS = {
     joint: '#5fb0ea',
     edge: '#ff5b4f',
     platform_outline: '#2fb5a8',
+    retouch: '#e0559b',
     ridge: '#36c26a',
     other: '#f2f5f3',
   } as Record<string, string>,
@@ -81,6 +82,8 @@ export function lineMaterial(color: string, width: number, opts: { ghost?: boole
 export class CurveVisual {
   readonly root = new THREE.Group();
   readonly label: CSS2DObject | null = null;
+  /** The lines without the label. */
+  readonly lines = new THREE.Group();
   private geometry: LineGeometry | null = null;
   private parts: LineSegmentsGeometry[] = [];
   private readonly halo: Line2;
@@ -103,7 +106,8 @@ export class CurveVisual {
     this.dash.visible = false;
     this.ghost.renderOrder = 900;
     for (const l of [this.halo, this.core, this.dash, this.ghost]) l.frustumCulled = false;
-    this.root.add(this.halo, this.core, this.dash, this.ghost);
+    this.lines.add(this.halo, this.core, this.dash, this.ghost);
+    this.root.add(this.lines);
     if (withLabel) {
       const el = document.createElement('button');
       el.type = 'button';
@@ -388,6 +392,8 @@ export class CurveLayer {
   fixedColor: string | null = null;
   /** Draw the curves faded (they are not what the current work mode is about). */
   dimmed = false;
+  /** The curve another layer draws (by its edge angles): only its label here. */
+  drawnElsewhere: string | null = null;
   /** The curve under the select tool's cursor. */
   private hovered: string | null = null;
 
@@ -421,6 +427,7 @@ export class CurveLayer {
       const dim = this.dimmed && !isSel;
       v.style(color, isSel ? WIDTH_SELECTED : isHov ? WIDTH_HOVER : WIDTH, display.showHidden && !dim, dim ? 0.3 : 1);
       v.setLabel(display.labels ? c.label : null, color, isSel, isHov);
+      v.lines.visible = c.id !== this.drawnElsewhere;
     }
     for (const [id, v] of this.visuals) {
       if (!seen.has(id)) {

@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { ConfigCorrections, Curve, FlakeData, Landmark, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenInfo } from './types';
+import { DEFAULT_SHARP_EDGE, type ConfigCorrections, type Curve, type FlakeData, type Landmark, type Measurement, type MeshInfo, type Plane, type ProjectState, type Region, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenInfo, type SharpEdgeRule } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'flake' | 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
+export type ChangeKind = 'sharpEdge' | 'flake' | 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -29,6 +29,7 @@ export function emptyProject(): ProjectState {
     split: null,
     configuration: { roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } },
     flake: { axis: null, otherFrame: null },
+    sharpEdge: { ...DEFAULT_SHARP_EDGE },
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,
@@ -289,6 +290,10 @@ export class ProjectStore {
 
   _setFlake(f: FlakeData): void {
     this._state.flake = f;
+  }
+
+  _setSharpEdge(rule: SharpEdgeRule): void {
+    this._state.sharpEdge = rule;
   }
 
   _setNextRegionNumber(n: number): void {

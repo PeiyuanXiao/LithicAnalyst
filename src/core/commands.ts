@@ -1,4 +1,4 @@
-import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
+import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, SharpEdgeRule } from './types';
 import type { LandmarkData, ProjectStore } from './store';
 
 /**
@@ -533,6 +533,24 @@ export class SetFlakeCommand implements Command {
   revert(store: ProjectStore): void {
     store._setFlake(structuredClone(this.before));
     store.notify({ kind: 'flake' });
+  }
+}
+
+/** Replace the rule for what counts as a sharp edge. */
+export class SetSharpEdgeCommand implements Command {
+  readonly labelKey = 'cmd.editField';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: SharpEdgeRule,
+    private readonly after: SharpEdgeRule,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setSharpEdge({ ...this.after });
+    store.notify({ kind: 'sharpEdge' });
+  }
+  revert(store: ProjectStore): void {
+    store._setSharpEdge({ ...this.before });
+    store.notify({ kind: 'sharpEdge' });
   }
 }
 

@@ -236,3 +236,55 @@ export function plyBytes(m: Mesh): Uint8Array {
   }
   return out;
 }
+
+/** The profile of a tool with two tiers of retouch above a flat ventral face: (r, z) from the edge inward. */
+const TIER_1 = [30, 24] as const, TIER_2 = [24, 12] as const;
+export const heightAt = (r: number): number => (r >= 24 ? 30 - r : r >= 12 ? 6 + (24 - r) / 6 : 8 + (12 - r) / 24);
+export const SEGMENTS = 240;
+
+/** Rings of vertices on it, so that the tiers' borders lie along mesh edges; the rings' first vertices by radius. */
+export function steppedTool(): Mesh & { ringAt: (r: number, up: boolean) => number } {
+  const up: number[] = [];
+  for (let r = TIER_1[0]; r > TIER_1[1] + 1e-9; r -= 0.6) up.push(r);
+  for (let r = TIER_2[0]; r > TIER_2[1] + 1e-9; r -= 0.8) up.push(r);
+  for (let r = 12; r > 0.5; r -= 1.5) up.push(r);
+  const down: number[] = [];
+  for (let r = 30 - 0.8; r > 0.5; r -= 0.8) down.push(r);
+  const rings = [...up.map((r) => [r, heightAt(r)]), ...down.reverse().reverse().map((r) => [r, 0])];
+  const pos: number[] = [0, 0, heightAt(0)];
+  const starts: number[] = [];
+  for (const [r, z] of rings) {
+    starts.push(pos.length / 3);
+    for (let j = 0; j < SEGMENTS; j++) pos.push(r * Math.cos((2 * Math.PI * j) / SEGMENTS), r * Math.sin((2 * Math.PI * j) / SEGMENTS), z);
+  }
+  const bottom = pos.length / 3;
+  pos.push(0, 0, 0);
+  const idx: number[] = [];
+  const nx = (j: number) => (j + 1) % SEGMENTS;
+  // the upper rings run from the edge inward, as do the lower ones
+  const upper = starts.slice(0, up.length), lower = starts.slice(up.length);
+  for (let j = 0; j < SEGMENTS; j++) idx.push(0, upper[upper.length - 1] + j, upper[upper.length - 1] + nx(j));
+  for (let b = 0; b + 1 < upper.length; b++) {
+    for (let j = 0; j < SEGMENTS; j++) {
+      const a0 = upper[b] + j, a1 = upper[b] + nx(j), b0 = upper[b + 1] + j, b1 = upper[b + 1] + nx(j);
+      idx.push(a0, a1, b1, a0, b1, b0);
+    }
+  }
+  const ventral = [upper[0], ...lower];
+  for (let b = 0; b + 1 < ventral.length; b++) {
+    for (let j = 0; j < SEGMENTS; j++) {
+      const a0 = ventral[b] + j, a1 = ventral[b] + nx(j), b0 = ventral[b + 1] + j, b1 = ventral[b + 1] + nx(j);
+      idx.push(a0, b1, a1, a0, b0, b1);
+    }
+  }
+  const last = ventral[ventral.length - 1];
+  for (let j = 0; j < SEGMENTS; j++) idx.push(bottom, last + nx(j), last + j);
+  const ringAt = (r: number, above: boolean): number => {
+    const list = above ? up : [30, ...down];
+    const firsts = above ? upper : ventral;
+    const i = list.findIndex((x) => Math.abs(x - r) < 1e-6);
+    if (i < 0) throw new Error(`no ring at ${r}`);
+    return firsts[i];
+  };
+  return { positions: new Float32Array(pos), index: new Uint32Array(idx), ringAt };
+}

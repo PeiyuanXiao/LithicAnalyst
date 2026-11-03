@@ -6,10 +6,10 @@ import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { FlakeMeasures } from '../compute/flake';
-import type { AutoMeasurements, FlakeDerived } from '../core/derived';
+import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, RetouchAngleCurve } from '../core/derived';
 import { measurementValue } from '../core/measurements';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
-import { configurationCsv, csvCell, curveCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
+import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, retouchAnglesCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
 import { landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
@@ -29,6 +29,10 @@ export interface BatchSpecimen {
   split: { upper: number; lower: number; ratio: number | null } | null;
   /** A flake's measurements, from the project file's derived results (null for a core). */
   flake: FlakeMeasures | null;
+  /** The curves' edge angles, from the project file's derived results. */
+  edgeAngles: readonly EdgeAngleCurve[];
+  /** The retouch layers along them, from the project file's derived results. */
+  retouchAngles: readonly RetouchAngleCurve[];
   /** Each observer's values (annotator → measure → value), from every project file of the model, for the ICC. */
   observers: Map<string, Record<string, number>>;
 }
@@ -130,6 +134,8 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
     split: storedSplit(derived.split),
     flake: state.specimen.type === 'flake' ? ((derived.flake as FlakeDerived | null | undefined)?.measures ?? null) : null,
+    edgeAngles: (derived.edgeAngles as { curves?: EdgeAngleCurve[] } | null | undefined)?.curves ?? [],
+    retouchAngles: (derived.retouchAngles as { curves?: RetouchAngleCurve[] } | null | undefined)?.curves ?? [],
     observers,
   };
 }
@@ -205,6 +211,9 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
     ['manual_measurements.csv', (s) => manualMeasurementsCsv(s.state, plain)],
     ['planes.csv', (s) => planesCsv(s.state, s.planes, plain)],
     ['regions.csv', (s) => regionsCsv(s.state, s.regions, plain)],
+    ['edge_angles.csv', (s) => edgeAnglesCsv(s.state, s.edgeAngles, plain)],
+    ['retouch_angles.csv', (s) => retouchAnglesCsv(s.state, s.retouchAngles, plain)],
+    ['edge_sharp.csv', (s) => edgeSharpCsv(s.state, s.edgeAngles, plain)],
     ['relations.csv', (s) => relationsCsv(s.state, plain)],
     ['series.csv', (s) => seriesCsv(s.state, plain)],
     ['landmarks.csv', (s) => landmarksCsv(s.state, landmarkTable(s.state), plain)],

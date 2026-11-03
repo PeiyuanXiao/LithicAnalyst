@@ -1,3 +1,5 @@
+import type { RetouchAngleResult } from '../compute/retouchAngle';
+import type { SharpResult } from '../compute/sharpEdge';
 import type { SnapMode } from '../compute/surfacePath';
 import type { PlaneResult } from '../compute/planes';
 import type { FigureLayout, FigureSettings } from '../render/figure';
@@ -45,6 +47,9 @@ export type ConfigPick = import('../core/fields').ConfigFace | import('../core/f
 
 /** Why the bicone shows nothing: its split is being computed, the mesh is not closed, or the split gives no volumes. */
 export type ConfigStatus = 'computing' | 'not_closed' | 'split_invalid';
+
+/** What the chart of edge angles shows. */
+export type EdgeChartMethod = import('../compute/edgeAngle').EdgeAngleMethod | 'layer_face';
 
 /** What the sidebar panels may ask of the application. */
 export interface AppApi {
@@ -174,6 +179,20 @@ export interface AppApi {
   configSketch(): import('../render/configSketch').ConfigSketch;
   /** A flake's measurements (null for a core, or before they are computed). */
   flakeMeasures(): import('../compute/flake').FlakeMeasures | null;
-  /** The user's own values of a curve field used so far: in this specimen and in the folder's project files already read. */
-  customValues(key: string): string[];
+  /** The user's own values of a curve's or a region's field used so far: in this specimen and in the folder's project files already read. */
+  customValues(field: import('../core/fields').FieldDef): string[];
+  /** A flake's edge does not part its ventral and dorsal faces. */
+  facesOpen(): boolean;
+  /** A curve's edge angles (null: not measured, or not yet). */
+  edgeAngleResult(curveId: string): import('../compute/edgeAngle').EdgeAngleResult | null;
+  /** The method the chart and the colours show. */
+  readonly edgeMethod: EdgeChartMethod;
+  retouchAngleResult(curveId: string): RetouchAngleResult | null;
+  sharpOf(curveId: string): SharpResult | null;
+  suggestSharpEdge(): Promise<void>;
+  edgeSeries: string;
+  setEdgeSeries(series: string): void;
+  edgeColorMode: 'angle' | 'sharp';
+  setEdgeColorMode(mode: 'angle' | 'sharp'): void;
+  setEdgeMethod(method: EdgeChartMethod): void;
 }

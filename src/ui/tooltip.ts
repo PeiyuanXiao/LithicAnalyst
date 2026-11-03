@@ -1,9 +1,10 @@
 import { h } from './dom';
 
-/** What a tooltip says: a name, and the key that does the same (shown as a key cap). */
+/** What a tooltip says: a name, and the key that does the same (shown as a key cap); or further lines under the name. */
 export interface TipContent {
   label: string;
   key?: string;
+  lines?: readonly string[];
 }
 
 const DELAY_MS = 300;
@@ -94,7 +95,7 @@ class Tips {
   private render(content: TipContent): HTMLElement {
     this.el?.remove();
     this.atCursor = false;
-    const el = h('div', { class: 'tip', role: 'tooltip' }, h('span', {}, content.label), content.key ? h('kbd', {}, content.key) : null);
+    const el = h('div', { class: content.lines ? 'tip tip-lines' : 'tip', role: 'tooltip' }, h('span', {}, content.label), ...(content.lines ?? []).map((l) => h('span', {}, l)), content.key ? h('kbd', {}, content.key) : null);
     el.style.visibility = 'hidden';
     document.body.append(el);
     this.el = el;

@@ -26,6 +26,13 @@ export interface LithicApi {
   } | null;
   sectionPanel(): { shown: boolean; at: number; width: number | null; thickness: number | null; ring: number };
   exportFlakesCsvText(): string;
+  edgeAngles(curveId: string): import('../src/compute/edgeAngle').EdgeAngleResult | null;
+  edgeColors(): { key: string; min: string | null; max: string | null } | null;
+  exportEdgeAnglesCsvText(): string;
+  retouchAngles(curveId: string): import('../src/compute/retouchAngle').RetouchAngleResult | null;
+  sharpEdge(curveId: string): import('../src/compute/sharpEdge').SharpResult | null;
+  exportRetouchAnglesCsvText(): string;
+  exportEdgeSharpCsvText(): string;
   selectForTest(id: string | null): void;
   exportCurvesCsvText(): string;
   curveDraft(): Vec3[] | null;
@@ -217,6 +224,16 @@ export async function curveClick(page: Page, at: { x: number; y: number }, opts:
   await page.mouse.click(at.x, at.y);
   if (opts.shift) await page.keyboard.up('Shift');
   await expect.poll(() => draftLength(page)).toBe(before + 1);
+}
+
+/** Close the curve being drawn: its first point is on the model's outline, so a click a few pixels from it toward `inside` (within closing reach). */
+export async function closeDraftToward(page: Page, inside: Vec3): Promise<void> {
+  const first = await toScreen(page, (await page.evaluate(() => window.lithicanalyst.curveDraft()))![0]);
+  const c = await toScreen(page, inside);
+  const k = 5 / Math.hypot(c.x - first.x, c.y - first.y);
+  const at = { x: first.x + k * (c.x - first.x), y: first.y + k * (c.y - first.y) };
+  await page.mouse.move(at.x, at.y, { steps: 3 });
+  await page.mouse.click(at.x, at.y);
 }
 
 /** Run `trigger` and return the file it downloads. */

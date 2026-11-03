@@ -1,6 +1,9 @@
 import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
 import type { ConfigBox } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
+import { EDGE_ANGLE_PARAMETERS, type EdgeAngleResult } from '../compute/edgeAngle';
+import type { RetouchAngleResult } from '../compute/retouchAngle';
+import { SHARP_EDGE_PARAMETERS, sharpOfCurve, type SharpSegment } from '../compute/sharpEdge';
 import { FLAKE_PARAMETERS, type FlakeGeometry, type FlakeMeasures, type FlakeResult } from '../compute/flake';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
@@ -9,7 +12,7 @@ import { relationResults, type RelationResults } from '../compute/relations';
 import type { SphereFit } from '../compute/sphere';
 import type { VolumeSplit } from '../compute/split';
 import { measurementUnit, measurementValue } from './measurements';
-import type { MeasureType, ProjectState, Vec3 } from './types';
+import type { MeasureType, ProjectState, SharpEdgeRule, Vec3 } from './types';
 
 /** Size and shape of the whole model, measured automatically when it is opened. */
 export interface AutoMeasurements {
@@ -42,6 +45,10 @@ export interface FlakeDerived {
   geometry: FlakeGeometry;
 }
 
+/** One curve's edge angles. */
+export type RetouchAngleCurve = RetouchAngleResult & { curveId: string };
+export type EdgeAngleCurve = EdgeAngleResult & { curveId: string };
+
 /**
  * Results computed from the annotations and the mesh (later features add
  * fitted planes, fitted spheres, volumes …). They are recomputed whenever their
@@ -72,6 +79,12 @@ export interface DerivedResults {
   configuration: CoreConfiguration | null;
   /** A flake's measurements (null for a core, or before they are computed). */
   flake: FlakeDerived | null;
+  /** The edge angles of the curves measured, with their parameters (null: none). */
+  edgeAngles: { parameters: typeof EDGE_ANGLE_PARAMETERS; curves: EdgeAngleCurve[] } | null;
+  /** The retouch layers along the curves measured (null: none). */
+  retouchAngles: { curves: RetouchAngleCurve[] } | null;
+  /** The sharp stretches of the curves measured, under the rule (null without a threshold, or without edge angles). */
+  sharpEdge: { rule: SharpEdgeRule; parameters: typeof SHARP_EDGE_PARAMETERS; curves: Array<{ curveId: string; length: number; segments: SharpSegment[] }> } | null;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -88,10 +101,29 @@ export interface MeshResults {
   flake?: FlakeResult | null;
   /** Each region plane's fit to its regions, by plane id. */
   regionFits?: ReadonlyMap<string, { centroid: Vec3; normal: Vec3; count: number }> | null;
+  /** The curves' edge angles. */
+  edgeAngles?: readonly EdgeAngleCurve[] | null;
+  /** The retouch layers along them. */
+  retouchAngles?: readonly RetouchAngleCurve[] | null;
 }
 
 /** Where the specimen frame came from, for flakes.csv. */
 export const frameSource = (state: Pick<ProjectState, 'specimen'>): string => state.specimen.frame?.source ?? 'principal';
+
+/** The sharp stretches of these curves under the project's rule; null without a threshold, or without edge angles. */
+function sharpDerived(state: Readonly<ProjectState>, curves: readonly EdgeAngleCurve[]): DerivedResults['sharpEdge'] {
+  const rule = state.sharpEdge;
+  if (rule.threshold === null || !curves.length) return null;
+  return {
+    rule: { ...rule },
+    parameters: SHARP_EDGE_PARAMETERS,
+    curves: curves.flatMap((r) => {
+      const c = state.curves.find((x) => x.id === r.curveId);
+      const s = c ? sharpOfCurve(r, c.closed, rule, state.specimen.unit) : null;
+      return s ? [{ curveId: r.curveId, length: s.length, segments: s.segments }] : [];
+    }),
+  };
+}
 
 export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults | null = null): DerivedResults {
   const auto = mesh?.measurements ?? null;
@@ -114,5 +146,8 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     landmarks: landmarkTable(state),
     configuration: state.specimen.type === 'flake' ? null : coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null),
     flake: state.specimen.type === 'flake' && mesh?.flake ? { parameters: FLAKE_PARAMETERS, frameSource: frameSource(state), measures: mesh.flake.measures, geometry: mesh.flake.geometry } : null,
+    edgeAngles: mesh?.edgeAngles?.length ? { parameters: EDGE_ANGLE_PARAMETERS, curves: [...mesh.edgeAngles] } : null,
+    retouchAngles: mesh?.retouchAngles?.length ? { curves: [...mesh.retouchAngles] } : null,
+    sharpEdge: sharpDerived(state, mesh?.edgeAngles ?? []),
   };
 }

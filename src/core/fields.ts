@@ -22,8 +22,6 @@ export interface FieldOption {
   legacy?: boolean;
   /** Offered only for these types of specimen (shown, not offered, for the others). */
   types?: readonly SpecimenType[];
-  /** Comes after the "custom" entry (its number key too). */
-  afterCustom?: boolean;
 }
 
 export interface FieldDef {
@@ -135,7 +133,8 @@ export const CURVE_FIELDS: FieldDef[] = [
       { value: 'edge', label: { zh: '边缘', en: 'Edge' }, types: ['flake'] },
       { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
       { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
-      { value: 'platform_outline', label: { zh: '台面轮廓', en: 'Platform outline' }, types: ['flake'], afterCustom: true },
+      { value: 'platform_outline', label: { zh: '台面轮廓', en: 'Platform outline' }, types: ['flake'] },
+      { value: 'retouch', label: { zh: '修理', en: 'Retouch' } },
       // older codes: read and written as they are
       { value: 'ridge', label: { zh: '棱脊', en: 'Ridge' }, legacy: true },
       { value: 'other', label: { zh: '其他', en: 'Other' }, legacy: true },
@@ -152,7 +151,15 @@ export const CURVE_FIELDS: FieldDef[] = [
 /** The curve that outlines a flake's platform (one per flake, closed). */
 export const PLATFORM_OUTLINE = 'platform_outline';
 
-/** Surface region types: scar (worked), cortex and joint surfaces (unworked), damage; a flake's platform. Keys 1–5. */
+/** Whether a curve of this type bounds the upper layer of regions: a flake's edge and platform outline, a core's edges. */
+export const isBoundaryCurve = (type: AttributeValue | undefined, specimen: SpecimenType): boolean =>
+  specimen === 'flake' ? type === 'edge' || type === PLATFORM_OUTLINE : type === 'core_edge';
+
+/**
+ * Surface region types. The lower layer: scar (worked), cortex and joint surfaces (unworked), damage, retouch, or the
+ * user's own text. The upper layer, parts of the specimen that lower regions lie in: a core's flaking surfaces
+ * and platforms; a flake's platform, ventral and dorsal faces. The user's own text is always the last choice.
+ */
 export const REGION_FIELDS: FieldDef[] = [
   {
     key: 'type',
@@ -161,17 +168,33 @@ export const REGION_FIELDS: FieldDef[] = [
     default: 'scar',
     numberKeys: true,
     listSummary: 'always',
+    allowCustom: true,
     options: [
       { value: 'scar', label: { zh: '片疤', en: 'Scar' } },
       { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
       { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
       { value: 'damage', label: { zh: '破损', en: 'Damage' } },
-      { value: 'platform', label: { zh: '台面', en: 'Platform' }, types: ['flake'] },
+      { value: 'flaking_surface', label: { zh: '剥片面', en: 'Flaking surface' }, types: ['core'] },
+      { value: 'platform', label: { zh: '台面', en: 'Platform' } },
+      { value: 'ventral', label: { zh: '腹面', en: 'Ventral face' }, types: ['flake'] },
+      { value: 'dorsal', label: { zh: '背面', en: 'Dorsal face' }, types: ['flake'] },
+      { value: 'retouch', label: { zh: '修理', en: 'Retouch' } },
     ],
   },
 ];
 
-export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage', 'platform'] as const;
+export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'retouch'] as const;
+
+/** The retouch layers on offer; 1 is the nearest the edge. */
+export const RETOUCH_LAYERS = [1, 2, 3, 4, 5] as const;
+
+/** The region types of the upper layer (bounded by the boundary curves alone, so lower regions lie inside them). */
+export const UPPER_REGION_TYPES: readonly string[] = ['flaking_surface', 'platform', 'ventral', 'dorsal'];
+export const isUpperRegion = (type: string): boolean => UPPER_REGION_TYPES.includes(type);
+
+/** Whether a curve's edge angles are measured: as the user said, else a flake's edge and a core's edge are. */
+export const measuresEdgeAngle = (c: { edgeAngle?: boolean; attributes: Readonly<Record<string, AttributeValue>> }, specimen: SpecimenType): boolean =>
+  c.edgeAngle ?? c.attributes.type === (specimen === 'flake' ? 'edge' : 'core_edge');
 
 /**
  * Volumetric configuration of a core (after the Logical Analytical System): the
@@ -227,11 +250,10 @@ export const curveFieldByKey = (key: string): FieldDef | undefined => CURVE_FIEL
 /** The options offered for picking on this type of specimen (not those kept only for older files or for the other type). */
 export const offeredOptions = (f: FieldDef, type: SpecimenType = 'core'): FieldOption[] => (f.options ?? []).filter((o) => !o.legacy && (!o.types || o.types.includes(type)));
 
-/** What the number keys 1, 2, … pick on this type of specimen: its options, with "custom" (a field that takes the user's own text) in its place. */
+/** What the number keys 1, 2, … pick on this type of specimen: its options and, always last, "custom" (a field that takes the user's own text). */
 export function keyedOptions(f: FieldDef, type: SpecimenType = 'core'): Array<FieldOption | 'custom'> {
   const offered = offeredOptions(f, type);
-  if (!f.allowCustom) return offered;
-  return [...offered.filter((o) => !o.afterCustom), 'custom', ...offered.filter((o) => o.afterCustom)];
+  return f.allowCustom ? [...offered, 'custom'] : offered;
 }
 
 /** A value of a field that takes the user's own text, as that text: not empty and none of its codes. */

@@ -72,7 +72,7 @@ describe('regions bounded by curves', () => {
       ['R1', 'scar', 12, false],
       ['R2', 'cortex', 12, false],
     ]);
-    expect(totals).toEqual({ scar: 12, cortex: 12, joint: 0, damage: 0, platform: 0, cortexRatio: 0.5 });
+    expect(totals).toEqual({ scar: 12, cortex: 12, joint: 0, damage: 0, flaking_surface: 0, platform: 0, ventral: 0, dorsal: 0, retouch: 0, cortexRatio: 0.5 });
 
     // a second seed in the bottom half: conflict, and the half counts once
     addRegion(s, [0.5, 0.5, -1], 'joint', null);
@@ -102,7 +102,7 @@ describe('regions bounded by curves', () => {
     expect(back.regions).toEqual(s.state.regions);
     expect(back.nextRegionNumber).toBe(4);
 
-    expect(regionsCsv(s.state, results, { excelBom: false })).toBe('specimen_id,region_id,type,scar_id,area,unit\n,R1,scar,S1,12,mm\n,R2,cortex,,12,mm\n');
+    expect(regionsCsv(s.state, results, { excelBom: false })).toBe('specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer\n,R1,scar,S1,12,mm,,\n,R2,cortex,,12,mm,,\n');
     expect(measurementsCsv(s.state, null, { excelBom: false }, totals).split('\n')[1].endsWith(',12,12,0,0,0.5,,,,,,')).toBe(true);
   });
 });

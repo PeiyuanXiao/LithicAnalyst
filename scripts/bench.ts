@@ -12,6 +12,8 @@ import type { CurvatureService } from '../src/compute/curvatureService';
 import { buildAdjacency, meanCurvature, robustAbsRange, smoothField } from '../src/compute/curvature';
 import { frameMeasures, surfaceMeasuresSteps } from '../src/compute/measure';
 import { fitPlane } from '../src/compute/meshGeometry';
+import { edgeAnglesSteps } from '../src/compute/edgeAngle';
+import { retouchAnglesSteps } from '../src/compute/retouchAngle';
 import { flakeMeasuresSteps, morphDimensionsSteps, techDimensionsSteps } from '../src/compute/flake';
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
 import { regionPlaneSteps } from '../src/compute/planes';
@@ -19,9 +21,9 @@ import { regionPathSteps } from '../src/compute/regionPath';
 import { technicalFrameSteps } from '../src/compute/technicalFrame';
 import { frameAxes } from '../src/core/frame';
 import { bvhPlaneCandidates } from '../src/render/bvhPlane';
-import { polylineEdgesSteps } from '../src/compute/regions';
+import { polylineEdgesSteps, regionsSteps } from '../src/compute/regions';
 import { splitByLoopSteps } from '../src/compute/split';
-import type { Steps } from '../src/compute/steps';
+import { runSync, type Steps } from '../src/compute/steps';
 import { emptyProject } from '../src/core/store';
 import type { Curve, ProjectState, Scar, Vec3 } from '../src/core/types';
 import { buildLoadedMesh } from '../src/io/loadMesh';
@@ -243,6 +245,21 @@ async function benchGenerated(triangles: number): Promise<void> {
   steps('6g shortest path within the region', regionPathSteps(pos, idx, platformFaces, [s0[0] - o[0], s0[1] - o[1], s0[2] - o[2]], [s1[0] - o[0], s1[1] - o[1], s1[2] - o[2]]));
   steps('6h plane of a region', regionPlaneSteps(pos, idx, platformFaces, o));
   steps('6i all the flake measures', flakeMeasuresSteps({ positions: pos, index: idx, offset: o, matrix: frameResult.matrix, P, ends: [], platformFaces, platformArea: 1, unit: 'mm', meanEdge: base.meanEdge, morph, candidates }));
+
+  // ⑦ the edge angles along the core's edge
+  const edgeLength = rim.reduce((s, p, i) => s + Math.hypot(p[0] - rim[(i + 1) % rim.length][0], p[1] - rim[(i + 1) % rim.length][1], p[2] - rim[(i + 1) % rim.length][2]), 0);
+  const angles = steps(`7 edge angles along ${edgeLength.toFixed(0)} mm`, edgeAnglesSteps({ positions: pos, index: idx, offset: o, points: rim, closed: true, unit: 'mm', meanEdge: base.meanEdge, candidates }));
+  console.log(`${angles?.stations.length ?? 0} stations`);
+
+  // ⑧ the retouch layers along it: both sides of the edge a layer, as far as the whole section
+  const rimPart = runSync(regionsSteps(pos, idx, base.edges, runSync(polylineEdgesSteps(rim, true, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
+    if (!search) return null;
+    search.start(a, null);
+    return search.reach(b) ? search.path(b) : null;
+  }))));
+  const layered = new Map(Array.from({ length: rimPart.count }, (_, c) => [c, { region: `R${c}`, layer: 1 }] as const));
+  const layers = steps(`8 retouch layers along ${edgeLength.toFixed(0)} mm (${rimPart.count} pieces)`, retouchAnglesSteps({ positions: pos, index: idx, offset: o, points: rim, closed: true, unit: 'mm', meanEdge: base.meanEdge, candidates, pieceOfFace: rimPart.region, pieces: layered }));
+  console.log(`${layers?.stations.filter((s) => s.stretches.length).length ?? 0} stations with a layer`);
   console.log('');
   report();
 }

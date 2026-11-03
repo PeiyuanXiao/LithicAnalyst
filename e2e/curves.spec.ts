@@ -171,7 +171,7 @@ async function ridgeCurve(page: Page, from: number, to: number): Promise<string>
 
 const typeOf = async (page: Page, id: string) => (await state(page)).curves.find((c) => c.id === id)!.attributes.type;
 
-test('curve types: keys 1–4, not filled in at first; 5 for the user’s own text, with what was used before', async ({ page }) => {
+test('curve types: keys 1–5, not filled in at first; 6 for the user’s own text, with what was used before', async ({ page }) => {
   const id = await ridgeCurve(page, 4, 24);
   expect(await typeOf(page, id)).toBe('');
   await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('—');
@@ -181,42 +181,42 @@ test('curve types: keys 1–4, not filled in at first; 5 for the user’s own te
     await expect.poll(() => typeOf(page, id)).toBe(code);
     await expect(page.locator(`#curve-field-type-${code}`)).toHaveAttribute('aria-checked', 'true');
   }
-  await expect(page.locator('#curve-inspector .opt-btn')).toHaveText(['1Scar outline', '2Core edge', '3Cortex', '4Joint surface', '5Custom']);
+  await expect(page.locator('#curve-inspector .opt-btn')).toHaveText(['1Scar outline', '2Core edge', '3Cortex', '4Joint surface', '5Retouch', '6Custom']);
   await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('Joint surface');
 
-  // 5: a box for the user's own text; Esc lets it go
-  await page.keyboard.press('5');
+  // 6: a box for the user's own text; Esc lets it go
+  await page.keyboard.press('6');
   const box = page.locator('#curve-field-type-text');
   await expect(box).toBeVisible();
   await expect(box).toBeFocused();
   await expect(box).toHaveValue('');
-  await box.fill('retouch');
+  await box.fill('use wear');
   await box.press('Escape');
   await expect(box).toBeHidden();
   expect(await typeOf(page, id)).toBe('joint');
   await expect(page.locator('#curve-field-type-joint')).toHaveAttribute('aria-checked', 'true');
   // Enter keeps it, trimmed
   await page.locator('#curve-field-type-custom').click();
-  await box.fill('  retouch  ');
+  await box.fill('  use wear  ');
   await box.press('Enter');
-  await expect.poll(() => typeOf(page, id)).toBe('retouch');
+  await expect.poll(() => typeOf(page, id)).toBe('use wear');
   await expect(box).toBeHidden();
   await expect(page.locator('#curve-field-type-custom')).toHaveAttribute('aria-checked', 'true');
-  await expect(page.locator('#curve-field-type-custom')).toContainText('Custom · retouch');
-  await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('retouch');
+  await expect(page.locator('#curve-field-type-custom')).toContainText('Custom · use wear');
+  await expect(page.locator('#curve-list .curve-row .arrow-meta')).toHaveText('use wear');
 
   // another curve: the text used before is offered; a preset's name keeps the preset's code
   const other = await ridgeCurve(page, 30, 46);
-  await page.keyboard.press('5');
+  await page.keyboard.press('6');
   await expect(box).toBeFocused();
-  expect(await page.locator('#curve-field-type-suggest option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).toEqual(['retouch']);
+  expect(await page.locator('#curve-field-type-suggest option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).toEqual(['use wear']);
   await box.fill('石核边缘');
   await box.press('Enter');
   await expect.poll(() => typeOf(page, other)).toBe('core_edge');
 
   // the CSV: codes for the presets, the text for the user's own
   const rows = parseCsv((await exportFile(page, 'curves')).text);
-  expect([...new Set(rows.map((r) => `${r.curve_id}:${r.type}`))]).toEqual(['C1:retouch', 'C2:core_edge']);
+  expect([...new Set(rows.map((r) => `${r.curve_id}:${r.type}`))]).toEqual(['C1:use wear', 'C2:core_edge']);
 });
 
 test('older curve types are read, shown with their names and written back as they were', async ({ page }) => {

@@ -16,7 +16,7 @@ import {
   SetNoduleCommand,
   SetRelationsCommand,
   SetConfigurationCommand,
-  SetFlakeCommand,
+  SetFlakeCommand, SetSharpEdgeCommand,
   SetSequencesCommand,
   SetSplitCommand,
   SetSpecimenCommand,
@@ -33,7 +33,7 @@ import { orderSequences, relationInputs } from '../compute/relations';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
-import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3 } from './types';
+import type { SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -173,14 +173,32 @@ export function addCurve(store: ProjectStore, input: NewCurveInput): Curve {
   return curve;
 }
 
-/** The platform region that follows the platform outline, for the steps that take the outline away. */
-const autoRegionGone = (store: ProjectStore): Command[] => store.state.regions.filter((r) => r.auto).map((r) => new DeleteRegionCommand(r.id));
+/**
+ * The commands that bring a flake's regions that follow other annotations in line with `after`: the platform comes with a
+ * platform outline, the ventral and dorsal faces with an edge and a technical frame. `seed`: any point, for those that are new.
+ */
+function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[]; axis: TechnicalAxis | null }, seed: Vec3): Command[] {
+  const st = store.state;
+  const wanted: RegionType[] = [];
+  if (st.specimen.type === 'flake') {
+    if (after.curves.some((c) => c.attributes.type === PLATFORM_OUTLINE)) wanted.push('platform');
+    if (after.axis?.matrix && after.curves.some((c) => c.attributes.type === 'edge')) wanted.push('ventral', 'dorsal');
+  }
+  const parts: Command[] = st.regions.filter((r) => r.auto && !wanted.includes(r.type)).map((r) => new DeleteRegionCommand(r.id));
+  let n = st.nextRegionNumber;
+  const t = nowIso();
+  for (const type of wanted) {
+    if (st.regions.some((r) => r.auto && r.type === type)) continue;
+    parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: null, auto: true, createdAt: t, modifiedAt: t }, n));
+    n++;
+  }
+  return parts;
+}
 
 export function deleteCurve(store: ProjectStore, id: string): void {
   const c = store.curve(id);
   if (!c) return;
-  const parts: Command[] = [new DeleteCurveCommand(id)];
-  if (c.attributes.type === PLATFORM_OUTLINE) parts.push(...autoRegionGone(store));
+  const parts: Command[] = [new DeleteCurveCommand(id), ...autoRegionChanges(store, { curves: store.state.curves.filter((x) => x.id !== id), axis: store.state.flake.axis }, c.points[0])];
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.deleteCurve', parts));
 }
 
@@ -232,18 +250,12 @@ function setCurveType(store: ProjectStore, c: Curve, value: AttributeValue): voi
   const update = new UpdateCurveCommand('cmd.editField', structuredClone(c), after);
   const st = store.state;
   const parts: Command[] = [];
+  let curves = st.curves.map((x) => (x.id === c.id ? after : x));
   if (value === PLATFORM_OUTLINE) {
     for (const o of st.curves) if (o.id !== c.id && o.attributes.type === PLATFORM_OUTLINE) parts.push(new DeleteCurveCommand(o.id));
-    parts.push(update);
-    if (!st.regions.some((r) => r.auto)) {
-      const n = st.nextRegionNumber;
-      const t = nowIso();
-      parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(c.points[0]), type: 'platform', scarId: null, auto: true, createdAt: t, modifiedAt: t }, n));
-    }
-  } else {
-    parts.push(update);
-    if (c.attributes.type === PLATFORM_OUTLINE) parts.push(...autoRegionGone(store));
+    curves = curves.filter((x) => x.id === c.id || x.attributes.type !== PLATFORM_OUTLINE);
   }
+  parts.push(update, ...autoRegionChanges(store, { curves, axis: st.flake.axis }, c.points[0]));
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editField', parts));
 }
 
@@ -255,6 +267,13 @@ export function setCurveAttribute(store: ProjectStore, id: string, key: string, 
   updateCurve(store, id, 'cmd.editField', (x) => {
     x.attributes[key] = value;
   }, isText ? `curve-attr:${key}:${id}` : null);
+}
+
+/** Whether a curve's edge angles are measured. */
+export function setCurveEdgeAngle(store: ProjectStore, id: string, on: boolean): void {
+  updateCurve(store, id, 'cmd.editField', (c) => {
+    c.edgeAngle = on;
+  });
 }
 
 export function setCurveLabel(store: ProjectStore, id: string, label: string): void {
@@ -459,6 +478,8 @@ export function setRegionType(store: ProjectStore, id: string, type: RegionType,
     linked = s.scar.id;
   }
   const after: Region = { ...structuredClone(before), type, scarId: type === 'scar' ? linked : null, modifiedAt: nowIso() };
+  if (type === 'retouch') after.retouchLayer = before.retouchLayer ?? 1;
+  else delete after.retouchLayer;
   if (after.auto) {
     delete after.auto;
     if (seed) after.seed = copy(seed);
@@ -466,6 +487,22 @@ export function setRegionType(store: ProjectStore, id: string, type: RegionType,
   parts.push(new UpdateRegionCommand(structuredClone(before), after));
   if (type !== 'scar') parts.push(...dropAreaScar(store, before));
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editRegion', parts));
+}
+
+/** Which scar a scar region belongs to (a scar's two parts may be two regions); a scar without a direction made for this region goes when nothing else uses it. */
+export function setRegionScar(store: ProjectStore, id: string, scarId: string): void {
+  const before = store.region(id);
+  if (!before || before.type !== 'scar' || before.scarId === scarId || !store.scar(scarId)) return;
+  const update = new UpdateRegionCommand(structuredClone(before), { ...structuredClone(before), scarId, modifiedAt: nowIso() });
+  const drop = dropAreaScar(store, before);
+  store.history.execute(drop.length ? new CompoundCommand('cmd.editRegion', [update, ...drop]) : update);
+}
+
+/** Which retouch layer a retouch region is. */
+export function setRegionRetouchLayer(store: ProjectStore, id: string, layer: number): void {
+  const before = store.region(id);
+  if (!before || before.type !== 'retouch' || before.retouchLayer === layer) return;
+  store.history.execute(new UpdateRegionCommand(structuredClone(before), { ...structuredClone(before), retouchLayer: layer, modifiedAt: nowIso() }));
 }
 
 export function deleteRegion(store: ProjectStore, id: string): void {
@@ -761,6 +798,14 @@ export function setSpecimenType(store: ProjectStore, type: SpecimenType): void {
   );
 }
 
+/** What counts as a sharp edge. */
+export function setSharpEdge(store: ProjectStore, change: Partial<SharpEdgeRule>): void {
+  const before = store.state.sharpEdge;
+  const after = { ...before, ...change };
+  if (after.method === before.method && after.distance === before.distance && after.threshold === before.threshold) return;
+  store.history.execute(new SetSharpEdgeCommand({ ...before }, after));
+}
+
 // ---------------------------------------------------------------- technical axis
 
 /** The frame source of a frame made from the technical axis. */
@@ -805,6 +850,7 @@ export function setTechnicalAxis(store: ProjectStore, input: NewAxisInput): Tech
   if (pop) touch(pop).point = copy(input.start);
   else lmAfter.landmarks.unshift({ id: uuid(), name: 'pop', point: copy(input.start), code: 'pop', createdAt: t, modifiedAt: t });
   parts.push(new SetLandmarksCommand('cmd.setAxis', lmBefore, lmAfter));
+  parts.push(...autoRegionChanges(store, { curves: st.curves, axis }, input.start));
   const before = st.specimen;
   const frame: SpecimenFrame | null = axis.matrix ? { matrix: [...axis.matrix], source: TECHNICAL_FRAME } : isTechnicalFrame(before.frame) ? null : before.frame;
   if (JSON.stringify(frame) !== JSON.stringify(before.frame)) parts.push(new SetSpecimenCommand(structuredClone(before), { ...structuredClone(before), frame: structuredClone(frame) }));
@@ -828,6 +874,7 @@ export function deleteTechnicalAxis(store: ProjectStore): void {
     }
     parts.push(new SetLandmarksCommand('cmd.deleteAxis', lmBefore, lmAfter));
   }
+  parts.push(...autoRegionChanges(store, { curves: st.curves, axis: null }, st.flake.axis.start));
   if (isTechnicalFrame(st.specimen.frame)) parts.push(new SetSpecimenCommand(structuredClone(st.specimen), { ...structuredClone(st.specimen), frame: null }));
   store.history.execute(new CompoundCommand('cmd.deleteAxis', parts));
 }

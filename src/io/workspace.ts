@@ -42,6 +42,9 @@ export interface DirectoryHandle {
 /** The folder the app keeps its files in. */
 export const APP_DIR = 'LithicAnalyst';
 
+/** What counts as a sharp edge in this folder: every model of it is judged alike. */
+export const SHARP_EDGE_FILE = `${APP_DIR}/sharp-edge.json`;
+
 /** Where a model's project file goes: `site1/EXP03.ply` → `LithicAnalyst/projects/site1/EXP03.ply.lithicanalyst.json`. */
 export const projectPathFor = (meshPath: string): string => `${APP_DIR}/projects/${meshPath}.lithicanalyst.json`;
 
