@@ -1,6 +1,7 @@
 import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
 import type { ConfigBox } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
+import { FLAKE_PARAMETERS, type FlakeGeometry, type FlakeMeasures, type FlakeResult } from '../compute/flake';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
@@ -8,7 +9,7 @@ import { relationResults, type RelationResults } from '../compute/relations';
 import type { SphereFit } from '../compute/sphere';
 import type { VolumeSplit } from '../compute/split';
 import { measurementUnit, measurementValue } from './measurements';
-import type { MeasureType, ProjectState } from './types';
+import type { MeasureType, ProjectState, Vec3 } from './types';
 
 /** Size and shape of the whole model, measured automatically when it is opened. */
 export interface AutoMeasurements {
@@ -29,6 +30,16 @@ export interface ManualMeasurementValue {
   type: MeasureType;
   value: number;
   unit: string;
+}
+
+/** What a flake's row of flakes.csv and its stored results hold. */
+export interface FlakeDerived {
+  /** The parameters they were measured with. */
+  parameters: typeof FLAKE_PARAMETERS;
+  /** Where the specimen frame came from (`technical_axis`, …), or `principal`. */
+  frameSource: string;
+  measures: FlakeMeasures;
+  geometry: FlakeGeometry;
 }
 
 /**
@@ -59,6 +70,8 @@ export interface DerivedResults {
   landmarks: LandmarkTable;
   /** Volumetric configuration of the core by the box or the bicone model (null without arrows, before the mesh is measured, or for the bicone without a split by a closed curve). */
   configuration: CoreConfiguration | null;
+  /** A flake's measurements (null for a core, or before they are computed). */
+  flake: FlakeDerived | null;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -71,7 +84,14 @@ export interface MeshResults {
   split?: VolumeSplit | null;
   /** The model's box along the specimen frame or the principal axes (volumetric configuration). */
   box?: ConfigBox | null;
+  /** A flake's measurements. */
+  flake?: FlakeResult | null;
+  /** Each region plane's fit to its regions, by plane id. */
+  regionFits?: ReadonlyMap<string, { centroid: Vec3; normal: Vec3; count: number }> | null;
 }
+
+/** Where the specimen frame came from, for flakes.csv. */
+export const frameSource = (state: Pick<ProjectState, 'specimen'>): string => state.specimen.frame?.source ?? 'principal';
 
 export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults | null = null): DerivedResults {
   const auto = mesh?.measurements ?? null;
@@ -85,13 +105,14 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
       value: measurementValue(m),
       unit: measurementUnit(m, state.specimen.unit),
     })),
-    planes: state.planes.map((p) => computePlane(p, state, mesh?.vertices ?? null)),
+    planes: state.planes.map((p) => computePlane(p, state, mesh?.vertices ?? null, mesh?.regionFits?.get(p.id) ?? null)),
     regions: mesh?.regions?.results ?? [],
     regionTotals: mesh?.regions?.totals ?? null,
     nodule: mesh?.nodule ?? null,
     split: mesh?.split ?? null,
     relations: relationResults(state),
     landmarks: landmarkTable(state),
-    configuration: coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null),
+    configuration: state.specimen.type === 'flake' ? null : coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null),
+    flake: state.specimen.type === 'flake' && mesh?.flake ? { parameters: FLAKE_PARAMETERS, frameSource: frameSource(state), measures: mesh.flake.measures, geometry: mesh.flake.geometry } : null,
   };
 }

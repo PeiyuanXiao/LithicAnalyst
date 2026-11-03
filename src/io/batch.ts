@@ -5,10 +5,11 @@ import { landmarkTable } from '../compute/landmarks';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
-import type { AutoMeasurements } from '../core/derived';
+import type { FlakeMeasures } from '../compute/flake';
+import type { AutoMeasurements, FlakeDerived } from '../core/derived';
 import { measurementValue } from '../core/measurements';
-import { hasVector, type ProjectState } from '../core/types';
-import { configurationCsv, csvCell, curveCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
+import { hasVector, type ProjectState, type Vec3 } from '../core/types';
+import { configurationCsv, csvCell, curveCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
 import { landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
@@ -26,6 +27,8 @@ export interface BatchSpecimen {
   regionTotals: RegionTotals | null;
   nodule: { radius: number; rms: number } | null;
   split: { upper: number; lower: number; ratio: number | null } | null;
+  /** A flake's measurements, from the project file's derived results (null for a core). */
+  flake: FlakeMeasures | null;
   /** Each observer's values (annotator → measure → value), from every project file of the model, for the ICC. */
   observers: Map<string, Record<string, number>>;
 }
@@ -61,6 +64,12 @@ function storedSplit(v: unknown): BatchSpecimen['split'] {
   return s && Number.isFinite(s.upper) && Number.isFinite(s.lower) ? { upper: s.upper, lower: s.lower, ratio: typeof s.ratio === 'number' ? s.ratio : null } : null;
 }
 
+/** A region plane's fit as stored with the results (it needs the mesh and the regions to compute again). */
+function storedRegionFit(planes: unknown, id: string): { centroid: Vec3; normal: Vec3; count: number } | null {
+  const p = Array.isArray(planes) ? (planes as PlaneResult[]).find((x) => x.id === id && x.method === 'region' && x.valid) : undefined;
+  return p?.center && p.normal ? { centroid: p.center, normal: p.normal, count: p.inputCount } : null;
+}
+
 /** The automatic measurements as stored in a project file, or null. */
 function storedAuto(v: unknown): AutoMeasurements | null {
   const m = v as AutoMeasurements | null | undefined;
@@ -79,7 +88,7 @@ export function savedResultsUsable(p: BatchProject, appVersion: string): boolean
     p.appVersion === appVersion &&
     !!storedAuto(p.derived.measurements) &&
     (!p.state.planes.length || !!storedAxes(p.derived.vertices)) &&
-    (!p.state.scars.some(hasVector) || p.state.configuration.model === 'bicone' || !!storedBox(p.derived.configuration))
+    (!p.state.scars.some(hasVector) || p.state.specimen.type === 'flake' || p.state.configuration.model === 'bicone' || !!storedBox(p.derived.configuration))
   );
 }
 
@@ -114,12 +123,13 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     file,
     state,
     auto: primary.measures.auto,
-    planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices)),
-    configuration: coreConfiguration(state, primary.measures.box, storedSplit(derived.split)),
+    planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices, storedRegionFit(derived.planes, p.id))),
+    configuration: state.specimen.type === 'flake' ? null : coreConfiguration(state, primary.measures.box, storedSplit(derived.split)),
     regions: (derived.regions as BatchSpecimen['regions']) ?? [],
     regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
     split: storedSplit(derived.split),
+    flake: state.specimen.type === 'flake' ? ((derived.flake as FlakeDerived | null | undefined)?.measures ?? null) : null,
     observers,
   };
 }
@@ -144,6 +154,8 @@ export interface Manifest {
   folder: string | null;
   kind: 'tables' | 'figures';
   options: Record<string, unknown>;
+  /** The named parameters of the angle and flake measurements. */
+  parameters?: Record<string, unknown>;
   specimens: Array<{ id: string; file: string; sha256: string | null; project: string | null; annotator: string }>;
   /** Models sharing a file name, whose IDs were made from their paths. */
   duplicateNames: Array<{ name: string; files: string[] }>;
@@ -201,6 +213,9 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
     const text = merged(make);
     if (hasRows(text)) out.push({ suffix, text });
   }
+  // flakes only here, and the volumetric configuration only of cores
+  const flakes = specimens.filter((s) => s.state.specimen.type === 'flake');
+  if (flakes.length) out.push({ suffix: 'flakes.csv', text: mergeCsv(flakes.map((s) => flakesCsv(s.state, s.flake, plain)), opts.excelBom) });
   // the volumetric configuration: specimens that have one (arrows on a measured model)
   const configured = specimens.filter((s) => s.configuration);
   if (configured.length) {

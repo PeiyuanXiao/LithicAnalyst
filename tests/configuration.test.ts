@@ -359,11 +359,11 @@ describe('configuration CSV', () => {
       'specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis\nC1,F1,front,top,false,3,wide,long\nC1,F2,back,bottom,false,1,wide,long\n',
     );
     const rows = scarVectorCsv(store.state, opts, r).trim().split('\n');
-    expect(rows[0].endsWith(',note,platform_face,flaking_surface,unit')).toBe(true);
-    expect(rows.slice(1).map((l) => l.split(',').slice(-3).join(','))).toEqual(['top,F1,mm', 'top,F1,mm', 'top,F1,mm', 'bottom,F2,mm']);
+    expect(rows[0].endsWith(',note,platform_face,flaking_surface,unit,tech_angle_deg')).toBe(true);
+    expect(rows.slice(1).map((l) => l.split(',').slice(-4, -1).join(','))).toEqual(['top,F1,mm', 'top,F1,mm', 'top,F1,mm', 'bottom,F2,mm']);
     // without a configuration (no mesh measured): the values are empty
     expect(configurationCsv(store.state, null, opts).split('\n')[1]).toBe('C1,box,,,,,');
-    expect(scarVectorCsv(store.state, opts).split('\n')[1].endsWith(',,,mm')).toBe(true);
+    expect(scarVectorCsv(store.state, opts).split('\n')[1].endsWith(',,,mm,')).toBe(true);
   });
 });
 

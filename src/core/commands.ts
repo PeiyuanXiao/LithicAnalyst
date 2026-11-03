@@ -1,4 +1,4 @@
-import type { ConfigCorrections, Curve, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
+import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo } from './types';
 import type { LandmarkData, ProjectStore } from './store';
 
 /**
@@ -515,6 +515,24 @@ export class SetNoduleCommand implements Command {
   revert(store: ProjectStore): void {
     store._setNodule(structuredClone(this.before));
     store.notify({ kind: 'nodule' });
+  }
+}
+
+/** Replace the flake's own data (the technical axis, the frame of the other type). */
+export class SetFlakeCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: FlakeData,
+    private readonly after: FlakeData,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setFlake(structuredClone(this.after));
+    store.notify({ kind: 'flake' });
+  }
+  revert(store: ProjectStore): void {
+    store._setFlake(structuredClone(this.before));
+    store.notify({ kind: 'flake' });
   }
 }
 

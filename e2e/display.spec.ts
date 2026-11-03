@@ -17,7 +17,7 @@ test('the display panel: rows of one rank with the panels among them; no sliders
   await expect(page.locator('#light-az')).toHaveCount(0);
   await expect(page.locator('#light-el')).toHaveCount(0);
   await expect(page.locator('#arrow-thickness')).toHaveCount(0);
-  await expect(page.locator('#display-body > .ctl > .ctl-label')).toHaveText(['Shading', 'Light', 'Arrow colour', 'Volumetric configuration', 'Harris matrix']);
+  await expect(page.locator('#display-body > .ctl:not([hidden]) > .ctl-label')).toHaveText(['Shading', 'Light', 'Arrow colour', 'Volumetric configuration', 'Harris matrix']);
   await expect(page.locator('#display-body .check-row .ctl-check')).toHaveCount(3);
 
   // the Harris matrix is switched here, with or without relations

@@ -9,6 +9,10 @@ import type { AttributeValue, LocalizedText } from './types';
  * once data exist. Labels can change freely.
  */
 
+/** What a specimen is. Written to project files; keep the codes. */
+export const SPECIMEN_TYPES = ['core', 'flake'] as const;
+export type SpecimenType = (typeof SPECIMEN_TYPES)[number];
+
 export interface FieldOption {
   value: string;
   label: LocalizedText;
@@ -16,6 +20,10 @@ export interface FieldOption {
   short?: LocalizedText;
   /** Read from older files and shown with its label, but no longer offered. */
   legacy?: boolean;
+  /** Offered only for these types of specimen (shown, not offered, for the others). */
+  types?: readonly SpecimenType[];
+  /** Comes after the "custom" entry (its number key too). */
+  afterCustom?: boolean;
 }
 
 export interface FieldDef {
@@ -123,11 +131,12 @@ export const CURVE_FIELDS: FieldDef[] = [
     allowCustom: true,
     options: [
       { value: 'scar_boundary', label: { zh: '片疤轮廓', en: 'Scar outline' } },
-      { value: 'core_edge', label: { zh: '石核边缘', en: 'Core edge' } },
+      { value: 'core_edge', label: { zh: '石核边缘', en: 'Core edge' }, types: ['core'] },
+      { value: 'edge', label: { zh: '边缘', en: 'Edge' }, types: ['flake'] },
       { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
       { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
-      // older codes: read and written as they are (edge is kept for flakes, later)
-      { value: 'edge', label: { zh: '刃缘', en: 'Edge' }, legacy: true },
+      { value: 'platform_outline', label: { zh: '台面轮廓', en: 'Platform outline' }, types: ['flake'], afterCustom: true },
+      // older codes: read and written as they are
       { value: 'ridge', label: { zh: '棱脊', en: 'Ridge' }, legacy: true },
       { value: 'other', label: { zh: '其他', en: 'Other' }, legacy: true },
     ],
@@ -140,7 +149,10 @@ export const CURVE_FIELDS: FieldDef[] = [
   },
 ];
 
-/** Surface region types: scar (worked), cortex and joint surfaces (unworked), damage. Keys 1–4. */
+/** The curve that outlines a flake's platform (one per flake, closed). */
+export const PLATFORM_OUTLINE = 'platform_outline';
+
+/** Surface region types: scar (worked), cortex and joint surfaces (unworked), damage; a flake's platform. Keys 1–5. */
 export const REGION_FIELDS: FieldDef[] = [
   {
     key: 'type',
@@ -154,11 +166,12 @@ export const REGION_FIELDS: FieldDef[] = [
       { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
       { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
       { value: 'damage', label: { zh: '破损', en: 'Damage' } },
+      { value: 'platform', label: { zh: '台面', en: 'Platform' }, types: ['flake'] },
     ],
   },
 ];
 
-export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage'] as const;
+export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage', 'platform'] as const;
 
 /**
  * Volumetric configuration of a core (after the Logical Analytical System): the
@@ -211,18 +224,25 @@ export const fieldByKey = (key: string): FieldDef | undefined => SCAR_FIELDS.fin
 
 export const curveFieldByKey = (key: string): FieldDef | undefined => CURVE_FIELDS.find((f) => f.key === key);
 
-/** The options offered for picking (not those kept only for older files). */
-export const offeredOptions = (f: FieldDef): FieldOption[] => (f.options ?? []).filter((o) => !o.legacy);
+/** The options offered for picking on this type of specimen (not those kept only for older files or for the other type). */
+export const offeredOptions = (f: FieldDef, type: SpecimenType = 'core'): FieldOption[] => (f.options ?? []).filter((o) => !o.legacy && (!o.types || o.types.includes(type)));
+
+/** What the number keys 1, 2, … pick on this type of specimen: its options, with "custom" (a field that takes the user's own text) in its place. */
+export function keyedOptions(f: FieldDef, type: SpecimenType = 'core'): Array<FieldOption | 'custom'> {
+  const offered = offeredOptions(f, type);
+  if (!f.allowCustom) return offered;
+  return [...offered.filter((o) => !o.afterCustom), 'custom', ...offered.filter((o) => o.afterCustom)];
+}
 
 /** A value of a field that takes the user's own text, as that text: not empty and none of its codes. */
 export const isCustomValue = (f: FieldDef, v: AttributeValue | undefined): v is string =>
   !!f.allowCustom && typeof v === 'string' && v !== '' && !(f.options ?? []).some((o) => o.value === v);
 
 /** What to store for the user's own text: trimmed; an offered option's code when it is that code or one of its labels (any case). */
-export function customValue(f: FieldDef, text: string): string {
+export function customValue(f: FieldDef, text: string, type: SpecimenType = 'core'): string {
   const s = text.trim();
   const low = s.toLowerCase();
-  const preset = offeredOptions(f).find((o) => [o.value, ...Object.values(o.label)].some((x) => x.toLowerCase() === low));
+  const preset = offeredOptions(f, type).find((o) => [o.value, ...Object.values(o.label)].some((x) => x.toLowerCase() === low));
   return preset ? preset.value : s;
 }
 

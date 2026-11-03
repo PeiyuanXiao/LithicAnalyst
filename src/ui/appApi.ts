@@ -33,10 +33,12 @@ export interface DisplaySettings {
   harris: boolean;
   /** Show the volumetric configuration panel and the view cube (annotate mode). */
   configuration: boolean;
+  /** Show a flake's profile panel. */
+  profile: boolean;
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'other';
+export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
 
 /** What can be picked in the configuration: a face of the box or a cone of the bicone. */
 export type ConfigPick = import('../core/fields').ConfigFace | import('../core/fields').BiconeCone;
@@ -121,9 +123,9 @@ export interface AppApi {
   agreementFocus(): string | null;
   /**
    * The open folder: its models (paths), which one is open (−1: none of them), which have a
-   * project, and (read-only folder) how many edited models were not downloaded.
+   * project and of which type (null: no project, or not read yet), and (read-only folder) how many edited models were not downloaded.
    */
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; undownloaded: number } | null;
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<import('../core/fields').SpecimenType | null>; undownloaded: number } | null;
   openWorkspaceMesh(i: number): Promise<void>;
   stepWorkspace(step: number): void;
   /** Open the next model without a project. */
@@ -170,6 +172,8 @@ export interface AppApi {
   completingLoop(): boolean;
   /** The sketch of the configuration (its canvas goes into the panel). */
   configSketch(): import('../render/configSketch').ConfigSketch;
+  /** A flake's measurements (null for a core, or before they are computed). */
+  flakeMeasures(): import('../compute/flake').FlakeMeasures | null;
   /** The user's own values of a curve field used so far: in this specimen and in the folder's project files already read. */
   customValues(key: string): string[];
 }

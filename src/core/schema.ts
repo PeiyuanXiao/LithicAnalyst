@@ -1,10 +1,10 @@
 import { joinKey, sameAxis } from '../compute/configuration';
 import { isValidShape } from './curveGeometry';
 import { computeDerived, type DerivedResults, type MeshResults } from './derived';
-import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, type BiconeRole, type BiconeSide, type ConfigFace } from './fields';
+import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, SPECIMEN_TYPES, type BiconeRole, type BiconeSide, type ConfigFace } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, FlakeData, Landmark, Measurement, MeasureType, MeshInfo, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, Vec3 } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -27,6 +27,7 @@ export interface ProjectFile {
   nodule: ProjectState['nodule'];
   split: ProjectState['split'];
   configuration: ConfigCorrections;
+  flake: FlakeData;
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
@@ -55,6 +56,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     nodule: structuredClone(state.nodule),
     split: structuredClone(state.split),
     configuration: structuredClone(state.configuration),
+    flake: structuredClone(state.flake),
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
@@ -213,7 +215,7 @@ function parseMeasurement(raw: unknown, i: number): Measurement {
   };
 }
 
-const PLANE_METHODS: PlaneMethod[] = ['all_vertices', 'scar_directions', 'scar_starts', 'curves'];
+const PLANE_METHODS: PlaneMethod[] = ['all_vertices', 'scar_directions', 'scar_starts', 'curves', 'region'];
 
 function parsePlane(raw: unknown, i: number): Plane {
   if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Plane ${i + 1} is not an object.`);
@@ -228,6 +230,7 @@ function parsePlane(raw: unknown, i: number): Plane {
     method,
     excludeCompleteness: strings(r.excludeCompleteness),
     curveIds: strings(r.curveIds),
+    regionIds: strings(r.regionIds),
     upHint: isFiniteVec(r.upHint) ? [r.upHint[0], r.upHint[1], r.upHint[2]] : [0, 0, 1],
     visible: r.visible !== false,
     createdAt: str(r.createdAt, t),
@@ -255,7 +258,7 @@ function parseSection(raw: unknown, i: number): Section {
   };
 }
 
-const REGION_TYPE_CODES: RegionType[] = ['scar', 'cortex', 'joint', 'damage'];
+const REGION_TYPE_CODES: RegionType[] = ['scar', 'cortex', 'joint', 'damage', 'platform'];
 
 function parseRegion(raw: unknown, i: number): Region {
   if (!raw || typeof raw !== 'object') throw new ProjectFileError(`Region ${i + 1} is not an object.`);
@@ -270,6 +273,7 @@ function parseRegion(raw: unknown, i: number): Region {
     seed: [r.seed[0], r.seed[1], r.seed[2]],
     type,
     scarId: typeof r.scarId === 'string' ? r.scarId : null,
+    ...(r.auto === true ? { auto: true } : {}),
     createdAt: str(r.createdAt, t),
     modifiedAt: str(r.modifiedAt, t),
   };
@@ -312,7 +316,8 @@ function parseLandmark(raw: unknown, i: number): Landmark {
   const r = raw as Record<string, unknown>;
   if (!isFiniteVec(r.point)) throw new ProjectFileError(`Landmark ${i + 1} needs a numeric "point" [x, y, z].`);
   const t = nowIso();
-  return { id: str(r.id) || uuid(), name: str(r.name, `LM${i + 1}`), point: [r.point[0], r.point[1], r.point[2]], createdAt: str(r.createdAt, t), modifiedAt: str(r.modifiedAt, t) };
+  const code: Pick<Landmark, 'code'> = r.code === 'pop' || r.code === 'platform_end' ? { code: r.code } : {};
+  return { id: str(r.id) || uuid(), name: str(r.name, `LM${i + 1}`), point: [r.point[0], r.point[1], r.point[2]], ...code, createdAt: str(r.createdAt, t), modifiedAt: str(r.modifiedAt, t) };
 }
 
 /** A set whose curve is missing stays (it has no points); references to unknown landmarks are dropped. */
@@ -367,6 +372,31 @@ function parseConfiguration(raw: unknown): ConfigCorrections {
   };
 }
 
+/** A flake's own data (files without it: none). An axis without numeric ends is dropped. */
+function parseFlake(raw: unknown): FlakeData {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const a = (r.axis && typeof r.axis === 'object' ? r.axis : null) as Record<string, unknown> | null;
+  const t = nowIso();
+  const normal = (v: unknown): Vec3 => (isFiniteVec(v) ? normalize(v) : [0, 0, 1]);
+  const m = a?.matrix;
+  return {
+    axis: a && isFiniteVec(a.start) && isFiniteVec(a.end)
+      ? {
+          id: str(a.id) || uuid(),
+          start: [a.start[0], a.start[1], a.start[2]],
+          end: [a.end[0], a.end[1], a.end[2]],
+          startNormal: normal(a.startNormal),
+          endNormal: normal(a.endNormal),
+          matrix: Array.isArray(m) && m.length === 16 && m.every((x) => typeof x === 'number' && Number.isFinite(x)) ? [...(m as number[])] : null,
+          failure: a.failure === 'short' || a.failure === 'few' ? a.failure : null,
+          createdAt: str(a.createdAt, t),
+          modifiedAt: str(a.modifiedAt, t),
+        }
+      : null,
+    otherFrame: parseFrame(r.otherFrame),
+  };
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -407,6 +437,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     unit: str(sp.unit, 'mm'),
     notes: str(sp.notes),
     frame: parseFrame(sp.frame),
+    type: SPECIMEN_TYPES.find((x) => x === sp.type) ?? 'core',
   };
   return {
     specimen,
@@ -431,6 +462,7 @@ export function parseProjectFile(input: unknown): ProjectState {
       return { source: sp.source, id: sp.id, upHint: isFiniteVec(sp.upHint) ? [sp.upHint[0], sp.upHint[1], sp.upHint[2]] : [0, 0, 1], swap: sp.swap === true };
     })(),
     configuration: parseConfiguration(raw.configuration),
+    flake: parseFlake(raw.flake),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
     nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),

@@ -3004,3 +3004,142 @@ input[type="checkbox"]:disabled {
   color: var(--ink-2);
   font-size: var(--step--1);
 }
+
+/* ------------------------------------------------------------ flakes */
+
+.pill-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.spec-bar .spec-frame {
+  margin-left: 6px;
+  flex: none;
+}
+
+.workspace-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.workspace-filters .ctl-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-filters .ctl-select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.ws-type {
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.landmark-lock {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--ink-2);
+}
+
+.landmark-lock svg {
+  width: 13px;
+  height: 13px;
+}
+
+.axis-row {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-panel {
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: 44px;
+  max-width: calc(100% - 24px);
+}
+
+.profile-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+}
+
+.profile-drawings {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.profile-svg {
+  display: block;
+  flex: none;
+}
+
+.profile-long {
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.profile-line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.profile-fill {
+  fill: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.profile-marker {
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.profile-point {
+  fill: #1f9e89;
+}
+
+.profile-epa {
+  fill: #7b5cd6;
+}
+
+.profile-fit {
+  stroke: #3a7fd5;
+  stroke-width: 1.4;
+}
+
+.profile-ventral {
+  stroke: #c8611f;
+  stroke-width: 3;
+  stroke-opacity: 0.45;
+}
+
+.profile-scale {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.profile-label {
+  font-size: 11px;
+  fill: var(--ink-2);
+}
+
+.profile-slider {
+  width: 100%;
+}
+
+.profile-readings {
+  margin: 0;
+}

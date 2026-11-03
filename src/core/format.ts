@@ -48,6 +48,11 @@ export function quantityUnit(kind: Quantity, unit: string): string {
   return unit;
 }
 
+/** Millimetres per unit; null when the unit is not stated. */
+export function mmPerUnit(unit: string): number | null {
+  return ({ mm: 1, cm: 10, m: 1000, in: 25.4 } as Record<string, number>)[unit] ?? null;
+}
+
 /** A time left, rounded to what is worth saying: "45 s", "3 min", "1 h 05 min" (under 10 s: "< 10 s"). */
 export function fmtDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return MISSING;

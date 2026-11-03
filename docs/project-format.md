@@ -25,7 +25,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `formatVersion` | `2` | required |
 | `app` | `{ name, version }` | software that wrote the file |
 | `savedAt`, `createdAt`, `modifiedAt` | ISO 8601 strings | |
-| `specimen` | `{ id, annotator, unit, notes, frame }` | see below |
+| `specimen` | `{ id, annotator, unit, notes, frame, type }` | see below |
 | `mesh` | object or `null` | `fileName`, `format`, `fileSize`, `sha256`, `vertexCount`, `triangleCount`, `bboxMin`, `bboxMax` |
 | `annotations.scars` | array | in creation order |
 | `annotations.curves` | array | in creation order |
@@ -34,12 +34,13 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.regions` | array | surface regions as seeds (`{ id, label, seed, type, scarId }`) |
 | `annotations.relations` | array | stratigraphic relations between scars (`{ id, a, b, kind }`), see below |
 | `annotations.sequences` | array | removal sequences, earliest first (`{ id, label, scarIds, ordered }`), see below |
-| `annotations.landmarks` | array | fixed landmarks in export order (`{ id, name, point }`) |
+| `annotations.landmarks` | array | fixed landmarks in export order (`{ id, name, point, code? }`) |
 | `annotations.semilandmarks` | array | curve semilandmark sets (`{ id, label, curveId, count, startLandmarkId, endLandmarkId }`), see below |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
 | `split` | `{ source, id, upHint, swap }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal (set when the split is chosen: toward the side of the curve's plane with more scars by their ends, when even toward the viewer); `swap: true` exchanges upper and lower (files without it: `false`) |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
+| `flake` | `{ axis, otherFrame }` | a flake's own data, see "Flakes"; files without it: none |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
@@ -66,7 +67,8 @@ faces each have vertices of their own) and degenerate triangles left out.
   "annotator": "PX",
   "unit": "mm",
   "notes": "",
-  "frame": { "matrix": [1, 0, 0, -12.5, 0, 1, 0, 3.2, 0, 0, 1, -8.1, 0, 0, 0, 1], "source": "view" }
+  "frame": { "matrix": [1, 0, 0, -12.5, 0, 1, 0, 3.2, 0, 0, 1, -8.1, 0, 0, 0, 1], "source": "view" },
+  "type": "core"
 }
 ```
 
@@ -77,8 +79,11 @@ faces each have vertices of their own) and degenerate triangles left out.
   thickness, or `null` when none is set. `matrix` is a row-major 4×4 matrix (16 numbers) that
   maps original coordinates to specimen coordinates: +Z points toward the viewer of the main
   face, +Y is up on the page, +X is to the right; the origin is the centre of the mesh's
-  bounding box. `source` records how it was set: `view`, or `plane:P1`, followed by
-  `; vertical:S3` when an arrow set the vertical (pointing up, origin at the bottom).
+  bounding box. `source` records how it was set: `view`, or `plane:P1`, or `technical_axis` (a
+  flake's technical frame, see "Flakes"), followed by `; vertical:S3` when an arrow set the
+  vertical (pointing up, origin at the bottom) or `; turned` when a technical frame was turned on the page.
+* `type`: `core` or `flake`; files without it are read as `core`. It decides which tools, panels
+  and exports the specimen has, nothing else: the other type's data stay in the file.
 
 ## Derived results
 
@@ -148,9 +153,10 @@ fitted planes, fitted spheres, volumes ….
   vertices projected onto the plane, or the second when the first is almost along the normal,
   with its largest component positive; +Y = Z × X).
 
-* `configuration`: the volumetric configuration of the core by the box or the bicone (null without
-  scars with an arrow, before the mesh is measured, or for the bicone without a split by a closed
-  curve on a closed mesh), see the next section.
+* `configuration`: the volumetric configuration of the core by the box or the bicone (null for a flake,
+  without scars with an arrow, before the mesh is measured, or for the bicone without a split by a
+  closed curve on a closed mesh), see the next section.
+* `flake`: a flake's measurements, see "Flakes" (null for a core, or before they are computed).
 
 ## Volumetric configuration
 
@@ -268,6 +274,77 @@ upper cone); `centre` (O); `area`; `radius`; `upperHeight`, `lowerHeight` (true 
 is not flaking); `cones` (`{ cone, side, autoRole, role, scars }`, upper then lower); `surfaces`
 (`{ id, cone, scarIds }`); `facialCharacter`.
 
+## Flakes
+
+A specimen of type `flake` has a technical axis, a platform and the measurements below. Switching
+the type deletes nothing: the other type's data stay in the file and come back with it.
+
+```json
+"flake": {
+  "axis": { "id": "…", "start": [0, 0, 0], "end": [0, 40, 0], "startNormal": [0, 0, -1], "endNormal": [0, 0, -1],
+            "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], "failure": null, "createdAt": "…", "modifiedAt": "…" },
+  "otherFrame": null
+}
+```
+
+* `axis` (null without one; one per flake): the arrow on the ventral face from the point of percussion
+  P (`start`) toward the distal end A (`end`).
+* `matrix`: the **technical frame**, row-major, from original to technical coordinates (null when none
+  could be made; then `failure`: `short` — |PA| under 5 mean edge lengths of the mesh —, or `few` —
+  fewer than 10 triangles left below). Origin P. n = the mean outward normal of the ventral strip:
+  the triangles whose centroid is within `STRIP_HALF_WIDTH_RATIO` × |PA| of the segment PA, weighted by
+  area; again without those at `STRIP_NORMAL_OUTLIER_DEG` or more from that mean. **Z** = −n (toward the
+  dorsal face), **Y** = A − P without its Z component (distal), **X** = Y × Z (to the right when the dorsal face
+  is toward the viewer and the platform down). It is stored because it needs the mesh; the mesh does not change.
+* `specimen.frame` is set to it (`source: "technical_axis"`) when the axis is drawn or moved, and back
+  to null when the axis is deleted or gives no frame. The standard views then show the dorsal face in
+  front, the ventral at the back and the platform from below. `otherFrame`: the frame of the type not in use.
+* The landmark `pop` (`code: "pop"`, named `pop`) is the arrow's start: it moves and goes with the axis
+  and cannot be moved or deleted by itself.
+* Platform ends: landmarks with `code: "platform_end"`, at most two, on the platform outline. In the landmark
+  exports they are named `platform_left` (−X) and `platform_right` (+X) of the technical frame (with both on one
+  side, by X), without an axis `platform_end`. Landmarks with a `code` are shown and exported only for flakes.
+* The platform: the curve of type `platform_outline` (one per flake; a new one takes the place of the old in
+  one step; closed) parts the surface in two. The region with `auto: true` is the smaller of the two; its `seed`
+  says nothing, it follows the outline. Given another type by hand it becomes an ordinary region at that place; a
+  region the user has typed in that piece stands instead. All regions of type `platform` make the platform region.
+
+**Derived** (`derived.flake`): `parameters`, `frameSource`, `measures` and `geometry` (points of the measures, for the
+profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ventral`, `ventralLine`).
+
+Lengths are in the coordinate unit. Millimetre parameters are converted by `specimen.unit`; without a stated unit
+what needs them is not measured.
+
+| `measures` | definition |
+|---|---|
+| `tech_length` | the vertices' largest Y (P is at 0) |
+| `tech_width`, `tech_thickness` | the range of the vertices' X, Z |
+| `morph_length` | the largest distance between two vertices (found on the convex hull's vertices) |
+| `morph_width` | every vertex projected onto the plane perpendicular to `morph_length`: the largest distance in it |
+| `morph_thickness` | the range perpendicular to both |
+| `morph_tech_angle_deg` | the `morph_length` direction projected onto the technical XY plane: its angle with the Y axis, 0–90° |
+| `platform_width_chord`, `platform_width_path` | between the two ends: the straight distance; the shortest path along the surface within the platform region |
+| `platform_depth_chord`, `platform_depth_path` | between P and E: the same |
+| `platform_area` | the area of the platform region's triangles |
+| `epa_3pt_1mm`, `_2mm`, `_3mm` | EPA, three points: between E→P along the platform line and E→Q_d |
+| `epa_2ln_1mm`, `_2mm`, `_3mm` | EPA, two lines: between E→P along the platform line and the tangent at Q_d, away from E |
+| `ipa` | between the platform line (P→E) and the line fitted to the ventral profile |
+
+* **S**, the longitudinal section: where the plane X = 0 cuts the mesh, the line nearest P.
+* **The platform stretch**: the part of S on the platform region nearest P; its end nearer P must be within
+  `PLATFORM_START_EDGES` (3) mean edge lengths of P, else there is none and no platform measure at all (nor
+  without a platform region or an axis). **E**: its far end. **The platform line**: the stretch resampled
+  to `FIT_RESAMPLE_COUNT` equally spaced points, total least squares, directed P→E.
+* **Q_d**: from E along S away from the stretch (the dorsal side), arc length d in `EPA_DISTANCES_MM`. **The tangent** at Q_d:
+  the chord between the points `TWO_LINES_LENGTH_MM` / 2 before and after it along S. Empty when S ends first.
+* **IPA's line**: from the stretch's near end along S away from it (the ventral side), up to S's largest Y, the part with
+  Y in `IPA_BAND` × `tech_length`, resampled and fitted the same way, directed +Y. It keeps off the bulb and the distal curve.
+* A fit with fewer than 5 points before resampling gives no line, and the angles that need it are empty. Fewer than two ends: the two widths are empty.
+* **Paths** run on the region's triangles only: the shortest way over its mesh edges; then, on the triangles that way passes
+  through, over 3 points on each side, those crossings pulled taut.
+* `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `FIT_RESAMPLE_COUNT` 200,
+  `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND` [0.25, 0.75].
+
 ## Surface region
 
 ```json
@@ -277,7 +354,7 @@ is not flaking); `cones` (`{ cone, side, autoRole, role, scars }`, upper then lo
 * The curves split the surface into pieces: each curve is turned into mesh edges (each point to
   its nearest vertex, gaps joined by shortest paths over mesh edges), and triangles are grouped
   across all other edges. A region is the piece that holds its `seed` (the clicked surface point).
-* `type`: `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`. A scar region links
+* `type`: `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`, `platform` (a flake's, see "Flakes"). A scar region links
   to a scar (`scarId`): the one whose arrow starts in it, or a scar without a direction created
   with the region.
 
@@ -349,6 +426,9 @@ Only the inputs are stored; the plane is recomputed whenever they change.
 | `scar_directions` (Xiao et al. 2026) | normal = eigenvector of the smallest eigenvalue of T = Σ u uᵀ over the unit directions u of all scars with an arrow | mean of the arrows' midpoints |
 | `scar_starts` | least-squares plane of the arrow origins, leaving out the completeness codes in `excludeCompleteness` | mean of the origins used |
 | `curves` | least-squares plane of the curves in `curveIds`, resampled at equal arc length (256 points over all of them) | mean of the resampled points |
+| `region` | least-squares plane of the vertices of the surface regions in `regionIds`, each weighted by a third of the area of its triangles there | the weighted mean |
+
+A flake offers `curves` and `region`, a core the first four (a plane made on the other type keeps its method).
 
 * A plane is invalid with fewer than 3 points, or (`scar_directions`) fewer than 2 non-parallel
   directions.
@@ -475,7 +555,7 @@ Defined in `src/core/fields.ts`.
 
 | key | values |
 |---|---|
-| `type` | `scar_boundary` 片疤轮廓 / Scar outline · `core_edge` 石核边缘 / Core edge · `cortex` 石皮 / Cortex · `joint` 节理面 / Joint surface; empty: not filled in (new curves). Older codes `edge` 刃缘, `ridge` 棱脊 and `other` 其他 are read and written as they are but no longer offered (`edge` is kept for flakes, later). **A value that is none of these codes is the annotator's own text** (a custom type) |
+| `type` | `scar_boundary` 片疤轮廓 / Scar outline · `core_edge` 石核边缘 / Core edge (offered for cores) · `edge` 边缘 / Edge (flakes) · `cortex` 石皮 / Cortex · `joint` 节理面 / Joint surface · `platform_outline` 台面轮廓 / Platform outline (flakes; closed, one per flake); empty: not filled in (new curves). Older codes `ridge` 棱脊 and `other` 其他 are read and written as they are but no longer offered; a code of the other type of specimen is shown but not offered. **A value that is none of these codes is the annotator's own text** (a custom type) |
 | `note` | free text |
 
 A custom type is stored trimmed; text that is a code or a name (Chinese or English, any case) of one
@@ -487,10 +567,19 @@ within one type, a custom text being a type of its own.
 One row per scar that has a direction arrow (scars with `"vector": null` are left out;
 `termination` is empty when not judged yet; `platform_face` is the scar's platform in the volumetric
 configuration, a face code, and `flaking_surface` its flaking surface, e.g. `F1` — empty when the
-scar's face is no flaking surface, and both empty before the mesh is measured):
+scar's face is no flaking surface, and both empty before the mesh is measured or for a flake;
+`tech_angle_deg`, for a flake with a technical frame: the arrow projected onto the frame's XY plane, +Y
+being 0° and counter-clockwise as seen from the dorsal side positive, in (−180°, 180°]; else empty):
 
 ```
-specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit
+specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg
+```
+
+Flakes (`<specimen>_flakes.csv`, one row per flake, empty where there is no value; see "Flakes"; `frame_source` is
+`specimen.frame.source`, or `principal` without a frame):
+
+```
+specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa
 ```
 
 Volumetric configuration (`<specimen>_configuration.csv`, one row; codes as in the project file,
@@ -626,7 +715,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
 * A read-only folder (a directory upload) gets the same layout in one ZIP to unpack into it: the
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app`, `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options`, `specimens` (`id`, `file` = model path, `sha256`, `project`
+  (`tables` or `figures`), `options`, `parameters` (`flake`: the named parameters of the flake measurements), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 
@@ -645,7 +734,8 @@ either way.
 
 The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio,file` (`file`: the model, its path in a folder).
 
-In the summary export, `configuration.csv` and `flaking_surfaces.csv` hold the models that have a
+In the summary export, `flakes.csv` holds the flakes, from the `derived.flake` their project files stored
+(the open model: as measured now). `configuration.csv` and `flaking_surfaces.csv` hold the cores that have a
 configuration (arrows on a measured model) and end with a `file` column as well. A project's stored
 box (`derived.configuration`) stands for its model like the other stored results; the bicone needs
 no box and uses the project's stored split (`derived.split`).
@@ -664,7 +754,7 @@ when reading, and saving writes format 2.
 | `annotations.scarVectors[]` with `start`, `end`, `startNormal`, `endNormal` at the top level of each item | `annotations.scars[]`; the four keys move into `vector`, which may be `null` |
 | `specimen` without `frame` | `specimen.frame` (matrix or `null`) |
 | no `derived` | `derived` (computed results) |
-| — | `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber`, `annotations.relations`, `annotations.sequences`, `nextSequenceNumber`, `annotations.landmarks`, `annotations.semilandmarks`, `nextLandmarkNumber`, `nextSemilandmarkNumber`, `configuration` |
+| — | `specimen.type`, `flake`, `annotations.measurements`, `nextMeasureNumber`, `annotations.planes`, `nextPlaneNumber`, `annotations.sections`, `nextSectionNumber`, `annotations.regions`, `nextRegionNumber`, `annotations.relations`, `annotations.sequences`, `nextSequenceNumber`, `annotations.landmarks`, `annotations.semilandmarks`, `nextLandmarkNumber`, `nextSemilandmarkNumber`, `configuration` |
 | `annotations.curves`, `nextCurveNumber` optional | always written |
 
 The arrow CSV is unchanged.

@@ -12,6 +12,13 @@ import type { CurvatureService } from '../src/compute/curvatureService';
 import { buildAdjacency, meanCurvature, robustAbsRange, smoothField } from '../src/compute/curvature';
 import { frameMeasures, surfaceMeasuresSteps } from '../src/compute/measure';
 import { fitPlane } from '../src/compute/meshGeometry';
+import { flakeMeasuresSteps, morphDimensionsSteps, techDimensionsSteps } from '../src/compute/flake';
+import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
+import { regionPlaneSteps } from '../src/compute/planes';
+import { regionPathSteps } from '../src/compute/regionPath';
+import { technicalFrameSteps } from '../src/compute/technicalFrame';
+import { frameAxes } from '../src/core/frame';
+import { bvhPlaneCandidates } from '../src/render/bvhPlane';
 import { polylineEdgesSteps } from '../src/compute/regions';
 import { splitByLoopSteps } from '../src/compute/split';
 import type { Steps } from '../src/compute/steps';
@@ -209,6 +216,33 @@ async function benchGenerated(triangles: number): Promise<void> {
       }
     })(),
   );
+
+  // ⑥ a flake: the frame, the dimensions, the sections and the paths on a piece of the surface
+  const P = snap.point(mesh.vertex(Math.floor(mesh.lat * 0.6), 0));
+  const A = snap.point(mesh.vertex(Math.floor(mesh.lat * 0.9), 0));
+  const frameResult = steps('6a technical frame (strip along the axis)', technicalFrameSteps({ positions: pos, index: idx, offset: o, orientationSign: loaded.orientationSign, meanEdge: base.meanEdge }, P, A));
+  if (!frameResult.ok) throw new Error(`no frame: ${frameResult.reason}`);
+  const axes = frameAxes(frameResult.matrix);
+  const frame = { ...axes, origin: [axes.origin[0] - o[0], axes.origin[1] - o[1], axes.origin[2] - o[2]] as Vec3 };
+  const morph = steps('6b morphological dimensions (convex hull)', morphDimensionsSteps(pos));
+  const tech = steps('6c technical dimensions', techDimensionsSteps(pos, frame));
+  const candidates = bvhPlaneCandidates(loaded.geometry);
+  const section = once('6d longitudinal section (BVH)', () => lineNear(sectionByPlane(pos, idx, frame.origin, frame.x, candidates), [P[0] - o[0], P[1] - o[1], P[2] - o[2]]));
+  once('6e one cross-section (BVH): at most once a frame', () => crossSectionAt(pos, idx, frame, tech.tech_length * 0.5, candidates));
+  once('6f the same over all the triangles', () => crossSectionAt(pos, idx, frame, tech.tech_length * 0.5, null));
+  // a platform: the triangles of about 2 % of the surface around P
+  const faces: number[] = [];
+  const r2 = (0.1 * loaded.diagonal) ** 2;
+  for (let t = 0; t < idx.length / 3; t++) {
+    const v = 3 * idx[3 * t];
+    if ((pos[v] - frame.origin[0]) ** 2 + (pos[v + 1] - frame.origin[1]) ** 2 + (pos[v + 2] - frame.origin[2]) ** 2 < r2) faces.push(t);
+  }
+  const platformFaces = Uint32Array.from(faces);
+  const s0 = snap.point(idx[3 * faces[0]]), s1 = snap.point(idx[3 * faces[faces.length - 1]]);
+  console.log(`platform stand-in: ${faces.length} triangles, section ${section?.points.length ?? 0} points, hull length ${morph?.length.toFixed(1)}`);
+  steps('6g shortest path within the region', regionPathSteps(pos, idx, platformFaces, [s0[0] - o[0], s0[1] - o[1], s0[2] - o[2]], [s1[0] - o[0], s1[1] - o[1], s1[2] - o[2]]));
+  steps('6h plane of a region', regionPlaneSteps(pos, idx, platformFaces, o));
+  steps('6i all the flake measures', flakeMeasuresSteps({ positions: pos, index: idx, offset: o, matrix: frameResult.matrix, P, ends: [], platformFaces, platformArea: 1, unit: 'mm', meanEdge: base.meanEdge, morph, candidates }));
   console.log('');
   report();
 }

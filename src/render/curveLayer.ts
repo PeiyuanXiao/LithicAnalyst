@@ -19,6 +19,7 @@ export const CURVE_COLORS = {
     cortex: '#d0884f',
     joint: '#5fb0ea',
     edge: '#ff5b4f',
+    platform_outline: '#2fb5a8',
     ridge: '#36c26a',
     other: '#f2f5f3',
   } as Record<string, string>,

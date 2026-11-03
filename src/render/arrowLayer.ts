@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { fieldByKey } from '../core/fields';
-import { hasVector, type ProjectState, type Scar, type Vec3 } from '../core/types';
+import { hasVector, type ProjectState, type Scar, type ScarVector, type Vec3 } from '../core/types';
 import { sequenceColors, UNASSIGNED_COLOR } from './sequenceColor';
 import type { Viewer } from './viewer';
 
@@ -31,6 +31,8 @@ export const ARROW_COLORS = {
   uniform: UNIFORM,
   selected: '#ffc61a',
   draft: UNIFORM,
+  /** The flake's technical axis. */
+  axis: '#2563c9',
   palette: ['#1f9e89', '#3a7fd5', '#7b5cd6', '#c8611f', '#d6336c', '#8a8f98'],
 };
 
@@ -236,6 +238,8 @@ export class ArrowLayer {
   dimmed = false;
   /** Draw these scars' arrows faded (e.g. scars in no sequence while sequences are being made), from the next sync. */
   faded: ReadonlySet<string> | null = null;
+  /** The flake's technical axis, drawn and handled as an arrow of its own colour, from the next sync. */
+  axis: { id: string; label: string; vector: ScarVector } | null = null;
   onLabelClick: (id: string) => void = () => {};
 
   constructor(private readonly viewer: Viewer) {
@@ -277,8 +281,9 @@ export class ArrowLayer {
     const lift = this.liftDistance(display);
     const seq = display.colorMode === 'sequence' ? sequenceColors(state.sequences) : null;
     const hl = this.highlight;
-    for (const a of state.scars) {
-      if (!hasVector(a)) continue;
+    const items: Array<{ id: string; label: string; vector: ScarVector; scar: Scar | null }> = state.scars.filter(hasVector).map((s) => ({ id: s.id, label: s.label, vector: s.vector, scar: s }));
+    if (this.axis) items.push({ ...this.axis, scar: null });
+    for (const a of items) {
       seen.add(a.id);
       let v = this.visuals.get(a.id);
       if (!v) {
@@ -304,7 +309,7 @@ export class ArrowLayer {
       const isHl = !isSel && !!hl?.ids.has(a.id);
       // hovered: between the normal and the selected thickness
       const isHov = !isSel && !isHl && a.id === this.hovered;
-      const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : this.fixedColor ?? arrowColor(a, display.colorMode, seq);
+      const color = isSel ? ARROW_COLORS.selected : isHl ? hl!.color : this.fixedColor ?? (a.scar ? arrowColor(a.scar, display.colorMode, seq) : ARROW_COLORS.axis);
       const r = isSel || isHl ? radius * 1.15 : isHov ? radius * 1.08 : radius;
       const faded = !isSel && (this.dimmed || (!isHl && !!this.faded?.has(a.id)));
       v.update(s, e, toV(sn), r, color, display.showHidden, display.labels ? a.label : null, isSel, faded, isHov);

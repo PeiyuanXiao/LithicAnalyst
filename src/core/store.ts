@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import type { ConfigCorrections, Curve, Landmark, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenInfo } from './types';
+import type { ConfigCorrections, Curve, FlakeData, Landmark, Measurement, MeshInfo, Plane, ProjectState, Region, Relation, Scar, ScarVector, Section, SemilandmarkSet, Sequence, SpecimenInfo } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
+export type ChangeKind = 'flake' | 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -13,7 +13,7 @@ export interface Change {
 export function emptyProject(): ProjectState {
   const t = nowIso();
   return {
-    specimen: { id: '', annotator: '', unit: 'mm', notes: '', frame: null },
+    specimen: { id: '', annotator: '', unit: 'mm', notes: '', frame: null, type: 'core' },
     mesh: null,
     scars: [],
     curves: [],
@@ -28,6 +28,7 @@ export function emptyProject(): ProjectState {
     nodule: { exclude: [], show: false },
     split: null,
     configuration: { roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } },
+    flake: { axis: null, otherFrame: null },
     nextLabelNumber: 1,
     nextCurveNumber: 1,
     nextMeasureNumber: 1,
@@ -284,6 +285,10 @@ export class ProjectStore {
 
   _setConfiguration(c: ConfigCorrections): void {
     this._state.configuration = c;
+  }
+
+  _setFlake(f: FlakeData): void {
+    this._state.flake = f;
   }
 
   _setNextRegionNumber(n: number): void {

@@ -5,19 +5,19 @@ import { completeLoopSteps, COMPLETE_ANCHOR_STEP_DEG, COMPLETE_STEP_DEG, type Co
 import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
-import { computePlane, type PlaneResult } from '../compute/planes';
+import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addLandmark, completeCurveLoop, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { addLandmark, completeCurveLoop, deleteTechnicalAxis, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
-import { CURVE_FIELDS, isCustomValue, numberKeyField, offeredOptions, REGION_FIELDS, SCAR_FIELDS, shiftNumberKeyField, type ConfigFace, type FieldDef } from '../core/fields';
+import { CURVE_FIELDS, isCustomValue, keyedOptions, numberKeyField, offeredOptions, PLATFORM_OUTLINE, REGION_FIELDS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseProjectFile, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type Vec3 } from '../core/types';
+import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { configurationCsv, curveCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
+import { configurationCsv, curveCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { APP_DIR, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
 import { batchOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
@@ -41,7 +41,14 @@ import { RelationTool, type ScarPick } from '../tools/relationTool';
 import { SequenceTool } from '../tools/sequenceTool';
 import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjacency';
 import { BorderLayer } from '../render/borderLayer';
-import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
+import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
+import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
+import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
+import { technicalFrameSteps } from '../compute/technicalFrame';
+import { frameSource } from '../core/derived';
+import { bvhPlaneCandidates } from '../render/bvhPlane';
+import { PlatformEndTool } from '../tools/platformEndTool';
+import { ProfilePanel } from './profilePanel';
 import { landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
 import { declutterLabels } from '../render/labelLayout';
@@ -50,7 +57,7 @@ import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLa
 import { uuid } from '../core/ids';
 import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
-import { polylineEdgesSteps, regionsSteps, resolveRegions, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
+import { facesOfPiecesSteps, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
 import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type VolumeSplit } from '../compute/split';
 import { assembleCurve, curveSegments } from '../core/curveGeometry';
@@ -100,6 +107,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   regions: true,
   harris: false,
   configuration: false,
+  profile: false,
   excelBom: false,
 };
 
@@ -338,7 +346,7 @@ export class App implements AppApi {
   private saveBtn!: HTMLButtonElement;
   private fileBtn!: HTMLButtonElement;
   private specimenBar!: HTMLElement;
-  private specimenRefs: { id: HTMLInputElement; unit: HTMLSelectElement; annotator: HTMLInputElement | HTMLTextAreaElement; notes: HTMLInputElement | HTMLTextAreaElement; meta: HTMLElement; name: HTMLElement; unitText: HTMLElement } | null = null;
+  private specimenRefs: { id: HTMLInputElement; unit: HTMLSelectElement; type: HTMLSelectElement; annotator: HTMLInputElement | HTMLTextAreaElement; notes: HTMLInputElement | HTMLTextAreaElement; meta: HTMLElement; name: HTMLElement; unitText: HTMLElement; framePill: HTMLElement } | null = null;
   readonly popovers = new Popovers();
   private displayCtl: HTMLElement | null = null;
   private appModeSeg: ToolRow | null = null;
@@ -358,6 +366,29 @@ export class App implements AppApi {
   private configResult: CoreConfiguration | null = null;
   /** The face (box) or cone (bicone) picked in the configuration panel or the view cube: the arrows elsewhere are drawn faded meanwhile. */
   private pickedFace: ConfigPick | null = null;
+  /** The longest measure of a flake, once per mesh. */
+  private flakeMorph: { loaded: LoadedMesh; value: MorphDimensions | null } | null = null;
+  private flakeSection: { loaded: LoadedMesh; key: string; line: SectionLine | null } | null = null;
+  /** A flake's measurements, and what the profile panel draws from them. */
+  private flake: FlakeResult | null = null;
+  private flakeToken = 0;
+  private flakeTimer = 0;
+  /** The specimen's type and unit as the flake was last measured with. */
+  private specimenKey = '';
+  /** Where the smaller piece along the platform outline lies, for the outline it was found from. */
+  private platformAuto: { key: string; seed: Vec3 } | null = null;
+  private platformToken = 0;
+  /** Each region plane's fit to its regions, by plane id. */
+  private regionFits = new Map<string, { centroid: Vec3; normal: Vec3; count: number }>();
+  private regionFitToken = 0;
+  private profilePanel: ProfilePanel | null = null;
+  private profileEl: HTMLElement | null = null;
+  private profileFit: (() => void) | null = null;
+  /** The profile panel's section across, as a share of the technical length (a view state, never in the file). */
+  private profileAt = 0.5;
+  private profileCross: CrossSection | null = null;
+  private profileFrame = 0;
+  private ringLayer: BorderLayer | null = null;
   /** The split as computed (before `swap`), for the plane or curve it was computed from. */
   private splitRaw: { key: string; value: VolumeSplit | null } | null = null;
   /** The split is being computed (the bicone waits for it). */
@@ -435,6 +466,7 @@ export class App implements AppApi {
     this.landmarkLayer = new LandmarkLayer(viewer);
     this.landmarkLayer.onLabelClick = (id) => this.selection.set(id);
     this.borderLayer = new BorderLayer(viewer);
+    this.ringLayer = new BorderLayer(viewer, true);
     this.viewCube = new ViewCube(viewer);
     this.viewCube.onPick = (face) => this.selectConfigFace(face, true);
 
@@ -480,15 +512,18 @@ export class App implements AppApi {
       changed: () => this.updateCursor(),
       editable: () => this.mode === 'annotate',
       hovered: (item) => this.hoverTip(item),
+      moveAxisEnd: (which, point, normal) => this.moveAxisEnd(which, point, normal),
     };
     this.tools = new ToolController(ctx, this.viewportEl);
     this.tools.register(new SelectTool(ctx));
     this.tools.register(new DrawArrowTool(ctx));
     this.tools.register(new DrawCurveTool(ctx));
+    this.tools.register(new DrawArrowTool(ctx, { id: 'axis', snapStart: true, onFinish: (s, e) => this.drawAxis(s, e) }));
+    this.tools.register(new PlatformEndTool(ctx, this.landmarkLayer, (p) => this.onPlatformOutline(p), (p) => this.selection.set(placePlatformEnd(this.store, p))));
     for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
-    this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p)));
+    this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p), (l, p) => (l.code === 'platform_end' ? (this.onPlatformOutline(p) ?? l.point) : p)));
     this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => this.recordRelation(a, b, at, from)));
     this.tools.register(new SequenceTool((x, y, hit) => this.scarAt(x, y, hit), (id) => this.toggleInSequence(id)));
     this.tools.onHover = (hit) => {
@@ -507,6 +542,7 @@ export class App implements AppApi {
     this.buildEmptyState();
     this.buildHarrisPanel();
     this.buildConfigPanel();
+    this.buildProfilePanel();
     this.buildDisplayControl();
     this.updateSpecimenBar();
     this.setTool('select');
@@ -683,19 +719,31 @@ export class App implements AppApi {
       h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'specimen-id' }, t('field.specimenId')), id),
       h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'specimen-unit' }, t('field.unit')), unit),
     );
+    const type = h('select', { id: 'specimen-type', class: 'ctl-select' }, ...SPECIMEN_TYPES.map((x) => h('option', { value: x }, t(`specimen.type.${x}`)))) as HTMLSelectElement;
+    type.addEventListener('change', () => {
+      setSpecimenType(this.store, type.value as SpecimenType);
+      // the next new specimen starts as this one
+      writePref('specimenType', type.value);
+    });
+    const typeRow = h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'specimen-type' }, t('field.specimenType')), type);
     const annotator = textRow('specimen-annotator', t('field.annotator'), '', (v) => {
       updateSpecimen(this.store, { annotator: v });
       writePref('annotator', v);
     });
     const notes = textRow('specimen-notes', t('field.notes'), '', (v) => updateSpecimen(this.store, { notes: v }), { multiline: true });
     const meta = h('dl', { class: 'num-grid', id: 'specimen-meta' });
-    const panel = h('div', { class: 'popover spec-panel', id: 'specimen-panel', role: 'dialog', 'aria-label': t('sec.specimen'), hidden: true }, head, annotator.el, notes.el, meta);
+    const panel = h('div', { class: 'popover spec-panel', id: 'specimen-panel', role: 'dialog', 'aria-label': t('sec.specimen'), hidden: true }, head, typeRow, annotator.el, notes.el, meta);
     const name = h('span', { class: 'spec-name', id: 'specimen-name' });
     const unitText = h('span', { class: 'spec-unit', id: 'specimen-unit-text' });
     const more = h('button', { type: 'button', class: 'spec-btn', id: 'specimen-more', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', onclick: () => this.popovers.toggle(more, panel) }, name, unitText, icon(ICONS.chevron));
     tip(more, t('sec.specimen'));
-    this.specimenRefs = { id, unit, annotator: annotator.input, notes: notes.input, meta, name, unitText };
-    return h('div', { class: 'menu-wrap spec-bar', id: 'specimen-bar' }, more, panel);
+    const framePill = h('span', { class: 'pill spec-frame', id: 'frame-pill', hidden: true });
+    tips.attach(framePill, () => {
+      const f = this.store.state.flake.axis?.failure;
+      return f ? { label: t(`axis.${f}`) } : null;
+    });
+    this.specimenRefs = { id, unit, type, annotator: annotator.input, notes: notes.input, meta, name, unitText, framePill };
+    return h('div', { class: 'menu-wrap spec-bar', id: 'specimen-bar' }, more, panel, framePill);
   }
 
   private updateSpecimenBar(): void {
@@ -705,6 +753,15 @@ export class App implements AppApi {
     this.specimenBar.hidden = !st.mesh;
     softSet(r.id, st.specimen.id);
     if (r.unit.value !== st.specimen.unit) r.unit.value = st.specimen.unit;
+    r.type.value = st.specimen.type;
+    // a flake's orientation: the technical axis, the principal axes before there is one, or why there is no frame
+    const flake = st.specimen.type === 'flake';
+    r.framePill.hidden = !flake;
+    if (flake) {
+      const failed = st.flake.axis?.failure;
+      r.framePill.textContent = failed ? t('axis.noFrame') : st.specimen.frame?.source.startsWith(TECHNICAL_FRAME) ? t('frame.src.technical') : st.specimen.frame ? t('frame.src.other') : t('config.principal');
+      r.framePill.classList.toggle('pill-warn', !!failed);
+    }
     softSet(r.annotator, st.specimen.annotator);
     softSet(r.notes, st.specimen.notes);
     r.name.textContent = st.specimen.id || t('specimen.untitled');
@@ -805,6 +862,8 @@ export class App implements AppApi {
       { value: 'relation', icon: ICONS20.relation, name: t('tool.relation'), key: 'B' },
       { value: 'sequence', icon: ICONS20.sequence, name: t('tool.sequence'), key: 'Q' },
       { value: 'landmark', icon: ICONS20.landmark, name: t('tool.landmark'), key: 'K' },
+      { value: 'axis', icon: ICONS20.axis, name: t('tool.axis'), key: 'T' },
+      { value: 'platform-end', icon: ICONS20.platformEnd, name: t('tool.platformEnd'), key: 'E' },
     ]);
     this.measureSeg = this.toolRow('measure-tool', t('appMode.measure'), [select, ...MEASURE_TOOLS.map(([value, key, k, ic]) => ({ value, icon: ic, name: t(key), key: k }))]);
     this.presentSeg = this.toolRow('present-tool', t('appMode.present'), [select, { value: 'section', icon: ICONS20.section, name: t('tool.section'), key: 'X' }]);
@@ -829,11 +888,19 @@ export class App implements AppApi {
   /** Tools of the current work mode only (the compare mode has none, only the full view). */
   private updateToolbar(): void {
     const annotate = this.mode === 'annotate';
-    if (this.modeSeg) this.modeSeg.el.hidden = !annotate;
+    if (this.modeSeg) {
+      this.modeSeg.el.hidden = !annotate;
+      // a flake's own tools
+      const flake = this.isFlake();
+      for (const id of ['mode-axis', 'mode-platform-end']) {
+        const b = this.modeSeg.el.querySelector<HTMLElement>(`#${id}`);
+        if (b) b.hidden = !flake;
+      }
+    }
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
     if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
     if (this.toolSep) this.toolSep.hidden = this.mode === 'compare';
-    if (this.snapEl) this.snapEl.hidden = !annotate || !['curve', 'landmark'].includes(this.tools?.activeId ?? '');
+    if (this.snapEl) this.snapEl.hidden = !annotate || !['curve', 'landmark', 'axis'].includes(this.tools?.activeId ?? '');
     this.updateSequenceBar();
   }
 
@@ -921,6 +988,7 @@ export class App implements AppApi {
     this.buildEmptyState();
     this.buildHarrisPanel();
     this.buildConfigPanel();
+    this.buildProfilePanel();
     this.buildDisplayControl();
     this.updateSpecimenBar();
     this.updateUndoButtons();
@@ -949,6 +1017,7 @@ export class App implements AppApi {
     this.sidebar.refresh('mesh');
     this.updateHarris();
     this.updateConfigPanel();
+    this.updateProfile();
   }
 
   private updateCursor(): void {
@@ -989,9 +1058,9 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel) && !this.store.landmark(sel) && !this.store.semilandmarkSet(sel))
+    if (sel && this.store.state.flake.axis?.id !== sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel) && !this.store.landmark(sel) && !this.store.semilandmarkSet(sel))
       this.selection.set(null);
-    if (['landmarks', 'curves', 'reset'].includes(c.kind)) this.landmarks = landmarkTable(this.store.state);
+    if (['landmarks', 'curves', 'reset', 'specimen', 'flake'].includes(c.kind)) this.landmarks = landmarkTable(this.store.state);
     if (c.kind === 'landmarks') this.rememberLandmarkNames();
     if (c.kind === 'reset') this.names = null;
     if (['scars', 'relations', 'sequences', 'reset'].includes(c.kind)) {
@@ -1005,14 +1074,30 @@ export class App implements AppApi {
     if (c.kind !== 'measurements' && c.kind !== 'specimen') this.updatePlanes();
     if (c.kind === 'sections' || c.kind === 'reset') this.updateSections();
     if (c.kind === 'curves' || c.kind === 'reset') this.updatePartition();
-    else if (c.kind === 'regions' || c.kind === 'scars') this.resolveRegionsNow();
+    // (a plane's regions: its fit)
+    else if (c.kind === 'regions' || c.kind === 'scars' || c.kind === 'planes') this.resolveRegionsNow();
     if (c.kind === 'nodule') this.updateNodule();
     // only the swap of upper and lower changed: no need to compute the split again
     if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit(c.kind === 'split');
     // the frame (specimen) changes the box: updateAuto below
-    if (['scars', 'configuration', 'reset'].includes(c.kind)) this.updateConfiguration();
+    if (['scars', 'configuration', 'reset', 'specimen'].includes(c.kind)) this.updateConfiguration();
+    if (c.kind === 'specimen' || c.kind === 'reset') {
+      this.updateToolbar();
+      // a flake's tools belong to flakes
+      if (!this.isFlake() && ['axis', 'platform-end'].includes(this.tools?.activeId ?? '')) this.setTool('select');
+      if (!this.isFlake() && this.tools) this.selection.set(this.store.landmark(this.selection.id ?? '')?.code || this.store.state.flake.axis?.id === this.selection.id ? null : this.selection.id);
+      this.paintRegions();
+    }
+    // technical axis, platform outline, platform region or ends: measured again
+    // (of the specimen's details, its type and unit count)
+    const specimenKey = `${this.store.state.specimen.type}|${this.store.state.specimen.unit}`;
+    const specimenCounts = c.kind === 'specimen' && specimenKey !== this.specimenKey;
+    this.specimenKey = specimenKey;
+    if (['flake', 'landmarks', 'regions', 'reset'].includes(c.kind) || specimenCounts) this.scheduleFlake();
+    // a flake has a platform outline to follow, a core does not
+    if (specimenCounts) void this.updatePlatformAuto().then(() => this.resolveRegionsNow());
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { flake: 'flake', scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
     if (c.kind === 'specimen') {
@@ -1020,10 +1105,12 @@ export class App implements AppApi {
       this.sidebar.refresh('curves');
       this.sidebar.refresh('measurements');
     }
+    if (c.kind === 'flake') this.updateSpecimenBar();
     if (c.kind === 'specimen' || c.kind === 'reset') {
       this.updateSpecimenBar();
       this.updateAuto();
       this.sidebar.refresh('figure');
+      this.sidebar.refresh('workspace');
     }
     if (['scars', 'sequences', 'reset'].includes(c.kind)) this.updateSequenceBar();
     this.relationChip?.update();
@@ -1065,7 +1152,8 @@ export class App implements AppApi {
   /** Recompute the configuration (cheap) from the scars, the corrections and the box or the volume split; show it in the panel, the sketch and the cube. */
   private updateConfiguration(): void {
     const st = this.store.state;
-    this.configResult = coreConfiguration(st, this.configBox, this.split);
+    // a core's: a flake's data do not go through it
+    this.configResult = this.isFlake() ? null : coreConfiguration(st, this.configBox, this.split);
     // a face of the box with the bicone, or a cone with the box: let go
     if (this.pickedFace && !this.pickFits(this.pickedFace)) this.pickedFace = null;
     this.updateConfigPanel();
@@ -1081,7 +1169,7 @@ export class App implements AppApi {
 
   configStatus(): ConfigStatus | null {
     const st = this.store.state;
-    if (st.configuration.model !== 'bicone' || this.configResult || !this.hasMesh()) return null;
+    if (this.isFlake() || st.configuration.model !== 'bicone' || this.configResult || !this.hasMesh()) return null;
     if (!this.measureBase || this.splitBusy) return 'computing';
     return this.measureBase.topology.closed === false ? 'not_closed' : 'split_invalid';
   }
@@ -1112,7 +1200,7 @@ export class App implements AppApi {
 
   /** The configuration panel and the view cube are shown: switched on, in the annotate mode, with a scar with an arrow. */
   private configShown(): boolean {
-    return this.display.configuration && this.mode === 'annotate' && this.hasMesh() && this.store.state.scars.some(hasVector);
+    return this.display.configuration && this.mode === 'annotate' && this.hasMesh() && !this.isFlake() && this.store.state.scars.some(hasVector);
   }
 
   /** Show or hide the configuration panel (and the cube); hidden, it lets go of the picked face. */
@@ -1284,6 +1372,8 @@ export class App implements AppApi {
     if (this.arrows) this.arrows.dimmed = dim;
     if (this.curves) this.curves.dimmed = dim;
     if (this.landmarkLayer) this.landmarkLayer.dimmed = dim;
+    const axis = this.isFlake() ? this.store.state.flake.axis : null;
+    if (this.arrows) this.arrows.axis = axis ? { id: axis.id, label: t('tool.axis'), vector: axis } : null;
     this.arrows?.setHighlight(this.emphasis());
     // the user's own colour setting comes back when the sequence tool is left
     const sequencing = this.sequencing();
@@ -1292,7 +1382,7 @@ export class App implements AppApi {
     this.showBorders();
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
-    this.landmarkLayer?.sync(this.store.state.landmarks, this.landmarks.sets, this.selection.id, this.display.arrows.labels, this.display.arrows.showHidden);
+    this.landmarkLayer?.sync(this.labelledLandmarks(), this.landmarks.sets, this.selection.id, this.display.arrows.labels, this.display.arrows.showHidden);
     const mesh = this.store.state.mesh;
     this.sectionLayer?.sync(this.store.state.sections, (id) => this.cuts.get(id)?.lines ?? null, this.selection.id, this.mode === 'present');
     this.applyClipping();
@@ -1353,6 +1443,7 @@ export class App implements AppApi {
     // the picked face belongs to the annotate mode's panel; the panel and the cube show only there
     this.pickedFace = null;
     this.updateConfigPanel();
+    this.updateProfile();
     if (mode === 'present') this.viewFrame(false);
     if (mode === 'compare' && this.agreementStale) this.scheduleAgreement();
     this.viewportEl.dataset.mode = mode;
@@ -1411,6 +1502,10 @@ export class App implements AppApi {
         break;
       case 'configuration':
         this.updateConfigPanel();
+        this.sidebar.refresh('display');
+        break;
+      case 'profile':
+        this.updateProfile();
         this.sidebar.refresh('display');
         break;
       case 'snap':
@@ -1513,7 +1608,7 @@ export class App implements AppApi {
 
   addPlane(): void {
     if (!this.hasMesh() || !this.viewer) return;
-    const p = addPlane(this.store, 'all_vertices', this.viewer.towardViewer());
+    const p = addPlane(this.store, this.isFlake() ? 'curves' : 'all_vertices', this.viewer.towardViewer());
     this.selection.set(p.id);
   }
 
@@ -1566,8 +1661,9 @@ export class App implements AppApi {
   turnFrame(deg: number, base?: number[]): void {
     const f = this.store.state.specimen.frame;
     if (!f) return;
-    // fine turning (from a fixed start) is one undo step
-    this.setFrame(rotateFrame(base ?? f.matrix, deg), f.source, !!base);
+    // fine turning (from a fixed start) is one undo step; a turned technical frame says so
+    const source = f.source === TECHNICAL_FRAME ? `${TECHNICAL_FRAME}; turned` : f.source;
+    this.setFrame(rotateFrame(base ?? f.matrix, deg), source, !!base);
   }
 
   clearFrame(): void {
@@ -1646,7 +1742,7 @@ export class App implements AppApi {
           return lines ? [{ lines, color: planeColor(p.label) }] : [];
         }),
         landmarks: [
-          ...st.landmarks.map((l) => ({ point: l.point, color: LANDMARK_COLORS.fixed, fixed: true })),
+          ...shownLandmarks(st).map((l) => ({ point: l.point, color: LANDMARK_COLORS.fixed, fixed: true })),
           ...this.landmarks.sets.flatMap((q) => q.points.map((p) => ({ point: p, color: LANDMARK_COLORS.semi, fixed: false }))),
         ],
         sections: only ? this.sectionDrawings([only]) : this.sectionDrawings(st.sections.filter((x) => x.inFigure)),
@@ -1759,7 +1855,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -1809,21 +1905,292 @@ export class App implements AppApi {
   private setRegionTypeFor(id: string, type: RegionType): void {
     const r = this.store.region(id);
     if (!r) return;
-    setRegionType(this.store, id, type, type === 'scar' ? this.scarStartingIn(this.componentAt(r.seed)) : null);
+    // the region that followed the platform outline stays where it is, the user's from now on
+    const seed = r.auto ? this.platformAuto?.seed : undefined;
+    setRegionType(this.store, id, type, type === 'scar' ? this.scarStartingIn(this.componentAt(seed ?? r.seed)) : null, seed);
   }
 
   /** Split the surface along the curves (in slices), then find the regions again. */
   private updatePartition(): void {
     const token = ++this.partitionToken;
-    void this.partitionFor(this.store.state.curves).then((part) => {
+    void this.partitionFor(this.store.state.curves).then(async (part) => {
       if (!part || token !== this.partitionToken) return;
       this.partition = part;
+      await this.updatePlatformAuto();
+      if (token !== this.partitionToken) return;
       this.resolveRegionsNow();
     });
   }
 
+  /** The closed platform outline of a flake. */
+  private platformOutline(): Curve | null {
+    if (!this.isFlake()) return null;
+    return this.store.state.curves.find((c) => c.attributes.type === PLATFORM_OUTLINE && c.closed) ?? null;
+  }
+
+  /** The smaller of the two pieces the platform outline makes: where the region that follows it lies. */
+  private async updatePlatformAuto(): Promise<void> {
+    const outline = this.platformOutline();
+    const base = this.measureBase, loaded = this.loaded;
+    const token = ++this.platformToken;
+    if (!outline || !base || !loaded) {
+      this.platformAuto = null;
+      return;
+    }
+    const key = JSON.stringify(outline.points);
+    if (this.platformAuto?.key === key) return;
+    const barrier = await this.barrierFor([outline]);
+    if (!barrier || token !== this.platformToken || this.loaded !== loaded) return;
+    const g = loaded.geometry;
+    const pos = g.getAttribute('position').array as Float32Array;
+    const idx = g.index!.array as Uint32Array;
+    const part = await runSliced(regionsSteps(pos, idx, base.edges, barrier));
+    const found = await runSliced(smallerPieceSteps(pos, idx, base.edges, barrier, part));
+    if (token !== this.platformToken || this.loaded !== loaded) return;
+    const o = loaded.offset;
+    this.platformAuto = found ? { key, seed: [found.seed[0] + o[0], found.seed[1] + o[1], found.seed[2] + o[2]] } : null;
+  }
+
+  /** The point of the platform outline nearest to a point; null without an outline (closed or not, a click can be placed on it). */
+  private onPlatformOutline(p: Vec3): Vec3 | null {
+    const c = this.store.state.curves.find((x) => x.attributes.type === PLATFORM_OUTLINE);
+    if (!c) return null;
+    const cum = arcLengths(c.points, c.closed);
+    return pointAtArc(c.points, c.closed, cum, nearestArc(c.points, c.closed, cum, p));
+  }
+
+  /** What each landmark is called in the view: those of a flake's own by what they are. */
+  private labelledLandmarks(): ReturnType<typeof shownLandmarks> {
+    const st = this.store.state;
+    const fixed = shownLandmarks(st);
+    const sides = platformSides(st.flake.axis?.matrix, fixed);
+    return fixed.map((l) => {
+      if (!l.code) return l;
+      if (l.code === 'pop') return { ...l, name: t('landmark.pop') };
+      const name = landmarkName(l, sides);
+      return { ...l, name: t(name === 'platform_left' ? 'landmark.platformLeft' : name === 'platform_right' ? 'landmark.platformRight' : 'landmark.platformEnd') };
+    });
+  }
+
+  // ------------------------------------------------------------ flake
+
+  private isFlake(): boolean {
+    return this.store.state.specimen.type === 'flake';
+  }
+
+  flakeMeasures(): FlakeMeasures | null {
+    return this.isFlake() ? (this.flake?.measures ?? null) : null;
+  }
+
+  /** The technical axis drawn: its frame found on the mesh (in slices), then one undo step with the arrow. */
+  private drawAxis(s: { p: Vec3; n: Vec3 }, e: { p: Vec3; n: Vec3 }): void {
+    void this.applyAxis({ start: s.p, startNormal: s.n, end: e.p, endNormal: e.n });
+  }
+
+  private moveAxisEnd(which: 'start' | 'end', point: Vec3, normal: Vec3): void {
+    const a = this.store.state.flake.axis;
+    if (!a) return;
+    void this.applyAxis(which === 'start' ? { start: point, startNormal: normal, end: a.end, endNormal: a.endNormal } : { start: a.start, startNormal: a.startNormal, end: point, endNormal: normal });
+  }
+
+  private async applyAxis(v: Pick<TechnicalAxis, 'start' | 'end' | 'startNormal' | 'endNormal'>): Promise<void> {
+    const base = this.measureBase, loaded = this.loaded;
+    if (!base || !loaded) return;
+    const g = loaded.geometry;
+    const fr = await runSliced(technicalFrameSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, orientationSign: loaded.orientationSign, meanEdge: base.meanEdge }, v.start, v.end));
+    if (this.loaded !== loaded || !this.isFlake()) return;
+    const first = !this.store.state.flake.axis?.matrix;
+    const axis = setTechnicalAxis(this.store, { ...v, matrix: fr.ok ? fr.matrix : null, failure: fr.ok ? null : fr.reason });
+    this.selection.set(axis.id);
+    // the first frame opens the profile panel
+    if (first && axis.matrix && !this.display.profile) this.setDisplay((d) => (d.profile = true), 'profile');
+    if (!fr.ok) this.feedback.toast(t(`axis.${fr.reason}`), 'warn', 4000);
+  }
+
+  /** Measure the flake again shortly: several changes of one step make one computation. */
+  private scheduleFlake(): void {
+    clearTimeout(this.flakeTimer);
+    this.flakeTimer = window.setTimeout(() => void this.updateFlake(), 30);
+  }
+
+  /** The flake's platform region: the pieces of surface of its `platform` regions, and their area. */
+  private platformPieces(): { pieces: Set<number>; area: number } | null {
+    const part = this.partition;
+    if (!part) return null;
+    const pieces = new Set<number>();
+    this.store.state.regions.forEach((r, i) => {
+      const c = this.seedComponent[i];
+      if (r.type === 'platform' && c >= 0) pieces.add(c);
+    });
+    if (!pieces.size) return null;
+    let area = 0;
+    for (const c of pieces) area += part.areas[c];
+    return { pieces, area };
+  }
+
+  /** A flake's measurements from its annotations (in slices); the last request wins. */
+  private async updateFlake(): Promise<void> {
+    const token = ++this.flakeToken;
+    const base = this.measureBase, loaded = this.loaded;
+    const st = this.store.state;
+    if (!this.isFlake() || !base || !loaded) {
+      this.flake = null;
+      this.sidebar.refresh('flake');
+      this.updateProfile();
+      return;
+    }
+    const g = loaded.geometry;
+    const positions = g.getAttribute('position').array as Float32Array;
+    const index = g.index!.array as Uint32Array;
+    if (this.flakeMorph?.loaded !== loaded) {
+      const value = await runSliced(morphDimensionsSteps(positions));
+      if (this.loaded !== loaded) return;
+      this.flakeMorph = { loaded, value };
+    }
+    const plat = this.platformPieces();
+    const faces = plat ? await runSliced(facesOfPiecesSteps(this.partition!, plat.pieces)) : null;
+    if (token !== this.flakeToken) return;
+    const axis = st.flake.axis;
+    // the longitudinal section changes only with the axis
+    const sectionKey = JSON.stringify([axis?.matrix, axis?.start]);
+    const known = this.flakeSection?.loaded === loaded && this.flakeSection.key === sectionKey ? this.flakeSection.line : undefined;
+    const result = await runSliced(
+      flakeMeasuresSteps({
+        positions,
+        index,
+        offset: loaded.offset,
+        matrix: axis?.matrix ?? null,
+        P: axis?.start ?? null,
+        ends: st.landmarks.filter((l) => l.code === 'platform_end').map((l) => l.point),
+        platformFaces: faces,
+        platformArea: plat?.area ?? null,
+        unit: st.specimen.unit,
+        meanEdge: base.meanEdge,
+        morph: this.flakeMorph!.value,
+        candidates: bvhPlaneCandidates(g),
+        section: known,
+      }),
+    );
+    if (token !== this.flakeToken) return;
+    if (axis?.matrix) this.flakeSection = { loaded, key: sectionKey, line: result.section };
+    this.flake = result;
+    this.sidebar.refresh('flake');
+    this.updateProfile();
+    this.syncCrossSection();
+    // the file holds the results too
+    if (this.unsaved) {
+      this.scheduleAutosave();
+      this.scheduleFolderSave();
+    }
+  }
+
+  // ------------------------------------------------------------ profile panel
+
+  /** The technical frame in the mesh's own coordinates (they are re-centred). */
+  private localFrame(): { frame: ReturnType<typeof frameAxes>; offset: Vec3 } | null {
+    const m = this.isFlake() ? this.store.state.flake.axis?.matrix : null;
+    const o = this.loaded?.offset;
+    if (!m || !o) return null;
+    const f = frameAxes(m);
+    return { frame: { ...f, origin: [f.origin[0] - o[0], f.origin[1] - o[1], f.origin[2] - o[2]] }, offset: o };
+  }
+
+  private profileShown(): boolean {
+    return this.display.profile && this.mode !== 'compare' && this.hasMesh() && !!this.localFrame();
+  }
+
+  private buildProfilePanel(): void {
+    const panel = floatingPanel({
+      id: 'profile',
+      title: t('profile.title'),
+      pref: 'profilePanel',
+      area: this.viewportEl,
+      onClose: () => this.setDisplay((d) => (d.profile = false), 'profile'),
+    });
+    const content = new ProfilePanel();
+    content.onMove = (f) => this.moveProfile(f);
+    panel.body.append(content.el);
+    if (this.profileEl) this.profileEl.replaceWith(panel.el);
+    else this.viewportEl.append(panel.el);
+    this.profileEl = panel.el;
+    this.profileFit = panel.fit;
+    this.profilePanel = content;
+    this.updateProfile();
+  }
+
+  /** Show or hide the panel, and draw what it shows. */
+  private updateProfile(): void {
+    const el = this.profileEl, panel = this.profilePanel;
+    if (!el || !panel) return;
+    const shown = this.profileShown();
+    const was = !el.hidden;
+    el.hidden = !shown;
+    const local = this.localFrame();
+    const m = this.flake?.measures;
+    if (!shown || !local || !m || m.tech_length === null) {
+      panel.setContent(null);
+      this.ringLayer?.clear();
+      return;
+    }
+    panel.setContent({
+      frame: local.frame,
+      section: this.flake!.section,
+      geometry: this.flake!.geometry,
+      offset: local.offset,
+      techLength: m.tech_length,
+      techWidth: m.tech_width ?? 0,
+      techThickness: m.tech_thickness ?? 0,
+      unit: this.store.state.specimen.unit,
+    });
+    if (!was) this.profileFit?.();
+    this.syncCrossSection();
+  }
+
+  /** The slider, the marker: the section across is cut at most once a frame. */
+  private moveProfile(fraction: number): void {
+    this.profileAt = fraction;
+    if (this.profileFrame) return;
+    this.profileFrame = requestAnimationFrame(() => {
+      this.profileFrame = 0;
+      this.syncCrossSection();
+    });
+  }
+
+  private syncCrossSection(): void {
+    const panel = this.profilePanel, loaded = this.loaded;
+    const local = this.localFrame();
+    const len = this.flake?.measures.tech_length ?? null;
+    if (!panel || !loaded || !local || len === null || !this.profileShown()) {
+      this.profileCross = null;
+      this.ringLayer?.clear();
+      return;
+    }
+    const g = loaded.geometry;
+    const cross = crossSectionAt(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, local.frame, this.profileAt * len, bvhPlaneCandidates(g));
+    this.profileCross = cross;
+    panel.setCross(this.profileAt, cross);
+    // the ring on the model
+    const o = local.offset;
+    const chains = cross.lines.map((l: SectionLine) => {
+      const pts = l.points.map((p): Vec3 => [p[0] + o[0], p[1] + o[1], p[2] + o[2]]);
+      return l.closed ? [...pts, pts[0]] : pts;
+    });
+    this.ringLayer?.sync(`${this.profileAt}|${JSON.stringify(this.store.state.flake.axis?.matrix)}`, chains, o);
+  }
+
   /** Pieces of surface between these curves (in slices); null when the mesh is not ready or changed meanwhile. */
   private async partitionFor(curves: readonly Curve[]): Promise<Partition | null> {
+    const base = this.measureBase;
+    const loaded = this.loaded;
+    const barrier = await this.barrierFor(curves);
+    if (!barrier || !base || !loaded || this.loaded !== loaded) return null;
+    const g = loaded.geometry;
+    const part = await runSliced(regionsSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, barrier));
+    return this.loaded === loaded ? part : null;
+  }
+
+  /** The mesh edges along these curves (in slices), as vertex pairs; null when the mesh is not ready or changed meanwhile. */
+  private async barrierFor(curves: readonly Curve[]): Promise<number[] | null> {
     const base = this.measureBase;
     const loaded = this.loaded;
     const snap = this.surfaceSnap;
@@ -1843,9 +2210,7 @@ export class App implements AppApi {
       if (this.loaded !== loaded) return null;
       for (const v of chain) barrier.push(v);
     }
-    const g = loaded.geometry;
-    const part = await runSliced(regionsSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, barrier));
-    return this.loaded === loaded ? part : null;
+    return barrier;
   }
 
   /** Which piece each region's seed falls in; areas, totals and conflicts; repaint. */
@@ -1854,7 +2219,13 @@ export class App implements AppApi {
     const base = this.measureBase;
     if (!part || !base) return;
     const st = this.store.state;
-    this.seedComponent = st.regions.map((r) => this.componentAt(r.seed));
+    this.seedComponent = st.regions.map((r) => (r.auto ? -1 : this.componentAt(r.seed)));
+    // the region that follows the platform outline: the smaller piece, unless the user typed that piece
+    const auto = st.regions.findIndex((r) => r.auto);
+    if (auto >= 0 && this.platformAuto && this.isFlake()) {
+      const c = this.componentAt(this.platformAuto.seed);
+      if (!this.seedComponent.includes(c)) this.seedComponent[auto] = c;
+    }
     this.regions = resolveRegions(st.regions, this.seedComponent, part, base.surfaceArea);
     const conflicts = this.regions.results.filter((r) => r.conflict).map((r) => r.id).join(',');
     if (conflicts && conflicts !== this.conflictKey) this.feedback.toast(t('toast.regionConflict'), 'warn', 4000);
@@ -1862,7 +2233,43 @@ export class App implements AppApi {
     this.paintRegions();
     this.updateNodule();
     this.updateBorders();
+    this.updateRegionFits();
+    this.scheduleFlake();
     this.sidebar.refresh('regions');
+  }
+
+  /** The planes fitted to surface regions (in slices), once the regions are known. */
+  private updateRegionFits(): void {
+    const token = ++this.regionFitToken;
+    const part = this.partition, loaded = this.loaded;
+    const st = this.store.state;
+    const planes = st.planes.filter((p) => p.method === 'region');
+    if (!part || !loaded || !planes.length) {
+      if (this.regionFits.size) {
+        this.regionFits = new Map();
+        this.updatePlanes();
+      }
+      return;
+    }
+    const g = loaded.geometry;
+    void (async () => {
+      const fits = new Map<string, { centroid: Vec3; normal: Vec3; count: number }>();
+      for (const p of planes) {
+        const pieces = new Set<number>();
+        for (const id of p.regionIds) {
+          const c = this.seedComponent[st.regions.findIndex((r) => r.id === id)];
+          if (c !== undefined && c >= 0) pieces.add(c);
+        }
+        if (!pieces.size) continue;
+        const faces = await runSliced(facesOfPiecesSteps(part, pieces));
+        const fit = await runSliced(regionPlaneSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, faces, loaded.offset));
+        if (token !== this.regionFitToken) return;
+        if (fit) fits.set(p.id, fit);
+      }
+      this.regionFits = fits;
+      this.updatePlanes();
+      this.syncAnnotations();
+    })();
   }
 
   towardViewer(): Vec3 {
@@ -1871,10 +2278,17 @@ export class App implements AppApi {
 
   // ------------------------------------------------------------ workspace
 
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; undownloaded: number } | null {
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<SpecimenType | null>; undownloaded: number } | null {
     const ws = this.workspace;
     if (!ws) return null;
-    return { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex, started: ws.meshes.map((p) => this.started(p)), undownloaded: this.undownloadedCount() };
+    return { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex, started: ws.meshes.map((p) => this.started(p)), types: ws.meshes.map((p, i) => this.modelType(p, i)), undownloaded: this.undownloadedCount() };
+  }
+
+  /** What the open model is, or what its project file says (null: no project, or none read yet). */
+  private modelType(path: string, i: number): SpecimenType | null {
+    if (i === this.wsIndex && this.hasMesh()) return this.store.state.specimen.type;
+    const index = this.projectIndex;
+    return index?.get(projectPathFor(path))?.state.specimen.type ?? index?.get(legacyProjectPathFor(path))?.state.specimen.type ?? null;
   }
 
   /** A model has a project (in the folder, from an earlier version next to it, or edited in this session); none are read for this. */
@@ -1916,6 +2330,11 @@ export class App implements AppApi {
     this.sessionProjects.clear();
     this.undownloaded.clear();
     this.sidebar.refresh('workspace');
+    // the list shows each model's type: every project file is read once, in the background
+    const index = this.projectIndex;
+    void index.ready().then(() => {
+      if (this.projectIndex === index) this.sidebar.refresh('workspace');
+    });
     await this.openWorkspaceMesh(0);
   }
 
@@ -2106,6 +2525,7 @@ export class App implements AppApi {
       folder: this.workspace?.name ?? null,
       kind,
       options,
+      parameters: { flake: FLAKE_PARAMETERS },
       duplicateNames: this.wsDuplicates,
     };
   }
@@ -2189,7 +2609,7 @@ export class App implements AppApi {
       const live: BatchProject = {
         path: primary?.path ?? own,
         state: structuredClone(this.store.state) as ProjectState,
-        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split },
+        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null },
         appVersion: __APP_VERSION__,
       };
       projects = projects.map((p) => (p === primary ? live : p));
@@ -2324,8 +2744,13 @@ export class App implements AppApi {
       const lm = this.landmarks;
       return [
         csv('scar-vectors', t('export.csv'), 'scar_vectors.csv', st.scars.some(hasVector), () => scarVectorCsv(st, opts, this.configResult)),
-        csv('configuration', t('export.configuration'), 'configuration.csv', !!this.configResult, () => configurationCsv(st, this.configResult, opts)),
-        csv('flaking-surfaces', t('export.flakingSurfaces'), 'flaking_surfaces.csv', !!this.configResult?.surfaces.length, () => flakingSurfacesCsv(st, this.configResult, opts)),
+        // a core's; a flake has none
+        ...(this.isFlake()
+          ? []
+          : [
+              csv('configuration', t('export.configuration'), 'configuration.csv', !!this.configResult, () => configurationCsv(st, this.configResult, opts)),
+              csv('flaking-surfaces', t('export.flakingSurfaces'), 'flaking_surfaces.csv', !!this.configResult?.surfaces.length, () => flakingSurfacesCsv(st, this.configResult, opts)),
+            ]),
         csv('curves', t('export.curvesCsv'), 'curves.csv', st.curves.length > 0, () => curveCsv(st, opts)),
         csv('regions', t('export.regions'), 'regions.csv', !!this.regions?.results.length, () => regionsCsv(st, this.regions?.results ?? [], opts)),
         csv('relations', t('export.relations'), 'relations.csv', st.relations.length > 0, () => relationsCsv(st, opts)),
@@ -2338,6 +2763,7 @@ export class App implements AppApi {
     }
     if (this.mode === 'measure')
       return [
+        ...(this.isFlake() ? [csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts))] : []),
         csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile())),
         csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
         csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
@@ -2781,7 +3207,7 @@ export class App implements AppApi {
   private rememberLandmarkNames(): void {
     const sha = this.store.state.mesh?.sha256;
     if (!sha) return;
-    const names = this.store.state.landmarks.map((l) => l.name);
+    const names = this.store.state.landmarks.filter((l) => !l.code).map((l) => l.name);
     const cur = readPref<{ sha: string; names: string[] } | null>('landmarkNames', null);
     if (cur?.sha === sha) writePref('landmarkNames', { sha, names });
     else if (names.length) {
@@ -3279,7 +3705,7 @@ export class App implements AppApi {
   private updatePlanes(): void {
     const st = this.store.state;
     const axes = this.vertexAxes();
-    this.planes = st.planes.map((p) => computePlane(p, st, axes));
+    this.planes = st.planes.map((p) => computePlane(p, st, axes, this.regionFits.get(p.id) ?? null));
     const base = this.measureBase;
     const loaded = this.loaded;
     for (const id of [...this.cuts.keys()]) if (this.store.plane(id) && !this.planes.some((p) => p.id === id && p.valid)) this.cuts.delete(id);
@@ -3372,7 +3798,8 @@ export class App implements AppApi {
       return;
     }
     if (this.mode !== 'annotate') return;
-    if (this.store.region(sel)) deleteRegion(this.store, sel);
+    if (this.store.state.flake.axis?.id === sel) deleteTechnicalAxis(this.store);
+    else if (this.store.region(sel)) deleteRegion(this.store, sel);
     else if (this.store.relation(sel)) deleteRelation(this.store, sel);
     else if (this.store.sequence(sel)) deleteSequence(this.store, sel);
     else if (this.store.landmark(sel)) deleteLandmark(this.store, sel);
@@ -3453,6 +3880,17 @@ export class App implements AppApi {
     this.configBox = null;
     this.configResult = null;
     this.pickedFace = null;
+    this.flake = null;
+    this.flakeToken++;
+    this.flakeMorph = null;
+    this.flakeSection = null;
+    this.platformAuto = null;
+    this.platformToken++;
+    this.regionFits = new Map();
+    this.regionFitToken++;
+    this.profileCross = null;
+    this.profileAt = 0.5;
+    this.ringLayer?.clear();
     this.loaded = null;
     this.syncConfigViews();
   }
@@ -3492,6 +3930,8 @@ export class App implements AppApi {
       unit: readPref('unit', prev.specimen.unit || 'mm'),
       notes: '',
       frame: null,
+      // a new specimen starts as the last one (a project file then says what it is)
+      type: readPref<string>('specimenType', prev.specimen.type) === 'flake' ? 'flake' : 'core',
     };
     this.selection.set(null);
     this.store.reset(fresh);
@@ -3610,7 +4050,7 @@ export class App implements AppApi {
       this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
       return;
     }
-    if (!saved.scars.length && !saved.curves.length && !saved.measurements.length) return;
+    if (!saved.scars.length && !saved.curves.length && !saved.measurements.length && !saved.flake.axis) return;
     const when = new Date(entry.savedAt).toLocaleString(getLang() === 'zh' ? 'zh-CN' : 'en-GB');
     const what = countsText(saved);
     const ok = await this.feedback.confirm(
@@ -3801,6 +4241,12 @@ export class App implements AppApi {
         case 'KeyK':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('landmark');
           return;
+        case 'KeyT':
+          if (this.hasMesh() && this.mode === 'annotate' && this.isFlake()) this.setTool('axis');
+          return;
+        case 'KeyE':
+          if (this.hasMesh() && this.mode === 'annotate' && this.isFlake()) this.setTool('platform-end');
+          return;
         case 'KeyX':
           if (this.hasMesh() && this.mode === 'present') this.setTool('section');
           return;
@@ -3820,7 +4266,7 @@ export class App implements AppApi {
           this.setTool('select');
           return;
         case 'KeyS':
-          if (this.tools?.activeId === 'curve' || this.tools?.activeId === 'landmark') this.cycleSnap();
+          if (['curve', 'landmark', 'axis'].includes(this.tools?.activeId ?? '')) this.cycleSnap();
           return;
         case 'Enter':
         case 'NumpadEnter':
@@ -3895,22 +4341,23 @@ export class App implements AppApi {
           if (f && opt && this.store.scar(sel)) setScarAttribute(this.store, sel, f.key, opt.value);
           return;
         }
+        const specimenType = this.store.state.specimen.type;
         if (this.store.region(sel)) {
-          const opt = numberKeyField(REGION_FIELDS)?.options?.[Number(digit[1]) - 1];
+          const field = numberKeyField(REGION_FIELDS);
+          const opt = field ? offeredOptions(field, specimenType)[Number(digit[1]) - 1] : undefined;
           if (opt) this.setRegionTypeFor(sel, opt.value as RegionType);
           return;
         }
         const isCurve = !!this.store.curve(sel);
         const f = numberKeyField(isCurve ? CURVE_FIELDS : SCAR_FIELDS);
         if (!f) return;
-        const offered = offeredOptions(f);
-        // the key after the options: the user's own text
-        if (f.allowCustom && Number(digit[1]) === offered.length + 1) {
+        const opt = keyedOptions(f, specimenType)[Number(digit[1]) - 1];
+        // "custom": the user's own text
+        if (opt === 'custom') {
           // not typed into the box it opens
           e.preventDefault();
           return this.sidebar.openCustomType();
         }
-        const opt = offered[Number(digit[1]) - 1];
         if (!opt) return;
         if (isCurve) setCurveAttribute(this.store, sel, f.key, opt.value);
         else setScarAttribute(this.store, sel, f.key, opt.value);
@@ -3938,12 +4385,15 @@ export class App implements AppApi {
     this.hoverTipTimer = window.setTimeout(() => {
       const s = this.store;
       const scar = s.scar(item.id), curve = s.curve(item.id), landmark = s.landmark(item.id), m = s.measurement(item.id);
-      const label = scar
+      const shownName = landmark ? this.labelledLandmarks().find((l) => l.id === landmark.id)?.name : '';
+      const label = s.state.flake.axis?.id === item.id
+        ? t('hover.axis')
+        : scar
         ? `${scar.label} · ${t('hover.arrow')}`
         : curve
           ? `${curve.label} · ${t('hover.curve')}`
           : landmark
-            ? `${landmark.name} · ${t('hover.landmark')}`
+            ? `${shownName} · ${t('hover.landmark')}`
             : m
               ? `${m.label} · ${t(`measure.type.${m.type}`)}`
               : null;
@@ -3954,7 +4404,8 @@ export class App implements AppApi {
   /** The shortcuts: two columns (general and mouse; the modes), keys as key caps, no explanations. */
   private showHelp(): void {
     const keyCount = (f: FieldDef | undefined) => (f ? offeredOptions(f).length + (f.allowCustom ? 1 : 0) : 0);
-    const count = Math.max(keyCount(numberKeyField(SCAR_FIELDS)), keyCount(numberKeyField(CURVE_FIELDS))) || 5;
+    const flakeKeys = this.isFlake() ? keyedOptions(CURVE_FIELDS[0], 'flake').length : 0;
+    const count = Math.max(keyCount(numberKeyField(SCAR_FIELDS)), keyCount(numberKeyField(CURVE_FIELDS)), flakeKeys) || 5;
     /** Keys ("Ctrl+Z / Ctrl+Shift+Z", "1 / 2 / 3 · Delete") as key caps; `hold`: to be held down. */
     const keys = (spec: string, hold: boolean): HTMLElement => {
       const dt = h('dt', {});
@@ -4007,6 +4458,7 @@ export class App implements AppApi {
         ['B', 'help.k.relation'],
         ['Q', 'help.k.sequence'],
         ['K', 'help.k.landmark'],
+        ...(this.isFlake() ? ([['T', 'help.k.axis'], ['E', 'help.k.platformEnd']] as Row[]) : []),
         ['1 / 2 / 3 · Delete', 'help.k.relationPick'],
         ['1 – 9 / N', 'help.k.sequencePick'],
         [`1 – ${count}`, 'help.k.complete'],
@@ -4035,6 +4487,7 @@ export class App implements AppApi {
       theme: () => getTheme(),
       state: () => this.store.state,
       selection: () => this.selection.id,
+      selectForTest: (id: string | null) => this.selection.set(id),
       project: (p: Vec3) => this.viewer?.project(new THREE.Vector3(p[0], p[1], p[2])),
       /** Surface point under a client position, or null. */
       pick: (x: number, y: number): Vec3 | null => {
@@ -4046,6 +4499,20 @@ export class App implements AppApi {
       mode: () => this.mode,
       setMode: (m: AppMode) => this.setMode(m),
       exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }, this.configResult),
+      /** A flake's frame and measurements (null for a core). */
+      flake: () =>
+        this.isFlake()
+          ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null }
+          : null,
+      /** The profile panel: shown or not, where the section across is (share of the technical length), its width and thickness, and how many lines the ring on the model has. */
+      sectionPanel: () => ({
+        shown: !!this.profileEl && !this.profileEl.hidden,
+        at: this.profileAt,
+        width: this.profileCross?.width ?? null,
+        thickness: this.profileCross?.thickness ?? null,
+        ring: this.ringLayer?.group.children.length ?? 0,
+      }),
+      exportFlakesCsvText: () => flakesCsv(this.store.state, this.flake?.measures ?? null, { excelBom: false }),
       /** The volumetric configuration (null without arrows or before the mesh is measured). */
       configuration: () => this.configResult,
       bicone: () => (isBicone(this.configResult) ? this.configResult : null),

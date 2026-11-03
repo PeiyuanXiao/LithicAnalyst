@@ -78,7 +78,8 @@ export class SelectTool implements Tool {
     }
     const which = this.ctx.arrows.handleAt(e.clientX, e.clientY);
     if (which && id) {
-      const a = this.ctx.store.scar(id)?.vector;
+      const axis = this.ctx.store.state.flake.axis;
+      const a = this.ctx.store.scar(id)?.vector ?? (axis?.id === id ? axis : null);
       if (a) {
         this.drag = {
           id,
@@ -193,7 +194,10 @@ export class SelectTool implements Tool {
     if (!d) return;
     this.drag = null;
     this.ctx.arrows.setEndpointOverride(null);
-    if (commit) moveEndpoint(this.ctx.store, d.id, d.which, d.point, d.normal);
+    if (commit) {
+      if (this.ctx.store.state.flake.axis?.id === d.id) this.ctx.moveAxisEnd(d.which, d.point, d.normal);
+      else moveEndpoint(this.ctx.store, d.id, d.which, d.point, d.normal);
+    }
     this.ctx.arrows.highlightHandle(null);
     this.ctx.changed();
   }

@@ -5,6 +5,10 @@
  * traced curve that stays on the ridge shows that snapping worked.
  */
 
+import { ellipsoid, flakeT1, flakeT2, T1 } from '../../tests/meshes';
+
+export { T1 };
+
 export type Vec3 = [number, number, number];
 
 /** Original coordinates sit far from the origin; the app must keep them as they are in the file. */
@@ -162,6 +166,10 @@ function cuboidMesh(center: Vec3, size: Vec3, n: number): Mesh {
   }
   return { positions: new Float32Array(pos), index: new Uint32Array(index) };
 }
+
+export const t1Ply = (): MeshFile => ({ name: 't1.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(flakeT1()) });
+export const t2Ply = (): MeshFile => ({ name: 't2.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(flakeT2()) });
+export const t3Ply = (): MeshFile => ({ name: 't3.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(ellipsoid(40, 25, 8)) });
 
 export const boxPly = (): MeshFile => ({ name: 'box.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(boxMesh()) });
 

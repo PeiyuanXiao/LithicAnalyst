@@ -5,7 +5,8 @@
  * Sliding itself happens in R.
  */
 
-import type { ProjectState, Vec3 } from '../core/types';
+import { frameAxes } from '../core/frame';
+import type { Landmark, ProjectState, Vec3 } from '../core/types';
 
 /** Arc length at each point of a polyline; a closed one gets one more entry (back to the first point). */
 export function arcLengths(points: readonly Vec3[], closed: boolean): number[] {
@@ -131,14 +132,37 @@ export interface LandmarkTable {
   sets: SemilandmarkResult[];
 }
 
-export function landmarkTable(state: Pick<ProjectState, 'landmarks' | 'semilandmarks' | 'curves'>): LandmarkTable {
-  const rows: LandmarkRow[] = state.landmarks.map((l, i) => ({ index: i + 1, name: l.name, kind: 'fixed', setId: '', point: [...l.point] as Vec3 }));
-  const fixedIndex = new Map(state.landmarks.map((l, i) => [l.id, i + 1]));
+/** The platform's two ends as left and right of the technical frame (−X left, +X right; two ends on one side: the one further to that side); ids. */
+export function platformSides(matrix: readonly number[] | null | undefined, landmarks: readonly Landmark[]): { left: string | null; right: string | null } {
+  const ends = landmarks.filter((l) => l.code === 'platform_end');
+  if (!matrix || !ends.length) return { left: null, right: null };
+  const f = frameAxes(matrix);
+  const xs = ends.map((e) => ({ id: e.id, x: (e.point[0] - f.origin[0]) * f.x[0] + (e.point[1] - f.origin[1]) * f.x[1] + (e.point[2] - f.origin[2]) * f.x[2] }));
+  if (xs.length === 1) return xs[0].x < 0 ? { left: xs[0].id, right: null } : { left: null, right: xs[0].id };
+  const [a, b] = xs[0].x <= xs[1].x ? [xs[0], xs[1]] : [xs[1], xs[0]];
+  return { left: a.id, right: b.id };
+}
+
+type TableInput = Pick<ProjectState, 'landmarks' | 'semilandmarks' | 'curves'> & Partial<Pick<ProjectState, 'specimen' | 'flake'>>;
+
+/** The landmarks a specimen shows and exports: those of a flake's own (`code`) only on a flake. */
+export const shownLandmarks = (state: Pick<TableInput, 'landmarks' | 'specimen'>): Landmark[] => (state.specimen?.type === 'flake' ? [...state.landmarks] : state.landmarks.filter((l) => !l.code));
+
+/** The name a landmark is exported with: a platform end's follows its side of the technical frame. */
+export function landmarkName(l: Landmark, sides: { left: string | null; right: string | null }): string {
+  return l.id === sides.left ? 'platform_left' : l.id === sides.right ? 'platform_right' : l.name;
+}
+
+export function landmarkTable(state: TableInput): LandmarkTable {
+  const fixed = shownLandmarks(state);
+  const sides = platformSides(state.flake?.axis?.matrix, fixed);
+  const rows: LandmarkRow[] = fixed.map((l, i) => ({ index: i + 1, name: landmarkName(l, sides), kind: 'fixed', setId: '', point: [...l.point] as Vec3 }));
+  const fixedIndex = new Map(fixed.map((l, i) => [l.id, i + 1]));
   const sliders: LandmarkTable['sliders'] = [];
   const sets: SemilandmarkResult[] = state.semilandmarks.map((q) => {
     const curve = state.curves.find((c) => c.id === q.curveId);
     const lm = (id: string | null) => {
-      const l = id ? state.landmarks.find((x) => x.id === id) : undefined;
+      const l = id ? fixed.find((x) => x.id === id) : undefined;
       return l ? { id: l.id, point: l.point } : null;
     };
     const s = curve ? sampleCurve(curve, q.count, lm(q.startLandmarkId), lm(q.endLandmarkId)) : null;

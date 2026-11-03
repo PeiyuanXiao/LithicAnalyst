@@ -7,6 +7,7 @@ export const REGION_COLORS: Record<Exclude<RegionType, 'scar'>, string> = {
   cortex: '#a0673a',
   joint: '#4f9fd6',
   damage: '#9a9a9a',
+  platform: '#3f8f8a',
 };
 
 /** Scar regions are told apart by scar (its number picks the colour). */

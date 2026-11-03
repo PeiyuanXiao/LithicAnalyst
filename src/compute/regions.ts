@@ -64,6 +64,70 @@ export function* regionsSteps(positions: ArrayLike<number>, index: ArrayLike<num
   return { region, count, areas };
 }
 
+/**
+ * Where the smaller of the pieces along a closed line lies (a point of the triangle nearest
+ * the piece's centre), for the platform outline: `barrier` the line's mesh edges, as
+ * vertex pairs, `partition` the pieces it makes. Null when it does not part the surface.
+ */
+export function* smallerPieceSteps(positions: ArrayLike<number>, index: ArrayLike<number>, edges: EdgeTable, barrier: ArrayLike<number>, partition: Partition): Steps<{ seed: Vec3; area: number } | null> {
+  const onLine = new Uint8Array(edges.v0.length);
+  for (let i = 0; i + 1 < barrier.length; i += 2) {
+    const e = edgeId(edges, barrier[i], barrier[i + 1]);
+    if (e >= 0) onLine[e] = 1;
+  }
+  // only the pieces the line touches: a mesh may have others apart from it
+  const touching = new Uint8Array(partition.count);
+  const n = Math.floor(index.length / 3);
+  for (let t = 0; t < n; t++) {
+    if (t % YIELD_EVERY === 0) yield;
+    if (onLine[edges.ofSide[3 * t]] || onLine[edges.ofSide[3 * t + 1]] || onLine[edges.ofSide[3 * t + 2]]) touching[partition.region[t]] = 1;
+  }
+  let piece = -1, sides = 0;
+  for (let c = 0; c < partition.count; c++) {
+    if (!touching[c]) continue;
+    sides++;
+    if (piece < 0 || partition.areas[c] < partition.areas[piece]) piece = c;
+  }
+  if (sides < 2 || piece < 0) return null;
+  const sum = [0, 0, 0];
+  let weight = 0;
+  const p = positions;
+  const centre = (t: number): Vec3 => {
+    const a = 3 * index[3 * t], b = 3 * index[3 * t + 1], c = 3 * index[3 * t + 2];
+    return [(p[a] + p[b] + p[c]) / 3, (p[a + 1] + p[b + 1] + p[c + 1]) / 3, (p[a + 2] + p[b + 2] + p[c + 2]) / 3];
+  };
+  for (let t = 0; t < n; t++) {
+    if (t % YIELD_EVERY === 0) yield;
+    if (partition.region[t] !== piece) continue;
+    const m = centre(t);
+    for (let k = 0; k < 3; k++) sum[k] += m[k];
+    weight++;
+  }
+  const at: Vec3 = [sum[0] / weight, sum[1] / weight, sum[2] / weight];
+  let best = Infinity, seed = at;
+  for (let t = 0; t < n; t++) {
+    if (t % YIELD_EVERY === 0) yield;
+    if (partition.region[t] !== piece) continue;
+    const m = centre(t);
+    const d = (m[0] - at[0]) ** 2 + (m[1] - at[1]) ** 2 + (m[2] - at[2]) ** 2;
+    if (d < best) {
+      best = d;
+      seed = m;
+    }
+  }
+  return { seed, area: partition.areas[piece] };
+}
+
+/** The triangles of these pieces. */
+export function* facesOfPiecesSteps(partition: Partition, pieces: ReadonlySet<number>): Steps<Uint32Array> {
+  const out: number[] = [];
+  for (let t = 0; t < partition.region.length; t++) {
+    if (t % YIELD_EVERY === 0) yield;
+    if (pieces.has(partition.region[t])) out.push(t);
+  }
+  return Uint32Array.from(out);
+}
+
 export interface RegionResult {
   id: string;
   label: string;
@@ -80,6 +144,7 @@ export interface RegionTotals {
   cortex: number;
   joint: number;
   damage: number;
+  platform: number;
   /** Cortex area / total surface area. */
   cortexRatio: number;
 }
@@ -105,7 +170,7 @@ export function resolveRegions(regions: readonly Region[], component: number[], 
       conflict: c >= 0 && component.some((d, j) => j !== i && d === c),
     };
   });
-  const totals: RegionTotals = { scar: 0, cortex: 0, joint: 0, damage: 0, cortexRatio: 0 };
+  const totals: RegionTotals = { scar: 0, cortex: 0, joint: 0, damage: 0, platform: 0, cortexRatio: 0 };
   for (const [c, i] of owner) totals[regions[i].type] += partition.areas[c];
   totals.cortexRatio = totalArea > 0 ? totals.cortex / totalArea : 0;
   return { results, totals };

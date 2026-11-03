@@ -72,7 +72,7 @@ describe('regions bounded by curves', () => {
       ['R1', 'scar', 12, false],
       ['R2', 'cortex', 12, false],
     ]);
-    expect(totals).toEqual({ scar: 12, cortex: 12, joint: 0, damage: 0, cortexRatio: 0.5 });
+    expect(totals).toEqual({ scar: 12, cortex: 12, joint: 0, damage: 0, platform: 0, cortexRatio: 0.5 });
 
     // a second seed in the bottom half: conflict, and the half counts once
     addRegion(s, [0.5, 0.5, -1], 'joint', null);

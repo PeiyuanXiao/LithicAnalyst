@@ -1,5 +1,6 @@
 import type { SnapMode } from '../compute/surfacePath';
 import type { ProjectStore } from '../core/store';
+import type { Vec3 } from '../core/types';
 import type { ArrowLayer } from '../render/arrowLayer';
 import type { CurveLayer } from '../render/curveLayer';
 import type { LandmarkLayer } from '../render/landmarkLayer';
@@ -28,6 +29,8 @@ export interface ToolContext {
   editable: () => boolean;
   /** The item under the select tool's cursor and where the cursor is (null: none); the app shows its name after a pause. */
   hovered: (item: { id: string; x: number; y: number } | null) => void;
+  /** An end of the technical axis was dragged to here. */
+  moveAxisEnd: (which: 'start' | 'end', point: Vec3, normal: Vec3) => void;
 }
 
 /** Lazily computed surface hit for the current pointer event (one ray cast at most). */

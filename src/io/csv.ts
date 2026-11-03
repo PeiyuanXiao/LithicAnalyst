@@ -1,9 +1,11 @@
 import { isBicone, type CoreConfiguration } from '../compute/bicone';
+import { FLAKE_MEASURES, type FlakeMeasures } from '../compute/flake';
+import { techAngleDeg } from '../compute/technicalFrame';
 import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AgreementRow, SummaryRow } from '../compute/agreement';
-import type { AutoMeasurements } from '../core/derived';
+import { frameSource, type AutoMeasurements } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
@@ -50,8 +52,10 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
     'platform_face',
     'flaking_surface',
     'unit',
+    'tech_angle_deg',
   ];
   const placed = new Map<string, { platform?: string; surface: string | null }>((config?.scars ?? []).map((p) => [p.id, p]));
+  const flakeFrame = state.specimen.type === 'flake' ? state.flake.axis?.matrix ?? null : null;
   const rows = state.scars.filter(hasVector).map((a) =>
     [
       csvCell(state.specimen.id),
@@ -67,10 +71,19 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
       placed.get(a.id)?.platform ?? '',
       placed.get(a.id)?.surface ?? '',
       csvCell(state.specimen.unit),
+      // a flake's scars, in its technical frame
+      flakeFrame ? cell(techAngleDeg(flakeFrame, a.vector.start, a.vector.end)) : '',
     ].join(','),
   );
   const body = [header.join(','), ...rows].join('\n') + '\n';
   return (opts.excelBom ? '﻿' : '') + body;
+}
+
+/** One row per flake: where its frame came from, and its measurements (empty where there is no value; lengths in the specimen's unit). */
+export function flakesCsv(state: Readonly<ProjectState>, measures: FlakeMeasures | null, opts: CsvOptions): string {
+  const header = ['specimen_id', 'unit', 'frame_source', ...FLAKE_MEASURES];
+  const row = [csvCell(state.specimen.id), csvCell(state.specimen.unit), csvCell(frameSource(state)), ...FLAKE_MEASURES.map((k) => cell(measures?.[k] ?? null))];
+  return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }
 
 /**

@@ -1,5 +1,5 @@
 import { moveLandmark } from '../core/actions';
-import type { Vec3 } from '../core/types';
+import type { Landmark, Vec3 } from '../core/types';
 import type { LandmarkLayer } from '../render/landmarkLayer';
 import type { SurfaceHit } from '../render/viewer';
 import { SNAP_PX } from './drawCurveTool';
@@ -21,6 +21,8 @@ export class LandmarkTool implements Tool {
     private readonly ctx: ToolContext,
     private readonly layer: LandmarkLayer,
     private readonly onPlace: (point: Vec3) => void,
+    /** Where a landmark of the flake's own may go (a platform end stays on the platform outline). */
+    private readonly constrain: (l: Landmark, point: Vec3) => Vec3 = (_l, p) => p,
   ) {}
 
   activate(): void {
@@ -37,7 +39,8 @@ export class LandmarkTool implements Tool {
     if (e.button !== 0 || !this.ctx.editable()) return false;
     const near = this.layer.pickNearest(e.clientX, e.clientY);
     if (near) {
-      this.drag = { id: near.id, point: null };
+      // the point of percussion follows the technical axis
+      if (this.ctx.store.landmark(near.id)?.code !== 'pop') this.drag = { id: near.id, point: null };
       this.ctx.selection.set(near.id);
       return true;
     }
@@ -49,7 +52,8 @@ export class LandmarkTool implements Tool {
     if (!this.drag) return;
     const h = hit();
     if (!h) return;
-    this.drag.point = this.target(h, e.shiftKey);
+    const l = this.ctx.store.landmark(this.drag.id);
+    this.drag.point = l ? this.constrain(l, this.target(h, e.shiftKey)) : null;
     this.layer.setPreview(this.drag.point);
   }
 

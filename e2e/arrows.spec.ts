@@ -1,7 +1,7 @@
 import { roofPly, roofPoint } from './fixtures/meshes';
 import { clickArrow, dist, dragArrow, expect, exportAvailable, exportFile, loadMesh, openApp, parseCsv, state, test, viewFromTop } from './helpers';
 
-const ARROW_CSV_HEADER = 'specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit';
+const ARROW_CSV_HEADER = 'specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg';
 
 test.beforeEach(async ({ page }) => {
   await openApp(page);

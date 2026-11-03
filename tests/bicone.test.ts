@@ -224,7 +224,7 @@ describe('bicone', () => {
       'specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis\nB1,F1,upper,,,1,,\nB1,F2,lower,,,1,,\n',
     );
     const rows = scarVectorCsv(store.state, opts, both).trim().split('\n');
-    expect(rows.slice(1).map((l) => l.split(',').slice(-3).join(','))).toEqual([',F1,mm', ',F2,mm']);
+    expect(rows.slice(1).map((l) => l.split(',').slice(-4, -1).join(','))).toEqual([',F1,mm', ',F2,mm']);
     // without a result (no split volumes): the model still
     expect(configurationCsv(store.state, null, opts).split('\n')[1]).toBe('B1,bicone,,,,,');
   });

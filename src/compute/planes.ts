@@ -1,6 +1,7 @@
 import type { Plane, PlaneMethod, ProjectState, Vec3 } from '../core/types';
 import { symmetricEigen3 } from './linalg';
-import { fitPlane, type PrincipalAxes } from './meshGeometry';
+import { fitPlane, type FittedPlane, type PrincipalAxes } from './meshGeometry';
+import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /** A fitted plane, derived from its inputs. */
 export interface PlaneResult {
@@ -87,10 +88,48 @@ export function planeFrame(center: Vec3, normal: Vec3, axes: readonly Vec3[] | n
 }
 
 /**
+ * The plane of a surface region: least squares over the region's vertices, each weighted by a third of
+ * the area of its triangles in the region (`positions` as the index gives them; `faces`: the region's triangles).
+ */
+export function* regionPlaneSteps(positions: ArrayLike<number>, index: ArrayLike<number>, faces: ArrayLike<number>, offset: Vec3 = [0, 0, 0]): Steps<Pick<FittedPlane, 'centroid' | 'normal'> & { count: number } | null> {
+  const weights = new Map<number, number>();
+  for (let i = 0; i < faces.length; i++) {
+    if (i % YIELD_EVERY === 0) yield;
+    const t = faces[i];
+    const a = index[3 * t], b = index[3 * t + 1], c = index[3 * t + 2];
+    const ux = positions[3 * b] - positions[3 * a], uy = positions[3 * b + 1] - positions[3 * a + 1], uz = positions[3 * b + 2] - positions[3 * a + 2];
+    const vx = positions[3 * c] - positions[3 * a], vy = positions[3 * c + 1] - positions[3 * a + 1], vz = positions[3 * c + 2] - positions[3 * a + 2];
+    const w = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 6;
+    for (const v of [a, b, c]) weights.set(v, (weights.get(v) ?? 0) + w);
+  }
+  if (weights.size < 3) return null;
+  let total = 0;
+  const m: Vec3 = [0, 0, 0];
+  for (const [v, w] of weights) {
+    total += w;
+    for (let k = 0; k < 3; k++) m[k] += w * positions[3 * v + k];
+  }
+  if (!(total > 0)) return null;
+  for (let k = 0; k < 3; k++) m[k] /= total;
+  const cov = new Array<number>(9).fill(0);
+  let n = 0;
+  for (const [v, w] of weights) {
+    if (n++ % YIELD_EVERY === 0) yield;
+    const d = [positions[3 * v] - m[0], positions[3 * v + 1] - m[1], positions[3 * v + 2] - m[2]];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) cov[3 * i + j] += w * d[i] * d[j];
+  }
+  const { vectors } = symmetricEigen3(cov);
+  return { centroid: [m[0] + offset[0], m[1] + offset[1], m[2] + offset[2]], normal: vectors[2], count: weights.size };
+}
+
+export const regionPlane = (positions: ArrayLike<number>, index: ArrayLike<number>, faces: ArrayLike<number>, offset: Vec3 = [0, 0, 0]) => runSync(regionPlaneSteps(positions, index, faces, offset));
+
+/**
  * Compute a plane from its inputs. `vertices`: principal axes of all mesh
  * vertices (original coordinates), or null before the mesh is measured.
+ * `regionFit`: for a region plane, the fit to its regions (it needs the mesh; null until known).
  */
-export function computePlane(plane: Plane, state: Readonly<ProjectState>, vertices: PrincipalAxes | null): PlaneResult {
+export function computePlane(plane: Plane, state: Readonly<ProjectState>, vertices: PrincipalAxes | null, regionFit: { centroid: Vec3; normal: Vec3; count: number } | null = null): PlaneResult {
   const result = (center: Vec3 | null, normal: Vec3 | null, inputCount: number): PlaneResult => {
     if (!center || !normal || !(len(normal) > 0)) return { id: plane.id, label: plane.label, method: plane.method, valid: false, center: null, normal: null, matrix: null, inputCount };
     let n = unit(normal);
@@ -137,5 +176,7 @@ export function computePlane(plane: Plane, state: Readonly<ProjectState>, vertic
       const fit = fitPlane(pts);
       return fit ? result(fit.centroid, fit.normal, pts.length) : result(null, null, pts.length);
     }
+    case 'region':
+      return regionFit ? result(regionFit.centroid, regionFit.normal, regionFit.count) : result(null, null, 0);
   }
 }

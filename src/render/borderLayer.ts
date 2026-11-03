@@ -21,7 +21,11 @@ export class BorderLayer {
   private geometries: LineGeometry[] = [];
   private key = '';
 
-  constructor(private readonly viewer: Viewer) {
+  /** `solid`: a whole line in place of the dashes (the profile panel's ring). */
+  constructor(
+    private readonly viewer: Viewer,
+    private readonly solid = false,
+  ) {
     this.group.name = 'borders';
     viewer.overlay.add(this.group);
   }
@@ -38,7 +42,7 @@ export class BorderLayer {
     this.key = key;
     this.group.position.set(origin[0], origin[1], origin[2]);
     const d = this.viewer.diagonal;
-    const dash: [number, number] = [d * 0.008, d * 0.006];
+    const dash: [number, number] | undefined = this.solid ? undefined : [d * 0.008, d * 0.006];
     for (const chain of chains) {
       if (chain.length < 2) continue;
       const flat = new Float32Array(chain.length * 3);

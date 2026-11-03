@@ -16,6 +16,7 @@ import {
   SetNoduleCommand,
   SetRelationsCommand,
   SetConfigurationCommand,
+  SetFlakeCommand,
   SetSequencesCommand,
   SetSplitCommand,
   SetSpecimenCommand,
@@ -29,10 +30,10 @@ import {
 import { editedCompletion, type CurveShape } from './curveGeometry';
 import { emptyCorrections, hasFaceCorrections, joinKey } from '../compute/configuration';
 import { orderSequences, relationInputs } from '../compute/relations';
-import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity } from './fields';
+import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
-import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenInfo, Vec3 } from './types';
+import type { AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -172,9 +173,15 @@ export function addCurve(store: ProjectStore, input: NewCurveInput): Curve {
   return curve;
 }
 
+/** The platform region that follows the platform outline, for the steps that take the outline away. */
+const autoRegionGone = (store: ProjectStore): Command[] => store.state.regions.filter((r) => r.auto).map((r) => new DeleteRegionCommand(r.id));
+
 export function deleteCurve(store: ProjectStore, id: string): void {
-  if (!store.curve(id)) return;
-  store.history.execute(new DeleteCurveCommand(id));
+  const c = store.curve(id);
+  if (!c) return;
+  const parts: Command[] = [new DeleteCurveCommand(id)];
+  if (c.attributes.type === PLATFORM_OUTLINE) parts.push(...autoRegionGone(store));
+  store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.deleteCurve', parts));
 }
 
 function updateCurve(
@@ -214,9 +221,36 @@ export function completeCurveLoop(store: ProjectStore, id: string, shape: CurveS
   });
 }
 
+/**
+ * A curve's type. A flake has one platform outline: a new one takes the place of the old in the same
+ * step, and the region that follows the outline comes and goes with it.
+ */
+function setCurveType(store: ProjectStore, c: Curve, value: AttributeValue): void {
+  const after = structuredClone(c);
+  after.attributes.type = value;
+  after.modifiedAt = nowIso();
+  const update = new UpdateCurveCommand('cmd.editField', structuredClone(c), after);
+  const st = store.state;
+  const parts: Command[] = [];
+  if (value === PLATFORM_OUTLINE) {
+    for (const o of st.curves) if (o.id !== c.id && o.attributes.type === PLATFORM_OUTLINE) parts.push(new DeleteCurveCommand(o.id));
+    parts.push(update);
+    if (!st.regions.some((r) => r.auto)) {
+      const n = st.nextRegionNumber;
+      const t = nowIso();
+      parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(c.points[0]), type: 'platform', scarId: null, auto: true, createdAt: t, modifiedAt: t }, n));
+    }
+  } else {
+    parts.push(update);
+    if (c.attributes.type === PLATFORM_OUTLINE) parts.push(...autoRegionGone(store));
+  }
+  store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editField', parts));
+}
+
 export function setCurveAttribute(store: ProjectStore, id: string, key: string, value: AttributeValue): void {
   const c = store.curve(id);
   if (!c || c.attributes[key] === value) return;
+  if (key === 'type') return setCurveType(store, c, value);
   const isText = curveFieldByKey(key)?.type === 'text';
   updateCurve(store, id, 'cmd.editField', (x) => {
     x.attributes[key] = value;
@@ -272,6 +306,7 @@ export function addPlane(store: ProjectStore, method: PlaneMethod, upHint: Vec3)
     method,
     excludeCompleteness: [],
     curveIds: [],
+    regionIds: [],
     upHint: copy(upHint),
     visible: true,
     createdAt: t,
@@ -316,6 +351,14 @@ export const setPlaneCurve = (store: ProjectStore, id: string, curveId: string, 
     const ids = p.curveIds.filter((x) => x !== curveId);
     if (used) ids.push(curveId);
     p.curveIds = ids;
+  });
+
+/** Use (or stop using) a surface region in a region plane. */
+export const setPlaneRegion = (store: ProjectStore, id: string, regionId: string, used: boolean): void =>
+  updatePlane(store, id, 'cmd.editPlane', (p) => {
+    const ids = p.regionIds.filter((x) => x !== regionId);
+    if (used) ids.push(regionId);
+    p.regionIds = ids;
   });
 
 export const flipPlane = (store: ProjectStore, id: string): void =>
@@ -401,8 +444,11 @@ function dropAreaScar(store: ProjectStore, region: Region): Command[] {
   return deleteScarCommands(store, scar.id);
 }
 
-/** Change a region's type; becoming a scar links it to `scarId` or to a new scar without a direction. */
-export function setRegionType(store: ProjectStore, id: string, type: RegionType, scarId: string | null): void {
+/**
+ * Change a region's type; becoming a scar links it to `scarId` or to a new scar without a direction.
+ * The region that followed the platform outline is the user's from then on, at `seed` (where it was).
+ */
+export function setRegionType(store: ProjectStore, id: string, type: RegionType, scarId: string | null, seed?: Vec3): void {
   const before = store.region(id);
   if (!before || before.type === type) return;
   const parts: Command[] = [];
@@ -413,6 +459,10 @@ export function setRegionType(store: ProjectStore, id: string, type: RegionType,
     linked = s.scar.id;
   }
   const after: Region = { ...structuredClone(before), type, scarId: type === 'scar' ? linked : null, modifiedAt: nowIso() };
+  if (after.auto) {
+    delete after.auto;
+    if (seed) after.seed = copy(seed);
+  }
   parts.push(new UpdateRegionCommand(structuredClone(before), after));
   if (type !== 'scar') parts.push(...dropAreaScar(store, before));
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editRegion', parts));
@@ -577,13 +627,13 @@ export function addLandmark(store: ProjectStore, point: Vec3, name?: string): La
 export const moveLandmark = (store: ProjectStore, id: string, point: Vec3): void =>
   changeLandmarks(store, 'cmd.moveLandmark', (d) => {
     const l = d.landmarks.find((x) => x.id === id);
-    if (l && JSON.stringify(l.point) !== JSON.stringify(point)) touch(l).point = copy(point);
+    if (l && l.code !== 'pop' && JSON.stringify(l.point) !== JSON.stringify(point)) touch(l).point = copy(point);
   });
 
 export const renameLandmark = (store: ProjectStore, id: string, name: string): void =>
   changeLandmarks(store, 'cmd.renameLandmark', (d) => {
     const l = d.landmarks.find((x) => x.id === id);
-    if (l && l.name !== name) touch(l).name = name;
+    if (l && !l.code && l.name !== name) touch(l).name = name;
   }, `landmark-name:${id}`);
 
 /** Move a landmark to position `index` of the list (the export order). */
@@ -598,12 +648,31 @@ export const reorderLandmark = (store: ProjectStore, id: string, index: number):
 /** Delete a landmark; semilandmark sets that ended at it run to the curve's end instead. */
 export const deleteLandmark = (store: ProjectStore, id: string): void =>
   changeLandmarks(store, 'cmd.deleteLandmark', (d) => {
+    // the point of percussion goes only with the technical axis
+    if (d.landmarks.find((x) => x.id === id)?.code === 'pop') return;
     d.landmarks = d.landmarks.filter((x) => x.id !== id);
     for (const q of d.semilandmarks) {
       if (q.startLandmarkId === id) touch(q).startLandmarkId = null;
       if (q.endLandmarkId === id) touch(q).endLandmarkId = null;
     }
   });
+
+/** At most two platform ends: a third click moves the nearest of the two. */
+export const MAX_PLATFORM_ENDS = 2;
+
+/** A platform end at `point` (on the platform outline). */
+export function placePlatformEnd(store: ProjectStore, point: Vec3): string {
+  const ends = store.state.landmarks.filter((l) => l.code === 'platform_end');
+  if (ends.length >= MAX_PLATFORM_ENDS) {
+    const near = ends.reduce((b, l) => (distance(l.point, point) < distance(b.point, point) ? l : b), ends[0]);
+    moveLandmark(store, near.id, point);
+    return near.id;
+  }
+  const t = nowIso();
+  const lm: Landmark = { id: uuid(), name: 'platform_end', point: copy(point), code: 'platform_end', createdAt: t, modifiedAt: t };
+  changeLandmarks(store, 'cmd.addLandmark', (d) => void d.landmarks.push(structuredClone(lm)));
+  return lm.id;
+}
 
 /** New curve semilandmarks on a curve (10 points by default). */
 export function addSemilandmarkSet(store: ProjectStore, curveId: string, count = 10): SemilandmarkSet {
@@ -667,12 +736,100 @@ export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>
   const key = Object.keys(patch).sort().join(',');
   const turned = JSON.stringify(before.frame?.matrix ?? null) !== JSON.stringify(after.frame?.matrix ?? null);
   const corrections = store.state.configuration;
-  // the polarity, the model and the bicone's corrections (by side of the split curve, not by face) stay
-  const config = turned && hasFaceCorrections(corrections)
+  // the polarity, the model and the bicone's corrections (by side of the split curve, not by face) stay;
+  // a flake's frame is not the one the corrections name faces of (see setSpecimenType)
+  const config = turned && before.type === 'core' && hasFaceCorrections(corrections)
     ? { before: structuredClone(corrections), after: { ...emptyCorrections(), polarity: corrections.polarity, model: corrections.model, bicone: structuredClone(corrections.bicone) } }
     : null;
   store.history.execute(new SetSpecimenCommand(structuredClone(before), after, merge ? `specimen:${key}` : null, config));
   return !!config;
+}
+
+/**
+ * Switch the type of specimen. Nothing is deleted: each type keeps its own frame (the other's
+ * waits in `flake.otherFrame`), so the core's corrections by face stay right when it comes back.
+ */
+export function setSpecimenType(store: ProjectStore, type: SpecimenType): void {
+  const before = store.state.specimen;
+  if (before.type === type) return;
+  const flake = store.state.flake;
+  store.history.execute(
+    new CompoundCommand('cmd.editSpecimen', [
+      new SetFlakeCommand('cmd.editSpecimen', structuredClone(flake), { ...structuredClone(flake), otherFrame: structuredClone(before.frame) }),
+      new SetSpecimenCommand(structuredClone(before), { ...structuredClone(before), type, frame: structuredClone(flake.otherFrame) }),
+    ]),
+  );
+}
+
+// ---------------------------------------------------------------- technical axis
+
+/** The frame source of a frame made from the technical axis. */
+export const TECHNICAL_FRAME = 'technical_axis';
+
+const isTechnicalFrame = (f: SpecimenFrame | null): boolean => !!f && f.source.startsWith(TECHNICAL_FRAME);
+
+const roundedMatrix = (m: readonly number[]): number[] => m.map((x) => Math.round(x * 1e9) / 1e9);
+
+export interface NewAxisInput {
+  start: Vec3;
+  end: Vec3;
+  startNormal: Vec3;
+  endNormal: Vec3;
+  matrix: number[] | null;
+  failure: TechnicalAxis['failure'];
+}
+
+/**
+ * Draw (or replace, or move an end of) the technical axis, in one undo step: the axis, the point of
+ * percussion at its start, and the specimen frame from it — back to none when no frame could be made.
+ */
+export function setTechnicalAxis(store: ProjectStore, input: NewAxisInput): TechnicalAxis {
+  const st = store.state;
+  const t = nowIso();
+  const old = st.flake.axis;
+  const axis: TechnicalAxis = {
+    id: old?.id ?? uuid(),
+    start: copy(input.start),
+    end: copy(input.end),
+    startNormal: copy(input.startNormal),
+    endNormal: copy(input.endNormal),
+    matrix: input.matrix ? roundedMatrix(input.matrix) : null,
+    failure: input.failure,
+    createdAt: old?.createdAt ?? t,
+    modifiedAt: t,
+  };
+  const parts: Command[] = [new SetFlakeCommand('cmd.setAxis', structuredClone(st.flake), { ...structuredClone(st.flake), axis })];
+  const lmBefore = landmarkData(st);
+  const lmAfter = structuredClone(lmBefore);
+  const pop = lmAfter.landmarks.find((l) => l.code === 'pop');
+  if (pop) touch(pop).point = copy(input.start);
+  else lmAfter.landmarks.unshift({ id: uuid(), name: 'pop', point: copy(input.start), code: 'pop', createdAt: t, modifiedAt: t });
+  parts.push(new SetLandmarksCommand('cmd.setAxis', lmBefore, lmAfter));
+  const before = st.specimen;
+  const frame: SpecimenFrame | null = axis.matrix ? { matrix: [...axis.matrix], source: TECHNICAL_FRAME } : isTechnicalFrame(before.frame) ? null : before.frame;
+  if (JSON.stringify(frame) !== JSON.stringify(before.frame)) parts.push(new SetSpecimenCommand(structuredClone(before), { ...structuredClone(before), frame: structuredClone(frame) }));
+  store.history.execute(new CompoundCommand('cmd.setAxis', parts));
+  return axis;
+}
+
+/** Delete the technical axis with the point of percussion; the frame made from it goes too (back to the principal axes). */
+export function deleteTechnicalAxis(store: ProjectStore): void {
+  const st = store.state;
+  if (!st.flake.axis) return;
+  const parts: Command[] = [new SetFlakeCommand('cmd.deleteAxis', structuredClone(st.flake), { ...structuredClone(st.flake), axis: null })];
+  const lmBefore = landmarkData(st);
+  const lmAfter = structuredClone(lmBefore);
+  const pop = lmAfter.landmarks.find((l) => l.code === 'pop');
+  if (pop) {
+    lmAfter.landmarks = lmAfter.landmarks.filter((l) => l !== pop);
+    for (const q of lmAfter.semilandmarks) {
+      if (q.startLandmarkId === pop.id) touch(q).startLandmarkId = null;
+      if (q.endLandmarkId === pop.id) touch(q).endLandmarkId = null;
+    }
+    parts.push(new SetLandmarksCommand('cmd.deleteAxis', lmBefore, lmAfter));
+  }
+  if (isTechnicalFrame(st.specimen.frame)) parts.push(new SetSpecimenCommand(structuredClone(st.specimen), { ...structuredClone(st.specimen), frame: null }));
+  store.history.execute(new CompoundCommand('cmd.deleteAxis', parts));
 }
 
 // ---------------------------------------------------------------- volumetric configuration

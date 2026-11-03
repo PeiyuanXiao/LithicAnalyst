@@ -126,7 +126,7 @@ keeps the selection and the undo history.
   panels (`ui/popover.ts`, one `Popovers` shared through `AppApi.popovers`) close on a press
   outside or Esc. The display settings are a panel over the view
   (`Sidebar.displayEl`, mounted by `App.buildDisplayControl`): rows of a label and its control, with
-  the switches of the configuration and Harris panels (annotate mode), and the light ball
+  the switches of the configuration and Harris panels (annotate mode) and of a flake's profile panel, and the light ball
   (`ui/lightBall.ts`, a 2D canvas drawn only when the light changes; it shares `lightFromDisc` in
   `render/lighting.ts` with the L key in `tools/toolController.ts`). The sidebar's left edge resizes
   it (`sidebarWidth` preference).
@@ -350,6 +350,32 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   larger copy closed by a cap and seen from inside, and a click on a cone turns the view along the
   base's normal from that side, the base's `reference` up.
 
+## Flakes
+
+`specimen.type` (`core`, `flake`) decides what a specimen shows: `App.isFlake` and the sections' `visible` choose
+tools, panels and exports; nothing loads or goes when it changes. `setSpecimenType` is one `CompoundCommand` that also exchanges
+`specimen.frame` with `flake.otherFrame`, so each type keeps its orientation and the core's corrections by face stay right
+(`updateSpecimen` leaves them alone on a flake).
+
+* **Technical axis** (`ProjectState.flake.axis`): the tool is a `DrawArrowTool` with options (the start goes to a mesh vertex as curve points do, `curveVertex`);
+  the select tool drags its ends through `ToolContext.moveAxisEnd`. `ArrowLayer.axis` draws and handles it like a scar's arrow, in a colour of
+  its own. `App.applyAxis` finds the frame on the mesh (`compute/technicalFrame.ts`, in slices), then `setTechnicalAxis` makes one step of the
+  axis with its matrix, the `pop` landmark and `specimen.frame`. The matrix is stored with the axis, so undo, the CSV angle (`techAngleDeg`) and
+  left and right of the platform ends (`platformSides`) need no mesh.
+* **Sections**: `compute/meshSection.ts` cuts as `intersectPlane` does, and keeps the triangle of each stretch (`SectionLine.faces`), which says what
+  is on the platform. It takes the triangles from `PlaneCandidates`: `render/bvhPlane.ts` hands them over from the BVH, tests and the batch do without.
+* **Platform region**: a `Region` with `auto: true` comes and goes with the outline in the same command (`setCurveType`, `deleteCurve`); its piece is
+  derived, not stored, so undo cannot set off a new command: `App.updatePlatformAuto` partitions along the outline alone (`smallerPieceSteps`: of the
+  pieces the line touches) and `resolveRegionsNow` gives the region that piece's component in the full partition, unless a typed region is there.
+* **Measurements**: `compute/flake.ts` is pure. `morphDimensionsSteps` (`compute/convexHull.ts`; a point within 1e−4 of the set's size of the hull
+  counts as inside, which also thins a smooth convex scan, and the result is settled on all the vertices) runs once per mesh; `flakeMeasuresSteps` takes
+  the frame, the ends and the platform's triangles, and `platformProfile` does the section's part. `compute/regionPath.ts` is the path within a region.
+  `App.updateFlake` reruns it, in slices and debounced, on changes of the axis, regions, landmarks, type or unit; the result goes to the sidebar, the
+  panel and `derived.flake`. The summary export reads `derived.flake` from the project files, as it does the regions.
+* **Profile panel** (`ui/profilePanel.ts`, a `floatingPanel`): SVG drawings of `FlakeResult.section` and of the cross-section, one scale for both;
+  `App.moveProfile` cuts at most once a frame (`crossSectionAt`), `ringLayer` (a solid `BorderLayer`) shows it on the model. Its place and the
+  position of the slider are view state, never in the file.
+
 ## Landmarks
 
 * `ProjectState.landmarks` (export order) and `semilandmarks` (sets: curve, count, end
@@ -507,7 +533,7 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   its own copy.
 * `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
-  box, the configuration, the volume split, the bicone and "Complete loop". The longest stretch is what
+  box, the configuration, the volume split, the bicone, "Complete loop" and a flake's frame, hull, sections and paths. The longest stretch is what
   design principle 10 limits to about 100 ms.
 
 ## Hosting

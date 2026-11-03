@@ -1,3 +1,4 @@
+import { mmPerUnit } from '../core/format';
 import * as THREE from 'three';
 import { simplifyLoop, traceOutlines } from '../compute/contour';
 import { frameAxes } from '../core/frame';
@@ -72,10 +73,7 @@ export class FigureError extends Error {
   }
 }
 
-/** Millimetres per unit; null when the unit is not stated. */
-export function mmPerUnit(unit: string): number | null {
-  return ({ mm: 1, cm: 10, m: 1000, in: 25.4 } as Record<string, number>)[unit] ?? null;
-}
+export { mmPerUnit };
 
 type Axis = 'x' | 'y' | 'z';
 interface ViewDef {

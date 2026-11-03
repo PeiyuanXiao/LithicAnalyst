@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Specimens have a type, core or flake (specimen panel; a new specimen starts as the last one; the folder list shows it and filters by it). Switching only changes what is shown: the other type's data stay in the project file and come back, and each type keeps its own frame. Curve types follow the type: a flake has Edge (`edge`, shown but not offered on a core; `core_edge` the other way round) and, after Custom, Platform outline (`platform_outline`, key 6, closed, one per flake). The new region type Platform (flakes): the smaller of the two pieces the outline makes becomes the platform region and follows the outline, unless the piece was typed by hand.
+- Technical axis of flakes (key T): an arrow on the ventral face from the point of percussion distally, its start snapped as curve points are; drawn again it is replaced, its ends drag, it can be deleted. It sets `specimen.frame` (`technical_axis`; origin at the point of percussion, +Z dorsal, +Y distal, +X = Y × Z), shown as a small tag in the top bar, which also says why when no frame could be made. The landmark `pop` follows the start and is locked. Platform ends (key E): at most two, on the outline, exported as `platform_left` and `platform_right`.
+- Flake measurements (measure mode, `flakes.csv`, also for the whole folder): technical and morphological length, width and thickness, the angle between the two lengths, platform width and depth (chord and along the surface within the platform region), platform area, EPA (three points and two lines at 1, 2 and 3 mm) and IPA, recomputed whenever their inputs change; the parameters are kept in the project file (`derived.flake`) and the manifest. `scar_vectors.csv` ends with a new column `tech_angle_deg` (empty for cores).
+- Profile panel for flakes (Display): the longitudinal section and a cross-section to one scale with a scale bar; a slider, or a click or drag on the longitudinal section, moves the cross-section (its width and thickness are read out and its outline shown on the model); the longitudinal section carries the points and lines of the measurements.
+- Fitted planes of flakes go by curve or by surface region (the new method `region`: the region's vertices, weighted by area).
+
 - Volumetric configuration of cores (annotate mode, after the Logical Analytical System): each
   scar with an arrow goes to a face of the model's box (the specimen frame, else the principal
   axes) by its normal across the arrow, and gets as its platform the adjacent face it was struck

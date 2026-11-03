@@ -7,7 +7,7 @@
  * touch stored coordinates.
  */
 
-import type { BiconeRole, BiconeSide, ConfigFace, ConfigModel, ConfigRole, Polarity } from './fields';
+import type { BiconeRole, BiconeSide, ConfigFace, ConfigModel, ConfigRole, Polarity, SpecimenType } from './fields';
 
 export type Vec3 = [number, number, number];
 
@@ -51,6 +51,8 @@ export interface SpecimenInfo {
   unit: string;
   notes: string;
   frame: SpecimenFrame | null;
+  /** What the specimen is: decides which tools, panels and exports it has. */
+  type: SpecimenType;
 }
 
 export type AttributeValue = string | number | boolean | null;
@@ -149,7 +151,7 @@ export interface Measurement {
   modifiedAt: string;
 }
 
-export type PlaneMethod = 'all_vertices' | 'scar_directions' | 'scar_starts' | 'curves';
+export type PlaneMethod = 'all_vertices' | 'scar_directions' | 'scar_starts' | 'curves' | 'region';
 
 /**
  * A fitted plane. Only its inputs are stored here; the plane itself is
@@ -165,6 +167,8 @@ export interface Plane {
   excludeCompleteness: string[];
   /** curves: the curves used. */
   curveIds: string[];
+  /** region: the surface regions used. */
+  regionIds: string[];
   /** The normal is taken on the side of this direction (toward the viewer when created; flipping negates it). */
   upHint: Vec3;
   visible: boolean;
@@ -194,7 +198,7 @@ export interface Section {
   modifiedAt: string;
 }
 
-export type RegionType = 'scar' | 'cortex' | 'joint' | 'damage';
+export type RegionType = 'scar' | 'cortex' | 'joint' | 'damage' | 'platform';
 
 /**
  * A surface region, stored as a seed: the clicked surface point and its type.
@@ -209,6 +213,8 @@ export interface Region {
   type: RegionType;
   /** The scar this region belongs to (type scar), or null. */
   scarId: string | null;
+  /** The platform region that follows the platform outline: the smaller of the two pieces it makes (the seed is not used). Gone once the user gives it a type. */
+  auto?: boolean;
   createdAt: string;
   modifiedAt: string;
 }
@@ -240,12 +246,16 @@ export interface Sequence {
   modifiedAt: string;
 }
 
+export type LandmarkCode = 'pop' | 'platform_end';
+
 /** A fixed landmark: a surface point with a free name. The list order is the export order. */
 export interface Landmark {
   id: string;
   /** Name or meaning, e.g. "LM1" or "apex". */
   name: string;
   point: Vec3;
+  /** A landmark of the flake's own: `pop` (the technical axis's start, locked), `platform_end`. Only flakes show them. */
+  code?: LandmarkCode;
   createdAt: string;
   modifiedAt: string;
 }
@@ -285,6 +295,30 @@ export interface ConfigCorrections {
   bicone: { roles: Partial<Record<BiconeSide, BiconeRole>> };
 }
 
+/**
+ * The technical axis of a flake: an arrow on the ventral face from the point of percussion
+ * toward the distal end. Its frame (matrix, see compute/technicalFrame.ts) is kept with it,
+ * since the mesh does not change; `failure` says why there is none.
+ */
+export interface TechnicalAxis {
+  id: string;
+  start: Vec3;
+  end: Vec3;
+  startNormal: Vec3;
+  endNormal: Vec3;
+  matrix: number[] | null;
+  failure: 'short' | 'few' | null;
+  createdAt: string;
+  modifiedAt: string;
+}
+
+/** A flake's own data; kept when the specimen is switched to a core, and shown again when it is switched back. */
+export interface FlakeData {
+  axis: TechnicalAxis | null;
+  /** The specimen frame of the type not in use (each type keeps its own orientation). */
+  otherFrame: SpecimenFrame | null;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -310,6 +344,7 @@ export interface ProjectState {
   split: { source: 'plane' | 'curve'; id: string; upHint: Vec3; swap: boolean } | null;
   /** Manual corrections to the volumetric configuration (none by default). */
   configuration: ConfigCorrections;
+  flake: FlakeData;
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */

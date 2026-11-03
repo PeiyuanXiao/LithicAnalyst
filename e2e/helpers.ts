@@ -15,6 +15,18 @@ export interface LithicApi {
   view(toward: Vec3, up: Vec3): void;
   setTool(id: string): void;
   exportCsvText(): string;
+  /** A flake's frame and measurements (null for a core). */
+  flake(): {
+    axis: ProjectState['flake']['axis'];
+    frameSource: string;
+    measures: import('../src/compute/flake').FlakeMeasures | null;
+    geometry: import('../src/compute/flake').FlakeGeometry | null;
+    parameters: unknown;
+    platformAuto: Vec3 | null;
+  } | null;
+  sectionPanel(): { shown: boolean; at: number; width: number | null; thickness: number | null; ring: number };
+  exportFlakesCsvText(): string;
+  selectForTest(id: string | null): void;
   exportCurvesCsvText(): string;
   curveDraft(): Vec3[] | null;
   measureDraft(): Vec3[] | null;
@@ -50,7 +62,7 @@ export interface LithicApi {
   closeModel(): Promise<void>;
   openFolderHandle(handle: never): Promise<void>;
   specimenIds(): Record<string, string>;
-  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; undownloaded: number } | null;
+  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<'core' | 'flake' | null>; undownloaded: number } | null;
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;

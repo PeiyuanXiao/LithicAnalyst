@@ -1,4 +1,6 @@
 import {
+  deleteTechnicalAxis,
+  setPlaneRegion,
   addSemilandmarkSet,
   deleteLandmark,
   deleteSemilandmarkSet,
@@ -43,8 +45,10 @@ import {
   setScarLabel,
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
-import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, offeredOptions, POLARITIES, REGION_FIELDS, SCAR_FIELDS, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity } from '../core/fields';
+import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, keyedOptions, offeredOptions, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
 import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
+import { FLAKE_MEASURES } from '../compute/flake';
+import { landmarkName, platformSides, shownLandmarks } from '../compute/landmarks';
 import type { ConfigurationResult, FlakingSurface } from '../compute/configuration';
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -72,7 +76,7 @@ import { tip, tips } from './tooltip';
 /** The trash can, in the danger colour. */
 const deleteButton = (id: string, onClick: () => void) => iconButton(ICONS.trash, t('arrows.delete'), onClick, { id, danger: true });
 
-export type RefreshKind = 'all' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'all' | 'flake' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -335,7 +339,7 @@ function curvesSection(api: AppApi): Section {
     const onPick = (v: string) => {
       if (api.selection.id) setCurveAttribute(api.store, api.selection.id, f.key, v);
     };
-    if (f.type === 'enum' && f.options && f.allowCustom) return customField(api, f, id, String(current ?? ''), onPick);
+    if (f.type === 'enum' && f.options && f.allowCustom) return customField(api, f, id, String(current ?? ''), api.store.state.specimen.type, onPick);
     if (f.type === 'enum' && f.options) {
       const ctl = f.numberKeys
         ? optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: i < 9 ? String(i + 1) : undefined })), String(current), onPick)
@@ -398,6 +402,8 @@ function curvesSection(api: AppApi): Section {
     clear(refs.meta);
     const u = st.specimen.unit;
     refs.meta.append(...numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), ...textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
+    // the platform outline must be closed before it means anything
+    if (c.attributes.type === PLATFORM_OUTLINE && !c.closed) refs.meta.append(h('dt', {}), h('dd', { class: 'text', id: 'curve-outline-open' }, h('span', { class: 'pill pill-warn' }, t('curves.notClosed'))));
     (refs.complete.parentElement as HTMLElement).hidden = c.closed;
     refs.complete.disabled = c.anchors.length < 3 || api.completingLoop();
   };
@@ -405,7 +411,8 @@ function curvesSection(api: AppApi): Section {
   const refresh = (kind: RefreshKind) => {
     if (kind === 'mesh' || kind === 'arrows') return;
     renderList();
-    if (kind !== 'display') renderInspector(kind === 'all');
+    // another type of specimen offers other curve types
+    if (kind !== 'display') renderInspector(kind === 'all' || kind === 'specimen');
   };
   refresh('all');
   return { el, refresh };
@@ -420,17 +427,21 @@ const CUSTOM = 'custom';
  * custom values used so far (Enter keeps the text, Esc lets it go). An older
  * code no longer offered is shown while the item has it.
  */
-function customField(api: AppApi, f: FieldDef, id: string, current: string, onPick: (v: string) => void): { el: HTMLElement; set: (x: { attributes: Record<string, AttributeValue> }) => void } {
-  const offered = offeredOptions(f);
-  const legacy = f.options?.find((o) => o.legacy && o.value === current);
+function customField(api: AppApi, f: FieldDef, id: string, current: string, specimenType: SpecimenType, onPick: (v: string) => void): { el: HTMLElement; set: (x: { attributes: Record<string, AttributeValue> }) => void } {
+  const offered = offeredOptions(f, specimenType);
+  // a code not offered on this type of specimen is shown while the item has it
+  const legacy = f.options?.find((o) => o.value === current && !offered.includes(o));
   const shown = (v: string) => (isCustomValue(f, v) ? CUSTOM : v);
+  const keyed = keyedOptions(f, specimenType);
+  const at = keyed.indexOf('custom');
+  const entry = (o: (typeof keyed)[number], i: number) => (o === 'custom' ? { value: CUSTOM, label: t('field.custom'), key: String(i + 1) } : { value: o.value, label: tl(o.label), key: String(i + 1) });
   const ctl = optionList(
     id,
     tl(f.label),
     [
-      ...offered.map((o, i) => ({ value: o.value, label: tl(o.label), key: String(i + 1) })),
+      ...keyed.slice(0, at).map((o, i) => entry(o, i)),
       ...(legacy ? [{ value: legacy.value, label: tl(legacy.label) }] : []),
-      { value: CUSTOM, label: t('field.custom'), key: String(offered.length + 1) },
+      ...keyed.slice(at).map((o, i) => entry(o, at + i)),
     ],
     shown(current),
     (v) => {
@@ -466,7 +477,7 @@ function customField(api: AppApi, f: FieldDef, id: string, current: string, onPi
     if (e.key === 'Enter') {
       e.preventDefault();
       input.hidden = true;
-      onPick(customValue(f, input.value));
+      onPick(customValue(f, input.value, specimenType));
     } else if (e.key === 'Escape') {
       e.preventDefault();
       cancel();
@@ -522,14 +533,21 @@ function displaySection(api: AppApi): Section {
   };
   const config = panelRow('config-show', t('sec.configuration'), d.configuration, (v) => api.setDisplay((x) => (x.configuration = v), 'configuration'));
   const harris = panelRow('harris-show', t('harris.title'), d.harris, (v) => api.setDisplay((x) => (x.harris = v), 'harris'));
+  const profile = panelRow('profile-show', t('profile.title'), d.profile, (v) => api.setDisplay((x) => (x.profile = v), 'profile'));
 
-  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, h('div', { class: 'check-row' }, labels, hidden, regions));
+  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, h('div', { class: 'check-row' }, labels, hidden, regions));
 
   const refresh = (kind: RefreshKind) => {
     // these panels belong to the annotate mode
-    config.el.hidden = harris.el.hidden = api.mode !== 'annotate';
+    const flake = api.store.state.specimen.type === 'flake';
+    config.el.hidden = api.mode !== 'annotate' || flake;
+    harris.el.hidden = api.mode !== 'annotate';
     config.input.checked = api.display.configuration;
     harris.input.checked = api.display.harris;
+    // a flake's: it needs the technical axis
+    profile.el.hidden = !flake;
+    profile.input.checked = api.display.profile;
+    profile.input.disabled = !api.store.state.flake.axis?.matrix;
     if (kind !== 'all' && kind !== 'display' && kind !== 'mesh') return;
     shading.set(api.display.shading);
     const scanBtn = shading.el.querySelector('[data-value="scan"]') as HTMLButtonElement | null;
@@ -570,6 +588,55 @@ function measureAutoSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+/** The kind of quantity of each of a flake's measurements. */
+const flakeQuantity = (k: string): Quantity => (k === 'platform_area' ? 'area' : k.startsWith('epa') || k === 'ipa' || k.endsWith('_deg') ? 'angle' : 'length');
+
+/** A flake's measurements (measure mode). */
+function flakeSection(api: AppApi): Section {
+  const { el, body } = section('flake', t('sec.flake'));
+  const meta = h('dl', { class: 'num-grid measure-auto', id: 'flake-measures' });
+  body.append(meta);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'measure', 'specimen', 'flake'].includes(kind)) return;
+    clear(meta);
+    const u = api.store.state.specimen.unit;
+    const m = api.flakeMeasures();
+    for (const k of FLAKE_MEASURES) meta.append(...numRow(t(`flake.${k}`), ...quantity(flakeQuantity(k), m?.[k] ?? null, u), `flake-${k}`));
+    const a = api.autoMeasurements();
+    meta.append(...numRow(t('measure.area'), ...quantity('area', a?.surfaceArea ?? null, u), 'flake-area'));
+    meta.append(...(a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : numRow(t('measure.volume'), ...quantity('volume', a?.volume ?? null, u), 'flake-volume')));
+  };
+  refresh('all');
+  return { el, refresh, visible: () => api.store.state.specimen.type === 'flake' };
+}
+
+/** A flake's technical axis (annotate mode): its ends, why it gives no frame, delete. */
+function axisSection(api: AppApi): Section {
+  const status = h('span', { class: 'pill', id: 'axis-status', hidden: true });
+  const { el, body } = section('axis', t('sec.axis'), status);
+  const inspector = h('div', { class: 'inspector', id: 'axis-inspector' });
+  body.append(inspector);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'flake', 'specimen', 'selection'].includes(kind)) return;
+    const st = api.store.state;
+    const a = st.flake.axis;
+    status.hidden = !a?.failure;
+    status.classList.toggle('pill-warn', !!a?.failure);
+    status.textContent = a?.failure ? t(`axis.${a.failure}`) : '';
+    clear(inspector);
+    if (!a) return;
+    const cu = quantityUnit('coord', st.specimen.unit);
+    const selected = api.selection.id === a.id;
+    inspector.append(
+      h('button', { type: 'button', class: `arrow-row axis-row${selected ? ' is-selected' : ''}`, id: 'axis-row', 'aria-pressed': String(selected), onclick: () => api.selection.set(a.id) }, h('span', { class: 'chip', style: `--chip:${selected ? ARROW_COLORS.selected : ARROW_COLORS.axis}` }), h('span', { class: 'arrow-meta' }, t('sec.axis'))),
+      h('dl', { class: 'coord-grid', id: 'axis-coords' }, ...coordRow(t('axis.start'), coords(a.start), cu), ...coordRow(t('axis.end'), coords(a.end), cu)),
+      h('div', { class: 'btn-row' }, deleteButton('axis-delete', () => deleteTechnicalAxis(api.store))),
+    );
+  };
+  refresh('all');
+  return { el, refresh, visible: () => api.store.state.specimen.type === 'flake' };
+}
+
 function measureManualSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('measure-manual', t('sec.measureManual'), badge);
@@ -606,6 +673,8 @@ function measureManualSection(api: AppApi): Section {
 }
 
 const PLANE_METHODS: PlaneMethod[] = ['all_vertices', 'scar_directions', 'scar_starts', 'curves'];
+/** A flake's planes go by part: a curve or a surface region. */
+const FLAKE_PLANE_METHODS: PlaneMethod[] = ['curves', 'region'];
 
 function planesSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
@@ -620,7 +689,10 @@ function planesSection(api: AppApi): Section {
     const id = api.selection.id;
     const p = id ? api.store.plane(id) : undefined;
     if (!p) return;
-    const method = selectRow('plane-method', t('plane.method'), PLANE_METHODS.map((m) => ({ value: m, label: t(`plane.method.${m}`) })), p.method, (v) =>
+    const offered = api.store.state.specimen.type === 'flake' ? FLAKE_PLANE_METHODS : PLANE_METHODS;
+    // a plane made on the other type of specimen keeps its method
+    const methods = offered.includes(p.method) ? offered : [...offered, p.method];
+    const method = selectRow('plane-method', t('plane.method'), methods.map((m) => ({ value: m, label: t(`plane.method.${m}`) })), p.method, (v) =>
       setPlaneMethod(api.store, p.id, v as PlaneMethod),
     );
     const inputs = h('div', { class: 'plane-inputs', id: 'plane-inputs' });
@@ -635,6 +707,12 @@ function planesSection(api: AppApi): Section {
         const type = fieldText(CURVE_FIELDS.find((x) => x.key === 'type')!, c.attributes.type);
         inputs.append(checkbox(`plane-curve-${c.id}`, type !== MISSING ? `${c.label} · ${type}` : c.label, p.curveIds.includes(c.id), (on) => setPlaneCurve(api.store, p.id, c.id, on)));
       }
+    } else if (p.method === 'region') {
+      const types = REGION_FIELDS[0].options!;
+      for (const r of api.store.state.regions) {
+        const type = types.find((o) => o.value === r.type);
+        inputs.append(checkbox(`plane-region-${r.id}`, `${r.label} · ${type ? tl(type.label) : r.type}`, p.regionIds.includes(r.id), (on) => setPlaneRegion(api.store, p.id, r.id, on)));
+      }
     }
     const actions = h(
       'div',
@@ -647,7 +725,7 @@ function planesSection(api: AppApi): Section {
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'planes', 'selection', 'mesh', 'arrows', 'curves'].includes(kind)) return;
+    if (!['all', 'planes', 'selection', 'mesh', 'arrows', 'curves', 'regions', 'specimen'].includes(kind)) return;
     const st = api.store.state;
     const results = api.planeResults();
     badge.textContent = String(st.planes.length);
@@ -683,7 +761,7 @@ function planesSection(api: AppApi): Section {
 /** Where the specimen frame came from, in words: "Plane P1 · Arrow S1" (stored as `plane:P1; vertical:S1`). */
 function frameSourceText(source: string): string {
   const part = (s: string): string | null =>
-    s === 'view' ? t('frame.src.view') : s.startsWith('plane:') ? t('frame.src.plane', { label: s.slice(6) }) : s.startsWith('vertical:') ? t('frame.src.vertical', { label: s.slice(9) }) : null;
+    s === 'view' ? t('frame.src.view') : s === 'technical_axis' ? t('frame.src.technical') : s === 'turned' ? t('frame.src.turned') : s.startsWith('plane:') ? t('frame.src.plane', { label: s.slice(6) }) : s.startsWith('vertical:') ? t('frame.src.vertical', { label: s.slice(9) }) : null;
   const parts = source.split('; ').map(part);
   return parts.every((p) => p !== null) ? parts.join(' · ') : t('frame.src.other');
 }
@@ -896,7 +974,10 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     clear(inspector);
     const r = sel ? api.store.region(sel) : undefined;
     if (r) {
-      const ctl = optionList('region-type', tl(typeField.label), typeField.options!.map((o, i) => ({ value: o.value, label: tl(o.label), key: String(i + 1) })), r.type, (v) => setType(r.id, v));
+      const offered = offeredOptions(typeField, st.specimen.type);
+      // a type not offered on this type of specimen is shown while the region has it
+      const here = typeField.options!.find((o) => o.value === r.type && !offered.includes(o));
+      const ctl = optionList('region-type', tl(typeField.label), [...offered.map((o, i) => ({ value: o.value, label: tl(o.label), key: String(i + 1) })), ...(here ? [{ value: here.value, label: tl(here.label) }] : [])], r.type, (v) => setType(r.id, v));
       inspector.append(
         ctl.el,
         h('div', { class: 'btn-row' }, deleteButton('region-delete', () => deleteRegion(api.store, r.id))),
@@ -905,7 +986,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     clear(totals);
     totals.hidden = !info || st.regions.length === 0;
     if (info && st.regions.length) {
-      for (const k of ['scar', 'cortex', 'joint', 'damage'] as const) if (info.totals[k] > 0) totals.append(...numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
+      for (const k of ['scar', 'cortex', 'joint', 'damage', 'platform'] as const) if (info.totals[k] > 0) totals.append(...numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
       if (info.totals.cortex > 0) totals.append(...numRow(t('region.cortexRatio'), fmtQuantity('ratio', info.totals.cortexRatio), '', 'region-cortex-ratio'));
       totals.hidden = !totals.childElementCount;
     }
@@ -1362,11 +1443,15 @@ function landmarksSection(api: AppApi): Section {
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'landmarks', 'curves', 'selection', 'mesh'].includes(kind)) return;
+    if (!['all', 'landmarks', 'curves', 'selection', 'mesh', 'specimen', 'flake'].includes(kind)) return;
     const st = api.store.state;
     const sel = api.selection.id;
     const table = api.landmarkTable();
-    badge.textContent = String(st.landmarks.length);
+    const fixed = shownLandmarks(st);
+    badge.textContent = String(fixed.length);
+    const sides = platformSides(st.flake.axis?.matrix, fixed);
+    /** What the list calls a landmark: those of the flake's own by what they are. */
+    const nameOf = (l: (typeof fixed)[number]) => (l.code === 'pop' ? t('landmark.pop') : l.code !== 'platform_end' ? l.name : landmarkName(l, sides) === 'platform_left' ? t('landmark.platformLeft') : landmarkName(l, sides) === 'platform_right' ? t('landmark.platformRight') : t('landmark.platformEnd'));
 
     // names carried over from the last specimen
     clear(names);
@@ -1386,14 +1471,17 @@ function landmarksSection(api: AppApi): Section {
 
     // fixed landmarks, in export order (drag to reorder)
     clear(list);
-    list.hidden = st.landmarks.length === 0;
-    st.landmarks.forEach((l, i) => {
+    list.hidden = fixed.length === 0;
+    fixed.forEach((l, shown) => {
+      // the position in the whole list (the export order): what a move goes by
+      const i = st.landmarks.indexOf(l);
       const li = h(
         'li',
         { class: 'arrow-row landmark-row', role: 'option', 'aria-selected': String(l.id === sel), 'data-id': l.id, draggable: 'true', onclick: () => api.selection.set(l.id) },
         h('span', { class: 'chip chip-dot', style: `--chip:${l.id === sel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.fixed}` }),
-        h('span', { class: 'arrow-id mono' }, String(i + 1)),
-        h('span', { class: 'arrow-meta' }, l.name),
+        h('span', { class: 'arrow-id mono' }, String(shown + 1)),
+        h('span', { class: 'arrow-meta' }, nameOf(l)),
+        l.code === 'pop' ? h('span', { class: 'landmark-lock', id: 'landmark-pop-lock', title: t('landmark.locked'), 'aria-label': t('landmark.locked') }, icon(ICONS.lock)) : null,
       );
       li.addEventListener('dragstart', (e) => {
         dragId = l.id;
@@ -1425,12 +1513,14 @@ function landmarksSection(api: AppApi): Section {
     } else {
       if (builtFor !== l.id || !nameInput) {
         clear(inspector);
-        const row = textRow('landmark-name', t('landmark.name'), l.name, (v) => renameLandmark(api.store, l.id, v));
+        const row = textRow('landmark-name', t('landmark.name'), nameOf(l), (v) => renameLandmark(api.store, l.id, v));
         nameInput = row.input as HTMLInputElement;
+        // a landmark of the flake's own is named by what it is
+        nameInput.disabled = !!l.code;
         inspector.append(row.el, h('div', { class: 'landmark-body' }));
         builtFor = l.id;
       }
-      softSet(nameInput, l.name);
+      softSet(nameInput, nameOf(l));
       const holder = inspector.querySelector('.landmark-body') as HTMLElement;
       clear(holder);
       const i = st.landmarks.indexOf(l);
@@ -1441,7 +1531,7 @@ function landmarksSection(api: AppApi): Section {
           { class: 'btn-row' },
           iconButton(ICONS.up, t('landmark.up'), () => reorderLandmark(api.store, l.id, i - 1), { id: 'landmark-up', disabled: i === 0 }),
           iconButton(ICONS.down, t('landmark.down'), () => reorderLandmark(api.store, l.id, i + 1), { id: 'landmark-down', disabled: i === st.landmarks.length - 1 }),
-          deleteButton('landmark-delete', () => deleteLandmark(api.store, l.id)),
+          l.code === 'pop' ? null : deleteButton('landmark-delete', () => deleteLandmark(api.store, l.id)),
         ),
       );
     }
@@ -1487,7 +1577,7 @@ function landmarksSection(api: AppApi): Section {
     softSet(countInput, String(q.count));
     const holder = setInspector.querySelector('.semi-body') as HTMLElement;
     clear(holder);
-    const lms: Array<[string, string]> = [['', t('semi.none')], ...st.landmarks.map((x, i): [string, string] => [x.id, `${i + 1} · ${x.name}`])];
+    const lms: Array<[string, string]> = [['', t('semi.none')], ...fixed.map((x, i): [string, string] => [x.id, `${i + 1} · ${nameOf(x)}`])];
     holder.append(
       select('semilandmark-curve', t('semi.curve'), st.curves.map((c): [string, string] => [c.id, c.label]), q.curveId, (v) => updateSemilandmarkSet(api.store, q.id, { curveId: v })),
       h(
@@ -1636,6 +1726,7 @@ function sectionsSection(api: AppApi): Section {
 function workspaceSection(api: AppApi): Section {
   const { el, body } = section('workspace', t('sec.workspace'));
   const name = h('div', { class: 'checks-row' });
+  const typeFilter = h('select', { id: 'workspace-type', class: 'ctl-select', 'aria-label': t('workspace.type') }, h('option', { value: '' }, t('workspace.type.all')), ...SPECIMEN_TYPES.map((x) => h('option', { value: x }, t(`specimen.type.${x}`)))) as HTMLSelectElement;
   const filter = h('input', { id: 'workspace-filter', class: 'ctl-text', type: 'search', placeholder: t('workspace.filter'), 'aria-label': t('workspace.filter'), autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
   // the models: only the rows in view are made (folders of a thousand models stay quick)
   const ROW = 28;
@@ -1650,7 +1741,7 @@ function workspaceSection(api: AppApi): Section {
   const barText = h('span', { class: 'mono', id: 'batch-status' });
   const cancel = iconButton(ICONS.close, t('dlg.cancel'), () => api.cancelBatch(), { id: 'batch-cancel' });
   const progress = h('div', { class: 'batch-row' }, barText, bar, cancel);
-  body.append(name, filter, list, h('div', { class: 'workspace-nav' }, prev, next, nextNew, download), progress);
+  body.append(name, h('div', { class: 'workspace-filters' }, filter, typeFilter), list, h('div', { class: 'workspace-nav' }, prev, next, nextNew, download), progress);
 
   let shown: number[] = [];
   let lastIndex = -2;
@@ -1669,6 +1760,7 @@ function workspaceSection(api: AppApi): Section {
           { class: 'ws-row', role: 'option', 'data-index': String(i), 'aria-selected': String(i === ws.index), style: `top:${k * ROW}px`, title: ws.meshes[i], onclick: () => !api.batchInfo() && void api.openWorkspaceMesh(i) },
           h('span', { class: `ws-dot${started ? ' is-started' : ''}`, title: t(started ? 'workspace.started' : 'workspace.notStarted'), 'aria-label': t(started ? 'workspace.started' : 'workspace.notStarted') }),
           h('span', { class: 'ws-path mono' }, ws.meshes[i]),
+          ws.types[i] ? h('span', { class: 'ws-type', 'data-type': ws.types[i] }, t(`specimen.type.${ws.types[i]}`)) : null,
         ),
       );
     }
@@ -1678,12 +1770,14 @@ function workspaceSection(api: AppApi): Section {
     const ws = api.workspaceInfo();
     if (!ws) return;
     const q = filter.value.trim().toLowerCase();
-    shown = ws.meshes.flatMap((m, i) => (!q || m.toLowerCase().includes(q) ? [i] : []));
+    const type = typeFilter.value;
+    shown = ws.meshes.flatMap((m, i) => ((!q || m.toLowerCase().includes(q)) && (!type || ws.types[i] === type) ? [i] : []));
     spacer.style.height = `${shown.length * ROW}px`;
     list.style.height = `${Math.max(1, Math.min(shown.length, 10)) * ROW + 2}px`;
     renderRows();
   };
   filter.addEventListener('input', applyFilter);
+  typeFilter.addEventListener('change', applyFilter);
 
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'workspace', 'mesh'].includes(kind)) return;
@@ -1776,7 +1870,7 @@ const AGREE_GROUPS: Array<[string, string[]]> = [
 /** Item types whose rows compare pairs of drawn items: a click shows the most different pair. */
 const AGREE_PAIRS = new Set(['arrow', 'curve', 'landmark', 'semilandmark']);
 
-const REGION_KEYS = ['scar', 'cortex', 'joint', 'damage'];
+const REGION_KEYS = ['scar', 'cortex', 'joint', 'damage', 'platform'];
 
 function agreementSection(api: AppApi): Section {
   const { el, body } = section('agreement', t('sec.agreement'));
@@ -1908,11 +2002,13 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [orientationSection, ['present']],
   [sectionsSection, ['present']],
   [figureSection, ['present']],
+  [axisSection, ['annotate']],
   [arrowsSection, ['annotate']],
   [relationsSection, ['annotate']],
   [curvesSection, ['annotate']],
   [(api) => regionsSection(api, (id, type) => api.setRegionType(id, type)), ['annotate']],
   [landmarksSection, ['annotate']],
+  [flakeSection, ['measure']],
   [measureAutoSection, ['measure']],
   [measureManualSection, ['measure']],
   [planesSection, ['measure']],
@@ -1939,6 +2035,8 @@ export interface Sidebar {
 /** The section each tool works in: switching to the tool opens it and folds the others. */
 const TOOL_SECTIONS: Record<string, string> = {
   draw: 'arrows',
+  axis: 'axis',
+  'platform-end': 'landmarks',
   curve: 'curves',
   region: 'regions',
   relation: 'relations',
@@ -1955,6 +2053,7 @@ function selectionTarget(api: AppApi): [string, string] | null {
   const id = api.selection.id;
   const st = api.store;
   if (!id) return null;
+  if (st.state.flake.axis?.id === id) return ['axis', '#axis-inspector'];
   if (st.scar(id)) return ['arrows', '#arrow-inspector'];
   if (st.curve(id)) return ['curves', '#curve-inspector'];
   if (st.region(id)) return ['regions', '#region-inspector'];

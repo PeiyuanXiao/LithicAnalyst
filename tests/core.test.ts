@@ -13,7 +13,7 @@ import {
   updateSpecimen,
 } from '../src/core/actions';
 import { assembleCurve, curveLength, curveSegments, isValidShape, midPointIndex } from '../src/core/curveGeometry';
-import { CURVE_FIELDS, customValue, defaultAttributes, defaultCurveAttributes, fieldLocked, isCustomValue, numberKeyField, offeredOptions, SCAR_FIELDS, shiftNumberKeyField, TERMINATION_MISSING, withAttribute } from '../src/core/fields';
+import { CURVE_FIELDS, customValue, defaultAttributes, defaultCurveAttributes, fieldLocked, isCustomValue, numberKeyField, offeredOptions, keyedOptions, SCAR_FIELDS, shiftNumberKeyField, TERMINATION_MISSING, withAttribute } from '../src/core/fields';
 import { parseProjectFile, ProjectFileError, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import type { Vec3 } from '../src/core/types';
@@ -200,9 +200,9 @@ describe('CSV export', () => {
     const csv = scarVectorCsv(s.state, { excelBom: false });
     const lines = csv.trimEnd().split('\n');
     expect(lines[0]).toBe(
-      ['specimen_id', 'scar_id', 'start_x', 'start_y', 'start_z', 'end_x', 'end_y', 'end_z', 'length', ...SCAR_FIELDS.map((f) => f.key), 'platform_face', 'flaking_surface', 'unit'].join(','),
+      ['specimen_id', 'scar_id', 'start_x', 'start_y', 'start_z', 'end_x', 'end_y', 'end_z', 'length', ...SCAR_FIELDS.map((f) => f.key), 'platform_face', 'flaking_surface', 'unit', 'tech_angle_deg'].join(','),
     );
-    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit');
+    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg');
     // the termination: empty until judged; NA once the completeness says it is missing
     expect(lines[1].startsWith('LB-1023,S1,10,0,0,30,0,0,20,point_complete,,certain,"step ""hinge"", maybe')).toBe(true);
     expect(csv).toContain(',bulb_truncated,na,certain,,,,mm');
@@ -291,7 +291,10 @@ describe('curves in the project', () => {
     // keys 1–4 the offered types, 5 the user's own text; the older codes are read but not offered
     const type = numberKeyField(CURVE_FIELDS)!;
     expect(offeredOptions(type).map((o) => o.value)).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint']);
-    expect(type.options!.filter((o) => o.legacy).map((o) => o.value)).toEqual(['edge', 'ridge', 'other']);
+    expect(type.options!.filter((o) => o.legacy).map((o) => o.value)).toEqual(['ridge', 'other']);
+    // a flake's: the edge and, after "custom", the platform outline
+    expect(keyedOptions(type, 'flake').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'edge', 'cortex', 'joint', 'custom', 'platform_outline']);
+    expect(keyedOptions(type, 'core').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint', 'custom']);
     expect(type.allowCustom).toBe(true);
     expect(addCurve(s, lineShape()).attributes.type).toBe('');
   });

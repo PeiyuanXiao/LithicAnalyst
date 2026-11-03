@@ -62,6 +62,7 @@ export const ICONS = {
   target: 'M12 3v4|M12 17v4|M3 12h4|M17 12h4|M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   lang: 'M4 5h9|M8.5 3v2|M6 5c.5 3 2.5 6 6 8|M11 5c-.5 3-2.5 6-6 8|M13 20l4-9 4 9|M14.5 17h5',
   close: 'M6 6l12 12|M18 6L6 18',
+  lock: 'M6 11h12v9H6z|M9 11V7a3 3 0 0 1 6 0v4',
   magnet: 'M5 4h5v7a2 2 0 0 0 4 0V4h5v7a7 7 0 0 1-14 0z|M5 8h5|M14 8h5',
   plus: 'M12 5v14|M5 12h14',
   up: 'M12 19V5|M6 11l6-6 6 6',
@@ -96,6 +97,8 @@ export function icon20(markup: string): SVGSVGElement {
 
 /** Icons of the view toolbar, the mode switch and the shell (20 × 20 grid). */
 export const ICONS20 = {
+  axis: '<circle cx="10" cy="16.5" r="2"/><path d="M10 14.5 V3.5"/><path d="M6.5 7 L10 3.5 L13.5 7"/><path d="M4 16.5 H6 M14 16.5 H16"/>',
+  platformEnd: '<path d="M3 13.5 H17"/><circle cx="4.5" cy="13.5" r="2" fill="currentColor"/><circle cx="15.5" cy="13.5" r="2" fill="currentColor"/><path d="M10 13.5 V6"/>',
   select: '<path d="M5 3 L15 10.5 L10.2 11.4 L12.6 16.6 L10.8 17.4 L8.4 12.2 L5 15.2 Z"/>',
   arrow: '<circle cx="4.5" cy="15.5" r="2"/><path d="M6 14 L15.5 4.5"/><path d="M10 4.5 H15.5 V10"/>',
   curve: '<path d="M3 15 C6 4 11 17 17 5"/><rect x="1.8" y="13.8" width="2.4" height="2.4" fill="currentColor"/><rect x="15.8" y="3.8" width="2.4" height="2.4" fill="currentColor"/><rect x="8.8" y="8.8" width="2.4" height="2.4" fill="currentColor"/>',

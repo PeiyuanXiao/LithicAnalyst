@@ -16,6 +16,8 @@ export interface SurfaceMeasures {
   vertices: PrincipalAxes;
   /** Edge table, kept for plane sections. */
   edges: EdgeTable;
+  /** Mean length of the mesh's edges. */
+  meanEdge: number;
 }
 
 export function* surfaceMeasuresSteps(positions: ArrayLike<number>, index: ArrayLike<number>): Steps<SurfaceMeasures> {
@@ -24,6 +26,13 @@ export function* surfaceMeasuresSteps(positions: ArrayLike<number>, index: Array
   const edges = yield* buildEdgesSteps(index, vertexCount);
   const topology = yield* meshTopologySteps(index, vertexCount, edges);
   const vertices = yield* vertexPcaSteps(positions);
+  let sum = 0;
+  const edgeCount = edges.v0.length;
+  for (let e = 0; e < edgeCount; e++) {
+    if (e % YIELD_EVERY === 0) yield;
+    const a = 3 * edges.v0[e], b = 3 * edges.v1[e];
+    sum += Math.hypot(positions[a] - positions[b], positions[a + 1] - positions[b + 1], positions[a + 2] - positions[b + 2]);
+  }
   return {
     surfaceArea: integrals.area,
     volume: topology.closed ? Math.abs(integrals.volume) : null,
@@ -31,6 +40,7 @@ export function* surfaceMeasuresSteps(positions: ArrayLike<number>, index: Array
     principal: surfacePca(integrals),
     vertices,
     edges,
+    meanEdge: edgeCount ? sum / edgeCount : 0,
   };
 }
 
