@@ -30,7 +30,7 @@ function specimen(id: string, size: [number, number, number], observers: Record<
     nodule: null,
     split: null,
     flake: null,
-    edgeAngles: [], retouchAngles: [],
+    edgeAngles: [], retouchAngles: [], gm: null,
     observers: new Map(Object.entries(observers)),
   };
 }

@@ -6,11 +6,12 @@ import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { FlakeMeasures } from '../compute/flake';
-import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, RetouchAngleCurve } from '../core/derived';
+import { gmMissingInputs, type GmMissing } from '../compute/gm';
+import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, GmDerived, RetouchAngleCurve } from '../core/derived';
 import { measurementValue } from '../core/measurements';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
 import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, retouchAnglesCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
-import { landmarksCsv, landmarksTps } from './landmarks';
+import { gmCurvesCsv, gmSurfacesCsv, landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
 export interface BatchSpecimen {
@@ -33,6 +34,8 @@ export interface BatchSpecimen {
   edgeAngles: readonly EdgeAngleCurve[];
   /** The retouch layers along them, from the project file's derived results. */
   retouchAngles: readonly RetouchAngleCurve[];
+  /** A flake's points for geometric morphometrics, from the project file's derived results; those of another configuration are made anew before the tables. */
+  gm: GmDerived | null;
   /** Each observer's values (annotator → measure → value), from every project file of the model, for the ICC. */
   observers: Map<string, Record<string, number>>;
 }
@@ -136,6 +139,7 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     flake: state.specimen.type === 'flake' ? ((derived.flake as FlakeDerived | null | undefined)?.measures ?? null) : null,
     edgeAngles: (derived.edgeAngles as { curves?: EdgeAngleCurve[] } | null | undefined)?.curves ?? [],
     retouchAngles: (derived.retouchAngles as { curves?: RetouchAngleCurve[] } | null | undefined)?.curves ?? [],
+    gm: state.specimen.type === 'flake' ? ((derived.gm as GmDerived | null | undefined) ?? null) : null,
     observers,
   };
 }
@@ -166,7 +170,42 @@ export interface Manifest {
   /** Models sharing a file name, whose IDs were made from their paths. */
   duplicateNames: Array<{ name: string; files: string[] }>;
   failures: BatchFailure[];
+  /** Flakes left out of the coordinates of geometric morphometrics, and why. */
+  gmSkipped?: GmSkipped[];
   files: string[];
+}
+
+/** A flake left out of the coordinates of geometric morphometrics: what it lacks (codes). */
+export interface GmSkipped {
+  file: string;
+  id: string;
+  missing: GmMissing[];
+}
+
+/**
+ * The points of the flakes of a batch: the coordinates of the complete ones and, once, their sliding definition. All must have
+ * the same points, or their numbers would mean different points; those with another number (the user's own landmarks) are skipped too.
+ */
+export function gmOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions): { files: Array<{ suffix: string; text: string }>; skipped: GmSkipped[] } {
+  const plain = { excelBom: false };
+  const skipped: GmSkipped[] = [];
+  const kept: Array<BatchSpecimen & { gm: GmDerived }> = [];
+  for (const s of specimens) {
+    if (s.state.specimen.type !== 'flake') continue;
+    const skip = (missing: GmMissing[]) => skipped.push({ file: s.file, id: s.state.specimen.id, missing });
+    if (!s.gm?.complete) skip(s.gm?.missing ?? gmMissingInputs(s.state));
+    else if (kept.length && kept[0].gm.rows.length !== s.gm.rows.length) skip(['point_count']);
+    else kept.push(s as BatchSpecimen & { gm: GmDerived });
+  }
+  if (!kept.length) return { files: [], skipped };
+  const first = kept[0].gm;
+  const files = [
+    { suffix: 'gm_landmarks.csv', text: mergeCsv(kept.map((s) => landmarksCsv(s.state, s.gm, plain)), opts.excelBom) },
+    { suffix: 'gm_landmarks.tps', text: kept.map((s) => landmarksTps(s.state, s.gm)).join('') },
+  ];
+  if (first.curves.length) files.push({ suffix: 'gm_curves.csv', text: gmCurvesCsv(first) });
+  if (first.surfaces.length) files.push({ suffix: 'gm_surfaces.csv', text: gmSurfacesCsv(first) });
+  return { files, skipped };
 }
 
 export const manifestJson = (m: Manifest): string => JSON.stringify(m, null, 2) + '\n';

@@ -2,6 +2,7 @@ import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
 import type { ConfigBox } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { EDGE_ANGLE_PARAMETERS, type EdgeAngleResult } from '../compute/edgeAngle';
+import type { GmResult } from '../compute/gm';
 import type { RetouchAngleResult } from '../compute/retouchAngle';
 import { SHARP_EDGE_PARAMETERS, sharpOfCurve, type SharpSegment } from '../compute/sharpEdge';
 import { FLAKE_PARAMETERS, type FlakeGeometry, type FlakeMeasures, type FlakeResult } from '../compute/flake';
@@ -12,7 +13,7 @@ import { relationResults, type RelationResults } from '../compute/relations';
 import type { SphereFit } from '../compute/sphere';
 import type { VolumeSplit } from '../compute/split';
 import { measurementUnit, measurementValue } from './measurements';
-import type { MeasureType, ProjectState, SharpEdgeRule, Vec3 } from './types';
+import type { GmConfig, MeasureType, ProjectState, SharpEdgeRule, Vec3 } from './types';
 
 /** Size and shape of the whole model, measured automatically when it is opened. */
 export interface AutoMeasurements {
@@ -47,6 +48,7 @@ export interface FlakeDerived {
 
 /** One curve's edge angles. */
 export type RetouchAngleCurve = RetouchAngleResult & { curveId: string };
+export type GmDerived = GmResult & { config: GmConfig };
 export type EdgeAngleCurve = EdgeAngleResult & { curveId: string };
 
 /**
@@ -85,6 +87,8 @@ export interface DerivedResults {
   retouchAngles: { curves: RetouchAngleCurve[] } | null;
   /** The sharp stretches of the curves measured, under the rule (null without a threshold, or without edge angles). */
   sharpEdge: { rule: SharpEdgeRule; parameters: typeof SHARP_EDGE_PARAMETERS; curves: Array<{ curveId: string; length: number; segments: SharpSegment[] }> } | null;
+  /** A flake's points for geometric morphometrics, and the configuration they were made by (null for a core, or before they are computed). */
+  gm: GmDerived | null;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -105,6 +109,8 @@ export interface MeshResults {
   edgeAngles?: readonly EdgeAngleCurve[] | null;
   /** The retouch layers along them. */
   retouchAngles?: readonly RetouchAngleCurve[] | null;
+  /** A flake's points for geometric morphometrics. */
+  gm?: GmResult | null;
 }
 
 /** Where the specimen frame came from, for flakes.csv. */
@@ -149,5 +155,6 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     edgeAngles: mesh?.edgeAngles?.length ? { parameters: EDGE_ANGLE_PARAMETERS, curves: [...mesh.edgeAngles] } : null,
     retouchAngles: mesh?.retouchAngles?.length ? { curves: [...mesh.retouchAngles] } : null,
     sharpEdge: sharpDerived(state, mesh?.edgeAngles ?? []),
+    gm: state.specimen.type === 'flake' && mesh?.gm ? { config: structuredClone(state.gm), ...mesh.gm } : null,
   };
 }

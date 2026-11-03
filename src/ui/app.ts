@@ -13,14 +13,14 @@ import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
-import { parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
+import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
+import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, retouchAnglesCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
-import { APP_DIR, SHARP_EDGE_FILE, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
-import { batchOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
+import { APP_DIR, GM_CONFIG_FILE, SHARP_EDGE_FILE, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
+import { batchOutputs, gmOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
 import { ProjectIndex, type IndexedProject } from '../io/projectIndex';
 import { createMeasurer, type MeshMeasurer } from '../io/meshMeasurer';
 import BatchWorker from '../io/batchWorker?worker&inline';
@@ -44,16 +44,18 @@ import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
 import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_PARAMETERS, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleResult } from '../compute/edgeAngle';
+import { gmMissingInputs, gmSteps, type GmResult } from '../compute/gm';
 import { retouchAnglesSteps, type RetouchAngleResult, type RetouchPiece } from '../compute/retouchAngle';
 import { ruleValues, SHARP_EDGE_PARAMETERS, sharpOfCurve, suggestThreshold, type SharpResult } from '../compute/sharpEdge';
 import { EDGE_ANGLE_FLAT_DEG, EDGE_ANGLE_RAMP, EdgeAngleLayer, rampPaint, SHARP_COLORS, sharpPaint } from '../render/edgeAngleLayer';
 import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
 import { technicalFrameSteps } from '../compute/technicalFrame';
 import { frameSource } from '../core/derived';
-import { bvhPlaneCandidates } from '../render/bvhPlane';
+import { bvhPlaneCandidates, bvhRayCandidates } from '../render/bvhPlane';
 import { PlatformEndTool } from '../tools/platformEndTool';
 import { ProfilePanel } from './profilePanel';
-import { landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
+import { gmCurvesCsv, gmSurfacesCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
+import { GmLayer } from '../render/gmLayer';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
 import { declutterLabels } from '../render/labelLayout';
 import { LandmarkTool } from '../tools/landmarkTool';
@@ -112,6 +114,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   harris: false,
   configuration: false,
   profile: false,
+  gmPoints: false,
   excelBom: false,
 };
 
@@ -419,6 +422,14 @@ export class App implements AppApi {
   private partitionVersion = 0;
   /** The folder's rule for a sharp edge (null: none yet, or no folder open). */
   private folderSharp: SharpEdgeRule | null = null;
+  /** A flake's points for geometric morphometrics, and what they were made from. */
+  private gm: GmResult | null = null;
+  private gmDoneKey = '';
+  private gmTimer = 0;
+  private gmToken = 0;
+  private gmLayer: GmLayer | null = null;
+  /** The folder's configuration of those points (null: none yet, or no folder open). */
+  private folderGm: GmConfig | null = null;
   private edgeLayer: EdgeAngleLayer | null = null;
   private edgeLegend: HTMLElement | null = null;
   private edgeColorKey = '';
@@ -504,6 +515,7 @@ export class App implements AppApi {
     this.borderLayer = new BorderLayer(viewer);
     this.ringLayer = new BorderLayer(viewer, true);
     this.edgeLayer = new EdgeAngleLayer(viewer);
+    this.gmLayer = new GmLayer(viewer);
     this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
     this.viewportEl.append(this.edgeLegend);
     this.viewCube = new ViewCube(viewer);
@@ -1148,8 +1160,10 @@ export class App implements AppApi {
     }
     if (c.kind === 'curves' || c.kind === 'reset') this.scheduleEdgeAngles();
     if (c.kind === 'sharpEdge') this.keepFolderSharp();
+    if (c.kind === 'gm') this.keepFolderGm();
+    if (['gm', 'flake', 'landmarks', 'specimen', 'reset'].includes(c.kind)) this.scheduleGm();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { gm: 'landmarks', sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
     if (c.kind === 'specimen') {
@@ -1466,6 +1480,7 @@ export class App implements AppApi {
     if (this.curves) this.curves.group.visible = shown(f.curves);
     if (this.landmarkLayer) this.landmarkLayer.group.visible = shown(f.landmarks);
     if (this.regionRoot) this.regionRoot.visible = shown(f.regions);
+    this.syncGmLayer();
     this.viewer?.requestRender();
   }
 
@@ -1562,6 +1577,10 @@ export class App implements AppApi {
         break;
       case 'profile':
         this.updateProfile();
+        this.sidebar.refresh('display');
+        break;
+      case 'gm':
+        this.syncGmLayer();
         this.sidebar.refresh('display');
         break;
       case 'snap':
@@ -1913,7 +1932,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves() };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves(), gm: this.gm };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -2235,6 +2254,119 @@ export class App implements AppApi {
 
   edgeAngleResult(curveId: string): EdgeAngleResult | null {
     return this.edgeResults.get(curveId)?.result ?? null;
+  }
+
+  // ------------------------------------------------------------ geometric morphometrics
+
+  gmResult(): GmResult | null {
+    return this.gm;
+  }
+
+  /** The semilandmarks in the view, when asked for (not in figures or comparisons). */
+  private syncGmLayer(): void {
+    const layer = this.gmLayer, loaded = this.loaded;
+    if (!layer) return;
+    const on = this.display.gmPoints && this.isFlake() && this.mode !== 'present' && this.mode !== 'compare' && !!this.gm && !!loaded;
+    layer.group.visible = on;
+    if (on) layer.sync(this.gm!.rows.filter((r) => r.kind !== 'fixed').map((r) => r.point), loaded!.offset);
+    this.viewer?.requestRender();
+  }
+
+  private gmKey(): string {
+    const st = this.store.state;
+    const axis = st.flake.axis;
+    return JSON.stringify([st.gm, axis?.matrix, axis?.start, st.landmarks.map((l) => [l.id, l.code, l.name, l.point]), st.semilandmarks, st.curves.map((c) => [c.id, c.points, c.closed, c.attributes.type]), this.partitionVersion, this.upperComponent]);
+  }
+
+  private scheduleGm(): void {
+    clearTimeout(this.gmTimer);
+    this.gmTimer = window.setTimeout(() => void this.updateGm(), 60);
+  }
+
+  /** A flake's points from its annotations and the configuration (in slices); the last request wins. */
+  private async updateGm(): Promise<void> {
+    const token = ++this.gmToken;
+    const base = this.measureBase, loaded = this.loaded;
+    const st = this.store.state;
+    if (!this.isFlake()) {
+      this.gm = null;
+      this.gmDoneKey = '';
+      this.syncGmLayer();
+      return;
+    }
+    if (!base || !loaded || !this.partition) return;
+    const key = this.gmKey();
+    if (key === this.gmDoneKey) return;
+    const plat = this.platformPieces();
+    const faces = plat ? await runSliced(facesOfPiecesSteps(this.upper!.partition, plat.pieces)) : null;
+    if (token !== this.gmToken) return;
+    const g = loaded.geometry;
+    const result = await runSliced(gmSteps(st, { positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, platformFaces: faces, candidates: bvhRayCandidates(g), centroid: base.vertices?.mean }));
+    if (token !== this.gmToken || this.loaded !== loaded) return;
+    this.gm = result;
+    this.gmDoneKey = key;
+    this.syncGmLayer();
+    this.sidebar.refresh('landmarks');
+    if (this.unsaved) {
+      this.scheduleAutosave();
+      this.scheduleFolderSave();
+    }
+  }
+
+  /** The points of the open model are up to date. */
+  private async gmSettled(): Promise<void> {
+    const t0 = performance.now();
+    while (performance.now() - t0 < 120_000) {
+      if (this.gmDoneKey === this.gmKey() && this.partition) return;
+      await nextFrame();
+    }
+  }
+
+  /** In a folder the configuration is the folder's: kept in its file (read-only folder: for the session, and with the projects to download). */
+  private keepFolderGm(): void {
+    const ws = this.workspace;
+    if (!ws) return;
+    const config = structuredClone(this.store.state.gm);
+    if (JSON.stringify(config) === JSON.stringify(this.folderGm)) return;
+    this.folderGm = config;
+    if (ws.writable) void ws.write(GM_CONFIG_FILE, JSON.stringify(config, null, 2)).catch((e) => this.feedback.toast(t('workspace.saveFailed', { msg: (e as Error).message }), 'error'));
+  }
+
+  private async readFolderGm(ws: Workspace): Promise<GmConfig | null> {
+    try {
+      return (await ws.exists(GM_CONFIG_FILE)) ? parseGmConfig(JSON.parse(await (await ws.read(GM_CONFIG_FILE)).text())) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The flakes of a summary by the folder's configuration. Stored points of another configuration are made anew on their models (these are opened in turn);
+   * a specimen that lacks an annotation needs no model to tell so.
+   */
+  private async gmOfFolder(specimens: BatchSpecimen[], config: GmConfig): Promise<void> {
+    const ws = this.workspace!;
+    const start = this.wsIndex;
+    const wanted = JSON.stringify(config);
+    let opened = false;
+    for (const s of specimens) {
+      if (s.state.specimen.type !== 'flake') continue;
+      s.state = { ...s.state, gm: config };
+      const lacks = gmMissingInputs(s.state);
+      if (lacks.length) {
+        s.gm = { config, complete: false, missing: lacks, rows: [], curves: [], surfaces: [] };
+        continue;
+      }
+      if (s.gm && JSON.stringify(s.gm.config) === wanted) continue;
+      const i = ws.meshes.indexOf(s.file);
+      if (i < 0) continue;
+      opened = true;
+      await this.openWorkspaceMesh(i, true);
+      await this.settled();
+      await this.gmSettled();
+      if (this.gm && this.wsIndex === i) s.gm = { config, ...this.gm };
+    }
+    if (opened && start >= 0) await this.openWorkspaceMesh(start, true);
   }
 
   setEdgeSeries(series: string): void {
@@ -2621,6 +2753,7 @@ export class App implements AppApi {
     this.updateRegionFits();
     this.scheduleFlake();
     this.scheduleRetouchAngles();
+    this.scheduleGm();
     this.sidebar.refresh('regions');
   }
 
@@ -2719,6 +2852,7 @@ export class App implements AppApi {
     this.sessionProjects.clear();
     this.undownloaded.clear();
     this.folderSharp = await this.readFolderSharp(ws);
+    this.folderGm = await this.readFolderGm(ws);
     this.sidebar.refresh('workspace');
     // the list shows each model's type: every project file is read once, in the background
     const index = this.projectIndex;
@@ -2848,6 +2982,7 @@ export class App implements AppApi {
     const name = `${fileStem(ws.name, 'folder')}_projects.zip`;
     const files = [...this.sessionProjects].map(([p, text]) => ({ name: projectPathFor(p), data: enc.encode(text) }));
     if (this.folderSharp) files.push({ name: SHARP_EDGE_FILE, data: enc.encode(JSON.stringify(this.folderSharp, null, 2)) });
+    if (this.folderGm) files.push({ name: GM_CONFIG_FILE, data: enc.encode(JSON.stringify(this.folderGm, null, 2)) });
     const outcome = await saveFile(name, zipStored(files), 'application/zip');
     if (outcome === 'saved') {
       this.undownloaded.clear();
@@ -2917,7 +3052,7 @@ export class App implements AppApi {
       folder: this.workspace?.name ?? null,
       kind,
       options,
-      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge } },
+      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: this.folderGm ?? this.store.state.gm },
       duplicateNames: this.wsDuplicates,
     };
   }
@@ -2970,8 +3105,12 @@ export class App implements AppApi {
       const sharp = this.folderSharp;
       const judged = sharp ? specimens.map((s) => ({ ...s, state: { ...s.state, sharpEdge: sharp } })) : specimens;
       for (const f of batchOutputs(judged, { excelBom: bom })) await sink.put(f.suffix, f.text);
+      // the same points on every flake
+      await this.gmOfFolder(judged, this.folderGm ?? this.store.state.gm);
+      const gm = gmOutputs(judged, { excelBom: bom });
+      for (const f of gm.files) await sink.put(f.suffix, f.text);
       if (failures.length) await sink.put('failures.csv', failuresCsv(failures, bom));
-      const where = await sink.finish({ ...this.manifestBase('folder', 'tables', { excelBom: bom, worker: measurer.inWorker }), specimens: listed, failures });
+      const where = await sink.finish({ ...this.manifestBase('folder', 'tables', { excelBom: bom, worker: measurer.inWorker }), specimens: listed, failures, gmSkipped: gm.skipped });
       this.batchToast(specimens.length, failures, where);
     } catch (e) {
       this.feedback.toast((e as Error).message, 'error');
@@ -3004,7 +3143,7 @@ export class App implements AppApi {
       const live: BatchProject = {
         path: primary?.path ?? own,
         state: structuredClone(this.store.state) as ProjectState,
-        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() } },
+        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() }, gm: this.gm ? { config: this.store.state.gm, ...this.gm } : null },
         appVersion: __APP_VERSION__,
       };
       projects = projects.map((p) => (p === primary ? live : p));
@@ -3154,6 +3293,16 @@ export class App implements AppApi {
         csv('landmarks-fcsv', t('export.landmarksFcsv'), 'landmarks.fcsv', lm.rows.length > 0, () => landmarksFcsv(lm)),
         csv('landmarks-csv', t('export.landmarksCsv'), 'landmarks.csv', lm.rows.length > 0, () => landmarksCsv(st, lm, opts)),
         csv('sliders', t('export.sliders'), 'sliders.csv', lm.sliders.length > 0, () => slidersCsv(lm)),
+        // a flake's points for geometric morphometrics: only when it has them all
+        ...(this.isFlake()
+          ? [
+              csv('gm-tps', t('export.gmTps'), 'gm_landmarks.tps', !!this.gm?.complete, () => landmarksTps(st, this.gm!)),
+              csv('gm-fcsv', t('export.gmFcsv'), 'gm_landmarks.fcsv', !!this.gm?.complete, () => landmarksFcsv(this.gm!)),
+              csv('gm-csv', t('export.gmCsv'), 'gm_landmarks.csv', !!this.gm?.complete, () => landmarksCsv(st, this.gm!, opts)),
+              csv('gm-curves', t('export.gmCurves'), 'gm_curves.csv', !!this.gm?.complete && this.gm.curves.length > 0, () => gmCurvesCsv(this.gm!)),
+              csv('gm-surfaces', t('export.gmSurfaces'), 'gm_surfaces.csv', !!this.gm?.complete && this.gm.surfaces.length > 0, () => gmSurfacesCsv(this.gm!)),
+            ]
+          : []),
       ];
     }
     if (this.mode === 'measure')
@@ -4318,6 +4467,8 @@ export class App implements AppApi {
     this.flakeToken++;
     this.edgeResults.clear();
     this.retouchResults.clear();
+    this.gm = null;
+    this.gmDoneKey = '';
     this.edgeToken++;
     this.edgeLayer?.clear();
     this.edgeColorKey = '';
@@ -4375,6 +4526,7 @@ export class App implements AppApi {
     };
     this.selection.set(null);
     if (this.workspace && this.folderSharp) fresh.sharpEdge = { ...this.folderSharp };
+    if (this.workspace && this.folderGm) fresh.gm = structuredClone(this.folderGm);
     this.store.reset(fresh);
     this.startMeasuring(loaded);
     this.applyShading();
@@ -4431,6 +4583,7 @@ export class App implements AppApi {
     this.tools?.cancel();
     this.selection.set(null);
     if (this.workspace && this.folderSharp) state.sharpEdge = { ...this.folderSharp };
+    if (this.workspace && this.folderGm) state.gm = structuredClone(this.folderGm);
     this.store.reset(state);
     if (toastKey) this.feedback.toast(t(toastKey, { what: countsText(state) }));
   }
@@ -4975,6 +5128,13 @@ export class App implements AppApi {
       /** What the edge-angle colours show (null: none), and the two ends of their scale. */
       edgeColors: () => (this.edgeColorKey ? { key: this.edgeColorKey, min: this.edgeLegend?.querySelector('#edge-legend-min')?.textContent ?? null, max: this.edgeLegend?.querySelector('#edge-legend-max')?.textContent ?? null } : null),
       exportEdgeAnglesCsvText: () => edgeAnglesCsv(this.store.state, this.edgeAngleCurves(), { excelBom: false }),
+      gm: () => this.gm,
+      exportGmText: (kind: 'tps' | 'csv' | 'curves' | 'surfaces') => {
+        const g = this.gm;
+        if (!g) return '';
+        const st = this.store.state;
+        return kind === 'tps' ? landmarksTps(st, g) : kind === 'csv' ? landmarksCsv(st, g, { excelBom: false }) : kind === 'curves' ? gmCurvesCsv(g) : gmSurfacesCsv(g);
+      },
       retouchAngles: (curveId: string) => this.retouchAngleResult(curveId),
       sharpEdge: (curveId: string) => this.sharpOf(curveId),
       exportRetouchAnglesCsvText: () => retouchAnglesCsv(this.store.state, this.retouchAngleCurves(), { excelBom: false }),

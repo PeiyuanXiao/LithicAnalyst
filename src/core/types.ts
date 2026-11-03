@@ -338,6 +338,39 @@ export interface SharpEdgeRule {
 
 export const DEFAULT_SHARP_EDGE: SharpEdgeRule = { method: 'three_points', distance: 2, threshold: null };
 
+/** A curve of semilandmarks: how many points, both its ends among them. */
+export interface GmCurveItem {
+  on: boolean;
+  points: number;
+}
+
+/** A grid of surface semilandmarks. */
+export interface GmGridItem {
+  on: boolean;
+  rows: number;
+  cols: number;
+}
+
+/** Which points a flake has for geometric morphometrics. In a folder, the folder's own: every model has the same. */
+export interface GmConfig {
+  fixed: { pop: boolean; platform_left: boolean; platform_right: boolean };
+  edge: GmCurveItem;
+  /** Each of its three stretches. */
+  platformOutline: GmCurveItem;
+  ventral: GmGridItem;
+  dorsal: GmGridItem;
+  platform: GmGridItem;
+}
+
+export const defaultGmConfig = (): GmConfig => ({
+  fixed: { pop: true, platform_left: true, platform_right: true },
+  edge: { on: true, points: 50 },
+  platformOutline: { on: true, points: 10 },
+  ventral: { on: true, rows: 15, cols: 10 },
+  dorsal: { on: true, rows: 15, cols: 10 },
+  platform: { on: true, rows: 4, cols: 8 },
+});
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -366,6 +399,7 @@ export interface ProjectState {
   flake: FlakeData;
   /** In a folder, the folder's own: every model of it is judged alike. */
   sharpEdge: SharpEdgeRule;
+  gm: GmConfig;
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */

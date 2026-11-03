@@ -1,6 +1,30 @@
 import * as THREE from 'three';
 import { INTERSECTED, NOT_INTERSECTED, type MeshBVH } from 'three-mesh-bvh';
+import type { RayCandidates } from '../compute/gm';
 import type { PlaneCandidates } from '../compute/meshSection';
+
+/** The triangles a line may cross, from the mesh's BVH (null without one: the line then looks at all of them). */
+export function bvhRayCandidates(geometry: THREE.BufferGeometry): RayCandidates | null {
+  const bvh = geometry.boundsTree as unknown as MeshBVH | undefined;
+  if (!bvh) return null;
+  if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+  const sphere = geometry.boundingSphere!;
+  const ray = new THREE.Ray();
+  const at = new THREE.Vector3();
+  return (origin, direction, visit) => {
+    // the whole line, either way: from beyond the mesh
+    const back = sphere.center.distanceTo(at.set(origin[0], origin[1], origin[2])) + sphere.radius + 1;
+    ray.origin.set(origin[0] - direction[0] * back, origin[1] - direction[1] * back, origin[2] - direction[2] * back);
+    ray.direction.set(direction[0], direction[1], direction[2]);
+    bvh.shapecast({
+      intersectsBounds: (box) => (ray.intersectsBox(box) ? INTERSECTED : NOT_INTERSECTED),
+      intersectsRange: (offset, count) => {
+        for (let t = offset; t < offset + count; t++) visit(t);
+        return false;
+      },
+    });
+  };
+}
 
 /** The triangles a plane may cut, from the mesh's BVH (null without one: the section then looks at all of them). */
 export function bvhPlaneCandidates(geometry: THREE.BufferGeometry): PlaneCandidates | null {

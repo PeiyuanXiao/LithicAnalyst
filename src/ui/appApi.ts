@@ -1,3 +1,4 @@
+import type { GmResult } from '../compute/gm';
 import type { RetouchAngleResult } from '../compute/retouchAngle';
 import type { SharpResult } from '../compute/sharpEdge';
 import type { SnapMode } from '../compute/surfacePath';
@@ -37,10 +38,12 @@ export interface DisplaySettings {
   configuration: boolean;
   /** Show a flake's profile panel. */
   profile: boolean;
+  /** Show a flake's semilandmarks for geometric morphometrics. */
+  gmPoints: boolean;
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
+export type DisplayAspect = 'gm' | 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
 
 /** What can be picked in the configuration: a face of the box or a cone of the bicone. */
 export type ConfigPick = import('../core/fields').ConfigFace | import('../core/fields').BiconeCone;
@@ -187,6 +190,7 @@ export interface AppApi {
   edgeAngleResult(curveId: string): import('../compute/edgeAngle').EdgeAngleResult | null;
   /** The method the chart and the colours show. */
   readonly edgeMethod: EdgeChartMethod;
+  gmResult(): GmResult | null;
   retouchAngleResult(curveId: string): RetouchAngleResult | null;
   sharpOf(curveId: string): SharpResult | null;
   suggestSharpEdge(): Promise<void>;

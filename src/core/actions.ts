@@ -16,7 +16,7 @@ import {
   SetNoduleCommand,
   SetRelationsCommand,
   SetConfigurationCommand,
-  SetFlakeCommand, SetSharpEdgeCommand,
+  SetFlakeCommand, SetSharpEdgeCommand, SetGmConfigCommand,
   SetSequencesCommand,
   SetSplitCommand,
   SetSpecimenCommand,
@@ -33,7 +33,7 @@ import { orderSequences, relationInputs } from '../compute/relations';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
-import type { SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3 } from './types';
+import type { GmConfig, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3 } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -804,6 +804,14 @@ export function setSharpEdge(store: ProjectStore, change: Partial<SharpEdgeRule>
   const after = { ...before, ...change };
   if (after.method === before.method && after.distance === before.distance && after.threshold === before.threshold) return;
   store.history.execute(new SetSharpEdgeCommand({ ...before }, after));
+}
+
+/** Which points a flake has for geometric morphometrics; no annotation changes with it. */
+export function setGmConfig(store: ProjectStore, change: Partial<GmConfig>): void {
+  const before = store.state.gm;
+  const after = { ...structuredClone(before), ...structuredClone(change) };
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  store.history.execute(new SetGmConfigCommand(structuredClone(before), after));
 }
 
 // ---------------------------------------------------------------- technical axis

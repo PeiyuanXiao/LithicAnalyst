@@ -2,7 +2,7 @@ import {
   deleteTechnicalAxis,
   setCurveEdgeAngle,
   setPlaneRegion,
-  setRegionRetouchLayer, setRegionScar, setSharpEdge,
+  setRegionRetouchLayer, setRegionScar, setGmConfig, setSharpEdge,
   addSemilandmarkSet,
   deleteLandmark,
   deleteSemilandmarkSet,
@@ -52,12 +52,13 @@ import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compu
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleResult } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FLAKE_MEASURES } from '../compute/flake';
+import { gmCounts, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
 import { landmarkName, platformSides, shownLandmarks } from '../compute/landmarks';
 import type { ConfigurationResult, FlakingSurface } from '../compute/configuration';
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
-import type { AttributeValue, Curve, Measurement, PlaneMethod, Scar, Vec3, SharpEdgeRule } from '../core/types';
+import type { AttributeValue, Curve, Measurement, PlaneMethod, Scar, Vec3, GmConfig, SharpEdgeRule } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
@@ -543,8 +544,9 @@ function displaySection(api: AppApi): Section {
   const config = panelRow('config-show', t('sec.configuration'), d.configuration, (v) => api.setDisplay((x) => (x.configuration = v), 'configuration'));
   const harris = panelRow('harris-show', t('harris.title'), d.harris, (v) => api.setDisplay((x) => (x.harris = v), 'harris'));
   const profile = panelRow('profile-show', t('profile.title'), d.profile, (v) => api.setDisplay((x) => (x.profile = v), 'profile'));
+  const gmPoints = panelRow('gm-show', t('display.gmPoints'), d.gmPoints, (v) => api.setDisplay((x) => (x.gmPoints = v), 'gm'));
 
-  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, h('div', { class: 'check-row' }, labels, hidden, regions));
+  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, gmPoints.el, h('div', { class: 'check-row' }, labels, hidden, regions));
 
   const refresh = (kind: RefreshKind) => {
     // these panels belong to the annotate mode
@@ -557,6 +559,8 @@ function displaySection(api: AppApi): Section {
     profile.el.hidden = !flake;
     profile.input.checked = api.display.profile;
     profile.input.disabled = !api.store.state.flake.axis?.matrix;
+    gmPoints.el.hidden = !flake;
+    gmPoints.input.checked = api.display.gmPoints;
     if (kind !== 'all' && kind !== 'display' && kind !== 'mesh') return;
     shading.set(api.display.shading);
     const scanBtn = shading.el.querySelector('[data-value="scan"]') as HTMLButtonElement | null;
@@ -1770,6 +1774,98 @@ function landmarksSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+/** Which points a flake has for geometric morphometrics: what each item asks for, the total, and what the open specimen lacks. */
+function gmSection(api: AppApi): Section {
+  const total = h('span', { class: 'badge mono', id: 'gm-total-badge' }, '0');
+  const { el, body } = section('gm', t('sec.gm'), total);
+  const incomplete = h('span', { class: 'pill pill-warn', id: 'gm-incomplete', hidden: true }, t('gm.incomplete'));
+  const missing = h('ul', { class: 'gm-missing', id: 'gm-missing' });
+  const numberBox = (id: string, value: number, least: number, set: (n: number) => void) => {
+    const input = h('input', { id, class: 'ctl-text mono gm-number', type: 'number', min: least, max: 500, step: 1 }) as HTMLInputElement;
+    input.value = String(value);
+    input.addEventListener('change', () => {
+      const n = Number(input.value);
+      if (Number.isInteger(n) && n >= least && n <= 500) set(n);
+      else input.value = String(value);
+    });
+    return input;
+  };
+  const counts = h('dl', { class: 'num-grid', id: 'gm-summary' });
+  const items = h('div', { class: 'gm-items' });
+  body.append(incomplete, missing, items, counts);
+  let builtFor = '';
+  const build = (c: GmConfig) => {
+    clear(items);
+    const set = (change: Partial<GmConfig>) => setGmConfig(api.store, change);
+    const count = (id: string, n: number) => h('span', { class: 'mono gm-count', id: `gm-count-${id}` }, fmtCount(n));
+    const n = gmCounts(c);
+    const fixed = (key: GmAnchor, label: string) => checkbox(`gm-fixed-${key}`, label, c.fixed[key], (on) => set({ fixed: { ...c.fixed, [key]: on } }));
+    const curve = (key: 'edge' | 'platformOutline', label: string) => {
+      const item = c[key];
+      return h(
+        'div',
+        { class: 'gm-item' },
+        checkbox(`gm-${key}-on`, label, item.on, (on) => set({ [key]: { ...item, on } })),
+        h('span', { class: 'gm-sizes' }, numberBox(`gm-${key}-points`, item.points, 2, (points) => set({ [key]: { ...item, points } }))),
+        count(key, n[key]),
+      );
+    };
+    const grid = (key: 'ventral' | 'dorsal' | 'platform') => {
+      const item = c[key];
+      return h(
+        'div',
+        { class: 'gm-item' },
+        checkbox(`gm-${key}-on`, t(`gm.${key}`), item.on, (on) => set({ [key]: { ...item, on } })),
+        h(
+          'span',
+          { class: 'gm-sizes' },
+          numberBox(`gm-${key}-rows`, item.rows, 1, (rows) => set({ [key]: { ...item, rows } })),
+          '×',
+          numberBox(`gm-${key}-cols`, item.cols, 1, (cols) => set({ [key]: { ...item, cols } })),
+        ),
+        count(key, n[key]),
+      );
+    };
+    items.append(
+      h('span', { class: 'ctl-label sub-label' }, t('gm.fixed')),
+      h('div', { class: 'checks-row' }, fixed('pop', t('landmark.pop')), fixed('platform_left', t('landmark.platformLeft')), fixed('platform_right', t('landmark.platformRight'))),
+      h('span', { class: 'ctl-label sub-label' }, t('gm.curves')),
+      curve('edge', t('gm.edge')),
+      curve('platformOutline', t('gm.platformOutline')),
+      h('span', { class: 'ctl-label sub-label' }, `${t('gm.surfaces')} (${t('gm.rows')} × ${t('gm.cols')})`),
+      grid('ventral'),
+      grid('dorsal'),
+      grid('platform'),
+    );
+  };
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'landmarks', 'curves', 'regions', 'mesh', 'specimen', 'flake'].includes(kind)) return;
+    const st = api.store.state;
+    const c = st.gm;
+    // (built anew only when the configuration changes: a box being typed in stays)
+    const key = JSON.stringify(c);
+    if (key !== builtFor) {
+      builtFor = key;
+      build(c);
+    }
+    const r = api.gmResult();
+    // the user's own landmarks and sets go along
+    const own = st.landmarks.filter((l) => !l.code).length + api.landmarkTable().rows.filter((x) => x.kind === 'curve').length;
+    const n = r?.complete ? r.rows.length : gmTotal(c, st.landmarks.every((l) => l.code !== 'platform_end'), own);
+    total.textContent = String(n);
+    clear(counts);
+    counts.append(...numRow(t('gm.total'), fmtCount(n), '', 'gm-total'));
+    tip(counts, t('gm.totalWhy'));
+    const lacks = r ? r.missing : gmMissingInputs(st);
+    incomplete.hidden = lacks.length === 0;
+    clear(missing);
+    missing.hidden = lacks.length === 0;
+    for (const m of lacks) missing.append(h('li', { 'data-code': m }, t(`gm.missing.${m}`)));
+  };
+  refresh('all');
+  return { el, refresh, visible: () => api.store.state.specimen.type === 'flake' };
+}
+
 function noduleSection(api: AppApi): Section {
   const { el, body } = section('nodule', t('sec.nodule'));
   const regions = h('div', { class: 'fig-views', id: 'nodule-regions' });
@@ -2180,6 +2276,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [curvesSection, ['annotate']],
   [(api) => regionsSection(api, (id, type) => api.setRegionType(id, type)), ['annotate']],
   [landmarksSection, ['annotate']],
+  [gmSection, ['annotate']],
   [flakeSection, ['measure']],
   [measureAutoSection, ['measure']],
   [edgeAngleSection, ['measure']],

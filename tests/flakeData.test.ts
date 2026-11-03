@@ -228,7 +228,7 @@ describe('the exports of a flake', () => {
       setSpecimenType(s, type);
       const m = emptyFlakeMeasures();
       m.tech_length = 10;
-      return { file: `${id}.ply`, state: s.state, auto: { frame: 'principal', length: 1, width: 1, thickness: 1, surfaceArea: 1, volume: 1, closed: true }, planes: [], configuration: null, regions: [], regionTotals: null, nodule: null, split: null, flake: type === 'flake' ? m : null, edgeAngles: [], retouchAngles: [], observers: new Map() };
+      return { file: `${id}.ply`, state: s.state, auto: { frame: 'principal', length: 1, width: 1, thickness: 1, surfaceArea: 1, volume: 1, closed: true }, planes: [], configuration: null, regions: [], regionTotals: null, nodule: null, split: null, flake: type === 'flake' ? m : null, edgeAngles: [], retouchAngles: [], gm: null, observers: new Map() };
     };
     const files = batchOutputs([make('A', 'core'), make('B', 'flake'), make('C', 'flake')], { excelBom: false });
     const flakes = files.find((f) => f.suffix === 'flakes.csv')!.text.trim().split('\n');

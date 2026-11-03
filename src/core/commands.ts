@@ -1,4 +1,4 @@
-import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, SharpEdgeRule } from './types';
+import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, GmConfig, SharpEdgeRule } from './types';
 import type { LandmarkData, ProjectStore } from './store';
 
 /**
@@ -551,6 +551,24 @@ export class SetSharpEdgeCommand implements Command {
   revert(store: ProjectStore): void {
     store._setSharpEdge({ ...this.before });
     store.notify({ kind: 'sharpEdge' });
+  }
+}
+
+/** Replace which points a flake has for geometric morphometrics. */
+export class SetGmConfigCommand implements Command {
+  readonly labelKey = 'cmd.editField';
+  readonly createdAt = Date.now();
+  constructor(
+    private readonly before: GmConfig,
+    private readonly after: GmConfig,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setGm(structuredClone(this.after));
+    store.notify({ kind: 'gm' });
+  }
+  revert(store: ProjectStore): void {
+    store._setGm(structuredClone(this.before));
+    store.notify({ kind: 'gm' });
   }
 }
 

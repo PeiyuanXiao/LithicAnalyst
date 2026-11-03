@@ -400,6 +400,12 @@ of the edge angles.
 
 `compute/sharpEdge.ts` is pure, and needs no mesh: the stretches come from the stored stations and the rule, so the summary export can judge every model by the folder's rule. `ProjectState.sharpEdge` is a Command like any other; in a folder `App.keepFolderSharp` copies it to `LithicAnalyst/sharp-edge.json` (read-only folder: `App.folderSharp` for the session, and in the ZIP of projects), and `applyProject` puts the folder's rule into each project opened, without marking it as edited. `ui/edgeAngleChart.ts` takes its lines as `ChartSeries`, built by the sidebar: distances in categorical hues, retouch layers in one ordered hue with dashes.
 
+## Geometric morphometrics
+
+`compute/gm.ts` is pure: `gmSteps` takes the annotations (`state.gm`, the frame, the landmarks, the curves) and the mesh, in slices. `GmMesh.candidates` hands over the triangles a line may cross (`bvhRayCandidates`; without it, all of them). `gmMissingInputs` tells what is lacking without a mesh. The app holds the result in `App.gm`, keyed by what it was made from (`gmKey`), and draws the semilandmarks with `render/gmLayer.ts` when asked. The curves' ends are single points (`anchorAt`), as the landmark table's sets do with their end landmarks.
+
+`state.gm` is a Command; in a folder `App.keepFolderGm` copies it to `LithicAnalyst/gm-config.json`, and each project opened takes the folder's. Points depend on the mesh, so a summary cannot judge them from stored results as it does the sharp edge: `App.gmOfFolder` takes those stored with this configuration, and opens the others' models in turn (as the figures of a folder do); `gmOutputs` writes the complete ones and lists the rest.
+
 ## Landmarks
 
 * `ProjectState.landmarks` (export order) and `semilandmarks` (sets: curve, count, end

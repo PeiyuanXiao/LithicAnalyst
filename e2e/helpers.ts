@@ -29,6 +29,8 @@ export interface LithicApi {
   edgeAngles(curveId: string): import('../src/compute/edgeAngle').EdgeAngleResult | null;
   edgeColors(): { key: string; min: string | null; max: string | null } | null;
   exportEdgeAnglesCsvText(): string;
+  gm(): import('../src/compute/gm').GmResult | null;
+  exportGmText(kind: 'tps' | 'csv' | 'curves' | 'surfaces'): string;
   retouchAngles(curveId: string): import('../src/compute/retouchAngle').RetouchAngleResult | null;
   sharpEdge(curveId: string): import('../src/compute/sharpEdge').SharpResult | null;
   exportRetouchAnglesCsvText(): string;

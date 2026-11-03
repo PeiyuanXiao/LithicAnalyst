@@ -86,6 +86,32 @@ edge_sharp |>
 - `edge_angles.csv` 有每一站的角度，在 R 里可以换阈值做敏感性检验。
 - 这个角度不等于刃尖的真实锐度；拐角处截面是斜切的，角度偏低，可能被算成锋利段。
 
+## 几何形态测量 / Geometric morphometrics
+
+石片在标注模式有「GM 配置」区块：选择要哪些点，每件石片按同一配置自动生成，不能单独拖动，导出后可直接进 geomorph。
+
+| 项目 | 默认 | 需要 |
+|---|---|---|
+| 固定地标：打击点、台面左端、台面右端 | 全选 | 技术轴、台面端点 |
+| 曲线半地标：边缘 | 50 点 | 边缘曲线 |
+| 曲线半地标：台面轮廓（左端→打击点、打击点→右端、右端→左端） | 各 10 点 | 闭合的台面轮廓、台面端点 |
+| 表面半地标：腹面、背面 | 15 行 × 10 列 | 技术轴、边缘曲线；有台面端点时还要台面轮廓 |
+| 表面半地标：台面 | 4 行 × 8 列 | 台面区域、台面轮廓、台面端点 |
+
+- 曲线的点数包括两端。两端和固定地标是同一个点，只写一次，所以默认共 407 个点，不是 415 个。
+- 没有台面端点（点台面）时，把台面端点、台面轮廓和台面都关掉，边缘从打击点出发再回到打击点。
+- 缺标注或有点落不到网格上时，这件标本算不完整：区块里写明缺什么，不能导出。文件夹汇总时列进 manifest 的 `gmSkipped`。
+- 文件夹里所有石片共用一份配置（`LithicAnalyst/gm-config.json`）。改了配置，打开的标本立即重算，汇总时其余标本在各自的模型上重算。
+- 「显示」面板的「GM 半地标」可以开关这些点。
+
+```r
+library(geomorph)
+A <- readland.tps("gm_landmarks.tps", specID = "ID")
+curves <- as.matrix(read.csv("gm_curves.csv"))
+surfaces <- read.csv("gm_surfaces.csv")$index
+fit <- gpagen(A, curves = curves, surfaces = surfaces)
+```
+
 ## 石核体积构型 / Volumetric configuration
 
 借用逻辑分析体系（LAS；Carbonell 等 1999、Lombao 等 2023）的思路，记录石核的基础体积构型。自动结果只作参考，不设门槛（一个片疤就足以成为剥片面），全部可以手动修正，修正可撤销。只用带箭头的片疤。
@@ -175,6 +201,14 @@ specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer
 specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg
 specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg
 specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length
+```
+
+GM 坐标（`gm_landmarks.csv`，`kind` 为 `fixed`、`curve` 或 `surface`）和滑动定义（`gm_curves.csv`、`gm_surfaces.csv`，点序号从 1 开始）：
+
+```
+specimen_id,index,name,kind,set_id,x,y,z
+before,slide,after
+index
 ```
 
 石片 CSV（每件石片一行，没有值时为空；长度为模型单位）：

@@ -109,7 +109,7 @@ export interface LandmarkRow {
   /** 1-based position in the exports. */
   index: number;
   name: string;
-  kind: 'fixed' | 'curve';
+  kind: 'fixed' | 'curve' | 'surface';
   /** Label of the semilandmark set ('' for fixed landmarks). */
   setId: string;
   point: Vec3;

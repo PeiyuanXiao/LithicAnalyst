@@ -41,6 +41,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
 | `flake` | `{ axis, otherFrame }` | a flake's own data, see "Flakes"; files without it: none |
+| `gm` | object | which points a flake has for geometric morphometrics, see "Geometric morphometrics"; files without it: the default |
 | `sharpEdge` | `{ method, distance, threshold }` | what counts as a sharp edge, see "Sharp edge"; files without it: three points at 2 mm, no threshold |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
@@ -163,6 +164,7 @@ fitted planes, fitted spheres, volumes ….
 * `edgeAngles`: the edge angles of the curves measured, see "Edge angles" (null: none).
 * `retouchAngles`: the retouch layers along those curves, see "Retouch layers" (null: none).
 * `sharpEdge`: their sharp stretches, see "Sharp edge" (null without a threshold, or without edge angles).
+* `gm`: a flake's points for geometric morphometrics, see "Geometric morphometrics" (null for a core, or before they are computed).
 
 ## Volumetric configuration
 
@@ -400,6 +402,37 @@ A station is sharp when its angle in that series is at most the threshold (no va
 stretches shorter than `SHARP_MIN_RUN_MM` (3) dropped; the ends of an open curve are no gaps. Round a closed curve a stretch may go on past the start (`start` after `end`).
 
 **Derived** (`derived.sharpEdge`): `rule`, `parameters` (those two, and `SHARP_AUTO_BIN_DEG`, `SHARP_AUTO_MIN_GAP_DEG`, `SHARP_AUTO_MAX_VALLEY` of the suggested threshold), `curves`: `{ curveId, length, segments }`, each segment `{ start, end, length }` in the coordinate unit.
+
+## Geometric morphometrics
+
+```json
+"gm": {
+  "fixed": { "pop": true, "platform_left": true, "platform_right": true },
+  "edge": { "on": true, "points": 50 },
+  "platformOutline": { "on": true, "points": 10 },
+  "ventral": { "on": true, "rows": 15, "cols": 10 },
+  "dorsal": { "on": true, "rows": 15, "cols": 10 },
+  "platform": { "on": true, "rows": 4, "cols": 8 }
+}
+```
+
+Flakes only. `points`: of a curve (`platformOutline`: of each of its three parts), both its ends among them, at least 2; `rows`, `cols`: at least 1; at most 500. In a folder the
+configuration is the folder's: `LithicAnalyst/gm-config.json` holds it, and it stands in for the value in each project.
+
+The points, in their order. None can be moved on its own; a change of the configuration changes no annotation.
+
+1. **Fixed**: `pop`, `platform_left`, `platform_right` (as asked for), then the user's own landmarks.
+2. **Curves**, equally spaced, both ends among them. A curve's end is a single point: the fixed landmark, or, when that is left out, a point (kind `curve`) written where it is first needed.
+   * `edge`: from the left end, by the distal end, to the right end (clockwise with the dorsal face toward the viewer). A closed curve is cut at the points nearest the ends, and the part reaching further distally taken. Without platform ends it begins and ends at the point of percussion, clockwise.
+   * `platform_left_pop`, `platform_pop_right` (the inner rim), `platform_right_left` (the outer rim): the closed platform outline, parted at the points nearest the three landmarks; each part ends on its landmark.
+   * Then the user's own sets of semilandmarks.
+3. **Surfaces**, row by row:
+   * `ventral`, `dorsal`: in the technical frame. The polygon of the edge and the inner rim (a point platform: the edge alone) in the XY plane. Row i of R at Y = Ymin + i/(R+1) × (Ymax − Ymin); between the row's leftmost and rightmost crossings of the polygon, column j of C at i/(C+1). A line along Z there: the lowest crossing of the mesh for the ventral face, the highest for the dorsal.
+   * `platform`: the plane fitted to the platform region's vertices, weighted by area, its normal n away from the flake's middle; u the direction from the left end to the right in it, v = n × u from the inner rim to the outer. Column j of C at j/(C+1) between the two ends' u; row i of R at i/(R+1) from the inner rim to the outer along v; down n onto the region's triangles.
+
+**Derived** (`derived.gm`): `config`, `complete`, `missing` (codes, below), `rows` (`{ index, name, kind, setId, point }`, original coordinates; `kind`: `fixed`, `curve` or `surface`), `curves` (`[before, slide, after]` by point number from 1), `surfaces` (point numbers).
+
+`missing`: `technical_axis`, `platform_ends`, `edge`, `platform_outline` (a closed one), `platform_region`, `ventral_miss`, `dorsal_miss`, `platform_miss` (a point finds no triangle). A specimen lacking any of them has no GM exports; in a summary it is listed instead, with `point_count` for one whose number of points differs from the others' (the user's own landmarks).
 
 ## Surface region
 
@@ -701,6 +734,15 @@ Retouch layers (`<specimen>_retouch_angles.csv`, long format: one row per statio
 specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg
 ```
 
+Geometric morphometrics (flakes with all their points; see "Geometric morphometrics"): the coordinates as the landmarks' (`<specimen>_gm_landmarks.tps`, `.fcsv`, `.csv`; `kind` also `surface`, `set_id` the curve or grid), and for geomorph's sliding:
+
+```
+before,slide,after      <specimen>_gm_curves.csv (by point number from 1; the ends of a curve do not slide)
+index                   <specimen>_gm_surfaces.csv
+```
+
+The summary of a folder has one `gm_landmarks.csv` and `gm_landmarks.tps` of its complete flakes, and one definition of each.
+
 Sharp edge (`<specimen>_edge_sharp.csv`, one row per sharp stretch, under the rule; see "Sharp edge"; `distance` in the coordinate unit, `segment` from 1):
 
 ```
@@ -773,6 +815,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
   …models (in subfolders too; folders starting with "." are left out)
   LithicAnalyst/
     sharp-edge.json                               what counts as a sharp edge in this folder
+    gm-config.json                                which points its flakes have for geometric morphometrics
     projects/<model path>.lithicanalyst.json     e.g. projects/site1/EXP03.ply.lithicanalyst.json
     exports/<YYYY-MM-DD_HHMMSS>/                  one new folder per export, never overwritten
       manifest.json, failures.csv (only when something failed)
@@ -794,7 +837,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
 * A read-only folder (a directory upload) gets the same layout in one ZIP to unpack into it: the
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app`, `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `sharpEdge`: the named parameters of the flake measurements, the edge angles and the sharp edge, with its `rule`), `specimens` (`id`, `file` = model path, `sha256`, `project`
+  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `sharpEdge`: the named parameters of the flake measurements, the edge angles and the sharp edge, with its `rule`; `gm`: the configuration), `gmSkipped` (`file`, `id`, `missing`: flakes left out of the coordinates of a summary), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 

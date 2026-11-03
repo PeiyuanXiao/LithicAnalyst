@@ -3245,6 +3245,41 @@ input[type="checkbox"]:disabled {
   touch-action: none;
 }
 
+.gm-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gm-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.gm-sizes {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.gm-number {
+  width: 54px;
+}
+
+.gm-count {
+  text-align: right;
+  color: var(--ink-2);
+}
+
+.gm-missing {
+  margin: 0;
+  padding-left: 16px;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
 .sharp-rule {
   display: flex;
   flex-wrap: wrap;

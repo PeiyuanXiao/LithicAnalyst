@@ -13,6 +13,7 @@ import { buildAdjacency, meanCurvature, robustAbsRange, smoothField } from '../s
 import { frameMeasures, surfaceMeasuresSteps } from '../src/compute/measure';
 import { fitPlane } from '../src/compute/meshGeometry';
 import { edgeAnglesSteps } from '../src/compute/edgeAngle';
+import { gmSteps } from '../src/compute/gm';
 import { retouchAnglesSteps } from '../src/compute/retouchAngle';
 import { flakeMeasuresSteps, morphDimensionsSteps, techDimensionsSteps } from '../src/compute/flake';
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
@@ -20,7 +21,7 @@ import { regionPlaneSteps } from '../src/compute/planes';
 import { regionPathSteps } from '../src/compute/regionPath';
 import { technicalFrameSteps } from '../src/compute/technicalFrame';
 import { frameAxes } from '../src/core/frame';
-import { bvhPlaneCandidates } from '../src/render/bvhPlane';
+import { bvhPlaneCandidates, bvhRayCandidates } from '../src/render/bvhPlane';
 import { polylineEdgesSteps, regionsSteps } from '../src/compute/regions';
 import { splitByLoopSteps } from '../src/compute/split';
 import { runSync, type Steps } from '../src/compute/steps';
@@ -260,6 +261,18 @@ async function benchGenerated(triangles: number): Promise<void> {
   const layered = new Map(Array.from({ length: rimPart.count }, (_, c) => [c, { region: `R${c}`, layer: 1 }] as const));
   const layers = steps(`8 retouch layers along ${edgeLength.toFixed(0)} mm (${rimPart.count} pieces)`, retouchAnglesSteps({ positions: pos, index: idx, offset: o, points: rim, closed: true, unit: 'mm', meanEdge: base.meanEdge, candidates, pieceOfFace: rimPart.region, pieces: layered }));
   console.log(`${layers?.stations.filter((s) => s.stretches.length).length ?? 0} stations with a layer`);
+
+  // ⑨ the points for geometric morphometrics, by the default configuration: the core's edge as the edge and as the outline, the platform stand-in as the platform
+  const ended = (x: Vec3, code: 'pop' | 'platform_end', i: number) => ({ id: `${code}${i}`, name: code, code, point: x, createdAt: '', modifiedAt: '' });
+  const gmState: ProjectState = {
+    ...emptyProject(),
+    specimen: { ...emptyProject().specimen, type: 'flake' },
+    landmarks: [ended(P, 'pop', 0), ended(rim[0], 'platform_end', 1), ended(rim[third], 'platform_end', 2)],
+    curves: [{ ...curve, attributes: { type: 'edge' } }, { ...curve, id: 'outline', attributes: { type: 'platform_outline' } }],
+    flake: { axis: { id: 'axis', start: P, end: A, startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix: frameResult.matrix, failure: null, createdAt: '', modifiedAt: '' }, otherFrame: null },
+  };
+  const gmResult = steps('9 points for geometric morphometrics', gmSteps(gmState, { positions: pos, index: idx, offset: o, platformFaces, candidates: bvhRayCandidates(loaded.geometry) }));
+  console.log(`${gmResult.rows.length} points, complete: ${gmResult.complete}, missing: ${gmResult.missing.join() || 'nothing'}`);
   console.log('');
   report();
 }

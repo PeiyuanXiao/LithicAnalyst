@@ -5,7 +5,7 @@ import { computeDerived, type DerivedResults, type MeshResults } from './derived
 import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, SPECIMEN_TYPES, type BiconeRole, type BiconeSide, type ConfigFace } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import { DEFAULT_SHARP_EDGE, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule } from './types';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, type GmConfig, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -30,6 +30,7 @@ export interface ProjectFile {
   configuration: ConfigCorrections;
   flake: FlakeData;
   sharpEdge: SharpEdgeRule;
+  gm: GmConfig;
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
@@ -60,6 +61,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     configuration: structuredClone(state.configuration),
     flake: structuredClone(state.flake),
     sharpEdge: { ...state.sharpEdge },
+    gm: structuredClone(state.gm),
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
@@ -294,6 +296,27 @@ export function parseSharpEdge(raw: unknown): SharpEdgeRule {
   };
 }
 
+/** The most points asked of one curve or side of a grid. */
+const GM_MAX_POINTS = 500;
+
+/** Which points a flake has (of a project file, or of a folder's file); what is not understood takes its default. */
+export function parseGmConfig(raw: unknown): GmConfig {
+  const d = defaultGmConfig();
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, Record<string, unknown> | undefined>;
+  const whole = (v: unknown, least: number, fallback: number) => (Number.isInteger(v) && (v as number) >= least && (v as number) <= GM_MAX_POINTS ? (v as number) : fallback);
+  const on = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
+  const curve = (key: 'edge' | 'platformOutline') => ({ on: on(r[key]?.on, d[key].on), points: whole(r[key]?.points, 2, d[key].points) });
+  const grid = (key: 'ventral' | 'dorsal' | 'platform') => ({ on: on(r[key]?.on, d[key].on), rows: whole(r[key]?.rows, 1, d[key].rows), cols: whole(r[key]?.cols, 1, d[key].cols) });
+  return {
+    fixed: { pop: on(r.fixed?.pop, true), platform_left: on(r.fixed?.platform_left, true), platform_right: on(r.fixed?.platform_right, true) },
+    edge: curve('edge'),
+    platformOutline: curve('platformOutline'),
+    ventral: grid('ventral'),
+    dorsal: grid('dorsal'),
+    platform: grid('platform'),
+  };
+}
+
 /** Relations between known scars only; one per pair of scars (the first one is kept). */
 function parseRelations(raw: unknown, scarIds: Set<string>): Relation[] {
   const list = Array.isArray(raw) ? raw : [];
@@ -479,6 +502,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     configuration: parseConfiguration(raw.configuration),
     flake: parseFlake(raw.flake),
     sharpEdge: parseSharpEdge(raw.sharpEdge),
+    gm: parseGmConfig(raw.gm),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
     nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),
