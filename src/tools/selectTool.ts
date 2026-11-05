@@ -3,6 +3,8 @@ import { moveEndpoint, setCurveShape } from '../core/actions';
 import { assembleCurve, curveSegments, type CurveShape } from '../core/curveGeometry';
 import type { Vec3 } from '../core/types';
 import { copy } from '../core/vec';
+import type { SurfaceHit } from '../render/viewer';
+import { pointVertex } from './drawArrowTool';
 import { SNAP_PX } from './drawCurveTool';
 import type { HitProvider, Tool, ToolContext } from './tool';
 
@@ -34,7 +36,7 @@ interface CurveDrag {
 export class SelectTool implements Tool {
   readonly id = 'select';
   private down: { x: number; y: number } | null = null;
-  private drag: { id: string; which: 'start' | 'end'; point: Vec3; normal: Vec3 } | null = null;
+  private drag: { id: string; which: 'start' | 'end'; point: Vec3; normal: Vec3; last?: SurfaceHit; exact?: boolean } | null = null;
   private curveDrag: CurveDrag | null = null;
   private overHandle: 'start' | 'end' | null = null;
   private overAnchor: number | null = null;
@@ -87,6 +89,11 @@ export class SelectTool implements Tool {
           point: which === 'start' ? a.start : a.end,
           normal: which === 'start' ? a.startNormal : a.endNormal,
         };
+        // the point of percussion goes where it goes when the axis is drawn
+        if (which === 'start' && axis?.id === id) {
+          const mode = this.ctx.snapMode();
+          if (mode !== 'off') void this.ctx.snap()?.prepare(mode);
+        }
         this.ctx.arrows.highlightHandle(which);
         this.ctx.changed();
         return true;
@@ -104,8 +111,16 @@ export class SelectTool implements Tool {
     if (this.drag) {
       const h = hit();
       if (h) {
-        this.drag.point = [h.point.x, h.point.y, h.point.z];
-        this.drag.normal = [h.normal.x, h.normal.y, h.normal.z];
+        if (this.isAxisStart(this.drag)) {
+          const at = pointVertex(this.ctx, h, e.shiftKey);
+          this.drag.point = at.p;
+          this.drag.normal = at.n;
+          this.drag.last = h;
+          this.drag.exact = e.shiftKey;
+        } else {
+          this.drag.point = [h.point.x, h.point.y, h.point.z];
+          this.drag.normal = [h.normal.x, h.normal.y, h.normal.z];
+        }
         this.ctx.arrows.setEndpointOverride({ id: this.drag.id, which: this.drag.which, point: this.drag.point, normal: this.drag.normal });
       }
       return;
@@ -189,13 +204,26 @@ export class SelectTool implements Tool {
 
   // ---- arrow endpoints
 
+  private isAxisStart(d: { id: string; which: 'start' | 'end' }): boolean {
+    return d.which === 'start' && this.ctx.store.state.flake.axis?.id === d.id;
+  }
+
   private endDrag(commit: boolean): void {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
     this.ctx.arrows.setEndpointOverride(null);
     if (commit) {
-      if (this.ctx.store.state.flake.axis?.id === d.id) this.ctx.moveAxisEnd(d.which, d.point, d.normal);
+      const snap = this.ctx.snap();
+      const mode = this.ctx.snapMode();
+      if (this.isAxisStart(d) && d.last && !d.exact && snap && mode !== 'off' && !snap.ready(mode)) {
+        // what it snaps to was not ready while dragging
+        const last = d.last;
+        void snap.prepare(mode).then(() => {
+          const at = pointVertex(this.ctx, last, false);
+          this.ctx.moveAxisEnd('start', at.p, at.n);
+        });
+      } else if (this.ctx.store.state.flake.axis?.id === d.id) this.ctx.moveAxisEnd(d.which, d.point, d.normal);
       else moveEndpoint(this.ctx.store, d.id, d.which, d.point, d.normal);
     }
     this.ctx.arrows.highlightHandle(null);

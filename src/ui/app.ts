@@ -8,16 +8,16 @@ import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compu
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addLandmark, completeCurveLoop, deleteTechnicalAxis, setRegionRetouchLayer, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { addLandmark, completeCurveLoop, deleteTechnicalAxis, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { CURVE_FIELDS, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import { hasVector, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
+import { hasVector, retouchSettingsOf, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, retouchAnglesCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
+import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { APP_DIR, GM_CONFIG_FILE, SHARP_EDGE_FILE, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
 import { batchOutputs, gmOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
@@ -45,7 +45,8 @@ import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, poi
 import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_PARAMETERS, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleResult } from '../compute/edgeAngle';
 import { gmMissingInputs, gmSteps, type GmResult } from '../compute/gm';
-import { retouchAnglesSteps, type RetouchAngleResult, type RetouchPiece } from '../compute/retouchAngle';
+import { retouchSectionsSteps, type RetouchAngleResult, type RetouchPiece, type StationSection } from '../compute/retouchAngle';
+import { FACE_DORSAL, FACE_PLATFORM, FACE_VENTRAL, faceOfTrianglesSteps, RETOUCH_INDEX_PARAMETERS, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps, type RetouchCurve, type RetouchIndexResult, type SegmentFrameResult, type SegmentOutline } from '../compute/retouchIndex';
 import { ruleValues, SHARP_EDGE_PARAMETERS, sharpOfCurve, suggestThreshold, type SharpResult } from '../compute/sharpEdge';
 import { EDGE_ANGLE_FLAT_DEG, EDGE_ANGLE_RAMP, EdgeAngleLayer, rampPaint, SHARP_COLORS, sharpPaint } from '../render/edgeAngleLayer';
 import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
@@ -415,11 +416,20 @@ export class App implements AppApi {
   /** Which line the chart shows and the curve is coloured by: 'all', a distance (d2) or a layer (L1). */
   edgeSeries = 'all';
   edgeColorMode: 'angle' | 'sharp' = 'angle';
-  private retouchResults = new Map<string, { key: string; result: RetouchAngleResult | null }>();
+  private retouchResults = new Map<string, { key: string; result: RetouchAngleResult | null; sections: Array<StationSection | null>; length: number }>();
   private retouchTimer = 0;
   private retouchToken = 0;
   /** Counts the partitions made: the retouch layers go by the pieces. */
   private partitionVersion = 0;
+  /** A flake's retouch indices, and what they were made from. */
+  private retouchIndex: RetouchIndexResult | null = null;
+  private retouchIndexKey = '';
+  private retouchIndexTimer = 0;
+  private retouchIndexToken = 0;
+  /** The plan the segments lie on, kept while its inputs stay. */
+  private retouchFrame: { key: string; frame: SegmentFrameResult; outline: SegmentOutline | null } | null = null;
+  /** The part of the flake each triangle lies in, kept while the upper layer of regions stays. */
+  private retouchFaces: { key: string; faces: Uint8Array } | null = null;
   /** The folder's rule for a sharp edge (null: none yet, or no folder open). */
   private folderSharp: SharpEdgeRule | null = null;
   /** A flake's points for geometric morphometrics, and what they were made from. */
@@ -1087,6 +1097,8 @@ export class App implements AppApi {
     if (tools.navigating) cursor = 'grab';
     if (tools.adjustingLight) cursor = 'crosshair';
     this.viewportEl.style.cursor = cursor;
+    // (the placing tools click through the labels)
+    this.viewportEl.dataset.tool = tools.activeId ?? '';
     this.modeSeg?.set(tools.activeId ?? 'select');
     this.measureSeg?.set(tools.activeId ?? 'select');
     this.presentSeg?.set(tools.activeId ?? 'select');
@@ -1159,6 +1171,7 @@ export class App implements AppApi {
       this.scheduleEdgeAngles();
     }
     if (c.kind === 'curves' || c.kind === 'reset') this.scheduleEdgeAngles();
+    if (['flake', 'specimen', 'reset'].includes(c.kind)) this.scheduleRetouchIndices();
     if (c.kind === 'sharpEdge') this.keepFolderSharp();
     if (c.kind === 'gm') this.keepFolderGm();
     if (['gm', 'flake', 'landmarks', 'specimen', 'reset'].includes(c.kind)) this.scheduleGm();
@@ -1932,7 +1945,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves(), gm: this.gm };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves(), retouchIndices: this.retouchIndex?.indices ?? null, gm: this.gm };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -2140,6 +2153,10 @@ export class App implements AppApi {
     return this.isFlake() ? (this.flake?.measures ?? null) : null;
   }
 
+  flakeEmptyReasons(): FlakeResult['reasons'] | null {
+    return this.isFlake() ? (this.flake?.reasons ?? null) : null;
+  }
+
   /** Look at the flake as the technical frame says, the whole of it: the dorsal face toward the viewer, the platform down. Only the camera moves. */
   private orientToAxis(): void {
     const m = this.isFlake() ? this.store.state.flake.axis?.matrix : null;
@@ -2208,11 +2225,8 @@ export class App implements AppApi {
     const g = loaded.geometry;
     const positions = g.getAttribute('position').array as Float32Array;
     const index = g.index!.array as Uint32Array;
-    if (this.flakeMorph?.loaded !== loaded) {
-      const value = await runSliced(morphDimensionsSteps(positions));
-      if (this.loaded !== loaded) return;
-      this.flakeMorph = { loaded, value };
-    }
+    await this.morphOf(loaded);
+    if (this.loaded !== loaded) return;
     const plat = this.platformPieces();
     const faces = plat ? await runSliced(facesOfPiecesSteps(this.upper!.partition, plat.pieces)) : null;
     if (token !== this.flakeToken) return;
@@ -2248,6 +2262,17 @@ export class App implements AppApi {
       this.scheduleAutosave();
       this.scheduleFolderSave();
     }
+  }
+
+  /** The morphological dimensions of a mesh: computed once. */
+  private async morphOf(loaded: LoadedMesh): Promise<MorphDimensions | null> {
+    if (this.flakeMorph?.loaded !== loaded) {
+      const positions = loaded.geometry.getAttribute('position').array as Float32Array;
+      const value = await runSliced(morphDimensionsSteps(positions));
+      if (this.loaded === loaded) this.flakeMorph = { loaded, value };
+      return value;
+    }
+    return this.flakeMorph.value;
   }
 
   // ------------------------------------------------------------ edge angles
@@ -2469,16 +2494,82 @@ export class App implements AppApi {
     for (const c of curves) {
       const key = JSON.stringify([c.points, c.closed, st.specimen.unit, piecesKey]);
       if (this.retouchResults.get(c.id)?.key === key) continue;
-      const result = pieces.size
-        ? await runSliced(retouchAnglesSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates, pieceOfFace: part.region, pieces }))
+      const found = pieces.size
+        ? await runSliced(retouchSectionsSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates, pieceOfFace: part.region, pieces }))
         : null;
       if (token !== this.retouchToken || this.loaded !== loaded) return;
-      this.retouchResults.set(c.id, { key, result });
+      this.retouchResults.set(c.id, { key, result: found?.result ?? null, sections: found?.sections ?? [], length: found?.length ?? 0 });
       changed = true;
     }
+    this.scheduleRetouchIndices();
     if (!changed) return;
     this.sidebar.refresh('edge');
     this.syncAnnotations();
+    if (this.unsaved) {
+      this.scheduleAutosave();
+      this.scheduleFolderSave();
+    }
+  }
+
+  private scheduleRetouchIndices(): void {
+    clearTimeout(this.retouchIndexTimer);
+    this.retouchIndexTimer = window.setTimeout(() => void this.updateRetouchIndices(), 60);
+  }
+
+  /** A flake's retouch indices (in slices), from the stations' sections: the mesh is not cut again; the last request wins. */
+  private async updateRetouchIndices(): Promise<void> {
+    const token = ++this.retouchIndexToken;
+    const base = this.measureBase, loaded = this.loaded, part = this.partition, up = this.upper;
+    const st = this.store.state;
+    if (!this.isFlake() || !base || !loaded || !part || !up) {
+      this.retouchIndex = null;
+      this.retouchIndexKey = '';
+      return;
+    }
+    const pieces = new Map<number, RetouchPiece>();
+    const faceOfPiece = new Map<number, number>();
+    st.regions.forEach((r, i) => {
+      const c = this.seedComponent[i];
+      if (r.type === 'retouch' && c >= 0 && !pieces.has(c)) pieces.set(c, { region: r.id, layer: r.retouchLayer ?? 1 });
+      const u = this.upperComponent[i];
+      const code = r.type === 'dorsal' ? FACE_DORSAL : r.type === 'ventral' ? FACE_VENTRAL : r.type === 'platform' ? FACE_PLATFORM : 0;
+      if (code && u >= 0 && !faceOfPiece.has(u)) faceOfPiece.set(u, code);
+    });
+    const measured = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type));
+    const settings = retouchSettingsOf(st.flake);
+    const matrix = st.flake.axis?.matrix ?? null;
+    const facesKey = JSON.stringify([up.key, [...faceOfPiece]]);
+    const frameKey = JSON.stringify([settings.axis, settings.flip, matrix, st.specimen.frame?.matrix ?? null, facesKey]);
+    const key = JSON.stringify([frameKey, settings.fitLength, st.specimen.unit, this.partitionVersion, [...pieces], measured.map((c) => [c.id, c.attributes.type, c.closed, this.retouchResults.get(c.id)?.key ?? null]), base.volume]);
+    if (key === this.retouchIndexKey) return;
+    const g = loaded.geometry;
+    const positions = g.getAttribute('position').array as Float32Array;
+    const index = g.index!.array as Uint32Array;
+    if (this.retouchFaces?.key !== facesKey) {
+      const faces = await runSliced(faceOfTrianglesSteps(up.partition.region, faceOfPiece));
+      if (token !== this.retouchIndexToken || this.loaded !== loaded) return;
+      this.retouchFaces = { key: facesKey, faces };
+    }
+    const faceOf = this.retouchFaces.faces;
+    if (this.retouchFrame?.key !== frameKey) {
+      const longest = settings.axis === 'longest' || (settings.axis === 'auto' && !matrix);
+      const morph = longest ? await this.morphOf(loaded) : null;
+      if (token !== this.retouchIndexToken || this.loaded !== loaded) return;
+      const frame = await runSliced(segmentFrameSteps({ positions, index, offset: loaded.offset, orientationSign: loaded.orientationSign, faceOf, settings, matrix, morph, specimenFrame: st.specimen.frame?.matrix ?? null }));
+      const outline = frame.frame ? await runSliced(segmentOutlineSteps(positions, frame.frame)) : null;
+      if (token !== this.retouchIndexToken || this.loaded !== loaded) return;
+      this.retouchFrame = { key: frameKey, frame, outline };
+    }
+    const curves: RetouchCurve[] = measured.map((c) => {
+      const r = this.retouchResults.get(c.id);
+      return { curveId: c.id, edge: c.attributes.type === 'edge', closed: c.closed, length: r?.length ?? 0, stations: r?.result?.stations ?? [], sections: r?.sections ?? [] };
+    });
+    const result = await runSliced(
+      retouchIndexSteps({ positions, index, offset: loaded.offset, faceOf, pieceOfFace: part.region, pieces, curves, unit: st.specimen.unit, meanEdge: base.meanEdge, volume: base.volume, fitLength: settings.fitLength, frame: this.retouchFrame.frame, outline: this.retouchFrame.outline }),
+    );
+    if (token !== this.retouchIndexToken || this.loaded !== loaded) return;
+    this.retouchIndex = result;
+    this.retouchIndexKey = key;
     if (this.unsaved) {
       this.scheduleAutosave();
       this.scheduleFolderSave();
@@ -3052,7 +3143,7 @@ export class App implements AppApi {
       folder: this.workspace?.name ?? null,
       kind,
       options,
-      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: this.folderGm ?? this.store.state.gm },
+      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, retouchIndex: RETOUCH_INDEX_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: this.folderGm ?? this.store.state.gm },
       duplicateNames: this.wsDuplicates,
     };
   }
@@ -3143,7 +3234,7 @@ export class App implements AppApi {
       const live: BatchProject = {
         path: primary?.path ?? own,
         state: structuredClone(this.store.state) as ProjectState,
-        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() }, gm: this.gm ? { config: this.store.state.gm, ...this.gm } : null },
+        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() }, retouchIndices: this.retouchIndex?.indices ?? null, gm: this.gm ? { config: this.store.state.gm, ...this.gm } : null },
         appVersion: __APP_VERSION__,
       };
       projects = projects.map((p) => (p === primary ? live : p));
@@ -3307,9 +3398,16 @@ export class App implements AppApi {
     }
     if (this.mode === 'measure')
       return [
-        ...(this.isFlake() ? [csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts))] : []),
+        ...(this.isFlake() ? [csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts, this.retouchIndex?.indices ?? null))] : []),
         csv('edge-angles', t('export.edgeAngles'), 'edge_angles.csv', this.edgeAngleCurves().length > 0, () => edgeAnglesCsv(st, this.edgeAngleCurves(), opts)),
         csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts)),
+        ...(this.isFlake()
+          ? [
+              csv('retouch-sections', t('export.retouchSections'), 'retouch_sections.csv', !!this.retouchIndex?.indices.stations.length, () => retouchSectionsCsv(st, this.retouchIndex?.indices ?? null, opts)),
+              csv('retouch-segments', t('export.retouchSegments'), 'retouch_segments.csv', !!this.retouchIndex?.indices.segments.length, () => retouchSegmentsCsv(st, this.retouchIndex?.indices ?? null, opts)),
+              csv('invasiveness', t('export.invasiveness'), 'invasiveness.csv', !!this.retouchIndex?.indices.penetration.length, () => invasivenessCsv(st, this.retouchIndex?.indices ?? null, opts)),
+            ]
+          : []),
         csv('edge-sharp', t('export.edgeSharp'), 'edge_sharp.csv', st.sharpEdge.threshold !== null && this.edgeAngleCurves().length > 0, () => edgeSharpCsv(st, this.edgeAngleCurves(), opts)),
         csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile())),
         csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
@@ -4467,6 +4565,11 @@ export class App implements AppApi {
     this.flakeToken++;
     this.edgeResults.clear();
     this.retouchResults.clear();
+    this.retouchIndex = null;
+    this.retouchIndexKey = '';
+    this.retouchIndexToken++;
+    this.retouchFrame = null;
+    this.retouchFaces = null;
     this.gm = null;
     this.gmDoneKey = '';
     this.edgeToken++;
@@ -5112,7 +5215,7 @@ export class App implements AppApi {
       /** A flake's frame and measurements (null for a core). */
       flake: () =>
         this.isFlake()
-          ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null }
+          ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, reasons: this.flake?.reasons ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null }
           : null,
       /** The profile panel: shown or not, where the section across is (share of the technical length), its width and thickness, and how many lines the ring on the model has. */
       sectionPanel: () => ({
@@ -5122,12 +5225,25 @@ export class App implements AppApi {
         thickness: this.profileCross?.thickness ?? null,
         ring: this.ringLayer?.group.children.length ?? 0,
       }),
-      exportFlakesCsvText: () => flakesCsv(this.store.state, this.flake?.measures ?? null, { excelBom: false }),
+      exportFlakesCsvText: () => flakesCsv(this.store.state, this.flake?.measures ?? null, { excelBom: false }, this.retouchIndex?.indices ?? null),
+      /** A flake's retouch indices as stored, and why what is empty is empty. */
+      retouch: () => {
+        const r = this.retouchIndex;
+        return r ? { ...r.indices, reasons: r.reasons, stationReasons: r.details.map((d) => ({ curveId: d.curveId, station: d.station, reason: d.reason, giurReason: d.giurReason })) } : null;
+      },
+      /** Its settings, through the actions. */
+      retouchSettings: (change: { fitLength?: number | null; axis?: RetouchAxisChoice; flip?: boolean }) => {
+        if (change.fitLength !== undefined) setRetouchFitLength(this.store, change.fitLength);
+        if (change.axis !== undefined) setRetouchAxis(this.store, change.axis);
+        if (change.flip !== undefined) setRetouchFlip(this.store, change.flip);
+      },
       /** A curve's edge angles (null: not measured, or no unit stated). */
       edgeAngles: (curveId: string) => this.edgeAngleResult(curveId),
       /** What the edge-angle colours show (null: none), and the two ends of their scale. */
       edgeColors: () => (this.edgeColorKey ? { key: this.edgeColorKey, min: this.edgeLegend?.querySelector('#edge-legend-min')?.textContent ?? null, max: this.edgeLegend?.querySelector('#edge-legend-max')?.textContent ?? null } : null),
       exportEdgeAnglesCsvText: () => edgeAnglesCsv(this.store.state, this.edgeAngleCurves(), { excelBom: false }),
+      /** Where the end of an arrow being dragged is shown. */
+      endpointPreview: () => this.arrows?.endpointOverride?.point ?? null,
       gm: () => this.gm,
       exportGmText: (kind: 'tps' | 'csv' | 'curves' | 'surfaces') => {
         const g = this.gm;

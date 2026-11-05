@@ -18,7 +18,7 @@ export const TWO_LINES_LENGTH_MM = 0.5;
 /** The part of the ventral profile (share of the technical length) IPA is fitted to: away from the bulb and the distal curve. */
 export const IPA_BAND = [0.25, 0.75] as const;
 /** Fewer points than this before resampling: no line. */
-export const MIN_FIT_POINTS = 5;
+export const MIN_FIT_POINTS = 2;
 /** The platform stretch of the section starts at most this many mean edge lengths from P. */
 export const PLATFORM_START_EDGES = 3;
 
@@ -30,6 +30,8 @@ export const FLAKE_PARAMETERS = {
   EPA_DISTANCES_MM: [...EPA_DISTANCES_MM],
   TWO_LINES_LENGTH_MM,
   IPA_BAND: [...IPA_BAND],
+  MIN_FIT_POINTS,
+  PLATFORM_START_EDGES,
 };
 
 /** The measured columns of flakes.csv, in order (after frame_source). */
@@ -56,6 +58,14 @@ export const FLAKE_MEASURES = [
 ] as const;
 export type FlakeMeasure = (typeof FLAKE_MEASURES)[number];
 export type FlakeMeasures = Record<FlakeMeasure, number | null>;
+
+/** Why a measure is empty, in the order they are looked for: for the screen, neither stored nor exported. */
+export const FLAKE_EMPTY_REASONS = ['no_hull', 'no_axis', 'frame_failed', 'along_z', 'no_platform', 'section_misses_platform', 'no_ends', 'no_path', 'no_unit', 'section_ends', 'band_not_reached'] as const;
+export type FlakeEmptyReason = (typeof FLAKE_EMPTY_REASONS)[number];
+
+const EPA_MEASURES = ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const;
+const PLATFORM_MEASURES: readonly FlakeMeasure[] = ['platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'platform_area', ...EPA_MEASURES, 'ipa'];
+const AXIS_MEASURES: readonly FlakeMeasure[] = ['tech_length', 'tech_width', 'tech_thickness', 'morph_tech_angle_deg', ...PLATFORM_MEASURES];
 
 export const emptyFlakeMeasures = (): FlakeMeasures => Object.fromEntries(FLAKE_MEASURES.map((k) => [k, null])) as FlakeMeasures;
 
@@ -402,8 +412,6 @@ export function platformProfile(line: SectionLine, P: Vec3, frame: FrameAxes, in
     const ys = ventralWalk.map((p) => inFrame(frame, p)[1]);
     const top = ys.reduce((m, y, i) => (y > ys[m] ? i : m), 0);
     const part: Vec3[] = [];
-    let raw = 0;
-    for (let i = 0; i <= top; i++) if (ys[i] >= lo && ys[i] <= hi) raw++;
     for (let i = 0; i < top; i++) {
       const ya = ys[i], yb = ys[i + 1];
       const s0 = yb !== ya ? Math.max(0, Math.min(1, ((ya < yb ? lo : hi) - ya) / (yb - ya))) : ya >= lo && ya <= hi ? 0 : 1;
@@ -415,7 +423,7 @@ export function platformProfile(line: SectionLine, P: Vec3, frame: FrameAxes, in
       if (!part.length || dist(part[part.length - 1], pa) > 0) part.push(pa);
       part.push(pb);
     }
-    const band = raw >= MIN_FIT_POINTS && part.length >= 2 ? fitLine(resampleEven(part, FIT_RESAMPLE_COUNT)) : null;
+    const band = part.length >= MIN_FIT_POINTS ? fitLine(resampleEven(part, FIT_RESAMPLE_COUNT)) : null;
     if (band) {
       const d = dot(band.dir, frame.y) < 0 ? neg(band.dir) : band.dir;
       ipa = angleDeg(lineDir, d);
@@ -469,6 +477,8 @@ export interface FlakeGeometry {
 
 export interface FlakeResult {
   measures: FlakeMeasures;
+  /** Why each empty measure is empty: the first of `FLAKE_EMPTY_REASONS` that holds; not stored. */
+  reasons: Partial<Record<FlakeMeasure, FlakeEmptyReason>>;
   geometry: FlakeGeometry;
   /** The longitudinal section (coordinates relative to the mesh's offset); not stored. */
   section: SectionLine | null;
@@ -480,37 +490,61 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   const o: Vec3 = input.offset ?? [0, 0, 0];
   const m = emptyFlakeMeasures();
   const geometry: FlakeGeometry = { P, E: null, platformLine: null, epaPoints: [], ventral: null, ventralLine: null };
+  const reasons: FlakeResult['reasons'] = {};
+  /** Those of these measures still empty, for this reason. */
+  const why = (reason: FlakeEmptyReason, keys: readonly FlakeMeasure[]) => {
+    for (const k of keys) if (m[k] === null && !reasons[k]) reasons[k] = reason;
+  };
   if (morph) {
     m.morph_length = morph.length;
     m.morph_width = morph.width;
     m.morph_thickness = morph.thickness;
+  } else why('no_hull', ['morph_length', 'morph_width', 'morph_thickness']);
+  if (!matrix || !P) {
+    why(P ? 'frame_failed' : 'no_axis', AXIS_MEASURES);
+    return { measures: m, reasons, geometry, section: null };
   }
-  if (!matrix || !P) return { measures: m, geometry, section: null };
   const toLocal = (p: Vec3): Vec3 => [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
   const toOriginal = (p: Vec3): Vec3 => [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
   const axes = frameAxes(matrix);
   const frame: FrameAxes = { ...axes, origin: toLocal(axes.origin) };
   const tech = yield* techDimensionsSteps(positions, frame);
   Object.assign(m, tech);
-  if (morph) m.morph_tech_angle_deg = morphTechAngle(morph.lengthDir, frame);
+  if (morph) {
+    m.morph_tech_angle_deg = morphTechAngle(morph.lengthDir, frame);
+    why('along_z', ['morph_tech_angle_deg']);
+  } else why('no_hull', ['morph_tech_angle_deg']);
   const localP = toLocal(P);
   const section = input.section !== undefined ? input.section : lineNear(sectionByPlane(positions, index, frame.origin, frame.x, input.candidates ?? null), localP);
   yield;
-  if (!section || !platformFaces?.length) return { measures: m, geometry, section };
+  if (!platformFaces?.length) {
+    why('no_platform', PLATFORM_MEASURES);
+    return { measures: m, reasons, geometry, section };
+  }
+  if (!section) {
+    why('section_misses_platform', PLATFORM_MEASURES);
+    return { measures: m, reasons, geometry, section };
+  }
   const mask = new Uint8Array(Math.floor(index.length / 3));
   for (let i = 0; i < platformFaces.length; i++) mask[platformFaces[i]] = 1;
   const profile = platformProfile(section, localP, frame, (f) => mask[f] === 1, meanEdge, tech.tech_length, mmPerUnit(unit));
-  if (!profile) return { measures: m, geometry, section };
+  if (!profile) {
+    why('section_misses_platform', PLATFORM_MEASURES);
+    return { measures: m, reasons, geometry, section };
+  }
   m.platform_area = platformArea;
+  why('no_platform', ['platform_area']);
   m.platform_depth_chord = dist(localP, profile.E);
   const depth = yield* regionPathSteps(positions, index, platformFaces, localP, profile.E);
   m.platform_depth_path = depth?.length ?? null;
+  why('no_path', ['platform_depth_path']);
   if (ends.length >= 2) {
     const a = toLocal(ends[0]), b = toLocal(ends[1]);
     m.platform_width_chord = dist(a, b);
     const width = yield* regionPathSteps(positions, index, platformFaces, a, b);
     m.platform_width_path = width?.length ?? null;
-  }
+    why('no_path', ['platform_width_path']);
+  } else why('no_ends', ['platform_width_chord', 'platform_width_path']);
   m.epa_3pt_1mm = profile.epa3[0];
   m.epa_3pt_2mm = profile.epa3[1];
   m.epa_3pt_3mm = profile.epa3[2];
@@ -518,13 +552,15 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   m.epa_2ln_2mm = profile.epa2[1];
   m.epa_2ln_3mm = profile.epa2[2];
   m.ipa = profile.ipa;
+  why(mmPerUnit(unit) === null ? 'no_unit' : 'section_ends', EPA_MEASURES);
+  why('band_not_reached', ['ipa']);
   const pair = (x: [Vec3, Vec3] | null): [Vec3, Vec3] | null => (x ? [toOriginal(x[0]), toOriginal(x[1])] : null);
   geometry.E = toOriginal(profile.E);
   geometry.platformLine = pair(profile.line);
   geometry.epaPoints = profile.q.map((x) => (x ? toOriginal(x) : null));
   geometry.ventral = profile.ventral ? pair([profile.ventral[0], profile.ventral[profile.ventral.length - 1]]) : null;
   geometry.ventralLine = pair(profile.ventralLine);
-  return { measures: m, geometry, section };
+  return { measures: m, reasons, geometry, section };
 }
 
 export const flakeMeasures = (input: FlakeInput): FlakeResult => runSync(flakeMeasuresSteps(input));

@@ -5,6 +5,7 @@
  */
 
 import type { Adjacency } from './curvature';
+import { symmetricEigen3 } from './linalg';
 
 /** What a traced curve is attracted to: convex ridges, concave valleys, or nothing. */
 export type SnapMode = 'ridge' | 'valley' | 'off';
@@ -17,6 +18,10 @@ const REFERENCE = 0.5;
 const FEATURE_COST = 0.03;
 /** Strength a vertex needs before a click snaps to it. */
 export const SNAP_MIN_STRENGTH = 0.5;
+/** What counts as the same feature when a point snaps to it: at least this share of its crest's strength. */
+export const POINT_SNAP_SHARE = 0.5;
+/** Which way a feature runs is told by the vertices of at least this share of its crest's strength: a smoothed feature is several rows wide, its crest one. */
+const POINT_CREST_SHARE = 0.9;
 
 /**
  * Per-vertex feature strength in [0, 1) from signed mean curvature (positive =
@@ -342,6 +347,90 @@ export function snapToFeature(
     cur = next;
   }
   return cur;
+}
+
+/**
+ * Move a picked vertex onto the nearest place of the feature under it, for things that are points (the point of
+ * percussion, a fixed landmark): `snapToFeature` runs along a feature to its most pronounced place, which is right for a
+ * line through it but moves a point away from where it was put. (1) `snapToFeature` tells which feature; (2) its band:
+ * the vertices connected to that crest, within 2 × `radius` of it, of at least `POINT_SNAP_SHARE` of its strength (straight, as
+ * `snapToFeature` measures how far it may go: a path over mesh edges zig-zags, and would leave out what lies abreast of the press);
+ * (3) the vertex of the band nearest `start`; (4) from there uphill across the feature only: no further along it
+ * (the main direction of the band's strongest vertices) than half a mean edge length. No clear direction: no last step.
+ * Returns `start` when no feature is within reach.
+ */
+export function snapToFeaturePoint(
+  start: number,
+  radius: number,
+  strength: Float32Array,
+  positions: ArrayLike<number>,
+  adj: Adjacency,
+  minStrength = SNAP_MIN_STRENGTH,
+): number {
+  const crest = snapToFeature(start, radius, strength, positions, adj, minStrength);
+  if (strength[crest] < minStrength) return start;
+  const band = featureBand(crest, 2 * radius, POINT_SNAP_SHARE * strength[crest], strength, positions, adj);
+  const at = (v: number, k: number) => positions[3 * v + k];
+  let near = crest, least = Infinity;
+  for (const v of band) {
+    const d = (at(v, 0) - at(start, 0)) ** 2 + (at(v, 1) - at(start, 1)) ** 2 + (at(v, 2) - at(start, 2)) ** 2;
+    if (d < least) {
+      least = d;
+      near = v;
+    }
+  }
+  const top = band.filter((v) => strength[v] >= POINT_CREST_SHARE * strength[crest]);
+  if (top.length < 3) return near;
+  const mean = [0, 0, 0];
+  for (const v of top) for (let k = 0; k < 3; k++) mean[k] += at(v, k) / top.length;
+  const cov = new Array<number>(9).fill(0);
+  for (const v of top) for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) cov[3 * i + j] += (at(v, i) - mean[i]) * (at(v, j) - mean[j]);
+  const { values, vectors } = symmetricEigen3(cov);
+  if (values[0] < 4 * values[1]) return near;
+  const [dx, dy, dz] = vectors[0];
+  const along = (v: number) => at(v, 0) * dx + at(v, 1) * dy + at(v, 2) * dz;
+  let total = 0, edges = 0;
+  for (const v of band) {
+    for (let e = adj.offsets[v]; e < adj.offsets[v + 1]; e++) {
+      const w = adj.neighbors[e];
+      total += Math.hypot(at(w, 0) - at(v, 0), at(w, 1) - at(v, 1), at(w, 2) - at(v, 2));
+      edges++;
+    }
+  }
+  const reach = edges ? (0.5 * total) / edges : 0;
+  const from = along(near);
+  let cur = near;
+  for (let step = 0; step < 500; step++) {
+    let next = cur;
+    for (let e = adj.offsets[cur]; e < adj.offsets[cur + 1]; e++) {
+      const v = adj.neighbors[e];
+      if (strength[v] <= strength[next]) continue;
+      // neither in one step nor by many small ones
+      if (Math.abs(along(v) - along(cur)) > reach || Math.abs(along(v) - from) > reach) continue;
+      next = v;
+    }
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/** The vertices connected to `seed` over vertices of at least `floor` strength, within `reach` of it. */
+function featureBand(seed: number, reach: number, floor: number, strength: Float32Array, positions: ArrayLike<number>, adj: Adjacency, maxVisits = 40_000): number[] {
+  const seen = new Set<number>([seed]);
+  const queue = [seed];
+  const sx = positions[3 * seed], sy = positions[3 * seed + 1], sz = positions[3 * seed + 2];
+  for (let head = 0; head < queue.length && queue.length < maxVisits; head++) {
+    const u = queue[head];
+    for (let e = adj.offsets[u]; e < adj.offsets[u + 1]; e++) {
+      const v = adj.neighbors[e];
+      if (seen.has(v) || strength[v] < floor) continue;
+      if (Math.hypot(positions[3 * v] - sx, positions[3 * v + 1] - sy, positions[3 * v + 2] - sz) > reach) continue;
+      seen.add(v);
+      queue.push(v);
+    }
+  }
+  return queue;
 }
 
 /** Best feature vertex within `radius` of `start` (surface distance), or −1. */

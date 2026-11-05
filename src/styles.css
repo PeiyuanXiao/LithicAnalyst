@@ -998,6 +998,18 @@ kbd {
   opacity: 0.28;
 }
 
+/* the tools that place things on the model click through the labels */
+.viewport[data-tool="draw"] .arrow-label,
+.viewport[data-tool="curve"] .arrow-label,
+.viewport[data-tool="axis"] .arrow-label,
+.viewport[data-tool="platform-end"] .arrow-label,
+.viewport[data-tool="landmark"] .arrow-label,
+.viewport[data-tool^="measure-"] .arrow-label,
+.viewport[data-tool="section"] .arrow-label,
+.viewport[data-tool="region"] .arrow-label {
+  pointer-events: none;
+}
+
 /* curve labels are pills, arrow labels are tags */
 .curve-label {
   border-radius: 999px;

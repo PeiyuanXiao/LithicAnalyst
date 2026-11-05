@@ -3,7 +3,7 @@ import { boxPly, T1, t1Ply, type Vec3 } from './fixtures/meshes';
 import { curveClick, displayPanel, dragArrow, expect, exportFile, folderPaths, folderText, loadMesh, mockFolder, nextFrames, openApp, openMockFolder, openSection, parseCsv, specimenPanel, state, test, toScreen } from './helpers';
 
 const FLAKES_HEADER =
-  'specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa';
+  'specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth';
 
 const flake = (page: Page) => page.evaluate(() => window.lithicanalyst.flake());
 const measures = async (page: Page) => (await flake(page))?.measures ?? null;
@@ -319,7 +319,7 @@ test('the type: stays with the project file, the next new model starts with it, 
   expect(file.flake.axis?.matrix?.length).toBe(16);
   await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.projectJson())).derived.flake?.measures.ipa ?? null).not.toBeNull();
   const again = await page.evaluate(() => window.lithicanalyst.projectJson());
-  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75] });
+  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3 });
 
   // a new model starts as a flake
   await loadMesh(page, { ...t1Ply(), name: 't1b.ply' });
@@ -380,7 +380,7 @@ test('a folder: the list shows and filters the type; the summary has flakes.csv 
   expect(row.frame_source).toBe('technical_axis');
   expect(Number(row.tech_length)).toBeCloseTo(60, 0);
   const manifest = JSON.parse((await folderText(page, (await find('manifest\\.json'))!))!);
-  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75] });
+  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3 });
 });
 
 test('the toolbar: the axis after Select, the platform ends after the curve; the automatic measurements are the flake\'s', async ({ page }) => {
@@ -499,4 +499,64 @@ test('an edge that does not close leaves the two faces unnamed, and says so', as
   const totals = (await regionsOf(page))!.totals;
   expect(totals.ventral).toBe(0);
   expect(totals.dorsal).toBe(0);
+});
+
+test('an empty measure says why when the pointer rests on it', async ({ page }) => {
+  await setType(page, 'flake');
+  await drawAxis(page);
+  await drawOutline(page);
+  await page.keyboard.press('v');
+  await page.locator('#app-mode-measure').click();
+  await openSection(page, 'flake');
+  await expect.poll(async () => (await measures(page))?.platform_depth_chord ?? null).not.toBeNull();
+  // no platform ends
+  const empty = page.locator('#flake-platform_width_chord');
+  await expect(empty).toHaveText('—');
+  await empty.hover();
+  await expect(page.locator('.tip')).toHaveText('Fewer than two platform ends');
+  // one with a value has none
+  await page.locator('#flake-platform_depth_chord').hover();
+  await expect(page.locator('.tip')).toHaveCount(0);
+  // nor do the reasons go into the file
+  const file = await page.evaluate(() => window.lithicanalyst.projectJson());
+  expect(file.derived.flake?.measures.platform_width_chord).toBeNull();
+  expect(JSON.stringify(file)).not.toContain('no_ends');
+  expect((await flake(page))?.reasons?.platform_width_chord).toBe('no_ends');
+});
+
+test('the tools that place things click through the labels; the select tool takes them', async ({ page }) => {
+  await setType(page, 'flake');
+  await drawAxis(page);
+  if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
+  await page.keyboard.press('v');
+  await page.evaluate(() => window.lithicanalyst.selectForTest(null));
+  // the whole flake seen from its ventral face: the label over the model
+  await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
+  await nextFrames(page, 3);
+  const label = page.locator('.arrow-label', { hasText: 'Technical axis' });
+  const box = (await label.boundingBox())!;
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  // the curve tool: the model under it takes the point
+  await page.keyboard.press('p');
+  await expect(page.locator('.viewport')).toHaveAttribute('data-tool', 'curve');
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.curveDraft()))?.length ?? 0).toBe(1);
+  expect(await page.evaluate(() => window.lithicanalyst.selection())).toBeNull();
+  await page.keyboard.press('Escape');
+  // the select tool: the label takes the click
+  await page.keyboard.press('v');
+  await expect(page.locator('.viewport')).toHaveAttribute('data-tool', 'select');
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.click(at.x, at.y);
+  const id = (await state(page)).flake.axis!.id;
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.selection())).toBe(id);
+  // each of the other tools that place, and the two that pick by label
+  const pointerEvents = () => label.evaluate((e) => getComputedStyle(e).pointerEvents);
+  for (const [key, none] of [['a', true], ['e', true], ['k', true], ['r', true], ['b', false], ['q', false]] as const) {
+    await page.keyboard.press(key);
+    await expect.poll(pointerEvents).toBe(none ? 'none' : 'auto');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('v');
+  }
 });

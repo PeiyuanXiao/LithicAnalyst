@@ -30,9 +30,11 @@ import {
 import { editedCompletion, type CurveShape } from './curveGeometry';
 import { emptyCorrections, hasFaceCorrections, joinKey } from '../compute/configuration';
 import { orderSequences, relationInputs } from '../compute/relations';
+import { clampFitLength } from '../compute/retouchIndex';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
+import { retouchSettingsOf, type RetouchAxisChoice, type RetouchSettings } from './types';
 import type { GmConfig, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3 } from './types';
 import { copy, distance } from './vec';
 
@@ -812,6 +814,35 @@ export function setGmConfig(store: ProjectStore, change: Partial<GmConfig>): voi
   const after = { ...structuredClone(before), ...structuredClone(change) };
   if (JSON.stringify(after) === JSON.stringify(before)) return;
   store.history.execute(new SetGmConfigCommand(structuredClone(before), after));
+}
+
+// ---------------------------------------------------------------- retouch indices
+
+/** A flake's settings of the retouch indices; one undo step, none when nothing changes. */
+function setRetouchSettings(store: ProjectStore, change: Partial<RetouchSettings>): void {
+  const flake = store.state.flake;
+  const before = retouchSettingsOf(flake);
+  const after = { ...before, ...change };
+  if (after.fitLength === before.fitLength && after.axis === before.axis && after.flip === before.flip) return;
+  const next = structuredClone(flake);
+  if (after.fitLength === null && after.axis === 'auto' && !after.flip) delete next.retouch;
+  else next.retouch = after;
+  store.history.execute(new SetFlakeCommand('cmd.retouchSettings', structuredClone(flake), next));
+}
+
+/** The length of section the original surface lines are fitted to, in mm (null: the default); out of range, the nearest in it. */
+export function setRetouchFitLength(store: ProjectStore, value: number | null): void {
+  setRetouchSettings(store, { fitLength: value === null ? null : clampFitLength(value) });
+}
+
+/** The frame the retouch indices are laid out on. */
+export function setRetouchAxis(store: ProjectStore, axis: RetouchAxisChoice): void {
+  setRetouchSettings(store, { axis });
+}
+
+/** The longest axis the other way round. */
+export function setRetouchFlip(store: ProjectStore, flip: boolean): void {
+  setRetouchSettings(store, { flip });
 }
 
 // ---------------------------------------------------------------- technical axis

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { convexHull } from '../src/compute/convexHull';
-import { emptyFlakeMeasures, flakeMeasures, FLAKE_MEASURES, morphDimensions, morphTechAngle, type FlakeMeasures } from '../src/compute/flake';
+import { emptyFlakeMeasures, FLAKE_PARAMETERS, flakeMeasures, FLAKE_MEASURES, morphDimensions, morphTechAngle, type FlakeMeasure, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
 import { buildEdges } from '../src/compute/meshGeometry';
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
 import { regionPlane } from '../src/compute/planes';
@@ -10,7 +10,7 @@ import { runSync } from '../src/compute/steps';
 import { techAngleDeg, technicalFrame, MIN_AXIS_EDGES } from '../src/compute/technicalFrame';
 import { frameAxes, frameMatrix, type FrameAxes } from '../src/core/frame';
 import type { Vec3 } from '../src/core/types';
-import { box, cylinderPatch, ellipsoid, flakeT1, flakeT2, mapped, rigid, T1, type Mesh } from './meshes';
+import { box, cylinderPatch, ellipsoid, flakeT1, flakeT2, flakeT6, mapped, rigid, T1, T6, t6Zv, type Mesh } from './meshes';
 
 const deg = (r: number) => (r * 180) / Math.PI;
 const IPA = 180 - deg(Math.atan(10 / 2));
@@ -360,5 +360,172 @@ describe('a rigid movement changes nothing', () => {
     closeTo(rb.tech_length, ra.tech_length!, 0.05);
     closeTo(rb.tech_width, ra.tech_width!, 0.05);
     closeTo(rb.tech_thickness, ra.tech_thickness!, 0.05);
+  });
+});
+
+describe('T6, a flake of realistic shape', () => {
+  const faceNormal = (m: Mesh, t: number): Vec3 => {
+    const p = (k: number): Vec3 => {
+      const v = 3 * m.index[3 * t + k];
+      return [m.positions[v], m.positions[v + 1], m.positions[v + 2]];
+    };
+    const [a, b, c] = [p(0), p(1), p(2)];
+    const u: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v: Vec3 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    return [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  };
+
+  /** The rows of triangles over the platform: all at y ≤ 0, and facing −y (more than the dorsal face's first rows do). */
+  const platformOfT6 = (m: Mesh): { faces: Uint32Array; area: number } => {
+    const faces: number[] = [];
+    let area = 0;
+    for (let t = 0; t < m.index.length / 3; t++) {
+      const low = [0, 1, 2].every((k) => m.positions[3 * m.index[3 * t + k] + 1] <= 1e-5);
+      const n = faceNormal(m, t);
+      if (!low || n[1] >= 0 || Math.abs(n[1]) <= Math.abs(n[2])) continue;
+      faces.push(t);
+      area += 0.5 * Math.hypot(...n);
+    }
+    return { faces: Uint32Array.from(faces), area };
+  };
+
+  it.each([[14, 9300, 18594], [1, 8689, 17372]])('K = %i: closed, manifold, turned one way, with a positive volume', (K, vertices, triangles) => {
+    const m = flakeT6(K);
+    expect(m.positions.length / 3).toBe(vertices);
+    expect(m.index.length / 3).toBe(triangles);
+    const uses = new Map<string, number>();
+    for (let t = 0; t < triangles; t++) {
+      for (let k = 0; k < 3; k++) {
+        const a = m.index[3 * t + k], b = m.index[3 * t + ((k + 1) % 3)];
+        const key = `${a},${b}`;
+        uses.set(key, (uses.get(key) ?? 0) + 1);
+      }
+    }
+    // each edge once each way: two triangles, turned alike
+    for (const [key, n] of uses) {
+      expect(n).toBe(1);
+      const [a, b] = key.split(',');
+      expect(uses.get(`${b},${a}`)).toBe(1);
+    }
+    let volume = 0;
+    const p = m.positions;
+    for (let t = 0; t < triangles; t++) {
+      const a = 3 * m.index[3 * t], b = 3 * m.index[3 * t + 1], c = 3 * m.index[3 * t + 2];
+      volume += (p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1]) - p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c]) + p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c])) / 6;
+    }
+    expect(volume).toBeCloseTo(5799.3, 0);
+  });
+
+  it.each([14, 1])('K = %i: the platform measures, with one row of triangles as with many', (K) => {
+    const m = flakeT6(K);
+    const P: Vec3 = [0, 0, t6Zv(0, 0)], A: Vec3 = [0, 40, t6Zv(0, 40)];
+    const edge = meanEdge(m);
+    const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
+    expect(fr.ok).toBe(true);
+    if (!fr.ok) return;
+    const plat = platformOfT6(m);
+    // two to a quad, one at each end of a row, where it comes to a point
+    expect(plat.faces.length).toBe(K * (2 * T6.ns - 2));
+    const ends: Vec3[] = [[-T6.w0, 0, t6Zv(-T6.w0, 0)], [T6.w0, 0, t6Zv(T6.w0, 0)]];
+    const r = flakeMeasures({ positions: m.positions, index: m.index, matrix: fr.matrix, P, ends, platformFaces: plat.faces, platformArea: plat.area, unit: 'mm', meanEdge: edge, morph: morphDimensions(m.positions) }).measures;
+    const within = (v: number | null, want: number) => closeTo(v, want, 0.01 * want);
+    within(r.platform_depth_chord, 7.04);
+    within(r.platform_width_chord, 22.0);
+    for (const [key, want] of [['epa_3pt_1mm', 59.83], ['epa_3pt_2mm', 59.59], ['epa_3pt_3mm', 59.98], ['epa_2ln_1mm', 59.32], ['epa_2ln_2mm', 59.73], ['epa_2ln_3mm', 62.23], ['ipa', 106.46]] as Array<[FlakeMeasure, number]>) closeTo(r[key], want, 1);
+  });
+
+  it('T1 measures the same as before', () => {
+    const r = measure(flakeT1());
+    closeTo(r.ipa, IPA, 0.5);
+    for (const k of ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const) closeTo(r[k], EPA, 0.5);
+    closeTo(r.platform_depth_chord, Math.sqrt(104), 0.01);
+    closeTo(r.platform_width_chord, 30, 0.01);
+    expect(FLAKE_PARAMETERS).toMatchObject({ MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3 });
+  });
+});
+
+describe('why a measure is empty', () => {
+  const EPA_KEYS = ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const;
+  const PLATFORM_KEYS = ['platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'platform_area', ...EPA_KEYS, 'ipa'] as const;
+
+  function run(opts: { P?: Vec3 | null; unit?: string; platform?: boolean; ends?: Vec3[]; matrix?: 'none' } = {}): FlakeResult {
+    const m = flakeT1();
+    const edge = meanEdge(m);
+    const P = opts.P === undefined ? T1.P : opts.P;
+    const fr = P && !opts.matrix ? technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, T1.A) : null;
+    const plat = opts.platform === false ? null : platformOf(m);
+    return flakeMeasures({
+      positions: m.positions,
+      index: m.index,
+      matrix: fr?.ok ? fr.matrix : null,
+      P,
+      ends: opts.ends ?? T1.ends,
+      platformFaces: plat?.faces ?? null,
+      platformArea: plat?.area ?? null,
+      unit: opts.unit ?? 'mm',
+      meanEdge: edge,
+      morph: morphDimensions(m.positions),
+    });
+  }
+
+  it('nothing is empty on a flake annotated in full', () => {
+    const r = run();
+    expect(r.reasons).toEqual({});
+    for (const k of FLAKE_MEASURES) expect(r.measures[k]).not.toBeNull();
+  });
+
+  it('no stated unit: the EPAs, not the IPA', () => {
+    const r = run({ unit: '' });
+    for (const k of EPA_KEYS) expect(r.reasons[k]).toBe('no_unit');
+    expect(r.measures.ipa).not.toBeNull();
+    expect(r.reasons.ipa).toBeUndefined();
+  });
+
+  it('no platform outline: everything of the platform', () => {
+    const r = run({ platform: false });
+    for (const k of PLATFORM_KEYS) expect(r.reasons[k]).toBe('no_platform');
+  });
+
+  it('one platform end: the widths, not the depth', () => {
+    const r = run({ ends: [T1.ends[0]] });
+    expect(r.reasons.platform_width_chord).toBe('no_ends');
+    expect(r.reasons.platform_width_path).toBe('no_ends');
+    expect(r.measures.platform_depth_chord).not.toBeNull();
+    expect(r.reasons.platform_depth_chord).toBeUndefined();
+  });
+
+  it('the axis starts on the ventral face, away from the platform: everything of the platform', () => {
+    const r = run({ P: [0, 5, 0] });
+    for (const k of PLATFORM_KEYS) expect(r.reasons[k]).toBe('section_misses_platform');
+  });
+
+  it('no axis: the technical dimensions, not the morphological ones', () => {
+    const r = run({ P: null });
+    for (const k of ['tech_length', 'tech_width', 'tech_thickness', 'morph_tech_angle_deg'] as const) expect(r.reasons[k]).toBe('no_axis');
+    for (const k of PLATFORM_KEYS) expect(r.reasons[k]).toBe('no_axis');
+    for (const k of ['morph_length', 'morph_width', 'morph_thickness'] as const) expect(r.measures[k]).not.toBeNull();
+  });
+
+  it('an axis without a frame', () => {
+    const r = run({ matrix: 'none' });
+    expect(r.reasons.tech_length).toBe('frame_failed');
+    expect(r.reasons.ipa).toBe('frame_failed');
+  });
+
+  it('a section that ends before the distance', () => {
+    // a platform at the very end of a short piece: on from E there is little of the dorsal side
+    const scale = (p: Vec3): Vec3 => [p[0] / 60, p[1] / 60, p[2] / 60];
+    const m = mapped(flakeT1(), scale);
+    const edge = meanEdge(m);
+    const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, scale(T1.P), scale(T1.A));
+    expect(fr.ok).toBe(true);
+    if (!fr.ok) return;
+    const plat = platformOf(m, scale);
+    const r = flakeMeasures({ positions: m.positions, index: m.index, matrix: fr.matrix, P: scale(T1.P), ends: T1.ends.map(scale), platformFaces: plat.faces, platformArea: plat.area, unit: 'mm', meanEdge: edge, morph: null });
+    expect(r.reasons.epa_3pt_3mm).toBe('section_ends');
+    expect(r.reasons.morph_length).toBe('no_hull');
+  });
+
+  it('the reasons are not in the measures, so neither in the file nor in the tables', () => {
+    expect(Object.keys(run({ platform: false }).measures)).toEqual([...FLAKE_MEASURES]);
   });
 });

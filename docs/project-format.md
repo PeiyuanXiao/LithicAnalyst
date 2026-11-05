@@ -40,7 +40,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `split` | `{ source, id, upHint, swap }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal (set when the split is chosen: toward the side of the curve's plane with more scars by their ends, when even toward the viewer); `swap: true` exchanges upper and lower (files without it: `false`) |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
-| `flake` | `{ axis, otherFrame }` | a flake's own data, see "Flakes"; files without it: none |
+| `flake` | `{ axis, otherFrame, retouch }` | a flake's own data, see "Flakes" and "Retouch indices"; files without it: none |
 | `gm` | object | which points a flake has for geometric morphometrics, see "Geometric morphometrics"; files without it: the default |
 | `sharpEdge` | `{ method, distance, threshold }` | what counts as a sharp edge, see "Sharp edge"; files without it: three points at 2 mm, no threshold |
 | `derived` | object | latest computed results, see below |
@@ -163,6 +163,7 @@ fitted planes, fitted spheres, volumes ….
 * `flake`: a flake's measurements, see "Flakes" (null for a core, or before they are computed).
 * `edgeAngles`: the edge angles of the curves measured, see "Edge angles" (null: none).
 * `retouchAngles`: the retouch layers along those curves, see "Retouch layers" (null: none).
+* `retouchIndices`: a flake's retouch indices, see "Retouch indices" (absent for a core, or before they are computed).
 * `sharpEdge`: their sharp stretches, see "Sharp edge" (null without a threshold, or without edge angles).
 * `gm`: a flake's points for geometric morphometrics, see "Geometric morphometrics" (null for a core, or before they are computed).
 
@@ -291,7 +292,8 @@ the type deletes nothing: the other type's data stay in the file and come back w
 "flake": {
   "axis": { "id": "…", "start": [0, 0, 0], "end": [0, 40, 0], "startNormal": [0, 0, -1], "endNormal": [0, 0, -1],
             "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], "failure": null, "createdAt": "…", "modifiedAt": "…" },
-  "otherFrame": null
+  "otherFrame": null,
+  "retouch": { "fitLength": null, "axis": "auto", "flip": false }
 }
 ```
 
@@ -351,11 +353,11 @@ what needs them is not measured.
   the chord between the points `TWO_LINES_LENGTH_MM` / 2 before and after it along S. Empty when S ends first.
 * **IPA's line**: from the stretch's near end along S away from it (the ventral side), up to S's largest Y, the part with
   Y in `IPA_BAND` × `tech_length`, resampled and fitted the same way, directed +Y. It keeps off the bulb and the distal curve.
-* A fit with fewer than 5 points before resampling gives no line, and the angles that need it are empty. Fewer than two ends: the two widths are empty.
+* A line takes `MIN_FIT_POINTS` (2) points before resampling: a platform stretch always gives one, as does any part of the ventral side within the band (with the points where the band begins and ends). No such part: no IPA. Fewer than two ends: the two widths are empty.
 * **Paths** run on the region's triangles only: the shortest way over its mesh edges; then, on the triangles that way passes
   through, over 3 points on each side, those crossings pulled taut.
 * `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `FIT_RESAMPLE_COUNT` 200,
-  `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND` [0.25, 0.75].
+  `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND` [0.25, 0.75], `MIN_FIT_POINTS` 2, `PLATFORM_START_EDGES` 3.
 
 ## Edge angles
 
@@ -388,6 +390,47 @@ For each layer: Pk its outer end, s the length from A along the section, Q the p
 
 **Derived** (`derived.retouchAngles`): `curves`: `{ curveId, stations }`, each station `{ position, point, stretches }`, each stretch `{ region, layer, distance, three_points, two_lines, layer_face }`
 (`region`: the id of the region where the layer begins; `distance`: s).
+
+## Retouch indices
+
+Worked out from the retouch regions and the edge, with no further annotation; flakes only.
+
+```json
+"flake": { "retouch": { "fitLength": null, "axis": "auto", "flip": false } }
+```
+
+`fitLength`: w below, in mm (1 to 20, in steps of 0.5, out of range the nearest; null: the default, 5). `axis`: the frame of the plan, `auto` (the technical frame when there is one, else the longest axis), `technical` or `longest`. `flip`: the longest axis the other way round, the two ends exchanged. Files without it: these defaults.
+
+Lengths are in the coordinate unit, millimetre parameters converted by `specimen.unit`. Without a stated unit there are no stations, and what needs them is empty.
+
+**At a station.** The curves are those with edge angles, the stations theirs (one every 1 mm). A station is retouched when a layer lies on either side of it. A weight goes with each: the spacing; the two ends of an open curve half of it, so that 30 mm have 31 stations and weigh 30.
+
+* A triangle's part of the flake: the type of the upper region it lies in (`dorsal`, `ventral`, `platform` or none). A side's part: where it first runs, stretches shorter than 2 mean edge lengths not counting (region borders follow mesh edges and the curve need not). One side must be dorsal and the other ventral, else the part is not told (`no_faces`).
+* D: on a side, from the edge along the section to the outer end of its deepest layer, R; without retouch D = 0 and R = A.
+
+**The original surface** (after Morales et al. 2015). On each side a line is fitted to the section from arc length D on, up to w further, stopping earlier where the side leaves its part, where other retouch begins (stretches of less than 2 mean edge lengths do not count) or at the end of the section. Then again, the stretch ending at the side's ridge as well: of the points of the side within its part, the one furthest from the other side's first line; peaks of that distance within a mean edge length of the highest are as high, and the last along the section is taken. A stretch shorter than `ORIGINAL_FIT_MIN_SHARE` × w gives no line (`no_original_surface`; so does a ridge before R). Lines: resampled to `FIT_RESAMPLE_COUNT` points, total least squares.
+
+The two lines meet at A0. Each runs from F (R, or A without retouch) toward the edge; where they meet must lie at least −`MEET_TOLERANCE_EDGES` mean edge lengths along both, and they must be `MIN_MEET_DEG` apart or more, else `lines_do_not_meet`. The missing area: the polygon A0, F₁, along the section to A, along the section to F₂, by the shoelace formula in the section's plane. `original_angle_deg`: between the two lines. `recession`: from A to A0. No upper limit: nearly parallel lines give large values, as they are.
+
+**The reduction** (Eren et al. 2005). A retouched station without a missing area takes one (`filled`) from the retouched stations on either side along the curve, by position (a closed curve goes round); from one side, that one; none on the curve, 0. `erp_filled_share`: filled stations / retouched stations. `removed_volume`: Σ weight × missing area. `erp`: `removed_volume` / (`removed_volume` + the model's volume).
+
+**GIUR** (Kuhn 1990). The stations with retouch on the dorsal side and none on the ventral (else `bifacial`, `inverse`). The reference line: fitted to the whole ventral side, from A to where it leaves the ventral face. t (`retouch_height`): from R to that line. T (`thickness`): the largest distance to it of the dorsal side, from A to where it leaves the dorsal face. `giur`: the mean of t/T over those stations; `giur_stations`: how many.
+
+**The plan.** `technical`: the technical frame, Y from 0 to the technical length (what lies below 0 goes to the first row). `longest`: Y along the morphological length, so that its dot product with the specimen frame's +Y is not negative (as the length's direction falls without a specimen frame), the other way with `flip`; Z the area-weighted mean normal of the dorsal triangles without its Y component (no dorsal face: of the ventral ones, turned round); X = Y × Z; Y from the vertices' smallest to their largest, the origin the origin of the file's coordinates. Fails (`frame_failed`) without a dorsal or a ventral face. Y: the range [y0, y1], L = y1 − y0.
+
+**Invasiveness** (Clarkson 2002, by the text). Rows: ⌊5(y − y0)/L⌋, from 0 at the proximal end. The outline: the vertices in `OUTLINE_BINS` cells along y give xL and xR (mid, half width), along x they give yTop and yBot; empty cells between their neighbours. Each retouch triangle on the dorsal or ventral face goes by its centroid to a segment: row 1 is segment 1, row 5 segment 8, rows 2 to 4 left and right of mid(y) by the plan's X, 2 / 4 / 6 and 3 / 5 / 7. The ventral face is not mirrored: its segments are 8 more, 9 to 16. How far in (p, 0 to 1): rows 2 to 4, 1 − |x − mid(y)| / half width(y); row 5, (yTop(x) − y) / (yTop(x) − (y0 + 0.8 L)); row 1, (y − yBot(x)) / ((y0 + 0.2 L) − yBot(x)); limited to [0, 1], 1 where the divisor is not positive. The two end rows look only at the distance to the end, as the text has it. A segment's p_max (`penetration`) is the largest of its triangles (none: 0). `score`: 0 without retouch, 0.5 up to `INVASIVE_BOUNDARY`, else 1. `invasiveness`: the sum of the scores / 16. `invasiveness_continuous`: the sum of p_max / 16.
+
+**The perimeter** (Barton 1988; Brumm & McLaren 2011). Only curves of type `edge` with edge angles. `retouch_perimeter`: the weights of the retouched stations (each once) / of all the stations. `retouch_perimeter_dorsal`, `_ventral`: of the stations retouched on that side.
+
+**The curvature** (R6/R3, Hiscock & Attenbrow 2003, 2005). Retouched stations next to each other along an `edge` curve, gaps of up to `RETOUCH_MERGE_GAP_MM` included, make a stretch; the one with most weight counts. Its A points on the plan: `edge_curvature_chord` (R3) from the first to the last; `edge_curvature_depth` (R6) the point furthest from that chord, positive away from the outline's centre (the mean of all the vertices; convex), negative toward it; `edge_curvature` = R6 / R3.
+
+**A retouch region on a curve** (`segments`; a notch marked as a region of its own has its diameter and depth here): the stations where it is a stretch of the section. `start_position`, `end_position`: round a closed curve from behind its widest gap, so `start_position` may lie after `end_position`. `length`: their weights. `chord`, `depth`: as above over their A points; null where it goes all the way round. `face`: the side it mostly lies on.
+
+**Not retouched.** A flake without any retouch region has 0 for all of these but the curvature, whatever else is missing, and sixteen rows of 0.
+
+**Empty values.** The reasons are for the screen: neither in the file nor in the tables. In order: the reduction: `no_unit`, `no_retouch_on_edge`, `no_faces` (no retouched station is told), `too_many_gaps` (`erp_filled_share` above `ERP_MAX_FILLED_SHARE`), and for `erp` alone `mesh_open`. GIUR: `no_unit`, `no_retouch_on_edge`, `no_faces`, `no_dorsal_retouch`. Invasiveness: `no_faces`, `no_axis` (`technical` chosen, no technical frame), `frame_failed`. The perimeter: `no_unit`, `no_edge`; the two faces also `no_faces`. The curvature: `no_unit`, `no_retouch_on_edge`, `whole_edge`, `no_axis`, `frame_failed`.
+
+**Derived** (`derived.retouchIndices`): `parameters` (`FIT_RESAMPLE_COUNT` 200, `ORIGINAL_FIT_MM` 5, `ORIGINAL_FIT_MIN_SHARE` 0.5, `MIN_MEET_DEG` 1, `MEET_TOLERANCE_EDGES` 1, `FIT_LENGTH_RANGE_MM` [1, 20], `ERP_MAX_FILLED_SHARE` 0.25, `OUTLINE_BINS` 200, `INVASIVE_BOUNDARY` 0.5, `RETOUCH_MERGE_GAP_MM` 2); `fitLength` (mm) and `axis` (`technical`, `longest` or null) as used; `frame` (`{ origin, x, y, z, y0, y1 }`, original coordinates; null: none); the values `removed_volume`, `erp`, `erp_filled_share`, `giur`, `giur_stations`, `invasiveness`, `invasiveness_continuous`, `retouch_perimeter`, `retouch_perimeter_dorsal`, `retouch_perimeter_ventral`, `edge_curvature`, `edge_curvature_chord`, `edge_curvature_depth`; `stations` (`{ curveId, station, position, segment, x, y, depth_dorsal, depth_ventral, removed_area, filled, original_angle_deg, recession, retouch_height, thickness, giur }`, the retouched ones); `segments` (`{ curveId, region, layer, face, start_position, end_position, length, chord, depth }`, `region` by id); `penetration` (`{ face, segment, penetration, score }`, sixteen; none when they cannot be told).
 
 ## Sharp edge
 
@@ -478,7 +521,7 @@ The points, in their order. None can be moved on its own; a change of the config
 { "id": "…", "label": "SL1", "curveId": "…", "count": 10, "startLandmarkId": "…", "endLandmarkId": null, "createdAt": "…", "modifiedAt": "…" }
 ```
 
-* Fixed landmarks: a surface point (snapped onto a ridge or valley vertex when the snap setting
+* Fixed landmarks: a surface point (snapped onto the nearest place of a ridge or valley when the snap setting
   says so) and a free name. Their order in the list is the export order.
 * Curve semilandmarks: `count` points at equal arc length along the curve's traced points. With a
   start and / or end landmark, the stretch runs between the points of the curve nearest to them,
@@ -670,7 +713,27 @@ Flakes (`<specimen>_flakes.csv`, one row per flake, empty where there is no valu
 `specimen.frame.source`, or `principal` without a frame):
 
 ```
-specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa
+specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth
+```
+
+The last fifteen are the retouch indices, see "Retouch indices": `retouch_axis` `technical` or `longest`, empty without a frame; `retouch_fit_length` in mm; lengths in the unit, `removed_volume` in unit³; shares as decimals from 0 to 1.
+
+Retouched stations (`<specimen>_retouch_sections.csv`, one row per retouched station; `station` counts from 0; `segment` the segment of A, 1 to 8, on the plan, whichever face; `x`, `y` A on the plan; `removed_area` in unit²; `filled` `true` when that area comes from the stations on either side, and then `original_angle_deg` and `recession` are empty; `retouch_height`, `thickness`, `giur` empty where the station takes no part in GIUR):
+
+```
+specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur
+```
+
+Retouch regions along the curves (`<specimen>_retouch_segments.csv`, one row per region and curve; `retouch_region` by label; `face` `dorsal` or `ventral`; `chord` and `depth` empty where it goes all round a closed curve):
+
+```
+specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth
+```
+
+Invasiveness (`<specimen>_invasiveness.csv`, sixteen rows per flake; `segment` 1 to 16, the ventral face's 9 to 16; `penetration` p_max; `score` 0, 0.5 or 1):
+
+```
+specimen_id,face,segment,penetration,score
 ```
 
 Volumetric configuration (`<specimen>_configuration.csv`, one row; codes as in the project file,
@@ -837,7 +900,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
 * A read-only folder (a directory upload) gets the same layout in one ZIP to unpack into it: the
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app`, `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `sharpEdge`: the named parameters of the flake measurements, the edge angles and the sharp edge, with its `rule`; `gm`: the configuration), `gmSkipped` (`file`, `id`, `missing`: flakes left out of the coordinates of a summary), `specimens` (`id`, `file` = model path, `sha256`, `project`
+  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration), `gmSkipped` (`file`, `id`, `missing`: flakes left out of the coordinates of a summary), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 

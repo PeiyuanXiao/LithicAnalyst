@@ -322,12 +322,32 @@ export interface TechnicalAxis {
   modifiedAt: string;
 }
 
+/** Which frame the retouch indices are laid out on: the technical axis when there is one (`auto`), or as chosen. */
+export const RETOUCH_AXES = ['auto', 'technical', 'longest'] as const;
+export type RetouchAxisChoice = (typeof RETOUCH_AXES)[number];
+
+/** A specimen's settings of the retouch indices. */
+export interface RetouchSettings {
+  /** The length of section the original surface lines are fitted to, in mm; null: the default. */
+  fitLength: number | null;
+  axis: RetouchAxisChoice;
+  /** The longest axis the other way round: the two ends exchanged. */
+  flip: boolean;
+}
+
+export const defaultRetouchSettings = (): RetouchSettings => ({ fitLength: null, axis: 'auto', flip: false });
+
 /** A flake's own data; kept when the specimen is switched to a core, and shown again when it is switched back. */
 export interface FlakeData {
   axis: TechnicalAxis | null;
   /** The specimen frame of the type not in use (each type keeps its own orientation). */
   otherFrame: SpecimenFrame | null;
+  /** The settings of the retouch indices; absent while they are the default (a file always has them). */
+  retouch?: RetouchSettings;
 }
+
+/** A flake's settings of the retouch indices. */
+export const retouchSettingsOf = (flake: Pick<FlakeData, 'retouch'>): RetouchSettings => flake.retouch ?? defaultRetouchSettings();
 
 /** What counts as the sharp part of an edge: the stations at most `threshold` degrees in one series of the edge angles (`distance` in mm). The threshold is the user's: null until set. */
 export interface SharpEdgeRule {

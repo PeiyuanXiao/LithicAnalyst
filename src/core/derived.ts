@@ -4,6 +4,7 @@ import type { PrincipalAxes } from '../compute/meshGeometry';
 import { EDGE_ANGLE_PARAMETERS, type EdgeAngleResult } from '../compute/edgeAngle';
 import type { GmResult } from '../compute/gm';
 import type { RetouchAngleResult } from '../compute/retouchAngle';
+import type { RetouchIndices } from '../compute/retouchIndex';
 import { SHARP_EDGE_PARAMETERS, sharpOfCurve, type SharpSegment } from '../compute/sharpEdge';
 import { FLAKE_PARAMETERS, type FlakeGeometry, type FlakeMeasures, type FlakeResult } from '../compute/flake';
 import { computePlane, type PlaneResult } from '../compute/planes';
@@ -85,6 +86,8 @@ export interface DerivedResults {
   edgeAngles: { parameters: typeof EDGE_ANGLE_PARAMETERS; curves: EdgeAngleCurve[] } | null;
   /** The retouch layers along the curves measured (null: none). */
   retouchAngles: { curves: RetouchAngleCurve[] } | null;
+  /** A flake's retouch indices (absent for a core, or before they are computed). */
+  retouchIndices?: RetouchIndices;
   /** The sharp stretches of the curves measured, under the rule (null without a threshold, or without edge angles). */
   sharpEdge: { rule: SharpEdgeRule; parameters: typeof SHARP_EDGE_PARAMETERS; curves: Array<{ curveId: string; length: number; segments: SharpSegment[] }> } | null;
   /** A flake's points for geometric morphometrics, and the configuration they were made by (null for a core, or before they are computed). */
@@ -109,6 +112,8 @@ export interface MeshResults {
   edgeAngles?: readonly EdgeAngleCurve[] | null;
   /** The retouch layers along them. */
   retouchAngles?: readonly RetouchAngleCurve[] | null;
+  /** A flake's retouch indices. */
+  retouchIndices?: RetouchIndices | null;
   /** A flake's points for geometric morphometrics. */
   gm?: GmResult | null;
 }
@@ -154,6 +159,7 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     flake: state.specimen.type === 'flake' && mesh?.flake ? { parameters: FLAKE_PARAMETERS, frameSource: frameSource(state), measures: mesh.flake.measures, geometry: mesh.flake.geometry } : null,
     edgeAngles: mesh?.edgeAngles?.length ? { parameters: EDGE_ANGLE_PARAMETERS, curves: [...mesh.edgeAngles] } : null,
     retouchAngles: mesh?.retouchAngles?.length ? { curves: [...mesh.retouchAngles] } : null,
+    ...(state.specimen.type === 'flake' && mesh?.retouchIndices ? { retouchIndices: mesh.retouchIndices } : {}),
     sharpEdge: sharpDerived(state, mesh?.edgeAngles ?? []),
     gm: state.specimen.type === 'flake' && mesh?.gm ? { config: structuredClone(state.gm), ...mesh.gm } : null,
   };

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { HitPointInfo, MeshBVH } from 'three-mesh-bvh';
 import type { Adjacency } from '../compute/curvature';
 import type { CurvatureService } from '../compute/curvatureService';
-import { featureCost, featureStrength, PathSearch, pathMobility, relaxPath, snapToFeature, type SnapMode, type SurfaceProjector } from '../compute/surfacePath';
+import { featureCost, featureStrength, PathSearch, pathMobility, relaxPath, snapToFeature, snapToFeaturePoint, type SnapMode, type SurfaceProjector } from '../compute/surfacePath';
 import type { Vec3 } from '../core/types';
 import type { LoadedMesh } from '../io/loadMesh';
 import type { SurfaceHit } from '../render/viewer';
@@ -124,6 +124,13 @@ export class SurfaceSnap {
     const f = mode === 'off' ? undefined : this.fields.get(mode);
     if (!f || !this.adj) return v;
     return snapToFeature(v, radius, f.strength, this.pos, this.adj);
+  }
+
+  /** The same for a thing that is a point: onto the feature, but no further along it than the press. */
+  snapPoint(v: number, radius: number, mode: SnapMode): number {
+    const f = mode === 'off' ? undefined : this.fields.get(mode);
+    if (!f || !this.adj) return v;
+    return snapToFeaturePoint(v, radius, f.strength, this.pos, this.adj);
   }
 
   /** The hit triangle's corner closest to the picked point. */

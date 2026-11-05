@@ -13,7 +13,7 @@ import { runSync, type Steps } from './steps';
  */
 
 /** A stretch shorter than this many mean edge lengths is no layer: the line runs by a sliver of a piece where the borders do not quite meet it. */
-const SLIVER_EDGES = 2;
+export const SLIVER_EDGES = 2;
 
 /** A piece of surface in a retouch layer. */
 export interface RetouchPiece {
@@ -59,14 +59,41 @@ export interface RetouchAngleInput extends EdgeAngleInput {
 }
 
 /** One way along a section line from a point on it: its polyline, each stretch's triangle, and the lengths along it. */
-interface Way {
+export interface RetouchWay {
   points: Vec3[];
   faces: number[];
   cum: number[];
   length: number;
 }
 
-function ways(line: SectionLine, seg: number, at: Vec3): [Way, Way] {
+/** A retouch layer along a way, from `from` to `to` along it. */
+export interface RetouchRun {
+  region: string;
+  layer: number;
+  from: number;
+  to: number;
+}
+
+/** A station's section, kept in memory only (not in the file) for what is worked out along it; in the coordinates of the positions. */
+export interface StationSection {
+  /** The section plane's normal. */
+  normal: Vec3;
+  /** The edge on the section. */
+  A: Vec3;
+  ways: [RetouchWay, RetouchWay];
+  /** The layers along each way. */
+  runs: [RetouchRun[], RetouchRun[]];
+}
+
+/** The layers along a curve, and the sections of its stations that have any (null: the others). */
+export interface RetouchSections {
+  result: RetouchAngleResult;
+  sections: Array<StationSection | null>;
+  /** Of the reference curve. */
+  length: number;
+}
+
+function ways(line: SectionLine, seg: number, at: Vec3): [RetouchWay, RetouchWay] {
   const pts = line.points, fs = line.faces, n = pts.length;
   const fwd: Vec3[] = [at], bck: Vec3[] = [at];
   const ff: number[] = [], bf: number[] = [];
@@ -89,19 +116,19 @@ function ways(line: SectionLine, seg: number, at: Vec3): [Way, Way] {
       bf.push(fs[i]);
     }
   }
-  const way = (points: Vec3[], faces: number[]): Way => {
+  const way = (points: Vec3[], faces: number[]): RetouchWay => {
     const cum = arcLengths(points, false);
     return { points, faces, cum, length: cum[cum.length - 1] };
   };
   return [way(fwd, ff), way(bck, bf)];
 }
 
-const along = (w: Way, d: number): Vec3 => pointAtArc(w.points, false, w.cum, d);
+const along = (w: RetouchWay, d: number): Vec3 => pointAtArc(w.points, false, w.cum, d);
 const away = (from: Vec3, to: Vec3): Vec3 => [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
 
 /** The layers a way goes through from the edge: slivers left out, stopping at the first piece that is not retouch. */
-function layersAlong(w: Way, input: Pick<RetouchAngleInput, 'pieceOfFace' | 'pieces'>, sliver: number): Array<{ region: string; layer: number; from: number; to: number }> {
-  const runs: Array<{ region: string; layer: number; from: number; to: number }> = [];
+function layersAlong(w: RetouchWay, input: Pick<RetouchAngleInput, 'pieceOfFace' | 'pieces'>, sliver: number): RetouchRun[] {
+  const runs: RetouchRun[] = [];
   w.faces.forEach((f, i) => {
     const piece = input.pieces.get(input.pieceOfFace[f]);
     const region = piece?.region ?? '';
@@ -122,7 +149,7 @@ function layersAlong(w: Way, input: Pick<RetouchAngleInput, 'pieceOfFace' | 'pie
 }
 
 /** The angles of a layer that reaches `to` along `S`, from `from`; the other side `O` is walked as far. */
-function stretchAngles(S: Way, O: Way, A: Vec3, from: number, to: number, half: number, whole: number): Pick<RetouchStretch, 'three_points' | 'two_lines' | 'layer_face'> {
+function stretchAngles(S: RetouchWay, O: RetouchWay, A: Vec3, from: number, to: number, half: number, whole: number): Pick<RetouchStretch, 'three_points' | 'two_lines' | 'layer_face'> {
   const fits = (d: number) => d <= S.length && d <= O.length && 2 * d <= whole;
   if (!fits(to)) return { three_points: null, two_lines: null, layer_face: null };
   const P = along(S, to), Q = along(O, to);
@@ -134,8 +161,8 @@ function stretchAngles(S: Way, O: Way, A: Vec3, from: number, to: number, half: 
   };
 }
 
-/** The retouch layers along a curve; null without a stated unit, or without a piece in a layer. */
-export function* retouchAnglesSteps(input: RetouchAngleInput): Steps<RetouchAngleResult | null> {
+/** The retouch layers along a curve and their sections; null without a stated unit, or without a piece in a layer. */
+export function* retouchSectionsSteps(input: RetouchAngleInput): Steps<RetouchSections | null> {
   const mm = mmPerUnit(input.unit);
   if (mm === null || input.points.length < 2 || !input.pieces.size) return null;
   const o: Vec3 = input.offset ?? [0, 0, 0];
@@ -145,10 +172,12 @@ export function* retouchAnglesSteps(input: RetouchAngleInput): Steps<RetouchAngl
   const half = TWO_LINES_LENGTH_MM / mm / 2;
   const sliver = SLIVER_EDGES * input.meanEdge;
   const stations: RetouchStation[] = [];
+  const sections: Array<StationSection | null> = [];
   for (let k = 0; k < plan.count; k++) {
     yield;
     const s = plan.at(k);
     const empty: RetouchStation = { position: s.position, point: null, stretches: [] };
+    sections.push(null);
     if (!s.normal || !s.crossing) {
       stations.push(empty);
       continue;
@@ -163,12 +192,21 @@ export function* retouchAnglesSteps(input: RetouchAngleInput): Steps<RetouchAngl
     const [one, other] = ways(near.line, near.seg, near.point);
     const whole = near.line.closed ? one.length : Infinity;
     const stretches: RetouchStretch[] = [];
-    for (const [S, O] of [[one, other], [other, one]] as const) {
-      for (const r of layersAlong(S, input, sliver)) stretches.push({ region: r.region, layer: r.layer, distance: r.to, ...stretchAngles(S, O, near.point, r.from, r.to, half, whole) });
-    }
+    const runs: [RetouchRun[], RetouchRun[]] = [layersAlong(one, input, sliver), layersAlong(other, input, sliver)];
+    for (const r of runs[0]) stretches.push({ region: r.region, layer: r.layer, distance: r.to, ...stretchAngles(one, other, near.point, r.from, r.to, half, whole) });
+    for (const r of runs[1]) stretches.push({ region: r.region, layer: r.layer, distance: r.to, ...stretchAngles(other, one, near.point, r.from, r.to, half, whole) });
     stations.push({ position: s.position, point: [near.point[0] + o[0], near.point[1] + o[1], near.point[2] + o[2]], stretches });
+    // only where there is a layer: sections are long
+    if (stretches.length) sections[k] = { normal: s.normal, A: near.point, ways: [one, other], runs };
   }
-  return { stations };
+  return { result: { stations }, sections, length: plan.length };
+}
+
+export const retouchSections = (input: RetouchAngleInput): RetouchSections | null => runSync(retouchSectionsSteps(input));
+
+/** The retouch layers along a curve; null without a stated unit, or without a piece in a layer. */
+export function* retouchAnglesSteps(input: RetouchAngleInput): Steps<RetouchAngleResult | null> {
+  return (yield* retouchSectionsSteps(input))?.result ?? null;
 }
 
 export const retouchAngles = (input: RetouchAngleInput): RetouchAngleResult | null => runSync(retouchAnglesSteps(input));

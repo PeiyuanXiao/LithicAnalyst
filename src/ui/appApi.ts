@@ -1,3 +1,4 @@
+import type { FlakeEmptyReason, FlakeMeasure } from '../compute/flake';
 import type { GmResult } from '../compute/gm';
 import type { RetouchAngleResult } from '../compute/retouchAngle';
 import type { SharpResult } from '../compute/sharpEdge';
@@ -190,6 +191,7 @@ export interface AppApi {
   edgeAngleResult(curveId: string): import('../compute/edgeAngle').EdgeAngleResult | null;
   /** The method the chart and the colours show. */
   readonly edgeMethod: EdgeChartMethod;
+  flakeEmptyReasons(): Partial<Record<FlakeMeasure, FlakeEmptyReason>> | null;
   gmResult(): GmResult | null;
   retouchAngleResult(curveId: string): RetouchAngleResult | null;
   sharpOf(curveId: string): SharpResult | null;

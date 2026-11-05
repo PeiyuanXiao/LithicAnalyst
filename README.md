@@ -19,7 +19,7 @@
 - 实时检查打破关系成环、与序列先后矛盾、与序列内部先后矛盾、片疤未归入序列，以计数显示，点开列出明细并在三维中高亮涉及的片疤。Harris 矩阵面板（晚的在上，只画直接关系，成环的边标红，按序列框起，没有打破关系的片疤单列一侧）随标注实时更新，在「显示」面板里打开，使用打破关系或剥片序列工具时自动显示；点击节点选中片疤，可拖动、调整大小和折叠，可导出 SVG。「按剥片序列」配色：箭头和片疤区域按序列着色，序列内由浅到深表示先后。
 - 石核体积构型（标注模式，在「显示」里打开）：方块和双锥两种模型，示意图、视角方块，见下面「石核体积构型」一节。
 - 标本类型（石核 / 石片，标本信息里选）：切换只换界面，另一类型的数据留在项目文件里，切回来就恢复；新标本沿用上一件的类型。文件夹列表显示类型，可按类型筛选。石片的工具和测量见下面「石片」一节。
-- 地标（标注模式，K）：在表面上点选固定地标（按吸附设置吸附到附近的棱脊 / 凹谷，按住 Shift 不吸附），可拖动移动、自由命名；列表顺序即导出顺序，可拖动行或用上移 / 下移调整。可「沿用上一件的点名」：之后点选时依次套用，可跳过。曲线半地标：选一条曲线和点数 N，可指定起止固定地标，沿曲线等弧长取点，曲线或地标一变就更新。导出 TPS（LM3）、3D Slicer `.fcsv`、长格式 CSV 和滑动定义 CSV（geomorph `curves` 格式），四者点序一致；滑动在 R 中完成。出图可叠加地标。
+- 地标（标注模式，K）：在表面上点选固定地标（按吸附设置落在按下处最近的棱脊 / 凹谷上，不沿棱滑开，按住 Shift 不吸附），可拖动移动、自由命名；列表顺序即导出顺序，可拖动行或用上移 / 下移调整。可「沿用上一件的点名」：之后点选时依次套用，可跳过。曲线半地标：选一条曲线和点数 N，可指定起止固定地标，沿曲线等弧长取点，曲线或地标一变就更新。导出 TPS（LM3）、3D Slicer `.fcsv`、长格式 CSV 和滑动定义 CSV（geomorph `curves` 格式），四者点序一致；滑动在 R 中完成。出图可叠加地标。
 - 观察者间一致性（比较模式）：载入同一模型（SHA-256 一致）的其他项目文件，与当前项目一起比较，各标注者用不同颜色叠加显示。箭头和曲线按距离做最优配对（匈牙利算法，配对距离上限可调），平面按方法、地标按名称、半地标按组和序号、区域按三角面比较；给出方向夹角、起止点距离、未配对数、曲线平均对称距离和 Hausdorff 距离、平面法向夹角和中心距离、区域 IoU / Dice、片疤属性 / 区域类型 / 打破关系的一致率和 Cohen's κ（三人及以上另给 Fleiss' κ）、地标距离和测量差值。侧栏结果按对象分组，点击箭头、曲线、地标或半地标的指标行，在三维中高亮差异最大的一对。导出长格式明细表和汇总表。
 - 文件夹与批量处理：「打开文件夹」读取一个文件夹中的模型（包括子文件夹，跳过 `LithicAnalyst/` 和以「.」开头的文件夹）。文件夹面板列出全部模型（可按名字筛选，圆点表示是否已有项目文件），可上一件 / 下一件（PageUp / PageDown）、下一件未开始（Shift+PageDown）。文件名相同的模型（在不同子文件夹或扩展名不同）用相对路径作标本编号。
 - Chrome / Edge 中软件的文件都放在文件夹里的 `LithicAnalyst/` 子文件夹：项目文件自动保存在 `LithicAnalyst/projects/<模型相对路径>.lithicanalyst.json`（文件名带扩展名，`EXP03.ply` 和 `EXP03.stl` 各有自己的项目文件）；每次导出写进一个新的 `LithicAnalyst/exports/<日期_时间>/`，出图写进 `LithicAnalyst/figures/<日期_时间>/<子文件夹>/`，从不覆盖，附 `manifest.json`（来源、选项、标本清单、失败清单）。旧版本放在模型旁边的 `<模型名>.lithicanalyst.json` 仍会读取（模型指纹一致时），但不再写入，也不会删除或修改；新位置有了项目文件后，可以手动删掉这些旧文件。
@@ -71,6 +71,18 @@ regions |>
 - **层面角**（`layer_face`）：这一层本身的直线与另一面的夹角。想比较每层是否不同，主要看这个。
 
 `distance` 是这一站刃口到该层外缘沿表面的距离，也就是修理深度。各层面积见 `regions.csv` 的 `retouch_layer`。
+
+## 修理指数 / Retouch indices
+
+石片标好修理层（见上）、边缘和背面、腹面后，软件直接算出下面几项，不用再标别的。背面、腹面来自上层区域：有技术轴时自动分出，也可以手动指定。没标修理区域的石片按未修理算，各项记 0。
+
+- **ERP 和去除体积**（Eren 等 2005；三维做法依照 Morales 等 2015）：每一站在截面上把修理外侧的两段表面各拟合一条直线，延长相交，就是复原的原始刃缘；两线和截面之间是缺失面积。去除体积 = Σ 站距 × 缺失面积，ERP = 去除体积 ÷（去除体积 + 模型体积）。两线平行或张开的站用前后的站插值（`filled`）；超过 25% 的站要插值时不给结果。
+- **GIUR**（Kuhn 1990）：只用背面修理、腹面没有修理的站。t 是修理内端到腹面拟合线的距离，T 是背面到这条线的最大距离，取各站 t/T 的平均。
+- **侵入度**（Clarkson 2002）：每面 8 段，共 16 段；每段按修理最大侵入程度记 0 / 0.5 / 1，总和 ÷ 16。另给连续版本（各段侵入程度之和 ÷ 16）。两端段按原文只看到端缘的距离。
+- **修理周长占比**：已修理刃缘 ÷ 刃缘总长（合计、背面、腹面），只用类型为「边缘」的曲线。
+- **刃缘弯曲度**（R6/R3，Hiscock & Attenbrow 2003、2005）：最长一段修理刃缘的弦高 ÷ 弦长，凸为正、凹为负。凹缺单独标成一块修理区域时，它的直径和深度在 `retouch_segments.csv` 里。
+
+分段和平面投影用的坐标系：有技术轴时用技术轴，否则用最大长轴；拟合长度 w 默认 5 mm（1–20 mm），每件标本可改。结果写进 `flakes.csv` 的后 15 列、`retouch_sections.csv`、`retouch_segments.csv`、`invasiveness.csv` 和项目文件的 `derived.retouchIndices`；定义和列见 `docs/project-format.md`。
 
 ## 锋利刃缘 / Sharp edge
 
@@ -150,10 +162,11 @@ fit <- gpagen(A, curves = curves, surfaces = surfaces)
 
 - **曲线类型**：1 片疤轮廓、2 边缘、3 石皮、4 节理面、5 台面轮廓、6 修理、7 自定义。台面轮廓要闭合（可用「补全一圈」），每件一条，新的替换旧的。它把表面分成两块，面积较小的一块自动成为台面区域，轮廓一改就跟着改；手动改过类型的以手动为准。
 - **区域类型**：1 片疤、2 石皮、3 节理面、4 破损、5 台面、6 腹面、7 背面、8 修理、9 自定义。有了边缘曲线和技术轴，腹面（技术轴所在的一块）和背面也自动标出；边缘没有闭合时提示。
-- **技术轴**（T）：在腹面上从打击点向远端拖一个箭头，起点像曲线点一样吸附（Shift 不吸附）；再拖一次就替换，选择工具下可拖动端点、可删除。由它得到技术坐标系：原点是打击点，+Z 指向背面，+Y 指向远端，+X = Y × Z（背面朝向观察者、台面朝下时观察者的右手边）；法向取箭头两侧一条带内的三角面（面积加权、去掉偏离 60° 以上的）。只记录为矩阵，写进 `specimen.frame`（来源 `technical_axis`），顶栏小签显示「技术轴」；箭头太短或三角面太少时不建坐标系，小签提示。出图的前视图、后视图、仰视图由此是背面、腹面、台面。起点就是地标「打击点」`pop`，跟着箭头走、不能单独移动或删除。
+- **技术轴**（T）：在腹面上从打击点向远端拖一个箭头，起点落在按下处最近的棱上，不沿棱滑开（Shift 不吸附）；再拖一次就替换，选择工具下可拖动端点（拖起点时同样吸附）、可删除。由它得到技术坐标系：原点是打击点，+Z 指向背面，+Y 指向远端，+X = Y × Z（背面朝向观察者、台面朝下时观察者的右手边）；法向取箭头两侧一条带内的三角面（面积加权、去掉偏离 60° 以上的）。只记录为矩阵，写进 `specimen.frame`（来源 `technical_axis`），顶栏小签显示「技术轴」；箭头太短或三角面太少时不建坐标系，小签提示。出图的前视图、后视图、仰视图由此是背面、腹面、台面。起点就是地标「打击点」`pop`，跟着箭头走、不能单独移动或删除。
 - **台面端点**（E）：点击吸附到台面轮廓上，最多两个（第三次点击移动较近的一个）；按技术坐标系的 X 分左右，导出名 `platform_left`、`platform_right`。
 - **摆放**（F，全视图旁的按钮）：背面朝向你、台面朝下，只移动相机。
-- **「自动测量」区块**（测量模式，导出 `flakes.csv`）：技术长宽厚；形态长宽厚（不依赖定向）；形态长与技术轴的夹角；台面宽、台面深（直线和限于台面区域的沿表面路径）；台面面积；EPA（三点法、两线法，各 1、2、3 mm）；IPA。纵切面是技术坐标系 X = 0 与网格的交线；其上落在台面区域内、离打击点最近的一段的远端是外缘点 E，这一段拟合台面线；EPA 从 E 沿纵切面往背面一侧取点，IPA 用腹面 25%–75% 长度那段的拟合线（避开打击泡和远端弯曲）。毫米距离按坐标单位换算，单位未注明时 EPA 不测。方法和参数存在项目文件里（`derived.flake`），定义见 `docs/project-format.md`。比值、指数交给统计软件。
+- **标签**：画箭头、曲线、技术轴、台面端点、地标、测量、截面、区域时，标签不接点击，点到标签上就是点在模型上；选择、关系、序列工具下点标签照旧选中。
+- **「自动测量」区块**（测量模式，导出 `flakes.csv`；为空的量显示「—」，鼠标停在上面显示原因）：技术长宽厚；形态长宽厚（不依赖定向）；形态长与技术轴的夹角；台面宽、台面深（直线和限于台面区域的沿表面路径）；台面面积；EPA（三点法、两线法，各 1、2、3 mm）；IPA。纵切面是技术坐标系 X = 0 与网格的交线；其上落在台面区域内、离打击点最近的一段的远端是外缘点 E，这一段拟合台面线；EPA 从 E 沿纵切面往背面一侧取点，IPA 用腹面 25%–75% 长度那段的拟合线（避开打击泡和远端弯曲）。毫米距离按坐标单位换算，单位未注明时 EPA 不测。方法和参数存在项目文件里（`derived.flake`），定义见 `docs/project-format.md`。比值、指数交给统计软件。
 - **剖面面板**（「显示」里开关，第一次建立技术轴时自动打开）：左边纵剖面（台面朝下），右边横截面（背面朝上），同一比例，附比例尺；滑动条、点击或拖动纵剖面上的细线改变横截面位置，旁边显示该处的宽和厚，模型上显示这一圈轮廓；纵剖面上叠加 P、E、台面线、EPA 取点、腹面范围及拟合线。
 - **拟合平面**：按曲线、按表面区域（区域内顶点按面积加权）。
 - **`scar_vectors.csv`** 的 `tech_angle_deg`：片疤方向投到技术坐标系 XY 平面，+Y 为 0°，从背面看逆时针为正。
@@ -203,6 +216,14 @@ specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,meth
 specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length
 ```
 
+修理站 CSV（每个有修理的站一行）、修理段 CSV（每个修理区域一行）、侵入度 CSV（每件 16 行）：
+
+```
+specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur
+specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth
+specimen_id,face,segment,penetration,score
+```
+
 GM 坐标（`gm_landmarks.csv`，`kind` 为 `fixed`、`curve` 或 `surface`）和滑动定义（`gm_curves.csv`、`gm_surfaces.csv`，点序号从 1 开始）：
 
 ```
@@ -214,7 +235,7 @@ index
 石片 CSV（每件石片一行，没有值时为空；长度为模型单位）：
 
 ```
-specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa
+specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth
 ```
 
 体积构型 CSV（每件一行；`model` 为 `box` 方块或 `bicone` 双锥；代码见 `docs/project-format.md`，没有值时为空）和剥片面 CSV（每个剥片面一行；`faces`、`platforms` 为用 `;` 连接的面代码 `front` / `back` / `left` / `right` / `top` / `bottom`；`also_platform` 为 `true` 表示它的某个面被其他剥片面的片疤用作台面）：

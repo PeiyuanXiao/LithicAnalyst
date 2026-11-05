@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { buildAdjacency, meanCurvature, robustAbsRange, type Adjacency } from '../src/compute/curvature';
-import { featureCost, featureStrength, PathSearch, pathMobility, relaxPath, snapToFeature, type SnapMode, type SurfaceProjector } from '../src/compute/surfacePath';
+import { featureCost, featureStrength, PathSearch, pathMobility, relaxPath, snapToFeature, snapToFeaturePoint, type SnapMode, type SurfaceProjector } from '../src/compute/surfacePath';
 
 /** Regular grid of (nx+1)×(ny+1) vertices, triangles wound so normals face +z for z = f(x, y). */
 function gridMesh(nx: number, ny: number, step: number, f: (x: number, y: number) => number) {
@@ -266,5 +266,79 @@ describe('pulling traced paths taut', () => {
     expect(m[1]).toBeLessThan(0.15);
     expect(m[2]).toBeGreaterThan(0.6);
     expect(Array.from(pathMobility([0, 1], null))).toEqual([1, 1]);
+  });
+});
+
+describe('a point on a ridge', () => {
+  /** A roof over x ∈ [0, 20], y ∈ [−5, 5], its ridge along y = 0; the strength given by the test. */
+  const roof = () => {
+    const step = 0.5, nx = 40, ny = 20;
+    const pos: number[] = [];
+    for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) pos.push(i * step, -5 + j * step, -0.3 * Math.abs(-5 + j * step));
+    const id = (i: number, j: number) => j * (nx + 1) + i;
+    const idx: number[] = [];
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        idx.push(id(i, j), id(i + 1, j), id(i + 1, j + 1));
+        idx.push(id(i, j), id(i + 1, j + 1), id(i, j + 1));
+      }
+    const positions = new Float32Array(pos);
+    const adj = buildAdjacency(new Uint32Array(idx), positions.length / 3);
+    const vertexAt = (x: number, y: number) => id(Math.round(x / step), Math.round((y + 5) / step));
+    const at = (v: number) => [positions[3 * v], positions[3 * v + 1]];
+    const strengthBy = (f: (x: number, y: number) => number) => {
+      const s = new Float32Array(positions.length / 3);
+      for (let v = 0; v < s.length; v++) s[v] = f(positions[3 * v], positions[3 * v + 1]);
+      return s;
+    };
+    return { positions, adj, vertexAt, at, strengthBy };
+  };
+  const rising = (x: number, y: number) => (y === 0 ? 0.6 + 0.02 * x : Math.abs(y) === 0.5 ? 0.3 : 0);
+
+  it('stays abreast of the press where the ridge grows stronger along it; the curves\' snap runs along', () => {
+    const r = roof();
+    const s = r.strengthBy(rising);
+    const start = r.vertexAt(10, 1.5);
+    expect(r.at(snapToFeaturePoint(start, 3, s, r.positions, r.adj))).toEqual([10, 0]);
+    expect(r.at(snapToFeature(start, 3, s, r.positions, r.adj))).toEqual([15.5, 0]);
+  });
+
+  it('where the ridge is even, the two agree', () => {
+    const r = roof();
+    const s = r.strengthBy((_x, y) => (y === 0 ? 0.8 : Math.abs(y) === 0.5 ? 0.3 : 0));
+    const start = r.vertexAt(10, 1.5);
+    expect(r.at(snapToFeaturePoint(start, 3, s, r.positions, r.adj))).toEqual([10, 0]);
+    expect(r.at(snapToFeature(start, 3, s, r.positions, r.adj))).toEqual([10, 0]);
+  });
+
+  it('without snapping, or with no feature in reach, it stays at the press', () => {
+    const r = roof();
+    const start = r.vertexAt(10, 1.5);
+    // Shift: the mode is off, and the strength of 'off' is nothing
+    const off = featureStrength(r.strengthBy(rising), 1, 'off');
+    expect(snapToFeaturePoint(start, 3, off, r.positions, r.adj)).toBe(start);
+    expect(snapToFeaturePoint(start, 0, r.strengthBy(rising), r.positions, r.adj)).toBe(start);
+    // the ridge is further than the radius
+    expect(snapToFeaturePoint(r.vertexAt(10, 4), 1, r.strengthBy(rising), r.positions, r.adj)).toBe(r.vertexAt(10, 4));
+  });
+
+  it('climbs across the ridge from the shoulder of a wide one, not along it', () => {
+    const r = roof();
+    // a wide band of strength, its crest at y = 0, rising along x too
+    const s = r.strengthBy((x, y) => (Math.abs(y) <= 1 ? 0.6 + 0.02 * x - 0.1 * Math.abs(y) : 0));
+    expect(r.at(snapToFeaturePoint(r.vertexAt(10, 3), 3, s, r.positions, r.adj))).toEqual([10, 0]);
+  });
+
+  it('from the shoulder of a smoothed ridge, its rows hardly narrower than the radius: to its crest, whatever the radius', () => {
+    const r = roof();
+    // as the curvature field makes them: the crest and the rows beside it, stronger along x
+    const s = r.strengthBy((x, y) => (y === 0 ? 0.74 + 0.01 * x : Math.abs(y) === 0.5 ? 0.66 : Math.abs(y) === 1 ? 0.46 : 0));
+    for (const radius of [0.9, 1.1, 1.3, 2]) expect(r.at(snapToFeaturePoint(r.vertexAt(10, 0.5), radius, s, r.positions, r.adj))).toEqual([10, 0]);
+  });
+
+  it('a spot of strength with no direction: the vertex of it nearest the press', () => {
+    const r = roof();
+    const s = r.strengthBy((x, y) => (Math.hypot(x - 10, y) <= 1 ? 0.9 - 0.1 * Math.hypot(x - 10, y) : 0));
+    expect(r.at(snapToFeaturePoint(r.vertexAt(10, 3), 3, s, r.positions, r.adj))).toEqual([10, 1]);
   });
 });

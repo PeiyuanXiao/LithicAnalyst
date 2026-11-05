@@ -615,7 +615,13 @@ function flakeSection(api: AppApi): Section {
     clear(meta);
     const u = api.store.state.specimen.unit;
     const m = api.flakeMeasures();
-    for (const k of FLAKE_MEASURES) meta.append(...numRow(t(`flake.${k}`), ...quantity(flakeQuantity(k), m?.[k] ?? null, u), `flake-${k}`));
+    const empty = api.flakeEmptyReasons();
+    for (const k of FLAKE_MEASURES) {
+      const row = numRow(t(`flake.${k}`), ...quantity(flakeQuantity(k), m?.[k] ?? null, u), `flake-${k}`);
+      const reason = empty?.[k];
+      if (reason) tip(row[1], t(`flake.empty.${reason}`));
+      meta.append(...row);
+    }
     const a = api.autoMeasurements();
     meta.append(...numRow(t('measure.area'), ...quantity('area', a?.surfaceArea ?? null, u), 'flake-area'));
     meta.append(...(a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : numRow(t('measure.volume'), ...quantity('volume', a?.volume ?? null, u), 'flake-volume')));

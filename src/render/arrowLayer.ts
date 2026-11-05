@@ -342,6 +342,11 @@ export class ArrowLayer {
     this.highlight = h;
   }
 
+  /** Where an end being dragged is shown. */
+  get endpointOverride(): EndpointOverride | null {
+    return this.override;
+  }
+
   setEndpointOverride(o: EndpointOverride | null): void {
     this.override = o;
     this.resync();

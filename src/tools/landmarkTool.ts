@@ -8,8 +8,8 @@ import type { HitProvider, Tool, ToolContext } from './tool';
 const CLICK_PX = 4;
 
 /**
- * Fixed landmarks: click the surface to place one (snapped onto a nearby ridge
- * or valley as the snap setting says; Shift places it exactly), drag one to
+ * Fixed landmarks: click the surface to place one (snapped onto the nearest place of a
+ * ridge or valley as the snap setting says; Shift places it exactly), drag one to
  * move it. Dragging elsewhere turns the view.
  */
 export class LandmarkTool implements Tool {
@@ -53,7 +53,8 @@ export class LandmarkTool implements Tool {
     const h = hit();
     if (!h) return;
     const l = this.ctx.store.landmark(this.drag.id);
-    this.drag.point = l ? this.constrain(l, this.target(h, e.shiftKey)) : null;
+    // a platform end goes on to the platform outline: from wherever the curve tool would take it
+    this.drag.point = l ? this.constrain(l, this.target(h, e.shiftKey, l.code !== 'platform_end')) : null;
     this.layer.setPreview(this.drag.point);
   }
 
@@ -66,11 +67,11 @@ export class LandmarkTool implements Tool {
     this.down = null;
     if (e.button !== 0 || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > CLICK_PX) return;
     const h = hit();
-    if (h) this.onPlace(this.target(h, e.shiftKey || d.shift));
+    if (h) this.onPlace(this.target(h, e.shiftKey || d.shift, true));
   }
 
-  /** The clicked point, or the ridge / valley vertex it snaps to. */
-  private target(h: SurfaceHit, exact: boolean): Vec3 {
+  /** The clicked point, or the ridge / valley vertex it snaps to (`point`: as a point does, not along the feature). */
+  private target(h: SurfaceHit, exact: boolean, point: boolean): Vec3 {
     const at: Vec3 = [h.point.x, h.point.y, h.point.z];
     const snap = this.ctx.snap();
     const mode = exact ? 'off' : this.ctx.snapMode();
@@ -80,7 +81,8 @@ export class LandmarkTool implements Tool {
       return at;
     }
     const v0 = snap.vertexOfHit(h);
-    const v = snap.snap(v0, this.ctx.viewer.worldPerPixel(h.point) * SNAP_PX, mode);
+    const radius = this.ctx.viewer.worldPerPixel(h.point) * SNAP_PX;
+    const v = point ? snap.snapPoint(v0, radius, mode) : snap.snap(v0, radius, mode);
     return v === v0 ? at : snap.point(v);
   }
 

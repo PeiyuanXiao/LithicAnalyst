@@ -14,7 +14,8 @@ import { frameMeasures, surfaceMeasuresSteps } from '../src/compute/measure';
 import { fitPlane } from '../src/compute/meshGeometry';
 import { edgeAnglesSteps } from '../src/compute/edgeAngle';
 import { gmSteps } from '../src/compute/gm';
-import { retouchAnglesSteps } from '../src/compute/retouchAngle';
+import { retouchAnglesSteps, retouchSectionsSteps } from '../src/compute/retouchAngle';
+import { FACE_DORSAL, FACE_VENTRAL, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps } from '../src/compute/retouchIndex';
 import { flakeMeasuresSteps, morphDimensionsSteps, techDimensionsSteps } from '../src/compute/flake';
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
 import { regionPlaneSteps } from '../src/compute/planes';
@@ -26,7 +27,7 @@ import { polylineEdgesSteps, regionsSteps } from '../src/compute/regions';
 import { splitByLoopSteps } from '../src/compute/split';
 import { runSync, type Steps } from '../src/compute/steps';
 import { emptyProject } from '../src/core/store';
-import type { Curve, ProjectState, Scar, Vec3 } from '../src/core/types';
+import { defaultRetouchSettings, type Curve, type ProjectState, type Scar, type Vec3 } from '../src/core/types';
 import { buildLoadedMesh } from '../src/io/loadMesh';
 import { SurfaceSnap } from '../src/tools/surfaceSnap';
 
@@ -273,6 +274,24 @@ async function benchGenerated(triangles: number): Promise<void> {
   };
   const gmResult = steps('9 points for geometric morphometrics', gmSteps(gmState, { positions: pos, index: idx, offset: o, platformFaces, candidates: bvhRayCandidates(loaded.geometry) }));
   console.log(`${gmResult.rows.length} points, complete: ${gmResult.complete}, missing: ${gmResult.missing.join() || 'nothing'}`);
+
+  // ⑩ the retouch indices: a band of retouch above the edge, the upper half the dorsal face, the lower half the ventral
+  const bandRing = Array.from({ length: mesh.lon }, (_, j) => mesh.vertex(Math.floor(mesh.lat * 0.45), j));
+  const bandEdges = bandRing.flatMap((v, j) => [v, bandRing[(j + 1) % bandRing.length]]);
+  const banded = runSync(regionsSteps(pos, idx, base.edges, [...chain, ...bandEdges]));
+  const inBand = mesh.vertex(Math.floor(mesh.lat * 0.47), 0);
+  let bandFace = 0;
+  while (idx[3 * bandFace] !== inBand && idx[3 * bandFace + 1] !== inBand && idx[3 * bandFace + 2] !== inBand) bandFace++;
+  const bandPieces = new Map([[banded.region[bandFace], { region: 'R1', layer: 1 }]]);
+  const faceOf = Uint8Array.from(rimPart.region, (c) => (c === rimPart.region[bandFace] ? FACE_DORSAL : FACE_VENTRAL));
+  const sections = steps(`10a retouch layers, keeping the sections, along ${edgeLength.toFixed(0)} mm`, retouchSectionsSteps({ positions: pos, index: idx, offset: o, points: rim, closed: true, unit: 'mm', meanEdge: base.meanEdge, candidates, pieceOfFace: banded.region, pieces: bandPieces }))!;
+  const planFrame = steps('10b the plan: the longest axis, the dorsal normal', segmentFrameSteps({ positions: pos, index: idx, offset: o, orientationSign: loaded.orientationSign, faceOf, settings: defaultRetouchSettings(), matrix: null, morph, specimenFrame: null }));
+  const outline = planFrame.frame ? steps('10c the plan: its outline', segmentOutlineSteps(pos, planFrame.frame)) : null;
+  const retouchInput = { positions: pos, index: idx, offset: o, faceOf, pieceOfFace: banded.region, pieces: bandPieces, curves: [{ curveId: 'rim', edge: true, closed: true, length: sections.length, stations: sections.result.stations, sections: sections.sections }], unit: 'mm', meanEdge: base.meanEdge, volume: base.volume, frame: planFrame, outline };
+  const indices = steps('10d the retouch indices', retouchIndexSteps({ ...retouchInput, fitLength: null }));
+  steps('10e again at another fitted length (no new sections)', retouchIndexSteps({ ...retouchInput, fitLength: 8 }));
+  const sectionPoints = sections.sections.reduce((n, s) => n + (s ? s.ways[0].points.length : 0), 0);
+  console.log(`${indices.indices.stations.length} retouched stations (${sectionPoints} section points kept), ERP ${indices.indices.erp?.toFixed(3)}, GIUR ${indices.indices.giur?.toFixed(3)}, invasiveness ${indices.indices.invasiveness}, empty: ${JSON.stringify(indices.reasons)}`);
   console.log('');
   report();
 }

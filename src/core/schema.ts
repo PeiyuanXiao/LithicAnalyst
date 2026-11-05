@@ -5,7 +5,8 @@ import { computeDerived, type DerivedResults, type MeshResults } from './derived
 import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, defaultAttributes, defaultCurveAttributes, POLARITIES, SPECIMEN_TYPES, type BiconeRole, type BiconeSide, type ConfigFace } from './fields';
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, type GmConfig, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule } from './types';
+import { clampFitLength } from '../compute/retouchIndex';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -59,7 +60,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     nodule: structuredClone(state.nodule),
     split: structuredClone(state.split),
     configuration: structuredClone(state.configuration),
-    flake: structuredClone(state.flake),
+    flake: { ...structuredClone(state.flake), retouch: { ...retouchSettingsOf(state.flake) } },
     sharpEdge: { ...state.sharpEdge },
     gm: structuredClone(state.gm),
     derived: computeDerived(state, mesh),
@@ -410,6 +411,15 @@ function parseConfiguration(raw: unknown): ConfigCorrections {
   };
 }
 
+/** The settings of the retouch indices, when they are not the default: what is not understood takes its default, a length out of range the nearest in it. */
+function parseRetouchSettings(raw: unknown): RetouchSettings | null {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const fitLength = typeof r.fitLength === 'number' && Number.isFinite(r.fitLength) ? clampFitLength(r.fitLength) : null;
+  const axis = RETOUCH_AXES.find((x) => x === r.axis) ?? 'auto';
+  const flip = r.flip === true;
+  return fitLength === null && axis === 'auto' && !flip ? null : { fitLength, axis, flip };
+}
+
 /** A flake's own data (files without it: none). An axis without numeric ends is dropped. */
 function parseFlake(raw: unknown): FlakeData {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -417,7 +427,9 @@ function parseFlake(raw: unknown): FlakeData {
   const t = nowIso();
   const normal = (v: unknown): Vec3 => (isFiniteVec(v) ? normalize(v) : [0, 0, 1]);
   const m = a?.matrix;
+  const retouch = parseRetouchSettings(r.retouch);
   return {
+    ...(retouch ? { retouch } : {}),
     axis: a && isFiniteVec(a.start) && isFiniteVec(a.end)
       ? {
           id: str(a.id) || uuid(),

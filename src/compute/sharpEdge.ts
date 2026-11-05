@@ -43,7 +43,7 @@ export function ruleValues(result: EdgeAngleResult, rule: SharpEdgeRule): Array<
 }
 
 /** The runs of true in a mask, each [first, count]; round a closed curve a run may go on past the end. */
-function runsOf(mask: readonly boolean[], closed: boolean): Array<[number, number]> {
+export function runsOf(mask: readonly boolean[], closed: boolean): Array<[number, number]> {
   const n = mask.length;
   const runs: Array<[number, number]> = [];
   // a closed curve is read from a station outside any run
@@ -61,6 +61,19 @@ function runsOf(mask: readonly boolean[], closed: boolean): Array<[number, numbe
   return runs;
 }
 
+/** A mask with its short gaps filled (at most `gap` long, stations `step` apart, in one unit); the two ends of an open curve lie between nothing. */
+export function withGapsFilled(raw: readonly boolean[], closed: boolean, step: number, gap: number): boolean[] {
+  const mask = [...raw];
+  const n = raw.length;
+  if (step > 0 && raw.some(Boolean)) {
+    for (const [first, count] of runsOf(raw.map((on) => !on), closed)) {
+      if (!closed && (first === 0 || first + count === n)) continue;
+      if (count * step <= gap + 1e-9) for (let k = 0; k < count; k++) mask[(first + k) % n] = true;
+    }
+  }
+  return mask;
+}
+
 /**
  * The sharp stretches of a curve at a threshold: first the short gaps are filled, then the short runs dropped.
  * `step`: from station to station; `length`: of the reference curve; lengths in the coordinate unit.
@@ -70,15 +83,7 @@ export function sharpSegments(values: ReadonlyArray<number | null>, positions: r
   const mm = mmPerUnit(unit) ?? 1;
   const step = n > 1 ? positions[1] - positions[0] : 0;
   const raw = values.map((v) => v !== null && v <= threshold);
-  const mask = [...raw];
-  if (step > 0 && raw.some(Boolean)) {
-    const gaps = runsOf(raw.map((on) => !on), closed);
-    for (const [first, count] of gaps) {
-      // the two ends of an open curve lie between nothing
-      if (!closed && (first === 0 || first + count === n)) continue;
-      if (count * step * mm <= SHARP_MERGE_GAP_MM + 1e-9) for (let k = 0; k < count; k++) mask[(first + k) % n] = true;
-    }
-  }
+  const mask = withGapsFilled(raw, closed, step * mm, SHARP_MERGE_GAP_MM);
   const segments: SharpSegment[] = [];
   for (const [first, count] of runsOf(mask, closed)) {
     const last = (first + count - 1) % n;

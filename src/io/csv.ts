@@ -8,6 +8,7 @@ import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AgreementRow, SummaryRow } from '../compute/agreement';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS } from '../compute/retouchAngle';
+import { RETOUCH_SUMMARY, type RetouchIndices } from '../compute/retouchIndex';
 import { sharpOfCurve } from '../compute/sharpEdge';
 import { frameSource, type AutoMeasurements, type EdgeAngleCurve } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
@@ -119,6 +120,32 @@ export function retouchAnglesCsv(state: Readonly<ProjectState>, curves: readonly
   return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
 }
 
+/** One row per retouched station of each curve measured (`filled`: its missing area comes from the stations on either side). */
+export function retouchSectionsCsv(state: Readonly<ProjectState>, r: RetouchIndices | null, opts: CsvOptions): string {
+  const header = 'specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur';
+  const label = new Map(state.curves.map((c) => [c.id, c.label]));
+  const rows = (r?.stations ?? []).filter((s) => label.has(s.curveId)).map((s) =>
+    [csvCell(state.specimen.id), csvCell(label.get(s.curveId)), String(s.station), fmt(s.position), cell(s.segment), cell(s.x), cell(s.y), cell(s.depth_dorsal), cell(s.depth_ventral), cell(s.removed_area), String(s.filled), cell(s.original_angle_deg), cell(s.recession), cell(s.retouch_height), cell(s.thickness), cell(s.giur)].join(','),
+  );
+  return (opts.excelBom ? '\uFEFF' : '') + [header, ...rows].join('\n') + '\n';
+}
+
+/** One row per retouch region on each curve measured; regions by label; `chord` and `depth` empty where it goes all round the curve. */
+export function retouchSegmentsCsv(state: Readonly<ProjectState>, r: RetouchIndices | null, opts: CsvOptions): string {
+  const header = 'specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth';
+  const label = new Map(state.curves.map((c) => [c.id, c.label]));
+  const rows = (r?.segments ?? []).filter((s) => label.has(s.curveId)).map((s) =>
+    [csvCell(state.specimen.id), csvCell(label.get(s.curveId)), csvCell(state.regions.find((g) => g.id === s.region)?.label ?? ''), String(s.layer), s.face ?? '', fmt(s.start_position), fmt(s.end_position), fmt(s.length), cell(s.chord), cell(s.depth)].join(','),
+  );
+  return (opts.excelBom ? '\uFEFF' : '') + [header, ...rows].join('\n') + '\n';
+}
+
+/** The sixteen segments of a flake: how far in the retouch reaches (`penetration`, 0–1) and the score. */
+export function invasivenessCsv(state: Readonly<ProjectState>, r: RetouchIndices | null, opts: CsvOptions): string {
+  const rows = (r?.penetration ?? []).map((s) => [csvCell(state.specimen.id), s.face, String(s.segment), fmt(s.penetration), fmt(s.score)].join(','));
+  return (opts.excelBom ? '\uFEFF' : '') + ['specimen_id,face,segment,penetration,score', ...rows].join('\n') + '\n';
+}
+
 /** One row per sharp stretch of each curve measured, under the project's rule (none without a threshold); lengths in the coordinate unit. */
 export function edgeSharpCsv(state: Readonly<ProjectState>, curves: readonly EdgeAngleCurve[], opts: CsvOptions): string {
   const header = 'specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length';
@@ -134,10 +161,20 @@ export function edgeSharpCsv(state: Readonly<ProjectState>, curves: readonly Edg
   return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
 }
 
-/** One row per flake: where its frame came from, and its measurements (empty where there is no value; lengths in the specimen's unit). */
-export function flakesCsv(state: Readonly<ProjectState>, measures: FlakeMeasures | null, opts: CsvOptions): string {
-  const header = ['specimen_id', 'unit', 'frame_source', ...FLAKE_MEASURES];
+/** What flakes.csv has of the retouch indices, after the measurements. */
+export const RETOUCH_FLAKE_COLUMNS = ['retouch_axis', 'retouch_fit_length', ...RETOUCH_SUMMARY] as const;
+
+/**
+ * One row per flake: where its frame came from, and its measurements (empty where there is no value; lengths in the specimen's unit), then
+ * its retouch indices (`retouch`: null when they have not been computed; left out: the measurements alone).
+ */
+export function flakesCsv(state: Readonly<ProjectState>, measures: FlakeMeasures | null, opts: CsvOptions, retouch?: RetouchIndices | null): string {
+  const header: string[] = ['specimen_id', 'unit', 'frame_source', ...FLAKE_MEASURES];
   const row = [csvCell(state.specimen.id), csvCell(state.specimen.unit), csvCell(frameSource(state)), ...FLAKE_MEASURES.map((k) => cell(measures?.[k] ?? null))];
+  if (retouch !== undefined) {
+    header.push(...RETOUCH_FLAKE_COLUMNS);
+    row.push(retouch?.axis ?? '', cell(retouch?.fitLength ?? null), ...RETOUCH_SUMMARY.map((k) => cell(retouch?.[k] ?? null)));
+  }
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }
 

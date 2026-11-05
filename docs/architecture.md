@@ -65,7 +65,10 @@ off the interaction path (after loading, in idle time or a worker), never per po
   (ridge = convex, valley = concave), a lazily expanded Dijkstra search over mesh edges whose
   weights drop on features (`PathSearch`, live-wire style: the frontier is kept, so following
   the cursor is cheap), snapping a picked vertex onto a nearby crest, and `relaxPath`, which
-  pulls a traced chain taut along the surface while holding feature points.
+  pulls a traced chain taut along the surface while holding feature points. Curve points snap with
+  `snapToFeature`, which climbs along a feature to its most pronounced place; things that are points (the
+  technical axis's start, fixed landmarks) with `snapToFeaturePoint`, which keeps abreast of the press: it takes
+  the feature from `snapToFeature`, then the nearest vertex of its band, then goes uphill across it only.
 * `tools/surfaceSnap.ts` ties these to one loaded mesh: adjacency and curvature come from the
   `CurvatureService` at the shading scale (what you see is what snaps), closest points from the BVH.
 * `tools/drawCurveTool.ts` places points and shows the live stretch; `tools/selectTool.ts`
@@ -133,7 +136,8 @@ keeps the selection and the undo history.
 * **Labels**: after each render `render/labelLayout.ts` moves labels that would cover each
   other apart by priority (selected first, hidden-behind-the-surface last) and hides those
   without a free place. `.viewport-labels` is its own stacking context, below every panel over
-  the view.
+  the view. `App.updateCursor` puts the active tool in `data-tool` on the viewport: under the tools that place
+  things on the model, the style sheet takes `pointer-events` from the labels, so a click reaches the model.
 
 ## Shell: theme, icons, tooltips, numbers
 
@@ -366,7 +370,7 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
 `specimen.frame` with `flake.otherFrame`, so each type keeps its orientation and the core's corrections by face stay right
 (`updateSpecimen` leaves them alone on a flake).
 
-* **Technical axis** (`ProjectState.flake.axis`): the tool is a `DrawArrowTool` with options (the start goes to a mesh vertex as curve points do, `curveVertex`);
+* **Technical axis** (`ProjectState.flake.axis`): the tool is a `DrawArrowTool` with options (the start goes to a mesh vertex by `pointVertex`, as it does when the select tool drags it);
   the select tool drags its ends through `ToolContext.moveAxisEnd`. `ArrowLayer.axis` draws and handles it like a scar's arrow, in a colour of
   its own. `App.applyAxis` finds the frame on the mesh (`compute/technicalFrame.ts`, in slices), then `setTechnicalAxis` makes one step of the
   axis with its matrix, the `pop` landmark and `specimen.frame`. The matrix is stored with the axis, so undo, the CSV angle (`techAngleDeg`) and
@@ -377,7 +381,7 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
   takes the piece of the upper layer holding that point, unless a typed region is there. Scars drawn on the platform therefore do not cut it.
 * **Measurements**: `compute/flake.ts` is pure. `morphDimensionsSteps` (`compute/convexHull.ts`; a point within 1e−4 of the set's size of the hull
   counts as inside, which also thins a smooth convex scan, and the result is settled on all the vertices) runs once per mesh; `flakeMeasuresSteps` takes
-  the frame, the ends and the platform's triangles, and `platformProfile` does the section's part. `compute/regionPath.ts` is the path within a region.
+  the frame, the ends and the platform's triangles, and `platformProfile` does the section's part. `FlakeResult.reasons` says why each empty measure is empty (`FLAKE_EMPTY_REASONS`, the first that holds): the sidebar shows it over the "—"; it goes neither into the file nor into the tables. `compute/regionPath.ts` is the path within a region.
   `App.updateFlake` reruns it, in slices and debounced, on changes of the axis, regions, landmarks, type or unit; the result goes to the sidebar, the
   panel and `derived.flake`. The summary export reads `derived.flake` from the project files, as it does the regions.
 * **Profile panel** (`ui/profilePanel.ts`, a `floatingPanel`): SVG drawings of `FlakeResult.section` and of the cross-section, one scale for both;
@@ -395,6 +399,10 @@ of the edge angles.
 ## Retouch layers
 
 `compute/retouchAngle.ts` is pure, and shares the stations with the edge angles (`stationPlan`). It takes the partition's piece of each triangle and the pieces in a layer: `SectionLine.faces` says which triangle each stretch of a section lies in, so a layer's ends come from the regions themselves, with no choice of curves to make. `App.updateRetouchAngles` runs after the regions are resolved, in slices, only for what changed (`partitionVersion` and the pieces are in the key), and only when there is a retouch region: the section there is the whole plane, not the sphere of the edge angles.
+
+## Retouch indices
+
+`compute/retouchIndex.ts` is pure and takes no mesh edges or regions as such: `faceOf` says which part of the flake each triangle lies in, `pieceOfFace` and `pieces` which are in a retouch layer, so tests hand them over triangle by triangle. `compute/retouchAngle.ts` keeps what it cut: `retouchSectionsSteps` returns, beside the angles, each retouched station's two ways along the section (`StationSection`: polyline, triangle of each stretch, arc lengths) and the layers along them. These stay in memory, in `App.retouchResults`, and never reach the file, so a change of the fitted length refits without cutting the mesh again. `App.updateRetouchIndices` runs after the retouch layers (`updateRetouchAngles` schedules it) and on changes of the flake's data or the specimen, in slices and keyed by all it reads; the frame of the plan and its outline (`segmentFrameSteps`, `segmentOutlineSteps`, each a pass over the mesh) and the triangles' parts (`faceOfTrianglesSteps`) are kept while their own inputs stay. `RetouchIndexResult` holds what is stored (`indices`), and what is only for the screen: `reasons`, and `details`, per station, with the reason and the fit. The settings are `flake.retouch`, changed by `setRetouchFitLength`, `setRetouchAxis` and `setRetouchFlip`; in the state the key is absent while they are the default (`retouchSettingsOf`), a file always has it. The summary export reads `derived.retouchIndices`, as it does the retouch layers.
 
 ## Sharp edge
 
@@ -563,7 +571,7 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   its own copy.
 * `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
-  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge. The longest stretch is what
+  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices. The longest stretch is what
   design principle 10 limits to about 100 ms.
 
 ## Hosting

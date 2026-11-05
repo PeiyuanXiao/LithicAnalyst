@@ -20,15 +20,20 @@ export interface LithicApi {
     axis: ProjectState['flake']['axis'];
     frameSource: string;
     measures: import('../src/compute/flake').FlakeMeasures | null;
+    reasons: import('../src/compute/flake').FlakeResult['reasons'] | null;
     geometry: import('../src/compute/flake').FlakeGeometry | null;
     parameters: unknown;
     platformAuto: Vec3 | null;
   } | null;
   sectionPanel(): { shown: boolean; at: number; width: number | null; thickness: number | null; ring: number };
   exportFlakesCsvText(): string;
+  /** A flake's retouch indices as stored, and why what is empty is empty. */
+  retouch(): (import('../src/compute/retouchIndex').RetouchIndices & { reasons: Partial<Record<import('../src/compute/retouchIndex').RetouchSummaryKey, import('../src/compute/retouchIndex').RetouchEmptyReason>>; stationReasons: Array<{ curveId: string; station: number; reason: string | null; giurReason: string | null }> }) | null;
+  retouchSettings(change: { fitLength?: number | null; axis?: 'auto' | 'technical' | 'longest'; flip?: boolean }): void;
   edgeAngles(curveId: string): import('../src/compute/edgeAngle').EdgeAngleResult | null;
   edgeColors(): { key: string; min: string | null; max: string | null } | null;
   exportEdgeAnglesCsvText(): string;
+  endpointPreview(): Vec3 | null;
   gm(): import('../src/compute/gm').GmResult | null;
   exportGmText(kind: 'tps' | 'csv' | 'curves' | 'surfaces'): string;
   retouchAngles(curveId: string): import('../src/compute/retouchAngle').RetouchAngleResult | null;

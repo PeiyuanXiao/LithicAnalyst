@@ -5,9 +5,9 @@
  * traced curve that stays on the ridge shows that snapping worked.
  */
 
-import { bicone, ellipsoid, flakeT1, flakeT2, heightAt, steppedTool, T1 } from '../../tests/meshes';
+import { bicone, ellipsoid, flakeT1, flakeT2, flakeT6, heightAt, steppedTool, T1, T6, t6Dorsal, t6Ventral, t6Zv } from '../../tests/meshes';
 
-export { heightAt, T1 };
+export { heightAt, T1, T6, t6Dorsal, t6Ventral, t6Zv };
 
 export type Vec3 = [number, number, number];
 
@@ -181,6 +181,8 @@ export function twoAnglePly(): MeshFile {
   for (let i = 0; i < p.length; i += 3) if (p[i + 1] < -1e-6) p[i + 2] *= 3;
   return { name: 'two.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(m) };
 }
+/** T6: a flake of realistic shape; `K` rows of triangles over the platform. */
+export const t6Ply = (K = 14): MeshFile => ({ name: 't6.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(flakeT6(K)) });
 export const t3Ply = (): MeshFile => ({ name: 't3.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(ellipsoid(40, 25, 8)) });
 
 export const boxPly = (): MeshFile => ({ name: 'box.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(boxMesh()) });
