@@ -92,7 +92,7 @@ export function floatingPanel(o: FloatingPanelOptions): FloatingPanel {
   const drag = (handle: HTMLElement, move: (dx: number, dy: number, start: DOMRect, view: DOMRect) => void) => {
     let from: { x: number; y: number; rect: DOMRect; view: DOMRect } | null = null;
     handle.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || (e.target as Element).closest('button, select, input')) return;
+      if (e.button !== 0 || (e.target as Element).closest('button, select, input, label')) return;
       e.preventDefault();
       handle.setPointerCapture(e.pointerId);
       from = { x: e.clientX, y: e.clientY, rect: el.getBoundingClientRect(), view: area.getBoundingClientRect() };

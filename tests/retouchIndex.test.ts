@@ -78,13 +78,14 @@ function labelled(kind: RetouchPrismKind) {
   const faceOf = new Uint8Array(m.side.length);
   const pieceOf = new Uint32Array(m.side.length);
   m.side.forEach((s, t) => {
-    if (s === 'AR' || s === 'RC' || s === 'CF') faceOf[t] = FACE_DORSAL;
-    else if (s === 'FA' || s === 'FCv' || s === 'CvRv' || s === 'RvA') faceOf[t] = FACE_VENTRAL;
+    if (s === 'AR' || s === 'RC' || s === 'CF' || s === 'AC') faceOf[t] = FACE_DORSAL;
+    else if (s === 'FA' || s === 'FCv' || s === 'CvRv' || s === 'RvA' || s === 'FRv') faceOf[t] = FACE_VENTRAL;
     else faceOf[t] = FACE_NONE;
     pieceOf[t] = s === 'AR' ? 1 : s === 'RvA' ? 2 : 0;
   });
-  const pieces = new Map<number, RetouchPiece>([[1, { region: 'R1', layer: 1 }]]);
-  if (kind === 'bifacial') pieces.set(2, { region: 'R2', layer: 1 });
+  const pieces = new Map<number, RetouchPiece>();
+  if (kind !== 'inverse') pieces.set(1, { region: 'R1', layer: 1 });
+  if (kind === 'bifacial' || kind === 'inverse') pieces.set(2, { region: 'R2', layer: 1 });
   return { m, faceOf, pieceOf, pieces };
 }
 
@@ -179,7 +180,7 @@ describe('T7, the retouch prism', () => {
     }
     expect(r.details.every((d) => d.giurReason === 'bifacial')).toBe(true);
     expect(r.indices.giur).toBeNull();
-    expect(r.reasons.giur).toBe('no_dorsal_retouch');
+    expect(r.reasons.giur).toBe('no_unifacial_station');
     expect(r.indices.giur_stations).toBe(0);
     expect(r.indices.retouch_perimeter).toBeCloseTo(1, 9);
     expect(r.indices.retouch_perimeter_dorsal).toBeCloseTo(1, 9);
@@ -198,15 +199,49 @@ describe('T7, the retouch prism', () => {
     nearAbs(r.indices.giur, 1, 0.005);
   });
 
-  it('inverse retouch: no GIUR; retouch on the ventral side counts for that face', () => {
-    const { m, faceOf, pieceOf, pieces } = labelled('unifacial');
-    // the same prism, with the faces the other way round
-    const swapped = faceOf.map((f) => (f === FACE_DORSAL ? FACE_VENTRAL : f === FACE_VENTRAL ? FACE_DORSAL : f));
-    const r = run(m, prismEdge(), false, swapped, pieceOf, pieces, { matrix: identity });
-    expect(r.details.every((d) => d.giurReason === 'inverse')).toBe(true);
-    expect(r.reasons.giur).toBe('no_dorsal_retouch');
+  it('inverse retouch: GIUR from the ventral line beyond it, the thickness over its inner end; it counts for that face', () => {
+    const r = prism('inverse');
+    expect(r.indices.stations.length).toBe(31);
+    for (const s of r.indices.stations) {
+      expect(s.depth_dorsal).toBe(0);
+      near(s.depth_ventral, Math.hypot(4, 2));
+      // the dorsal surface over x = 8 is at z = 3, the ventral line at z = −2; the top at z = 12
+      near(s.retouch_height, 5);
+      near(s.thickness, 14);
+      nearAbs(s.giur, 5 / 14, 0.005);
+      // the lines meet at (4 − 8/3, −2): a triangle on the ventral side
+      near(s.removed_area, 20 / 3);
+      near(s.recession, Math.hypot(8 / 3, 2));
+    }
+    expect(r.details.every((d) => d.giurReason === null)).toBe(true);
+    nearAbs(r.indices.giur, 5 / 14, 0.005);
+    expect(r.indices.giur_stations).toBe(31);
+    expect(r.reasons.giur).toBeUndefined();
     expect(r.indices.retouch_perimeter_dorsal).toBe(0);
     expect(r.indices.retouch_perimeter_ventral).toBeCloseTo(1, 9);
+    expect(r.indices.segments.map((s) => s.face)).toEqual(['ventral']);
+  });
+
+  it('dorsal stretches and inverse ones along one edge: each station by its own side, all in the mean', () => {
+    const { m, faceOf, pieceOf, pieces } = labelled('unifacial');
+    // the same prism, with the faces the other way round on the far half of the edge
+    const half = (t: number) => (m.positions[3 * m.index[3 * t] + 1] + m.positions[3 * m.index[3 * t + 1] + 1] + m.positions[3 * m.index[3 * t + 2] + 1]) / 3 > 20;
+    const swapped = faceOf.map((f, t) => (half(t) ? (f === FACE_DORSAL ? FACE_VENTRAL : f === FACE_VENTRAL ? FACE_DORSAL : f) : f));
+    const r = run(m, prismEdge(), false, swapped, pieceOf, pieces, { matrix: identity });
+    const told = r.indices.stations.filter((s) => s.giur !== null);
+    expect(told.some((s) => s.depth_dorsal! > 0)).toBe(true);
+    expect(told.some((s) => s.depth_ventral! > 0)).toBe(true);
+    expect(r.indices.giur_stations).toBe(told.length);
+    nearAbs(r.indices.giur, told.reduce((a, s) => a + s.giur!, 0) / told.length, 1e-9);
+  });
+
+  it('retouch over the whole ventral side leaves no line to measure from', () => {
+    const { m, faceOf, pieceOf, pieces } = labelled('inverse');
+    const whole = pieceOf.map((p, t) => (faceOf[t] === FACE_VENTRAL ? 2 : p));
+    const r = run(m, prismEdge(), false, faceOf, whole, pieces, { matrix: identity });
+    expect(r.details.every((d) => d.giurReason === 'no_original_surface')).toBe(true);
+    expect(r.indices.giur).toBeNull();
+    expect(r.reasons.giur).toBe('no_unifacial_station');
   });
 
   it('why values are empty', () => {
@@ -338,7 +373,7 @@ function plate(): Mesh & { face: number[] } {
 }
 
 describe('invasiveness on a plate', () => {
-  it('each segment by its reach; the side retouch that falls into a proximal segment counts by the end alone', () => {
+  it('each segment by its reach; in the end rows the nearer of the end and the side', () => {
     const m = plate();
     const pieceOf = new Uint32Array(m.face.length);
     m.face.forEach((f, t) => {
@@ -351,14 +386,15 @@ describe('invasiveness on a plate', () => {
     const r = run(m, [[0, 0, 0], [0, 1, 0]], false, m.face, pieceOf, new Map([[1, { region: 'R1', layer: 1 }]]), { matrix: identity });
     const row = (n: number) => r.indices.penetration[n - 1];
     expect(r.indices.penetration.map((p) => p.segment)).toEqual(Array.from({ length: 16 }, (_, i) => i + 1));
-    expect(r.indices.penetration.map((p) => p.score)).toEqual([0, 0.5, 0, 1, 0, 0.5, 0, 0.5, 1, 0, 0, 0, 0, 0, 0, 0]);
-    expect(r.indices.invasiveness).toBe(0.21875);
-    nearAbs(r.indices.invasiveness_continuous, 0.1411, 0.005);
+    expect(r.indices.penetration.map((p) => p.score)).toEqual([0, 0.5, 0, 1, 0, 0.5, 0, 0.5, 0.5, 0, 0, 0, 0, 0, 0, 0]);
+    expect(r.indices.invasiveness).toBe(0.1875);
+    nearAbs(r.indices.invasiveness_continuous, 0.0851, 0.005);
     nearAbs(row(2).penetration, 0.1833, 0.001);
     nearAbs(row(6).penetration, 0.1833, 0.001);
     nearAbs(row(4).penetration, 0.6833, 0.001);
     nearAbs(row(8).penetration, 0.2292, 0.001);
-    nearAbs(row(9).penetration, 0.9792, 0.001);
+    // side retouch in a proximal segment: x > 9, so no further in than that, however far along
+    nearAbs(row(9).penetration, 0.0833, 0.001);
     expect(row(2).face).toBe('dorsal');
     expect(row(9).face).toBe('ventral');
   });

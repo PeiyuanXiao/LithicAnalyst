@@ -296,6 +296,7 @@ const RETOUCH_PRISMS = {
   unifacial: { A: [4, 0], R: [8, 8 * tan(30)], C: [20, 20 * tan(30)], F: [40, 0] },
   bifacial: { A: [4, 0], R: [8, 8 * tan(20)], C: [20, 20 * tan(20)], F: [40, 0], Cv: [20, -20 * tan(20)], Rv: [8, -8 * tan(20)] },
   flat: { A: [4, 0], R: [8, 8 * tan(30)], C: [30, 8 * tan(30)], F: [40, 0] },
+  inverse: { A: [4, 0], C: [20, 12], F: [40, -2], Rv: [8, -2] },
 } as const;
 
 export type RetouchPrismKind = keyof typeof RETOUCH_PRISMS;

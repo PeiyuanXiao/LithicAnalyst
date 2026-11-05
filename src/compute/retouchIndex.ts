@@ -50,7 +50,7 @@ export const RETOUCH_INDEX_PARAMETERS = {
 };
 
 /** Why a value is empty: for the screen, neither stored nor exported. */
-export const RETOUCH_EMPTY_REASONS = ['no_unit', 'no_faces', 'no_retouch_on_edge', 'no_edge', 'mesh_open', 'too_many_gaps', 'no_dorsal_retouch', 'no_axis', 'frame_failed', 'whole_edge', 'section_misses_curve', 'no_original_surface', 'lines_do_not_meet', 'bifacial', 'inverse'] as const;
+export const RETOUCH_EMPTY_REASONS = ['no_unit', 'no_faces', 'no_retouch_on_edge', 'no_edge', 'mesh_open', 'too_many_gaps', 'no_unifacial_station', 'no_axis', 'frame_failed', 'whole_edge', 'section_misses_curve', 'no_original_surface', 'lines_do_not_meet', 'bifacial'] as const;
 export type RetouchEmptyReason = (typeof RETOUCH_EMPTY_REASONS)[number];
 
 /** The part of a flake a triangle lies in. */
@@ -111,17 +111,22 @@ export function fillGaps(values: ReadonlyArray<number | null>, closed = false, p
  * The chord from the first of these points to the last, and the depth: the point furthest from the chord, with its sign;
  * positive away from `inside` (a convex edge), negative toward it. `inside` on the chord says nothing: positive.
  */
-export function chordDepth(points: ReadonlyArray<readonly [number, number]>, inside: readonly [number, number]): { chord: number; depth: number } {
+export function chordDepth(points: ReadonlyArray<readonly [number, number]>, inside: readonly [number, number]): { chord: number; depth: number; far: number } {
   const a = points[0], b = points[points.length - 1];
   const chord = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  if (!(chord > 0)) return { chord: 0, depth: 0 };
+  if (!(chord > 0)) return { chord: 0, depth: 0, far: 0 };
   const nx = -(b[1] - a[1]) / chord, ny = (b[0] - a[0]) / chord;
   const side = (p: readonly [number, number]) => (p[0] - a[0]) * nx + (p[1] - a[1]) * ny;
-  let far = 0;
-  for (const p of points) if (Math.abs(side(p)) > Math.abs(far)) far = side(p);
+  let most = 0, at = 0;
+  points.forEach((p, i) => {
+    if (Math.abs(side(p)) > Math.abs(most)) {
+      most = side(p);
+      at = i;
+    }
+  });
   const within = side(inside);
   const tiny = 1e-9 * chord;
-  return { chord, depth: within > tiny ? -far : within < -tiny ? far : Math.abs(far) };
+  return { chord, depth: within > tiny ? -most : within < -tiny ? most : Math.abs(most), far: at };
 }
 
 // ---------------------------------------------------------------- the frame of the plan
@@ -223,7 +228,7 @@ export function* segmentFrameSteps(input: SegmentFrameInput): Steps<SegmentFrame
 export const segmentFrame = (input: SegmentFrameInput): SegmentFrameResult => runSync(segmentFrameSteps(input));
 
 /** A point on the plan. */
-const onPlan = (f: SegmentFrame, p: Vec3): [number, number] => {
+export const onPlan = (f: SegmentFrame, p: Vec3): [number, number] => {
   const d = sub(p, f.origin);
   return [dot(d, f.x), dot(d, f.y)];
 };
@@ -289,10 +294,10 @@ export function* segmentOutlineSteps(positions: ArrayLike<number>, frame: Segmen
 }
 
 /** The row of the plan a height lies in, 0 (proximal) to 4. */
-const rowOf = (o: SegmentOutline, y: number): number => Math.max(0, Math.min(4, Math.floor((5 * (y - o.y0)) / o.L)));
+export const rowOf = (o: SegmentOutline, y: number): number => Math.max(0, Math.min(4, Math.floor((5 * (y - o.y0)) / o.L)));
 
 /** The middle and half width of the outline at a height. */
-function across(o: SegmentOutline, y: number): { mid: number; half: number } {
+export function across(o: SegmentOutline, y: number): { mid: number; half: number } {
   const c = cellOf(y, o.y0, o.L, OUTLINE_BINS);
   return { mid: (o.xL[c] + o.xR[c]) / 2, half: (o.xR[c] - o.xL[c]) / 2 };
 }
@@ -305,15 +310,18 @@ export function segmentAt(o: SegmentOutline, x: number, y: number): number {
   return 2 * row + (x < across(o, y).mid ? 0 : 1);
 }
 
-/** How far in a point of the plan is, 0 at the edge: in rows 2–4 from the sides, in the two end rows from their ends alone (Clarkson's text). */
+/**
+ * How far in a point of the plan is, 0 at the edge: from the sides; in the two end rows also from the end, whichever is less. The end's share is 1
+ * where its row begins, so the value runs on across the rows, and its level lines close round the plan.
+ */
 export function penetrationAt(o: SegmentOutline, x: number, y: number): number {
-  const row = rowOf(o, y);
-  const clamp = (top: number, bottom: number) => (bottom > 0 ? Math.max(0, Math.min(1, top / bottom)) : 1);
-  const c = cellOf(x, o.xMin, o.xMax - o.xMin, OUTLINE_BINS);
-  if (row === 4) return clamp(o.yTop[c] - y, o.yTop[c] - (o.y0 + 0.8 * o.L));
-  if (row === 0) return clamp(y - o.yBot[c], o.y0 + 0.2 * o.L - o.yBot[c]);
+  const share = (top: number, bottom: number) => (bottom > 0 ? Math.max(0, Math.min(1, top / bottom)) : 1);
   const { mid, half } = across(o, y);
-  return half > 0 ? Math.max(0, Math.min(1, 1 - Math.abs(x - mid) / half)) : 1;
+  const side = share(half - Math.abs(x - mid), half);
+  const row = rowOf(o, y);
+  if (row !== 0 && row !== 4) return side;
+  const c = cellOf(x, o.xMin, o.xMax - o.xMin, OUTLINE_BINS);
+  return Math.min(side, row === 4 ? share(o.yTop[c] - y, o.yTop[c] - (o.y0 + 0.8 * o.L)) : share(y - o.yBot[c], o.y0 + 0.2 * o.L - o.yBot[c]));
 }
 
 /** The sixteen segments (the ventral face's are 9–16): how far in the retouch reaches in each, and its score. */
@@ -391,7 +399,7 @@ function nextRetouch(way: RetouchWay, pieceOfFace: ArrayLike<number>, pieces: Re
 }
 
 /** The way from `a` to `b` along it. */
-function stretchOf(way: RetouchWay, a: number, b: number): Vec3[] {
+export function stretchOf(way: RetouchWay, a: number, b: number): Vec3[] {
   const out: Vec3[] = [pointAtArc(way.points, false, way.cum, a)];
   for (let i = 0; i < way.points.length; i++) if (way.cum[i] > a && way.cum[i] < b) out.push(way.points[i]);
   out.push(pointAtArc(way.points, false, way.cum, b));
@@ -511,14 +519,47 @@ function originalSurface(sec: StationSection, sides: [Side, Side], w: number, me
   return { area: Math.abs(twice) / 2, angle: between, recession: dist(A, A0), A0, fits: [fits[0], fits[1]] };
 }
 
-/** GIUR at a station with retouch on the dorsal side only: the retouch's height over the line of the ventral face, and the thickness. */
-function giurAt(dorsal: Side, ventral: Side): { t: number; T: number; C: Vec3; ratio: number } | null {
-  const line = fitStretch(ventral.way, 0, ventral.extent);
+/** The two sides of a station's section, and which way is on the dorsal side (−1: not told). */
+function sidesOf(sec: StationSection, faceOf: ArrayLike<number>, pieceOfFace: ArrayLike<number>, pieces: ReadonlyMap<number, RetouchPiece>, sliver: number): { sides: [Side, Side]; dorsal: number } {
+  const sides = ([0, 1] as const).map((i): Side => {
+    const way = sec.ways[i], runs = sec.runs[i];
+    const { face, extent } = faceAlong(way, faceOf, sliver);
+    const depth = runs.length ? runs[runs.length - 1].to : 0;
+    return { way, runs, face, extent, depth, limit: Math.min(extent, nextRetouch(way, pieceOfFace, pieces, depth, sliver)) };
+  }) as [Side, Side];
+  return { sides, dorsal: sides[0].face === FACE_DORSAL && sides[1].face === FACE_VENTRAL ? 0 : sides[1].face === FACE_DORSAL && sides[0].face === FACE_VENTRAL ? 1 : -1 };
+}
+
+/** Which way of a station's section is on the dorsal side (−1: not told), and where each way leaves its part. */
+export function stationFaces(sec: StationSection, faceOf: ArrayLike<number>, pieceOfFace: ArrayLike<number>, pieces: ReadonlyMap<number, RetouchPiece>, meanEdge: number): { dorsal: number; extents: [number, number]; depths: [number, number] } {
+  const { sides, dorsal } = sidesOf(sec, faceOf, pieceOfFace, pieces, SLIVER_EDGES * meanEdge);
+  return { dorsal, extents: [sides[0].extent, sides[1].extent], depths: [sides[0].depth, sides[1].depth] };
+}
+
+/** The first point of the dorsal side straight above a point, across a line. */
+function dorsalOver(dorsal: Side, from: Vec3, line: { point: Vec3; dir: Vec3 }): Vec3 | null {
+  const along = (p: Vec3) => dot(sub(p, from), line.dir);
+  const points = stretchOf(dorsal.way, 0, dorsal.extent);
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = along(points[i]), b = along(points[i + 1]);
+    if (a === b || a * b > 0) continue;
+    const s = a / (a - b);
+    return [points[i][0] + s * (points[i + 1][0] - points[i][0]), points[i][1] + s * (points[i + 1][1] - points[i][1]), points[i][2] + s * (points[i + 1][2] - points[i][2])];
+  }
+  return null;
+}
+
+/**
+ * GIUR at a station with retouch on one side only, from the line of the ventral face beyond any retouch: how thick the flake is where the retouch
+ * ends, and at its thickest. Retouch on the dorsal side ends at R itself; on the ventral side, the thickness is taken from the dorsal surface over R.
+ */
+function giurAt(dorsal: Side, ventral: Side): { t: number; T: number; H: Vec3; C: Vec3; ratio: number; line: { point: Vec3; dir: Vec3 } } | null {
+  const line = fitStretch(ventral.way, ventral.depth, ventral.extent);
   if (!line) return null;
-  const R = pointAtArc(dorsal.way.points, false, dorsal.way.cum, dorsal.depth);
-  const t = distanceToLine(R, line);
+  const H = ventral.runs.length ? dorsalOver(dorsal, pointAtArc(ventral.way.points, false, ventral.way.cum, ventral.depth), line) : pointAtArc(dorsal.way.points, false, dorsal.way.cum, dorsal.depth);
+  if (!H) return null;
   let T = 0;
-  let C = R;
+  let C = H;
   for (const p of stretchOf(dorsal.way, 0, dorsal.extent)) {
     const h = distanceToLine(p, line);
     if (h > T) {
@@ -526,7 +567,8 @@ function giurAt(dorsal: Side, ventral: Side): { t: number; T: number; C: Vec3; r
       C = p;
     }
   }
-  return T > 0 ? { t, T, C, ratio: t / T } : null;
+  const t = distanceToLine(H, line);
+  return T > 0 ? { t, T, H, C, ratio: t / T, line } : null;
 }
 
 // ---------------------------------------------------------------- all together
@@ -634,8 +676,22 @@ export interface RetouchStationDetail {
   /** Why it takes no part in GIUR. */
   giurReason: RetouchEmptyReason | null;
   surface: OriginalSurface | null;
+  /** The point t was measured to. */
+  H: Vec3 | null;
   /** The point T was measured to. */
   C: Vec3 | null;
+  /** The line t and T are measured from. */
+  reference: { point: Vec3; dir: Vec3 } | null;
+}
+
+/** The stretch the curvature is taken of: its chord and depth on the plan, for drawing; not stored. */
+export interface LongestStretch {
+  curveId: string;
+  a: [number, number];
+  b: [number, number];
+  /** The point furthest from the chord, and its foot on the chord. */
+  far: [number, number];
+  foot: [number, number];
 }
 
 export interface RetouchIndexResult {
@@ -645,47 +701,51 @@ export interface RetouchIndexResult {
   details: RetouchStationDetail[];
   /** The plan's outline, for the next run on the same frame. */
   outline: SegmentOutline | null;
+  longest: LongestStretch | null;
+  /** The stations of each row of `indices.segments`, in order along it. */
+  segmentStations: number[][];
 }
 
-/** All the retouch indices of a flake. A flake without any retouch region counts as not retouched. */
-export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndexResult> {
-  const { positions, faceOf, pieceOfFace, pieces, curves, meanEdge, volume, frame: chosen } = input;
+/** What the stations of all the curves give at one fitted length. */
+interface StationPass {
+  rows: RetouchStationRow[];
+  details: RetouchStationDetail[];
+  /** Which way is on the dorsal side, per station of each curve (−1: not told). */
+  dorsalWay: Int8Array[];
+  retouched: number;
+  filled: number;
+  removed: number;
+  knownFaces: number;
+  giurSum: number;
+  giurCount: number;
+}
+
+const weightOf = (c: RetouchCurve, k: number, step: number): number => (c.closed || (k > 0 && k < c.stations.length - 1) ? step : step / 2);
+
+function* stationPass(input: RetouchIndexInput, frame: SegmentFrame | null, outline: SegmentOutline | null, fitLength: number): Steps<StationPass> {
+  const { faceOf, pieceOfFace, pieces, curves, meanEdge } = input;
   const o: Vec3 = input.offset ?? [0, 0, 0];
   const mm = mmPerUnit(input.unit);
-  const fitLength = input.fitLength ?? ORIGINAL_FIT_MM;
-  const frame = chosen.frame;
-  const outline = frame ? (input.outline ?? (yield* segmentOutlineSteps(positions, frame))) : null;
   const w = mm === null ? 0 : fitLength / mm;
   const step = mm === null ? 0 : EDGE_ANGLE_STEP_MM / mm;
   const sliver = SLIVER_EDGES * meanEdge;
-  const local = (p: Vec3): Vec3 => sub(p, o);
-
   const rows: RetouchStationRow[] = [];
   const details: RetouchStationDetail[] = [];
   let retouched = 0, filled = 0, removed = 0, knownFaces = 0, giurSum = 0, giurCount = 0;
-  /** Which way is on the dorsal side, per station of each curve (−1: not told). */
   const dorsalWay = curves.map((c) => new Int8Array(c.stations.length).fill(-1));
-  const weightOf = (c: RetouchCurve, k: number) => (c.closed || (k > 0 && k < c.stations.length - 1) ? step : step / 2);
-
   for (const [ci, c] of curves.entries()) {
     const own: Array<{ k: number; row: RetouchStationRow; area: number | null }> = [];
     for (let k = 0; k < c.stations.length; k++) {
       const s = c.stations[k], sec = c.sections[k];
       if (!s.point) {
-        details.push({ curveId: c.curveId, station: k, reason: 'section_misses_curve', giurReason: null, surface: null, C: null });
+        details.push({ curveId: c.curveId, station: k, reason: 'section_misses_curve', giurReason: null, surface: null, H: null, C: null, reference: null });
         continue;
       }
       if (!sec) continue;
       yield;
-      const sides = ([0, 1] as const).map((i): Side => {
-        const way = sec.ways[i], runs = sec.runs[i];
-        const { face, extent } = faceAlong(way, faceOf, sliver);
-        const depth = runs.length ? runs[runs.length - 1].to : 0;
-        return { way, runs, face, extent, depth, limit: Math.min(extent, nextRetouch(way, pieceOfFace, pieces, depth, sliver)) };
-      }) as [Side, Side];
-      const d: number = sides[0].face === FACE_DORSAL && sides[1].face === FACE_VENTRAL ? 0 : sides[1].face === FACE_DORSAL && sides[0].face === FACE_VENTRAL ? 1 : -1;
+      const { sides, dorsal: d } = sidesOf(sec, faceOf, pieceOfFace, pieces, sliver);
       dorsalWay[ci][k] = d;
-      const plan = frame && outline ? onPlan(frame, local(s.point)) : null;
+      const plan = frame && outline ? onPlan(frame, sub(s.point, o)) : null;
       const row: RetouchStationRow = {
         curveId: c.curveId,
         station: k,
@@ -703,7 +763,7 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
         thickness: null,
         giur: null,
       };
-      const detail: RetouchStationDetail = { curveId: c.curveId, station: k, reason: null, giurReason: null, surface: null, C: null };
+      const detail: RetouchStationDetail = { curveId: c.curveId, station: k, reason: null, giurReason: null, surface: null, H: null, C: null, reference: null };
       let area: number | null = null;
       if (d < 0) {
         detail.reason = 'no_faces';
@@ -719,18 +779,19 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
           row.recession = surface.recession;
         }
         const dorsal = sides[d], ventral = sides[1 - d];
-        if (!dorsal.runs.length) detail.giurReason = 'inverse';
-        else if (ventral.runs.length) detail.giurReason = 'bifacial';
+        if (dorsal.runs.length && ventral.runs.length) detail.giurReason = 'bifacial';
         else {
           const g = giurAt(dorsal, ventral);
           if (g) {
             row.retouch_height = g.t;
             row.thickness = g.T;
             row.giur = g.ratio;
+            detail.H = g.H;
             detail.C = g.C;
+            detail.reference = g.line;
             giurSum += g.ratio;
             giurCount++;
-          }
+          } else detail.giurReason = 'no_original_surface';
         }
       }
       details.push(detail);
@@ -742,11 +803,36 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
     own.forEach((x, i) => {
       x.row.removed_area = areas[i];
       x.row.filled = x.area === null;
-      removed += weightOf(c, x.k) * areas[i];
+      removed += weightOf(c, x.k, step) * areas[i];
       retouched++;
       if (x.area === null) filled++;
     });
   }
+  return { rows, details, dorsalWay, retouched, filled, removed, knownFaces, giurSum, giurCount };
+}
+
+/** The volume removed at each of these fitted lengths (mm); null where it would be empty. The rest of the indices do not depend on them. */
+export function* removedVolumeCurveSteps(input: RetouchIndexInput, lengths: readonly number[]): Steps<Array<{ length: number; removed: number | null }>> {
+  const out: Array<{ length: number; removed: number | null }> = [];
+  for (const length of lengths) {
+    const p = yield* stationPass(input, null, null, length);
+    const told = input.pieces.size > 0 && p.retouched > 0 && p.knownFaces > 0 && p.filled / p.retouched <= ERP_MAX_FILLED_SHARE;
+    out.push({ length, removed: told ? p.removed : null });
+  }
+  return out;
+}
+
+/** All the retouch indices of a flake. A flake without any retouch region counts as not retouched. */
+export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndexResult> {
+  const { positions, faceOf, pieces, curves, volume, frame: chosen } = input;
+  const o: Vec3 = input.offset ?? [0, 0, 0];
+  const mm = mmPerUnit(input.unit);
+  const fitLength = input.fitLength ?? ORIGINAL_FIT_MM;
+  const frame = chosen.frame;
+  const outline = frame ? (input.outline ?? (yield* segmentOutlineSteps(positions, frame))) : null;
+  const step = mm === null ? 0 : EDGE_ANGLE_STEP_MM / mm;
+  const local = (p: Vec3): Vec3 => sub(p, o);
+  const { rows, details, dorsalWay, retouched, filled, removed, knownFaces, giurSum, giurCount } = yield* stationPass(input, frame, outline, fitLength);
 
   const edges = curves.map((c, i) => ({ c, i })).filter((x) => x.c.edge);
   const reasons: RetouchIndexResult['reasons'] = {};
@@ -757,6 +843,8 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
   const values = Object.fromEntries(RETOUCH_SUMMARY.map((k) => [k, null])) as Record<RetouchSummaryKey, number | null>;
   let penetration: PenetrationRow[] = [];
   const segments: RetouchSegmentRow[] = [];
+  const segmentStations: number[][] = [];
+  let longest: LongestStretch | null = null;
   const CURVATURE = ['edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth'] as const;
 
   if (!pieces.size) {
@@ -787,7 +875,7 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
       values.giur_stations = giurCount;
       if (!retouched) empty('no_retouch_on_edge', ['giur']);
       else if (!knownFaces) empty('no_faces', ['giur']);
-      else if (!giurCount) empty('no_dorsal_retouch', ['giur']);
+      else if (!giurCount) empty('no_unifacial_station', ['giur']);
       else values.giur = giurSum / giurCount;
     }
 
@@ -814,7 +902,7 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
       let total = 0, all = 0, dorsal = 0, ventral = 0, told = false, anyRetouch = false;
       for (const { c, i } of edges) {
         for (let k = 0; k < c.stations.length; k++) {
-          const weight = weightOf(c, k);
+          const weight = weightOf(c, k, step);
           total += weight;
           const sec = c.sections[k];
           if (!sec) continue;
@@ -844,7 +932,7 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
         const raw = c.stations.map((s) => s.stretches.length > 0);
         for (const [first, count] of runsOf(withGapsFilled(raw, c.closed, EDGE_ANGLE_STEP_MM, RETOUCH_MERGE_GAP_MM), c.closed)) {
           let weight = 0;
-          for (let i = 0; i < count; i++) weight += weightOf(c, (first + i) % n);
+          for (let i = 0; i < count; i++) weight += weightOf(c, (first + i) % n, step);
           if (!best || weight > best.weight) best = { c, first, count, weight };
         }
       }
@@ -857,11 +945,14 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
           const p = best.c.stations[(best.first + i) % best.c.stations.length].point;
           if (p) points.push(onPlan(frame, local(p)));
         }
-        const { chord, depth } = chordDepth(points.length ? points : [[0, 0]], outline.centre);
+        const { chord, depth, far } = chordDepth(points.length ? points : [[0, 0]], outline.centre);
         if (chord > 0) {
           values.edge_curvature = depth / chord;
           values.edge_curvature_chord = chord;
           values.edge_curvature_depth = depth;
+          const a = points[0], b = points[points.length - 1], p = points[far];
+          const along = ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / (chord * chord);
+          longest = { curveId: best.c.curveId, a, b, far: p, foot: [a[0] + along * (b[0] - a[0]), a[1] + along * (b[1] - a[1])] };
         } else empty('no_retouch_on_edge', CURVATURE);
       }
     }
@@ -897,7 +988,8 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
           let widest = -1;
           on.forEach((k, i) => {
             const gap = (on[(i + 1) % on.length] - k + n) % n || n;
-            if (gap > widest) {
+            // (all the way round there is no gap: from the start)
+            if (gap > widest && gap > 1) {
               widest = gap;
               from = (i + 1) % on.length;
             }
@@ -916,10 +1008,11 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
           face: f.dorsal || f.ventral ? (f.dorsal >= f.ventral ? 'dorsal' : 'ventral') : null,
           start_position: c.stations[ordered[0]].position,
           end_position: c.stations[ordered[ordered.length - 1]].position,
-          length: ordered.reduce((s, k) => s + weightOf(c, k), 0),
+          length: ordered.reduce((s, k) => s + weightOf(c, k, step), 0),
           chord: shape ? shape.chord : null,
           depth: shape ? shape.depth : null,
         });
+        segmentStations.push(ordered);
       }
     }
   }
@@ -938,6 +1031,8 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
     reasons,
     details,
     outline,
+    longest,
+    segmentStations,
   };
 }
 

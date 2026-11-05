@@ -14,8 +14,10 @@ import { frameMeasures, surfaceMeasuresSteps } from '../src/compute/measure';
 import { fitPlane } from '../src/compute/meshGeometry';
 import { edgeAnglesSteps } from '../src/compute/edgeAngle';
 import { gmSteps } from '../src/compute/gm';
-import { retouchAnglesSteps, retouchSectionsSteps } from '../src/compute/retouchAngle';
-import { FACE_DORSAL, FACE_VENTRAL, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps } from '../src/compute/retouchIndex';
+import { retouchAnglesSteps, retouchSectionsSteps, sectionAtStation } from '../src/compute/retouchAngle';
+import { FACE_DORSAL, FACE_VENTRAL, removedVolumeCurveSteps, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps } from '../src/compute/retouchIndex';
+import { drawnOutline, planRegionsSteps, planShape, segmentLinesSteps } from '../src/compute/retouchPlan';
+import { planDrawing, PRINT_PALETTE, sectionDrawing, sectionModel, svgFile } from '../src/render/retouchDrawing';
 import { flakeMeasuresSteps, morphDimensionsSteps, techDimensionsSteps } from '../src/compute/flake';
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
 import { regionPlaneSteps } from '../src/compute/planes';
@@ -291,6 +293,19 @@ async function benchGenerated(triangles: number): Promise<void> {
   const indices = steps('10d the retouch indices', retouchIndexSteps({ ...retouchInput, fitLength: null }));
   steps('10e again at another fitted length (no new sections)', retouchIndexSteps({ ...retouchInput, fitLength: 8 }));
   const sectionPoints = sections.sections.reduce((n, s) => n + (s ? s.ways[0].points.length : 0), 0);
+  steps('10f the volume removed at nine fitted lengths', removedVolumeCurveSteps({ ...retouchInput, fitLength: null }, [2, 3, 4, 5, 6, 7, 8, 9, 10]));
+  if (planFrame.frame && outline) {
+    const frame2 = planFrame.frame;
+    const loops = steps('10g the regions on the plan', planRegionsSteps({ positions: pos, index: idx, faceOf, pieceOfFace: banded.region, pieces: bandPieces, frame: frame2 }));
+    const drawn = drawnOutline(outline);
+    steps('10h the segments\' lines on the model', segmentLinesSteps({ positions: pos, index: idx, faceOf, frame: frame2, outline: drawn }));
+    const shape = once('10i the plan\'s shape', () => planShape(drawn));
+    once('10j the plan drawn', () => svgFile(planDrawing({ shape, loops, face: 'dorsal', station: null, longest: null, highlight: null, tag: '', palette: PRINT_PALETTE, unit: 'mm', width: 300, height: 400 }), 'x'));
+    console.log(`${loops.reduce((n, l) => n + l.loops.reduce((m, r) => m + r.length, 0), 0)} points round the regions on the plan`);
+  }
+  // moving the current station: at most once a frame
+  const moved = once('10k a station\'s section, cut when asked for (BVH)', () => sectionAtStation({ positions: pos, index: idx, offset: o, points: rim, closed: true, unit: 'mm', meanEdge: base.meanEdge, candidates, pieceOfFace: banded.region, pieces: bandPieces }, 20));
+  if (moved) once('10l that section drawn', () => svgFile(sectionDrawing(sectionModel(moved, null, { dorsal: 0, extents: [moved.ways[0].length, moved.ways[1].length], depths: [0, 0] }), { palette: PRINT_PALETTE, whole: true, minWidth: 5, unit: 'mm', width: 420, height: 300 }), 'x'));
   console.log(`${indices.indices.stations.length} retouched stations (${sectionPoints} section points kept), ERP ${indices.indices.erp?.toFixed(3)}, GIUR ${indices.indices.giur?.toFixed(3)}, invasiveness ${indices.indices.invasiveness}, empty: ${JSON.stringify(indices.reasons)}`);
   console.log('');
   report();

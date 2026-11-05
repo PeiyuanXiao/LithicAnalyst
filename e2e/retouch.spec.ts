@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { heightAt, T4, t4Ply, toolPly, twoAnglePly, type Vec3 } from './fixtures/meshes';
+import { setType } from './retouchSetup';
 import { closeDraftToward, curveClick, expect, exportAvailable, exportFile, folderPaths, folderText, loadMesh, mockFolder, nextFrames, openApp, openMockFolder, openSection, parseCsv, state, test, toScreen } from './helpers';
 
 const ON = (r: number, deg: number, z: number): Vec3 => [r * Math.cos((deg * Math.PI) / 180), r * Math.sin((deg * Math.PI) / 180), z];
@@ -86,22 +87,19 @@ test('retouch layers: the curves and regions, each layer\'s angles, retouch_angl
     expect(Math.abs(two.three_points! - (Math.atan(8 / 18) * 180) / Math.PI)).toBeLessThan(5);
   }
 
-  // what is shown: all the lines, a distance, a layer; the method of the layers' own faces
+  // what the measure mode shows: all the distances, or one; no layers, no method of theirs
   const lines = page.locator('#edge-chart .edge-chart-line');
-  await expect(lines).toHaveCount(5);
-  await expect(page.locator('#edge-chart-legend .edge-chart-key')).toHaveText(['2 mm', '5 mm', '10 mm', 'Layer 1', 'Layer 2']);
+  await expect(lines).toHaveCount(3);
+  await expect(page.locator('#edge-chart-legend .edge-chart-key')).toHaveText(['2 mm', '5 mm', '10 mm']);
+  await expect(page.locator('#edge-method-layer_face')).toHaveCount(0);
+  await expect(page.locator('#edge-series-L1')).toHaveCount(0);
   const key = await page.evaluate(() => window.lithicanalyst.edgeColors()?.key);
   await page.locator('#edge-series-d10').click();
   await expect(lines).toHaveCount(1);
   await expect(lines).toHaveAttribute('data-series', 'd10');
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.edgeColors()?.key)).not.toBe(key);
-  await page.locator('#edge-series-L2').click();
-  await expect(lines).toHaveAttribute('data-series', 'L2');
-  await page.locator('#edge-method-layer_face').click();
   await page.locator('#edge-series-all').click();
-  await expect(lines).toHaveCount(2);
-  await expect(page.locator('#edge-chart-legend .edge-chart-key')).toHaveText(['Layer 1', 'Layer 2']);
-  await expect.poll(() => page.evaluate(() => window.lithicanalyst.edgeColors())).not.toBeNull();
+  await expect(lines).toHaveCount(3);
 
   // the export: a row per station, layer and method
   const out = await exportFile(page, 'retouch-angles');
@@ -116,6 +114,28 @@ test('retouch layers: the curves and regions, each layer\'s angles, retouch_angl
   // the project file holds them
   const file = await page.evaluate(() => window.lithicanalyst.projectJson());
   expect(file.derived.retouchAngles?.curves[0].curveId).toBe(edge);
+
+  // the layers are the retouch mode's, and that mode a flake's: all the lines, a layer; the method of the layers' own faces
+  await page.locator('#app-mode-annotate').click();
+  await setType(page, 'flake');
+  await page.evaluate((id) => window.lithicanalyst.selectForTest(id), edge);
+  await page.keyboard.press('2');
+  await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('edge');
+  await page.locator('#app-mode-retouch').click();
+  await openSection(page, 'retouch-angles');
+  const layers = page.locator('#retouch-chart .edge-chart-line');
+  await expect(layers).toHaveCount(2);
+  await expect(page.locator('#retouch-chart-legend .edge-chart-key')).toHaveText(['Layer 1', 'Layer 2']);
+  const layerKey = await page.evaluate(() => window.lithicanalyst.edgeColors()?.key);
+  await page.locator('#retouch-series-L2').click();
+  await expect(layers).toHaveCount(1);
+  await expect(layers).toHaveAttribute('data-series', 'L2');
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.edgeColors()?.key)).not.toBe(layerKey);
+  await page.locator('#retouch-method-layer_face').click();
+  await page.locator('#retouch-series-all').click();
+  await expect(layers).toHaveCount(2);
+  await expect(page.locator('#retouch-chart-legend .edge-chart-key')).toHaveText(['Layer 1', 'Layer 2']);
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.edgeColors())).not.toBeNull();
 
   // no retouch: nothing to choose, nothing to export
   await page.locator('#app-mode-annotate').click();

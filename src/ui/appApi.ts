@@ -17,7 +17,7 @@ import type { Feedback } from './feedback';
 import type { Popovers } from './popover';
 
 /** Work modes; each shows only its own tools and sidebar sections. */
-export const APP_MODES = ['annotate', 'measure', 'present', 'compare'] as const;
+export const APP_MODES = ['annotate', 'measure', 'retouch', 'present', 'compare'] as const;
 export type AppMode = (typeof APP_MODES)[number];
 
 export interface DisplaySettings {
@@ -41,10 +41,15 @@ export interface DisplaySettings {
   profile: boolean;
   /** Show a flake's semilandmarks for geometric morphometrics. */
   gmPoints: boolean;
+  /** The retouch mode's section and plan panels, the segments' lines and the original edge on the model. */
+  retouchSection: boolean;
+  retouchPlan: boolean;
+  retouchLines: boolean;
+  retouchEdge: boolean;
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'gm' | 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
+export type DisplayAspect = 'retouch' | 'gm' | 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
 
 /** What can be picked in the configuration: a face of the box or a cone of the bicone. */
 export type ConfigPick = import('../core/fields').ConfigFace | import('../core/fields').BiconeCone;
@@ -190,7 +195,7 @@ export interface AppApi {
   /** A curve's edge angles (null: not measured, or not yet). */
   edgeAngleResult(curveId: string): import('../compute/edgeAngle').EdgeAngleResult | null;
   /** The method the chart and the colours show. */
-  readonly edgeMethod: EdgeChartMethod;
+  readonly edgeMethod: import('../compute/edgeAngle').EdgeAngleMethod;
   flakeEmptyReasons(): Partial<Record<FlakeMeasure, FlakeEmptyReason>> | null;
   gmResult(): GmResult | null;
   retouchAngleResult(curveId: string): RetouchAngleResult | null;
@@ -200,5 +205,28 @@ export interface AppApi {
   setEdgeSeries(series: string): void;
   edgeColorMode: 'angle' | 'sharp';
   setEdgeColorMode(mode: 'angle' | 'sharp'): void;
-  setEdgeMethod(method: EdgeChartMethod): void;
+  setEdgeMethod(method: import('../compute/edgeAngle').EdgeAngleMethod): void;
+  /** A flake's retouch indices (null for a core, or before they are computed). */
+  retouchResult(): import('../compute/retouchIndex').RetouchIndexResult | null;
+  /** The current station of the retouch mode (null: no curve has stations). */
+  retouchStationNow(): { curveId: string; station: number; position: number } | null;
+  moveRetouchStation(curveId: string, k: number): void;
+  /** To the station nearest a position along the curve. */
+  moveRetouchPosition(curveId: string, position: number): void;
+  /** Another curve: its station with the largest missing area. */
+  useRetouchCurve(curveId: string): void;
+  /** A row of the table of retouch regions: the middle of its stretch, and the region selected. */
+  focusRetouchSegment(i: number): void;
+  /** The fitted length while its slider is dragged (mm), nothing written yet; null: as stored. */
+  previewFitLength(mm: number | null): void;
+  /** The volume removed at a range of fitted lengths (null: not known yet). */
+  retouchFitCurve(): Array<{ length: number; removed: number | null }> | null;
+  /** A segment of the sixteen: shown on the plan, on its face; again to let go. */
+  focusPlanSegment(segment: number): void;
+  planMark(): number | null;
+  /** The chart of the retouch layers: what it shows, on its own, apart from the measure mode's. */
+  readonly retouchMethod: EdgeChartMethod;
+  readonly retouchSeries: string;
+  setRetouchMethod(method: EdgeChartMethod): void;
+  setRetouchSeries(series: string): void;
 }

@@ -1,4 +1,5 @@
 import {
+  setRetouchFitLength,
   deleteTechnicalAxis,
   setCurveEdgeAngle,
   setPlaneRegion,
@@ -49,8 +50,9 @@ import {
 import { curveLength } from '../core/curveGeometry';
 import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
 import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
-import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleResult } from '../compute/edgeAngle';
+import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
+import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
 import { FLAKE_MEASURES } from '../compute/flake';
 import { gmCounts, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
 import { landmarkName, platformSides, shownLandmarks } from '../compute/landmarks';
@@ -58,7 +60,7 @@ import type { ConfigurationResult, FlakingSurface } from '../compute/configurati
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
-import type { AttributeValue, Curve, Measurement, PlaneMethod, Scar, Vec3, GmConfig, SharpEdgeRule } from '../core/types';
+import { retouchSettingsOf, type AttributeValue, type Curve, type Measurement, type PlaneMethod, type Scar, type Vec3, type GmConfig, type SharpEdgeRule } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
@@ -82,7 +84,7 @@ import { tip, tips } from './tooltip';
 /** The trash can, in the danger colour. */
 const deleteButton = (id: string, onClick: () => void) => iconButton(ICONS.trash, t('arrows.delete'), onClick, { id, danger: true });
 
-export type RefreshKind = 'all' | 'flake' | 'edge' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'retouch' | 'station' | 'all' | 'flake' | 'edge' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -545,8 +547,14 @@ function displaySection(api: AppApi): Section {
   const harris = panelRow('harris-show', t('harris.title'), d.harris, (v) => api.setDisplay((x) => (x.harris = v), 'harris'));
   const profile = panelRow('profile-show', t('profile.title'), d.profile, (v) => api.setDisplay((x) => (x.profile = v), 'profile'));
   const gmPoints = panelRow('gm-show', t('display.gmPoints'), d.gmPoints, (v) => api.setDisplay((x) => (x.gmPoints = v), 'gm'));
+  const retouchRows = [
+    panelRow('retouch-section-show', t('retouch.section'), d.retouchSection, (v) => api.setDisplay((x) => (x.retouchSection = v), 'retouch')),
+    panelRow('retouch-plan-show', t('retouch.plan'), d.retouchPlan, (v) => api.setDisplay((x) => (x.retouchPlan = v), 'retouch')),
+    panelRow('retouch-lines-show', t('retouch.lines'), d.retouchLines, (v) => api.setDisplay((x) => (x.retouchLines = v), 'retouch')),
+    panelRow('retouch-edge-show', t('retouch.edge'), d.retouchEdge, (v) => api.setDisplay((x) => (x.retouchEdge = v), 'retouch')),
+  ];
 
-  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, gmPoints.el, h('div', { class: 'check-row' }, labels, hidden, regions));
+  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, gmPoints.el, ...retouchRows.map((r) => r.el), h('div', { class: 'check-row' }, labels, hidden, regions));
 
   const refresh = (kind: RefreshKind) => {
     // these panels belong to the annotate mode
@@ -556,11 +564,17 @@ function displaySection(api: AppApi): Section {
     config.input.checked = api.display.configuration;
     harris.input.checked = api.display.harris;
     // a flake's: it needs the technical axis
-    profile.el.hidden = !flake;
+    profile.el.hidden = !flake || api.mode === 'retouch';
     profile.input.checked = api.display.profile;
     profile.input.disabled = !api.store.state.flake.axis?.matrix;
-    gmPoints.el.hidden = !flake;
+    gmPoints.el.hidden = !flake || api.mode === 'retouch';
     gmPoints.input.checked = api.display.gmPoints;
+    // the retouch mode's own
+    for (const r of retouchRows) r.el.hidden = api.mode !== 'retouch';
+    retouchRows[0].input.checked = api.display.retouchSection;
+    retouchRows[1].input.checked = api.display.retouchPlan;
+    retouchRows[2].input.checked = api.display.retouchLines;
+    retouchRows[3].input.checked = api.display.retouchEdge;
     if (kind !== 'all' && kind !== 'display' && kind !== 'mesh') return;
     shading.set(api.display.shading);
     const scanBtn = shading.el.querySelector('[data-value="scan"]') as HTMLButtonElement | null;
@@ -666,7 +680,7 @@ function edgeAngleSection(api: AppApi): Section {
   const status = h('span', { class: 'pill pill-warn', id: 'edge-no-unit', hidden: true }, t('edge.noUnit'));
   tip(status, t('edge.noUnitWhy'));
   const list = h('ol', { class: 'arrow-list num-list', id: 'edge-angle-list', role: 'listbox', 'aria-label': t('sec.edgeAngle') });
-  const method = segmented('edge-method', null, RETOUCH_ANGLE_METHODS.map((m) => ({ value: m, label: t(`edge.method.${m}`) })), api.edgeMethod, (v) => api.setEdgeMethod(v as EdgeChartMethod));
+  const method = segmented('edge-method', null, EDGE_ANGLE_METHODS.map((m) => ({ value: m, label: t(`edge.method.${m}`) })), api.edgeMethod, (v) => api.setEdgeMethod(v as EdgeAngleMethod));
   const seriesBox = h('div', { id: 'edge-series-box' });
   let seriesKey = '';
   let seriesControl: ReturnType<typeof segmented> | null = null;
@@ -701,38 +715,13 @@ function edgeAngleSection(api: AppApi): Section {
   const colorBy = segmented('edge-color', null, [{ value: 'angle', label: t('edge.color.angle') }, { value: 'sharp', label: t('edge.color.sharp') }], api.edgeColorMode, (v) => api.setEdgeColorMode(v as 'angle' | 'sharp'));
   const sharpSummary = h('dl', { class: 'num-grid', id: 'sharp-summary' });
   body.append(status, list, method.el, seriesBox, chart.el, rule, colorBy.el, sharpSummary);
-  /** The lines of the selected curve in the method shown: the distances, and the layers on each side of the edge. */
-  const chartSeries = (edge: EdgeAngleResult, retouch: RetouchAngleResult | null, m: EdgeChartMethod, unit: string): ChartSeries[] => {
+  /** The lines of the selected curve in the method shown: the distances. */
+  const chartSeries = (edge: EdgeAngleResult, m: EdgeAngleMethod, unit: string): ChartSeries[] => {
     const u = quantityUnit('length', unit);
-    const out: ChartSeries[] = [];
-    if (m !== 'layer_face') {
-      edge.distances.forEach((d, i) => {
-        const label = `${fmtNum(d, d < 1 ? 2 : 0)}${u ? ` ${u}` : ''}`;
-        out.push({ id: `d${EDGE_ANGLE_DISTANCES_MM[i]}`, key: label, label, color: `var(--series-${i + 1})`, values: edge.stations.map((s) => s[m][i]) });
-      });
-    }
-    if (!retouch) return out;
-    const info = api.regionInfo();
-    const st = api.store.state;
-    const lines = new Map<string, { layer: number; side: string; values: Array<number | null> }>();
-    retouch.stations.forEach((s, k) => {
-      for (const x of s.stretches) {
-        const side = info?.results.find((r) => r.id === x.region)?.parent ?? '';
-        const id = `${x.layer}|${side}`;
-        let line = lines.get(id);
-        if (!line) lines.set(id, (line = { layer: x.layer, side, values: retouch.stations.map(() => null) }));
-        line.values[k] ??= x[m];
-      }
+    return edge.distances.map((d, i) => {
+      const label = `${fmtNum(d, d < 1 ? 2 : 0)}${u ? ` ${u}` : ''}`;
+      return { id: `d${EDGE_ANGLE_DISTANCES_MM[i]}`, key: label, label, color: `var(--series-${i + 1})`, values: edge.stations.map((s) => s[m][i]) };
     });
-    const seen = new Set<number>();
-    for (const line of [...lines.values()].sort((a, b) => a.layer - b.layer)) {
-      const key = t('edge.layer', { n: line.layer });
-      const parent = st.regions.find((r) => r.id === line.side)?.label;
-      const slot = Math.min(line.layer, RETOUCH_LAYERS.length);
-      out.push({ id: `L${line.layer}`, key, label: parent ? `${key} (${parent})` : key, color: `var(--layer-${slot})`, dash: LAYER_DASHES[slot - 1], faint: seen.has(line.layer), values: line.values });
-      seen.add(line.layer);
-    }
-    return out;
   };
   const measured = () => api.store.state.curves.filter((c) => measuresEdgeAngle(c, api.store.state.specimen.type));
   const refresh = (kind: RefreshKind) => {
@@ -757,15 +746,11 @@ function edgeAngleSection(api: AppApi): Section {
       );
     }
     const shown = sel && curves.some((c) => c.id === sel) ? api.edgeAngleResult(sel) : null;
-    const retouch = shown ? api.retouchAngleResult(sel!) : null;
-    // the layers gone, so is their method
-    const m = api.edgeMethod === 'layer_face' && !retouch ? 'three_points' : api.edgeMethod;
+    const m = api.edgeMethod;
     method.set(m);
     (method.el as HTMLElement).hidden = !shown;
-    const faceOption = method.el.querySelector<HTMLElement>('[data-value="layer_face"]');
-    if (faceOption) faceOption.hidden = !retouch;
-    // what can be chosen to show: all, a distance, a layer
-    const all = shown ? chartSeries(shown, retouch, m, st.specimen.unit) : [];
+    // what can be chosen to show: all, a distance
+    const all = shown ? chartSeries(shown, m, st.specimen.unit) : [];
     const options = [...new Map(all.map((s) => [s.id, s.key])).entries()];
     const key = options.map((o) => o.join(':')).join();
     if (key !== seriesKey) {
@@ -803,6 +788,278 @@ function edgeAngleSection(api: AppApi): Section {
     clear(sharpSummary);
     sharpSummary.hidden = !sharp;
     if (sharp) sharpSummary.append(...numRow(t('edge.sharp.length'), ...quantity('length', sharp.length, st.specimen.unit), 'sharp-length'), ...numRow(t('edge.sharp.count'), fmtCount(sharp.segments.length), '', 'sharp-count'));
+  };
+  refresh('all');
+  return { el, refresh, visible: () => measured().length > 0 };
+}
+
+/** The lines of a curve's retouch layers in a method: one per layer and side of the edge. */
+function layerSeries(api: AppApi, retouch: RetouchAngleResult, m: EdgeChartMethod): ChartSeries[] {
+  const info = api.regionInfo();
+  const st = api.store.state;
+  const lines = new Map<string, { layer: number; side: string; values: Array<number | null> }>();
+  retouch.stations.forEach((s, k) => {
+    for (const x of s.stretches) {
+      const side = info?.results.find((r) => r.id === x.region)?.parent ?? '';
+      const id = `${x.layer}|${side}`;
+      let line = lines.get(id);
+      if (!line) lines.set(id, (line = { layer: x.layer, side, values: retouch.stations.map(() => null) }));
+      line.values[k] ??= x[m];
+    }
+  });
+  const out: ChartSeries[] = [];
+  const seen = new Set<number>();
+  for (const line of [...lines.values()].sort((a, b) => a.layer - b.layer)) {
+    const key = t('edge.layer', { n: line.layer });
+    const parent = st.regions.find((r) => r.id === line.side)?.label;
+    const slot = Math.min(line.layer, RETOUCH_LAYERS.length);
+    out.push({ id: `L${line.layer}`, key, label: parent ? `${key} (${parent})` : key, color: `var(--layer-${slot})`, dash: LAYER_DASHES[slot - 1], faint: seen.has(line.layer), values: line.values });
+    seen.add(line.layer);
+  }
+  return out;
+}
+
+/** The indices of a flake (retouch mode): the numbers, each saying why it is empty, and the sixteen segments. */
+function retouchIndicesSection(api: AppApi): Section {
+  const { el, body } = section('retouch-indices', t('sec.retouchIndices'));
+  const values = h('dl', { class: 'num-grid', id: 'retouch-values' });
+  let gridBy: 'score' | 'p' = 'score';
+  const cells: HTMLButtonElement[] = [];
+  const cell = (n: number, wide: boolean) => {
+    const b = h('button', { type: 'button', class: `retouch-cell${wide ? ' is-wide' : ''}`, id: `retouch-cell-${n}`, 'data-segment': n, 'aria-pressed': 'false', onclick: () => api.focusPlanSegment(n) }, String(n)) as HTMLButtonElement;
+    cells[n - 1] = b;
+    return b;
+  };
+  // Clarkson's order: the distal end above, the proximal below, left and right between them
+  const grid = (face: 'dorsal' | 'ventral', base: number) =>
+    h('div', { class: 'retouch-grid-face' }, h('span', { class: 'retouch-grid-title' }, t(`retouch.face.${face}`)), h('div', { class: 'retouch-grid', id: `retouch-grid-${face}` }, cell(base + 8, true), cell(base + 6, false), cell(base + 7, false), cell(base + 4, false), cell(base + 5, false), cell(base + 2, false), cell(base + 3, false), cell(base + 1, true)));
+  const by = segmented('retouch-grid-by', null, [{ value: 'score', label: t('retouch.grid.score') }, { value: 'p', label: t('retouch.grid.p') }], gridBy, (v) => {
+    gridBy = v as typeof gridBy;
+    paint();
+  });
+  const paint = () => {
+    const rows = api.retouchResult()?.indices.penetration ?? [];
+    cells.forEach((b, i) => {
+      const r = rows[i];
+      const reach = gridBy === 'p' ? (r?.penetration ?? 0) : (r?.score ?? 0);
+      b.style.background = reach > 0 ? (gridBy === 'p' ? `color-mix(in srgb, var(--accent) ${Math.round(reach * 100)}%, transparent)` : reach >= 1 ? 'var(--accent)' : 'var(--accent-soft)') : '';
+      b.classList.toggle('is-full', reach > 0.6);
+      b.dataset.score = String(r?.score ?? '');
+      b.setAttribute('aria-pressed', String(api.planMark() === i + 1));
+    });
+  };
+  body.append(values, h('div', { class: 'retouch-grids' }, grid('dorsal', 0), grid('ventral', 8)), by.el);
+  let shownKey: unknown = null;
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'retouch', 'specimen', 'figure'].includes(kind)) return;
+    const r = api.retouchResult();
+    const u = api.store.state.specimen.unit;
+    paint();
+    // the rows stay under the pointer, with their tips, as long as what they say does
+    const key = JSON.stringify([r?.indices.removed_volume, r?.indices.erp, r?.indices.erp_filled_share, r?.indices.giur, r?.indices.giur_stations, r?.indices.invasiveness, r?.indices.invasiveness_continuous, r?.indices.retouch_perimeter, r?.indices.retouch_perimeter_dorsal, r?.indices.retouch_perimeter_ventral, r?.indices.edge_curvature, r?.indices.edge_curvature_chord, r?.indices.edge_curvature_depth, r?.reasons, u]);
+    if (key === shownKey) return;
+    shownKey = key;
+    clear(values);
+    const row = (id: string, label: string, key: RetouchSummaryKey, kind2: Quantity | 'count') => {
+      const v = r?.indices[key] ?? null;
+      const cellsOf = numRow(t(label), ...(kind2 === 'count' ? ([fmtCount(v), ''] as [string, string]) : quantity(kind2, v, u)), id);
+      const why = v === null ? r?.reasons[key] : undefined;
+      if (why) tip(cellsOf[1], t(`retouch.empty.${why}`));
+      values.append(...cellsOf);
+    };
+    row('retouch-erp', 'retouch.erp', 'erp', 'ratio');
+    row('retouch-removed', 'retouch.removed', 'removed_volume', 'volume');
+    row('retouch-filled', 'retouch.filledShare', 'erp_filled_share', 'ratio');
+    row('retouch-giur', 'retouch.giur', 'giur', 'ratio');
+    row('retouch-giur-stations', 'retouch.giurStations', 'giur_stations', 'count');
+    row('retouch-invasiveness', 'retouch.invasiveness', 'invasiveness', 'ratio');
+    row('retouch-continuous', 'retouch.invasivenessContinuous', 'invasiveness_continuous', 'ratio');
+    row('retouch-perimeter', 'retouch.perimeter', 'retouch_perimeter', 'ratio');
+    row('retouch-perimeter-dorsal', 'retouch.perimeterDorsal', 'retouch_perimeter_dorsal', 'ratio');
+    row('retouch-perimeter-ventral', 'retouch.perimeterVentral', 'retouch_perimeter_ventral', 'ratio');
+    row('retouch-curvature', 'retouch.curvature', 'edge_curvature', 'ratio');
+    row('retouch-chord', 'retouch.chord', 'edge_curvature_chord', 'length');
+    row('retouch-depth', 'retouch.depth', 'edge_curvature_depth', 'length');
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+/** The fitted length: a slider that previews while dragged and writes on letting go, and the volume removed along a range of lengths. */
+function retouchParamsSection(api: AppApi): Section {
+  const { el, body } = section('retouch-params', t('sec.retouchParams'));
+  const [lo, hi] = FIT_LENGTH_RANGE_MM;
+  const range = h('input', { type: 'range', id: 'retouch-fit', class: 'ctl-range', min: lo, max: hi, step: FIT_LENGTH_STEP_MM, 'aria-label': t('retouch.fit') }) as HTMLInputElement;
+  const box = h('input', { type: 'number', id: 'retouch-fit-value', class: 'ctl-input mono retouch-fit-box', min: lo, max: hi, step: FIT_LENGTH_STEP_MM, 'aria-label': t('retouch.fit') }) as HTMLInputElement;
+  const own = h('span', { class: 'pill', id: 'retouch-fit-own', hidden: true }, t('retouch.fit.own'));
+  const commit = (v: number | null) => {
+    previewing = false;
+    api.previewFitLength(null);
+    setRetouchFitLength(api.store, v);
+    show();
+  };
+  const reset = h('button', { type: 'button', class: 'btn btn-quiet btn-tiny', id: 'retouch-fit-default', onclick: () => commit(null) }, t('retouch.fit.default'));
+  let previewing = false;
+  range.addEventListener('input', () => {
+    previewing = true;
+    box.value = range.value;
+    api.previewFitLength(Number(range.value));
+  });
+  range.addEventListener('change', () => commit(Number(range.value)));
+  box.addEventListener('change', () => {
+    const v = Number(box.value);
+    if (box.value.trim() !== '' && Number.isFinite(v)) commit(v);
+    else show();
+  });
+  const plot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  plot.setAttribute('id', 'retouch-fit-curve');
+  plot.setAttribute('class', 'retouch-fit-curve');
+  plot.setAttribute('viewBox', '0 0 240 56');
+  plot.setAttribute('role', 'img');
+  plot.setAttribute('aria-label', t('retouch.fitCurve'));
+  const show = () => {
+    const stored = retouchSettingsOf(api.store.state.flake).fitLength;
+    const w = stored ?? ORIGINAL_FIT_MM;
+    if (!previewing) {
+      range.value = String(w);
+      if (document.activeElement !== box) box.value = String(w);
+    }
+    own.hidden = stored === null;
+    drawPlot(previewing ? Number(range.value) : w);
+  };
+  const drawPlot = (w: number) => {
+    const pts = (api.retouchFitCurve() ?? []).filter((p): p is { length: number; removed: number } => p.removed !== null);
+    if (pts.length < 2) {
+      plot.innerHTML = '';
+      plot.style.display = 'none';
+      return;
+    }
+    plot.style.display = '';
+    const x0 = pts[0].length, x1 = pts[pts.length - 1].length;
+    const lo2 = Math.min(...pts.map((p) => p.removed)), hi2 = Math.max(...pts.map((p) => p.removed));
+    const sx = (l: number) => 6 + ((l - x0) / (x1 - x0)) * 228;
+    const sy = (v: number) => 50 - (hi2 > lo2 ? (v - lo2) / (hi2 - lo2) : 0.5) * 44;
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.length).toFixed(1)} ${sy(p.removed).toFixed(1)}`).join('');
+    // where the length in use lies on it
+    let dot = '';
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1];
+      if (w < a.length || w > b.length) continue;
+      const v = a.removed + ((b.removed - a.removed) * (w - a.length)) / (b.length - a.length);
+      dot = `<circle id="retouch-fit-dot" cx="${sx(w).toFixed(1)}" cy="${sy(v).toFixed(1)}" r="3.5" fill="var(--accent)" stroke="var(--ink)" stroke-width="0.75"/>`;
+      break;
+    }
+    plot.innerHTML = `<path id="retouch-fit-line" d="${line}" fill="none" stroke="var(--ink-2)" stroke-width="1.25"/>${dot}`;
+  };
+  body.append(h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, t('retouch.fit')), h('div', { class: 'retouch-fit-row' }, range, box, h('span', { class: 'unit' }, 'mm'))), h('div', { class: 'retouch-fit-row' }, own, reset), plot);
+  const refresh = (kind: RefreshKind) => {
+    if (['all', 'mesh', 'retouch', 'flake', 'specimen', 'figure'].includes(kind)) show();
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+/** Each retouch region along the edge: a click goes to the middle of its stretch, and selects it. */
+function retouchSegmentsSection(api: AppApi): Section {
+  const { el, body } = section('retouch-segments', t('sec.retouchSegments'));
+  const rows = h('tbody', { id: 'retouch-segment-rows' });
+  const table = h(
+    'table',
+    { class: 'retouch-table', id: 'retouch-segment-table' },
+    h('thead', {}, h('tr', {}, ...['label', 'layer', 'face', 'length', 'chord', 'depth'].map((k) => h('th', {}, t(`retouch.seg.${k}`))))),
+    rows,
+  );
+  body.append(table);
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'retouch', 'regions', 'selection', 'specimen', 'figure'].includes(kind)) return;
+    const st = api.store.state;
+    const segments = api.retouchResult()?.indices.segments ?? [];
+    table.hidden = !segments.length;
+    clear(rows);
+    segments.forEach((s, i) => {
+      const num = (v: number | null) => h('td', { class: 'num' }, fmtQuantity('length', v));
+      const why = (cell: HTMLElement, v: number | null) => {
+        if (v === null) tip(cell, t('retouch.empty.whole_edge'));
+        return cell;
+      };
+      rows.append(
+        h(
+          'tr',
+          { id: `retouch-segment-${i}`, class: api.selection.id === s.region ? 'is-selected' : '', onclick: () => api.focusRetouchSegment(i) },
+          h('td', { class: 'mono' }, st.regions.find((r) => r.id === s.region)?.label ?? ''),
+          h('td', { class: 'num' }, String(s.layer)),
+          h('td', {}, s.face ? t(`retouch.face.${s.face}`) : MISSING),
+          num(s.length),
+          why(num(s.chord), s.chord),
+          why(num(s.depth), s.depth),
+        ),
+      );
+    });
+  };
+  refresh('all');
+  return { el, refresh };
+}
+
+/** The retouch layers along a curve (retouch mode): which curve, which method, which layer; a line at the current station, a press moves it. */
+function retouchAnglesSection(api: AppApi): Section {
+  const { el, body } = section('retouch-angles', t('sec.retouchAngles'));
+  const list = h('ol', { class: 'arrow-list num-list', id: 'retouch-angle-list', role: 'listbox', 'aria-label': t('sec.retouchAngles') });
+  const method = segmented('retouch-method', null, RETOUCH_ANGLE_METHODS.map((m) => ({ value: m, label: t(`edge.method.${m}`) })), api.retouchMethod, (v) => api.setRetouchMethod(v as EdgeChartMethod));
+  const seriesBox = h('div', { id: 'retouch-series-box' });
+  let seriesKey = '';
+  let seriesControl: ReturnType<typeof segmented> | null = null;
+  const chart = new EdgeAngleChart('retouch');
+  chart.el.hidden = true;
+  chart.onPick = (p) => {
+    const s = api.retouchStationNow();
+    if (s) api.moveRetouchPosition(s.curveId, p);
+  };
+  body.append(list, method.el, seriesBox, chart.el);
+  const measured = () => api.store.state.curves.filter((c) => api.retouchAngleResult(c.id));
+  const refresh = (kind: RefreshKind) => {
+    const now = api.retouchStationNow();
+    if (kind === 'station') {
+      chart.setCursor(now?.position ?? null);
+      // another curve: its chart
+      if ((now?.curveId ?? '') === list.dataset.curve) return;
+    } else if (!['all', 'mesh', 'curves', 'regions', 'specimen', 'edge', 'figure', 'retouch'].includes(kind)) return;
+    const curves = measured();
+    list.dataset.curve = now?.curveId ?? '';
+    list.hidden = !curves.length;
+    clear(list);
+    for (const c of curves) {
+      list.append(
+        h(
+          'li',
+          { class: 'arrow-row', role: 'option', 'aria-selected': String(c.id === now?.curveId), 'data-id': c.id, onclick: () => api.useRetouchCurve(c.id) },
+          h('span', { class: 'chip chip-line', style: `--chip:${curveColor(c)}` }),
+          h('span', { class: 'arrow-id mono' }, c.label),
+          h('span', { class: 'arrow-meta' }, fieldText(CURVE_FIELDS[0], c.attributes.type)),
+        ),
+      );
+    }
+    const retouch = now ? api.retouchAngleResult(now.curveId) : null;
+    const edge = now ? api.edgeAngleResult(now.curveId) : null;
+    method.set(api.retouchMethod);
+    (method.el as HTMLElement).hidden = !retouch;
+    const all = retouch ? layerSeries(api, retouch, api.retouchMethod) : [];
+    const options = [...new Map(all.map((s) => [s.id, s.key])).entries()];
+    const key = options.map((o) => o.join(':')).join();
+    if (key !== seriesKey) {
+      seriesKey = key;
+      clear(seriesBox);
+      seriesControl = options.length ? segmented('retouch-series', null, [{ value: 'all', label: t('edge.series.all') }, ...options.map(([value, label]) => ({ value, label }))], api.retouchSeries, (v) => api.setRetouchSeries(v)) : null;
+      if (seriesControl) seriesBox.append(seriesControl.el);
+    }
+    const chosen = options.some(([id]) => id === api.retouchSeries) ? api.retouchSeries : 'all';
+    seriesControl?.set(chosen);
+    seriesBox.hidden = !seriesControl;
+    chart.set(
+      retouch && edge
+        ? { positions: retouch.stations.map((s) => s.position), length: edge.length, unit: api.store.state.specimen.unit, series: all.filter((s) => chosen === 'all' || s.id === chosen), threshold: null, bands: [] }
+        : null,
+    );
+    chart.setCursor(now?.position ?? null);
   };
   refresh('all');
   return { el, refresh, visible: () => measured().length > 0 };
@@ -2268,7 +2525,7 @@ function agreementSection(api: AppApi): Section {
   return { el, refresh, visible: () => api.observerList().filter((o) => o.included).length >= 2 };
 }
 
-const ALL_MODES: AppMode[] = ['annotate', 'measure', 'present', 'compare'];
+const ALL_MODES: AppMode[] = ['annotate', 'measure', 'retouch', 'present', 'compare'];
 
 /** The sidebar sections, in order, and the work modes that show them. */
 const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
@@ -2290,6 +2547,10 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [planesSection, ['measure']],
   [noduleSection, ['measure']],
   [splitSection, ['measure']],
+  [retouchIndicesSection, ['retouch']],
+  [retouchParamsSection, ['retouch']],
+  [retouchSegmentsSection, ['retouch']],
+  [retouchAnglesSection, ['retouch']],
   [observersSection, ['compare']],
   [agreementSection, ['compare']],
 ];

@@ -30,6 +30,19 @@ export interface LithicApi {
   /** A flake's retouch indices as stored, and why what is empty is empty. */
   retouch(): (import('../src/compute/retouchIndex').RetouchIndices & { reasons: Partial<Record<import('../src/compute/retouchIndex').RetouchSummaryKey, import('../src/compute/retouchIndex').RetouchEmptyReason>>; stationReasons: Array<{ curveId: string; station: number; reason: string | null; giurReason: string | null }> }) | null;
   retouchSettings(change: { fitLength?: number | null; axis?: 'auto' | 'technical' | 'longest'; flip?: boolean }): void;
+  retouchView(): {
+    station: { curveId: string; station: number; position: number } | null;
+    marker: Vec3 | null;
+    lines: { station: number; edge: number; segments: number } | null;
+    section: string | null;
+    plan: string | null;
+    chart: string | null;
+    tool: string | null;
+    face: string;
+    mark: number | null;
+    fitCurve: Array<{ length: number; removed: number | null }> | null;
+    segments: Array<{ segment: number; model: number[] }> | null;
+  };
   edgeAngles(curveId: string): import('../src/compute/edgeAngle').EdgeAngleResult | null;
   edgeColors(): { key: string; min: string | null; max: string | null } | null;
   exportEdgeAnglesCsvText(): string;
@@ -80,7 +93,7 @@ export interface LithicApi {
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;
-  setMode(m: 'annotate' | 'measure' | 'present' | 'compare'): void;
+  setMode(m: 'annotate' | 'measure' | 'retouch' | 'present' | 'compare'): void;
   agreement(): { rows: import('../src/compute/agreement').AgreementRow[]; summary: import('../src/compute/agreement').SummaryRow[] } | null;
   agreementBusy(): boolean;
   observers(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }>;

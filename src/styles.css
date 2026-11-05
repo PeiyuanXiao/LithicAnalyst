@@ -3354,3 +3354,262 @@ input[type="checkbox"]:disabled {
 .edge-legend-value {
   font-variant-numeric: tabular-nums;
 }
+
+/* ------------------------------------------------------------ the retouch mode */
+
+.viewport[data-mode="retouch"] .arrow-label:not(.measure-label) {
+  opacity: 0.3;
+}
+
+.viewport[data-tool="station"] .arrow-label {
+  pointer-events: none;
+}
+
+.retouch-section-panel {
+  left: max(12px, env(safe-area-inset-left, 0px));
+  top: 62px;
+  width: 440px;
+  height: 460px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 74px);
+}
+
+.retouch-plan-panel {
+  right: max(12px, env(safe-area-inset-right, 0px));
+  top: 62px;
+  width: 300px;
+  height: 420px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 74px);
+}
+
+.retouch-section-panel .float-head,
+.retouch-plan-panel .float-head {
+  flex-wrap: wrap;
+}
+
+.retouch-section-panel .float-title,
+.retouch-plan-panel .float-title {
+  flex: 0 1 auto;
+}
+
+.retouch-section-panel .float-fold,
+.retouch-plan-panel .float-fold {
+  margin-left: auto;
+}
+
+.retouch-section-panel .seg-btn,
+.retouch-plan-panel .seg-btn {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.retouch-curve,
+.retouch-axis {
+  width: auto;
+  max-width: 112px;
+  padding-block: 0;
+  font-size: 11px;
+}
+
+.btn-tiny {
+  min-height: 0;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.retouch-position {
+  font-size: 11px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.retouch-whole {
+  font-size: 11px;
+}
+
+.retouch-content {
+  --series-3: #6250d6;
+  --layer-1: #6f1147;
+  --layer-2: #9a1c63;
+  --layer-3: #c0327f;
+  --layer-4: #d9559a;
+  --layer-5: #e77fb3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px 8px;
+}
+
+:root[data-theme="dark"] .retouch-content {
+  --series-3: #9085e9;
+  --layer-1: #f7c1db;
+  --layer-2: #f19ac4;
+  --layer-3: #e874ad;
+  --layer-4: #d95296;
+  --layer-5: #bd3a7e;
+}
+
+.retouch-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.retouch-stage[hidden] {
+  display: none;
+}
+
+.retouch-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.retouch-readings {
+  flex: none;
+  margin: 0;
+}
+
+.retouch-filled {
+  margin-left: 4px;
+  font-size: 10px;
+}
+
+.retouch-empty {
+  margin: 8px 4px;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+.retouch-grids {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin: 8px 0 4px;
+}
+
+.retouch-grid-face {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 150px;
+}
+
+.retouch-grid-title {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.retouch-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.retouch-cell {
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.retouch-cell.is-wide {
+  grid-column: span 2;
+}
+
+.retouch-cell.is-full {
+  color: var(--accent-ink);
+}
+
+.retouch-cell[aria-pressed="true"] {
+  border-color: var(--accent-line);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.retouch-fit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.retouch-fit-row .ctl-range {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.retouch-fit-box {
+  flex: 0 0 58px;
+  width: 58px;
+}
+
+.retouch-fit-curve {
+  display: block;
+  width: 100%;
+  height: 56px;
+  margin-top: 6px;
+}
+
+.retouch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+
+.retouch-table th {
+  padding: 2px 4px;
+  color: var(--ink-2);
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.retouch-table td {
+  padding: 3px 4px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.retouch-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.retouch-table tbody tr {
+  cursor: pointer;
+}
+
+.retouch-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.retouch-table tbody tr.is-selected {
+  background: var(--accent-soft);
+}
+
+.edge-chart-cursor {
+  pointer-events: none;
+  stroke: var(--accent-line);
+  stroke-width: 1.25;
+}
+
+/* five modes on a flake: tighter before the names have to go */
+@media (max-width: 1420px) {
+  .mode-btn {
+    padding-inline: 8px;
+  }
+  .brand-ver {
+    display: none;
+  }
+}

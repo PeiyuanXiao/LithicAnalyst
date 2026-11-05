@@ -43,10 +43,15 @@ import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjace
 import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
 import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
-import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_PARAMETERS, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleResult } from '../compute/edgeAngle';
+import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_PARAMETERS, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { gmMissingInputs, gmSteps, type GmResult } from '../compute/gm';
-import { retouchSectionsSteps, type RetouchAngleResult, type RetouchPiece, type StationSection } from '../compute/retouchAngle';
-import { FACE_DORSAL, FACE_PLATFORM, FACE_VENTRAL, faceOfTrianglesSteps, RETOUCH_INDEX_PARAMETERS, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps, type RetouchCurve, type RetouchIndexResult, type SegmentFrameResult, type SegmentOutline } from '../compute/retouchIndex';
+import { retouchSectionsSteps, sectionAtStation, type RetouchAngleResult, type RetouchPiece, type StationSection } from '../compute/retouchAngle';
+import { drawnOutline, planRegionsSteps, planShape, segmentLinesSteps, type P2, type PlanLoops, type PlanShape, type SegmentLines } from '../compute/retouchPlan';
+import { planDrawing, PRINT_PALETTE, PX_PER_MM, sectionDrawing, sectionModel, svgFile, type Drawing, type SectionModel } from '../render/retouchDrawing';
+import { RetouchLayer } from '../render/retouchLayer';
+import { StationTool } from '../tools/stationTool';
+import { drawingPng, RetouchPlanPanel, RetouchSectionPanel, type PlanFace, type SectionReading } from './retouchPanels';
+import { FACE_DORSAL, FACE_PLATFORM, FACE_VENTRAL, faceOfTrianglesSteps, onPlan, removedVolumeCurveSteps, RETOUCH_INDEX_PARAMETERS, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps, stationFaces, type RetouchCurve, type RetouchIndexInput, type RetouchIndexResult, type RetouchStationDetail, type RetouchStationRow, type SegmentFrameResult, type SegmentOutline } from '../compute/retouchIndex';
 import { ruleValues, SHARP_EDGE_PARAMETERS, sharpOfCurve, suggestThreshold, type SharpResult } from '../compute/sharpEdge';
 import { EDGE_ANGLE_FLAT_DEG, EDGE_ANGLE_RAMP, EdgeAngleLayer, rampPaint, SHARP_COLORS, sharpPaint } from '../render/edgeAngleLayer';
 import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
@@ -88,7 +93,7 @@ import { SurfaceSnap } from '../tools/surfaceSnap';
 import type { ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type EdgeChartMethod, type ConfigPick, type ConfigStatus, type DisplayAspect, type DisplaySettings } from './appApi';
-import { fmtCount, fmtNum, fmtQuantity, quantityUnit } from '../core/format';
+import { fmtCount, fmtNum, fmtQuantity, mmPerUnit, quantityUnit, type Quantity } from '../core/format';
 import { numRow, segmented, softSet, textRow, textValueRow } from './controls';
 import { floatingPanel } from './floatingPanel';
 import { Popovers, onViewport } from './popover';
@@ -116,6 +121,10 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   configuration: false,
   profile: false,
   gmPoints: false,
+  retouchSection: true,
+  retouchPlan: true,
+  retouchLines: true,
+  retouchEdge: true,
   excelBom: false,
 };
 
@@ -189,6 +198,11 @@ function countsText(state: Readonly<ProjectState>): string {
   return parts.join(' · ');
 }
 
+/** A press this near a station's point takes it, in pixels. */
+const STATION_REACH_PX = 24;
+/** Where the volume removed is worked out for the small curve, mm. */
+const FIT_CURVE_LENGTHS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+
 /** Keys of the bar shown after recording a relation. */
 const CHIP_KEYS: Record<string, 'ab' | 'reverse' | 'ind' | 'delete'> = {
   Digit1: 'ab',
@@ -211,6 +225,7 @@ const MEASURE_TOOLS: Array<[string, string, string, string]> = [
 const MODE_ICONS: Record<AppMode, string> = {
   annotate: ICONS20.modeAnnotate,
   measure: ICONS20.modeMeasure,
+  retouch: ICONS20.modeRetouch,
   present: ICONS20.modePresent,
   compare: ICONS20.modeCompare,
 };
@@ -373,6 +388,7 @@ export class App implements AppApi {
   private snapEl: HTMLElement | null = null;
   private measureSeg: ToolRow | null = null;
   private presentSeg: ToolRow | null = null;
+  private retouchSeg: ToolRow | null = null;
   private toolSep: HTMLElement | null = null;
   private orientBtn: HTMLButtonElement | null = null;
   private themeBtn: HTMLButtonElement | null = null;
@@ -412,7 +428,7 @@ export class App implements AppApi {
   private edgeResults = new Map<string, { key: string; result: EdgeAngleResult | null }>();
   private edgeToken = 0;
   private edgeTimer = 0;
-  edgeMethod: EdgeChartMethod = 'three_points';
+  edgeMethod: EdgeAngleMethod = 'three_points';
   /** Which line the chart shows and the curve is coloured by: 'all', a distance (d2) or a layer (L1). */
   edgeSeries = 'all';
   edgeColorMode: 'angle' | 'sharp' = 'angle';
@@ -430,6 +446,36 @@ export class App implements AppApi {
   private retouchFrame: { key: string; frame: SegmentFrameResult; outline: SegmentOutline | null } | null = null;
   /** The part of the flake each triangle lies in, kept while the upper layer of regions stays. */
   private retouchFaces: { key: string; faces: Uint8Array } | null = null;
+  /** The pieces in a retouch layer when the indices were last worked out. */
+  private retouchPieces: ReadonlyMap<number, RetouchPiece> = new Map();
+  private retouchLastInput: RetouchIndexInput | null = null;
+  /** The key of the indices without the fitted length. */
+  private retouchFitKey = '';
+  /** The fitted length while its slider is dragged. */
+  private fitPreview: number | null = null;
+  /** The current station: view state, never in the file. */
+  private retouchStation: { curveId: string; k: number } | null = null;
+  /** It goes to where the missing area is largest until the user moves it. */
+  private stationAuto = true;
+  private stationQueued = 0;
+  private stationCache: { key: string; section: StationSection | null } | null = null;
+  retouchMethod: EdgeChartMethod = 'three_points';
+  retouchSeries = 'all';
+  private planFace: PlanFace = 'dorsal';
+  private planMarked: number | null = null;
+  private planShapeOf: { key: string; shape: PlanShape } | null = null;
+  private planLoops: { key: string; loops: PlanLoops[] } | null = null;
+  private segmentLines: { key: string; lines: SegmentLines } | null = null;
+  private fitCurve: { key: string; points: Array<{ length: number; removed: number | null }> } | null = null;
+  private retouchExtrasToken = 0;
+  private retouchLayer: RetouchLayer | null = null;
+  private sectionPanel: RetouchSectionPanel | null = null;
+  private sectionEl: HTMLElement | null = null;
+  private sectionFit: (() => void) | null = null;
+  private planPanel: RetouchPlanPanel | null = null;
+  private planEl: HTMLElement | null = null;
+  private planFit: (() => void) | null = null;
+  private edgeColorCurve: string | null = null;
   /** The folder's rule for a sharp edge (null: none yet, or no folder open). */
   private folderSharp: SharpEdgeRule | null = null;
   /** A flake's points for geometric morphometrics, and what they were made from. */
@@ -525,6 +571,7 @@ export class App implements AppApi {
     this.borderLayer = new BorderLayer(viewer);
     this.ringLayer = new BorderLayer(viewer, true);
     this.edgeLayer = new EdgeAngleLayer(viewer);
+    this.retouchLayer = new RetouchLayer(viewer);
     this.gmLayer = new GmLayer(viewer);
     this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
     this.viewportEl.append(this.edgeLegend);
@@ -584,6 +631,7 @@ export class App implements AppApi {
     for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
+    this.tools.register(new StationTool((x, y, following) => this.placeStation(x, y, following)));
     this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p), (l, p) => (l.code === 'platform_end' ? (this.onPlatformOutline(p) ?? l.point) : p)));
     this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => this.recordRelation(a, b, at, from)));
     this.tools.register(new SequenceTool((x, y, hit) => this.scarAt(x, y, hit), (id) => this.toggleInSequence(id)));
@@ -604,9 +652,16 @@ export class App implements AppApi {
     this.buildHarrisPanel();
     this.buildConfigPanel();
     this.buildProfilePanel();
+    this.buildRetouchPanels();
     this.buildDisplayControl();
     this.updateSpecimenBar();
-    this.setTool('select');
+    // the retouch mode belongs to flakes (the preference stays until a mode is chosen)
+    if (this.mode === 'retouch' && !this.isFlake()) {
+      this.mode = 'annotate';
+      this.viewportEl.dataset.mode = this.mode;
+      this.appModeSeg?.set(this.mode);
+    }
+    this.setTool(this.mode === 'retouch' ? 'station' : 'select');
 
     this.store.subscribe((c) => this.onStoreChange(c));
     this.store.history.onChange(() => this.updateUndoButtons());
@@ -928,6 +983,7 @@ export class App implements AppApi {
     ]);
     this.measureSeg = this.toolRow('measure-tool', t('appMode.measure'), [select, ...MEASURE_TOOLS.map(([value, key, k, ic]) => ({ value, icon: ic, name: t(key), key: k }))]);
     this.presentSeg = this.toolRow('present-tool', t('appMode.present'), [select, { value: 'section', icon: ICONS20.section, name: t('tool.section'), key: 'X' }]);
+    this.retouchSeg = this.toolRow('retouch-tool', t('appMode.retouch'), [{ value: 'station', icon: ICONS20.station, name: t('tool.station'), key: 'J' }]);
     this.snapSeg = segmented('snap', null, SNAP_MODES.map((m) => ({ value: m, label: t(`snap.${m}`) })), this.display.curveSnap, (v) =>
       this.setDisplay((d) => (d.curveSnap = v as SnapMode), 'snap'),
     );
@@ -941,7 +997,7 @@ export class App implements AppApi {
     const orient = h('button', { type: 'button', class: 'tool-btn', id: 'btn-orient', 'aria-label': `${t('view.orient')} (F)`, onclick: () => this.orientToAxis() }, icon20(ICONS20.orient), h('span', { class: 'tool-key', 'aria-hidden': 'true' }, 'F')) as HTMLButtonElement;
     tips.attach(orient, () => ({ label: t(this.store.state.flake.axis?.matrix ? 'view.orient' : 'view.orientNone'), key: 'F' }));
     this.orientBtn = orient;
-    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.toolSep, fit, orient, this.snapEl);
+    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.retouchSeg.el, this.presentSeg.el, this.toolSep, fit, orient, this.snapEl);
     // the sequences, under the toolbar while the sequence tool is in use
     const bar = h('div', { class: 'viewport-ui vp-seqbar', id: 'sequence-bar', role: 'radiogroup', 'aria-label': t('sequence.title'), hidden: true });
     if (this.sequenceBarEl) this.sequenceBarEl.replaceWith(bar);
@@ -964,6 +1020,10 @@ export class App implements AppApi {
     }
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
     if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
+    if (this.retouchSeg) this.retouchSeg.el.hidden = this.mode !== 'retouch';
+    // the retouch mode belongs to flakes
+    const modeBtn = this.header?.querySelector<HTMLElement>('#app-mode-retouch');
+    if (modeBtn) modeBtn.hidden = !this.isFlake();
     if (this.toolSep) this.toolSep.hidden = this.mode === 'compare';
     if (this.orientBtn) {
       this.orientBtn.hidden = !this.isFlake() || this.mode === 'compare';
@@ -1058,6 +1118,7 @@ export class App implements AppApi {
     this.buildHarrisPanel();
     this.buildConfigPanel();
     this.buildProfilePanel();
+    this.buildRetouchPanels();
     this.buildDisplayControl();
     this.updateSpecimenBar();
     this.updateUndoButtons();
@@ -1102,6 +1163,7 @@ export class App implements AppApi {
     this.modeSeg?.set(tools.activeId ?? 'select');
     this.measureSeg?.set(tools.activeId ?? 'select');
     this.presentSeg?.set(tools.activeId ?? 'select');
+    this.retouchSeg?.set(tools.activeId ?? 'select');
     this.updateToolbar();
   }
 
@@ -1153,7 +1215,11 @@ export class App implements AppApi {
     // the frame (specimen) changes the box: updateAuto below
     if (['scars', 'configuration', 'reset', 'specimen'].includes(c.kind)) this.updateConfiguration();
     if (c.kind === 'specimen' || c.kind === 'reset') {
+      // the retouch mode belongs to flakes: a specimen turned into a core goes back to measuring, a core opened to annotating
+      if (this.mode === 'retouch' && !this.isFlake()) this.setMode(c.kind === 'reset' ? 'annotate' : 'measure', c.kind !== 'reset');
+      else if (c.kind === 'reset' && this.isFlake() && readPref<string>('mode', '') === 'retouch') this.setMode('retouch', false);
       this.updateToolbar();
+      this.updateRetouch();
       // a flake's tools belong to flakes
       if (!this.isFlake() && ['axis', 'platform-end'].includes(this.tools?.activeId ?? '')) this.setTool('select');
       if (!this.isFlake() && this.tools) this.selection.set(this.store.landmark(this.selection.id ?? '')?.code || this.store.state.flake.axis?.id === this.selection.id ? null : this.selection.id);
@@ -1449,7 +1515,7 @@ export class App implements AppApi {
   private syncAnnotations(): void {
     const handles = this.tools?.activeId === 'select' && this.mode === 'annotate';
     // the measure mode is about measurements: annotations are drawn faded there
-    const dim = this.mode === 'measure';
+    const dim = this.mode === 'measure' || this.mode === 'retouch';
     if (this.arrows) this.arrows.dimmed = dim;
     if (this.curves) this.curves.dimmed = dim;
     if (this.landmarkLayer) this.landmarkLayer.dimmed = dim;
@@ -1462,7 +1528,7 @@ export class App implements AppApi {
     this.arrows?.sync(this.store.state, this.selection.id, sequencing ? { ...this.display.arrows, colorMode: 'sequence' } : this.display.arrows, handles);
     this.showBorders();
     this.syncEdgeColors();
-    if (this.curves) this.curves.drawnElsewhere = this.edgeColorKey ? this.selection.id : null;
+    if (this.curves) this.curves.drawnElsewhere = this.edgeColorKey ? this.edgeColorCurve : null;
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
     this.landmarkLayer?.sync(this.labelledLandmarks(), this.landmarks.sets, this.selection.id, this.display.arrows.labels, this.display.arrows.showHidden);
@@ -1497,7 +1563,9 @@ export class App implements AppApi {
     this.viewer?.requestRender();
   }
 
-  setTool(id: string): void {
+  setTool(wanted: string): void {
+    // the retouch mode has its one tool
+    const id = this.mode === 'retouch' ? 'station' : wanted === 'station' ? 'select' : wanted;
     const changed = id !== this.tools?.activeId;
     if (changed) {
       this.sidebar.focusTool(id);
@@ -1516,14 +1584,16 @@ export class App implements AppApi {
   }
 
   /** Switch the work mode. The selection and the undo history are kept. */
-  setMode(mode: AppMode): void {
+  /** `remember`: as the mode to start in (a core sent out of the retouch mode leaves the preference standing). */
+  setMode(mode: AppMode, remember = true): void {
     if (mode === this.mode) return;
+    if (mode === 'retouch' && !this.isFlake()) return;
     // tools belong to their mode; an unfinished curve is kept (as on Esc)
     this.relationChip?.close();
     this.tools?.activeTool?.clearHover?.();
-    this.setTool('select');
     this.mode = mode;
-    writePref('mode', mode);
+    this.setTool(mode === 'retouch' ? 'station' : 'select');
+    if (remember) writePref('mode', mode);
     // the picked face belongs to the annotate mode's panel; the panel and the cube show only there
     this.pickedFace = null;
     this.updateConfigPanel();
@@ -1537,11 +1607,16 @@ export class App implements AppApi {
     this.paintRegions();
     this.showNodule();
     this.updateHarris();
+    if (mode === 'retouch') this.stationAuto = true;
+    this.updateRetouch();
+    this.syncGmLayer();
     this.sidebar.refresh('mode');
   }
 
+  /** On through the modes shown. */
   private cycleMode(): void {
-    this.setMode(APP_MODES[(APP_MODES.indexOf(this.mode) + 1) % APP_MODES.length]);
+    const shown = APP_MODES.filter((m) => m !== 'retouch' || this.isFlake());
+    this.setMode(shown[(shown.indexOf(this.mode) + 1) % shown.length]);
   }
 
   /** The curve tool re-evaluates what is under the cursor (snap mode or curvature scale changed). */
@@ -1594,6 +1669,10 @@ export class App implements AppApi {
         break;
       case 'gm':
         this.syncGmLayer();
+        this.sidebar.refresh('display');
+        break;
+      case 'retouch':
+        this.updateRetouch();
         this.sidebar.refresh('display');
         break;
       case 'snap':
@@ -2291,7 +2370,7 @@ export class App implements AppApi {
   private syncGmLayer(): void {
     const layer = this.gmLayer, loaded = this.loaded;
     if (!layer) return;
-    const on = this.display.gmPoints && this.isFlake() && this.mode !== 'present' && this.mode !== 'compare' && !!this.gm && !!loaded;
+    const on = this.display.gmPoints && this.isFlake() && this.mode !== 'present' && this.mode !== 'compare' && this.mode !== 'retouch' && !!this.gm && !!loaded;
     layer.group.visible = on;
     if (on) layer.sync(this.gm!.rows.filter((r) => r.kind !== 'fixed').map((r) => r.point), loaded!.offset);
     this.viewer?.requestRender();
@@ -2540,7 +2619,9 @@ export class App implements AppApi {
     const matrix = st.flake.axis?.matrix ?? null;
     const facesKey = JSON.stringify([up.key, [...faceOfPiece]]);
     const frameKey = JSON.stringify([settings.axis, settings.flip, matrix, st.specimen.frame?.matrix ?? null, facesKey]);
-    const key = JSON.stringify([frameKey, settings.fitLength, st.specimen.unit, this.partitionVersion, [...pieces], measured.map((c) => [c.id, c.attributes.type, c.closed, this.retouchResults.get(c.id)?.key ?? null]), base.volume]);
+    const fitKey = JSON.stringify([frameKey, st.specimen.unit, this.partitionVersion, [...pieces], measured.map((c) => [c.id, c.attributes.type, c.closed, this.retouchResults.get(c.id)?.key ?? null]), base.volume]);
+    const fitLength = this.fitPreview ?? settings.fitLength;
+    const key = `${fitKey}|${fitLength}`;
     if (key === this.retouchIndexKey) return;
     const g = loaded.geometry;
     const positions = g.getAttribute('position').array as Float32Array;
@@ -2564,15 +2645,472 @@ export class App implements AppApi {
       const r = this.retouchResults.get(c.id);
       return { curveId: c.id, edge: c.attributes.type === 'edge', closed: c.closed, length: r?.length ?? 0, stations: r?.result?.stations ?? [], sections: r?.sections ?? [] };
     });
-    const result = await runSliced(
-      retouchIndexSteps({ positions, index, offset: loaded.offset, faceOf, pieceOfFace: part.region, pieces, curves, unit: st.specimen.unit, meanEdge: base.meanEdge, volume: base.volume, fitLength: settings.fitLength, frame: this.retouchFrame.frame, outline: this.retouchFrame.outline }),
-    );
+    const input: RetouchIndexInput = { positions, index, offset: loaded.offset, faceOf, pieceOfFace: part.region, pieces, curves, unit: st.specimen.unit, meanEdge: base.meanEdge, volume: base.volume, fitLength, frame: this.retouchFrame.frame, outline: this.retouchFrame.outline };
+    const result = await runSliced(retouchIndexSteps(input));
     if (token !== this.retouchIndexToken || this.loaded !== loaded) return;
     this.retouchIndex = result;
     this.retouchIndexKey = key;
-    if (this.unsaved) {
+    this.retouchFitKey = fitKey;
+    this.retouchPieces = pieces;
+    this.retouchLastInput = input;
+    this.updateRetouch();
+    this.sidebar.refresh('retouch');
+    if (this.fitPreview === null && this.unsaved) {
       this.scheduleAutosave();
       this.scheduleFolderSave();
+    }
+  }
+
+  // ------------------------------------------------------------ the retouch mode
+
+  retouchResult(): RetouchIndexResult | null {
+    return this.retouchIndex;
+  }
+
+  /** The curves measured that have stations. */
+  private retouchCurves(): Curve[] {
+    const st = this.store.state;
+    return st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type) && (this.edgeResults.get(c.id)?.result?.stations.length ?? 0) > 0);
+  }
+
+  /** Where the station goes by itself: the largest missing area of a curve (where Morales et al. took the section), else its middle. */
+  private defaultStation(curveId?: string): { curveId: string; k: number } | null {
+    const curves = this.retouchCurves();
+    if (!curves.length) return null;
+    let best: RetouchStationRow | null = null;
+    for (const r of this.retouchIndex?.indices.stations ?? []) {
+      if (r.filled || (curveId && r.curveId !== curveId) || !curves.some((c) => c.id === r.curveId)) continue;
+      if (!best || (r.removed_area ?? 0) > (best.removed_area ?? 0)) best = r;
+    }
+    if (best) return { curveId: best.curveId, k: best.station };
+    const id = curveId ?? curves.find((c) => c.id === this.selection.id)?.id ?? curves[0].id;
+    return { curveId: id, k: Math.floor((this.edgeResults.get(id)?.result?.stations.length ?? 1) / 2) };
+  }
+
+  /** The current station, kept valid. */
+  private ensureStation(): { curveId: string; k: number } | null {
+    const cur = this.retouchStation;
+    const stations = cur ? this.edgeResults.get(cur.curveId)?.result?.stations : null;
+    const ok = !!cur && !!stations && cur.k < stations.length && this.retouchCurves().some((c) => c.id === cur.curveId);
+    if (!ok || this.stationAuto) this.retouchStation = this.defaultStation(ok && !this.stationAuto ? cur.curveId : undefined);
+    return this.retouchStation;
+  }
+
+  retouchStationNow(): { curveId: string; station: number; position: number } | null {
+    const s = this.retouchStation;
+    const at = s ? this.edgeResults.get(s.curveId)?.result?.stations[s.k] : null;
+    return s && at ? { curveId: s.curveId, station: s.k, position: at.position } : null;
+  }
+
+  moveRetouchStation(curveId: string, k: number): void {
+    const n = this.edgeResults.get(curveId)?.result?.stations.length ?? 0;
+    if (!n) return;
+    this.stationAuto = false;
+    this.retouchStation = { curveId, k: Math.max(0, Math.min(n - 1, k)) };
+    this.queueStation();
+  }
+
+  moveRetouchPosition(curveId: string, position: number): void {
+    const stations = this.edgeResults.get(curveId)?.result?.stations ?? [];
+    let best = 0;
+    stations.forEach((s, k) => {
+      if (Math.abs(s.position - position) < Math.abs(stations[best].position - position)) best = k;
+    });
+    this.moveRetouchStation(curveId, best);
+  }
+
+  useRetouchCurve(curveId: string): void {
+    this.stationAuto = false;
+    this.retouchStation = this.defaultStation(curveId);
+    this.queueStation();
+  }
+
+  /** ← / →: round a closed curve; an open one stops at its ends. */
+  private stepStation(step: number): void {
+    const s = this.ensureStation();
+    const c = s ? this.store.curve(s.curveId) : null;
+    const n = s ? (this.edgeResults.get(s.curveId)?.result?.stations.length ?? 0) : 0;
+    if (!s || !c || !n) return;
+    this.moveRetouchStation(s.curveId, c.closed ? ((s.k + step) % n + n) % n : s.k + step);
+  }
+
+  /** A press in the view: to the station nearest it, if one is near; held, along the curve it is on. */
+  private placeStation(x: number, y: number, following: boolean): boolean {
+    const viewer = this.viewer;
+    if (!viewer) return false;
+    const current = this.retouchStation?.curveId;
+    const curves = following ? this.retouchCurves().filter((c) => c.id === current) : this.retouchCurves();
+    let best: { curveId: string; k: number } | null = null, least = Infinity;
+    for (const c of curves) {
+      this.edgeResults.get(c.id)?.result?.stations.forEach((s, k) => {
+        if (!s.point) return;
+        const q = viewer.project(new THREE.Vector3(s.point[0], s.point[1], s.point[2]));
+        const d = Math.hypot(q.x - x, q.y - y);
+        if (q.visible && d < least) {
+          least = d;
+          best = { curveId: c.id, k };
+        }
+      });
+    }
+    if (!best || (!following && least > STATION_REACH_PX)) return false;
+    const { curveId, k } = best as { curveId: string; k: number };
+    this.moveRetouchStation(curveId, k);
+    return true;
+  }
+
+  /** Draw the station's views at most once a frame. */
+  private queueStation(): void {
+    if (this.stationQueued) return;
+    this.stationQueued = requestAnimationFrame(() => {
+      this.stationQueued = 0;
+      this.syncStation();
+    });
+  }
+
+  /** The section of a station: the one kept where there is retouch, else cut now. */
+  private stationSection(curveId: string, k: number): StationSection | null {
+    const kept = this.retouchResults.get(curveId)?.sections[k];
+    if (kept) return kept;
+    const c = this.store.curve(curveId), loaded = this.loaded, base = this.measureBase, part = this.partition;
+    if (!c || !loaded || !base || !part) return null;
+    const key = JSON.stringify([curveId, k, this.partitionVersion, this.edgeResults.get(curveId)?.key]);
+    if (this.stationCache?.key === key) return this.stationCache.section;
+    const g = loaded.geometry;
+    const section = sectionAtStation({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: this.store.state.specimen.unit, meanEdge: base.meanEdge, candidates: bvhPlaneCandidates(g), pieceOfFace: part.region, pieces: this.retouchPieces }, k);
+    this.stationCache = { key, section };
+    return section;
+  }
+
+  private stationDetail(curveId: string, k: number): RetouchStationDetail | null {
+    return this.retouchIndex?.details.find((d) => d.curveId === curveId && d.station === k) ?? null;
+  }
+
+  /** The section panel's drawing of the current station. */
+  private stationModel(): SectionModel | null {
+    const s = this.retouchStation, part = this.partition, base = this.measureBase;
+    const sec = s ? this.stationSection(s.curveId, s.k) : null;
+    if (!s || !sec || !part || !base) return null;
+    const faces = stationFaces(sec, this.retouchFaces?.faces ?? new Uint8Array(part.region.length), part.region, this.retouchPieces, base.meanEdge);
+    const layer = this.retouchSeries.startsWith('L') ? Number(this.retouchSeries.slice(1)) : null;
+    return sectionModel(sec, this.stationDetail(s.curveId, s.k), faces, layer);
+  }
+
+  /** The readings under the section; what is empty says why. */
+  private sectionReadings(): SectionReading[] {
+    const s = this.retouchStation;
+    const u = this.store.state.specimen.unit;
+    const row = s ? (this.retouchIndex?.indices.stations.find((r) => r.curveId === s.curveId && r.station === s.k) ?? null) : null;
+    const detail = s ? this.stationDetail(s.curveId, s.k) : null;
+    const point = s ? this.edgeResults.get(s.curveId)?.result?.stations[s.k]?.point : null;
+    const noStation = point ? 'no_retouch_on_edge' : 'section_misses_curve';
+    const entry = (id: string, label: string, kind: Quantity, v: number | null | undefined, why: string | null, note?: string): SectionReading => ({ id: `retouch-read-${id}`, label: t(label), value: fmtQuantity(kind, v), unit: quantityUnit(kind, u), why: v === null || v === undefined ? t(`retouch.empty.${why ?? noStation}`) : null, note });
+    const surface = detail?.reason ?? null;
+    const giur = detail?.giurReason ?? null;
+    const faces = row && row.depth_dorsal === null ? 'no_faces' : null;
+    return [
+      entry('area', 'retouch.read.area', 'area', row?.removed_area, surface, row?.filled ? t('retouch.filled') : undefined),
+      entry('angle', 'retouch.read.angle', 'angle', row?.original_angle_deg, surface),
+      entry('recession', 'retouch.read.recession', 'length', row?.recession, surface),
+      entry('depth-dorsal', 'retouch.read.depthDorsal', 'length', row?.depth_dorsal, faces),
+      entry('depth-ventral', 'retouch.read.depthVentral', 'length', row?.depth_ventral, faces),
+      entry('t', 'retouch.read.t', 'length', row?.retouch_height, giur),
+      entry('T', 'retouch.read.T', 'length', row?.thickness, giur),
+      entry('ratio', 'retouch.read.ratio', 'ratio', row?.giur, giur),
+    ];
+  }
+
+  /** The current station, everywhere it shows. */
+  private syncStation(): void {
+    const panel = this.sectionPanel, loaded = this.loaded, layer = this.retouchLayer;
+    if (!panel || !loaded || !layer || !this.retouching()) return;
+    const s = this.retouchStation;
+    const st = this.store.state;
+    const curves = this.retouchCurves();
+    const edge = s ? this.edgeResults.get(s.curveId)?.result : null;
+    const at = s ? edge?.stations[s.k] : null;
+    const mm = mmPerUnit(st.specimen.unit);
+    panel.set(
+      s && edge && at
+        ? {
+            curves: curves.map((c) => ({ id: c.id, label: c.label })),
+            curveId: s.curveId,
+            station: s.k,
+            count: edge.stations.length,
+            position: `${fmtNum(at.position, 1)} / ${fmtNum(edge.length, 1)}${st.specimen.unit ? ` ${st.specimen.unit}` : ''}`,
+            model: this.stationModel(),
+            unit: mm !== null ? st.specimen.unit : null,
+            minWidth: 5 / (mm ?? 1),
+            readings: this.sectionReadings(),
+          }
+        : null,
+    );
+    // on the model: the section's line and the point on the edge
+    const sec = s ? this.stationSection(s.curveId, s.k) : null;
+    if (sec && s) {
+      const chain = sec.closed ? [...sec.ways[0].points, sec.A] : [...sec.ways[1].points.slice(1).reverse(), ...sec.ways[0].points];
+      layer.syncStation(`${s.curveId}|${s.k}|${this.partitionVersion}|${this.edgeResults.get(s.curveId)?.key}`, [chain], sec.A, loaded.offset);
+    } else layer.syncStation('none', [], null, loaded.offset);
+    const frame = this.retouchFrame?.frame.frame;
+    this.planPanel?.moveStation(at?.point && frame ? onPlan(frame, [at.point[0] - loaded.offset[0], at.point[1] - loaded.offset[1], at.point[2] - loaded.offset[2]]) : null, s?.k ?? 0);
+    // another curve: its colours
+    if ((s?.curveId ?? null) !== this.edgeColorCurve) this.syncAnnotations();
+    this.sidebar.refresh('station');
+  }
+
+  private retouching(): boolean {
+    return this.mode === 'retouch' && this.isFlake() && this.hasMesh();
+  }
+
+  /** Show or hide what the retouch mode shows, and draw it. */
+  private updateRetouch(): void {
+    const on = this.retouching();
+    const wasSection = !!this.sectionEl && !this.sectionEl.hidden, wasPlan = !!this.planEl && !this.planEl.hidden;
+    if (this.sectionEl) this.sectionEl.hidden = !on || !this.display.retouchSection;
+    if (this.planEl) this.planEl.hidden = !on || !this.display.retouchPlan;
+    if (!on) {
+      this.retouchLayer?.clear();
+      return;
+    }
+    if (!wasSection) this.sectionFit?.();
+    if (!wasPlan) this.planFit?.();
+    this.ensureStation();
+    this.syncStation();
+    this.drawPlan();
+    this.syncRetouchEdge();
+    void this.updateRetouchExtras();
+  }
+
+  /** The original edge on the model: the stations' A0, broken where a station has none of its own. */
+  private syncRetouchEdge(): void {
+    const layer = this.retouchLayer, loaded = this.loaded;
+    if (!layer || !loaded) return;
+    if (!this.display.retouchEdge) {
+      layer.syncEdge('off', [], loaded.offset);
+      return;
+    }
+    const chains: Vec3[][] = [];
+    for (const c of this.retouchCurves()) {
+      const stations = this.edgeResults.get(c.id)?.result?.stations ?? [];
+      const of = new Map(this.retouchIndex?.details.filter((d) => d.curveId === c.id && d.surface).map((d) => [d.station, d.surface!.A0]));
+      const own: Vec3[][] = [];
+      let run: Vec3[] = [];
+      stations.forEach((_, k) => {
+        const p = of.get(k);
+        if (p) run.push(p);
+        else if (run.length) {
+          own.push(run);
+          run = [];
+        }
+      });
+      if (run.length) own.push(run);
+      // round a closed curve, the last run goes on into the first
+      if (c.closed && of.has(0) && of.has(stations.length - 1)) {
+        if (own.length === 1) own[0] = [...own[0], own[0][0]];
+        else own[0] = [...own.pop()!, ...own[0]];
+      }
+      chains.push(...own);
+    }
+    layer.syncEdge(this.retouchIndexKey, chains, loaded.offset);
+  }
+
+  /** What the mode draws from the frame and the regions, each in slices and only when what it depends on changed. */
+  private async updateRetouchExtras(): Promise<void> {
+    const token = ++this.retouchExtrasToken;
+    const fr = this.retouchFrame, part = this.partition, faces = this.retouchFaces, loaded = this.loaded, layer = this.retouchLayer;
+    if (!this.retouching() || !loaded || !layer) return;
+    const g = loaded.geometry;
+    const positions = g.getAttribute('position').array as Float32Array, index = g.index!.array as Uint32Array;
+    const frame = fr?.frame.frame, outline = fr?.outline;
+    if (fr && frame && outline && part && faces) {
+      const loopsKey = JSON.stringify([fr.key, this.partitionVersion, [...this.retouchPieces]]);
+      if (this.planLoops?.key !== loopsKey) {
+        const loops = await runSliced(planRegionsSteps({ positions, index, faceOf: faces.faces, pieceOfFace: part.region, pieces: this.retouchPieces, frame }));
+        if (token !== this.retouchExtrasToken || this.loaded !== loaded) return;
+        this.planLoops = { key: loopsKey, loops };
+        this.drawPlan();
+      }
+      if (this.display.retouchLines && this.segmentLines?.key !== fr.key) {
+        const lines = await runSliced(segmentLinesSteps({ positions, index, faceOf: faces.faces, frame, outline: drawnOutline(outline) }));
+        if (token !== this.retouchExtrasToken || this.loaded !== loaded) return;
+        this.segmentLines = { key: fr.key, lines };
+      }
+    }
+    const shown = this.display.retouchLines && frame && this.segmentLines?.key === fr?.key ? this.segmentLines : null;
+    layer.syncSegments(shown ? shown.key : 'off', shown?.lines ?? null, loaded.offset);
+    // the volume removed along a range of fitted lengths
+    const input = this.retouchLastInput;
+    if (input && this.fitCurve?.key !== this.retouchFitKey) {
+      const key = this.retouchFitKey;
+      const points = await runSliced(removedVolumeCurveSteps(input, FIT_CURVE_LENGTHS));
+      if (token !== this.retouchExtrasToken || this.loaded !== loaded) return;
+      this.fitCurve = { key, points };
+      this.sidebar.refresh('retouch');
+    }
+  }
+
+  retouchFitCurve(): Array<{ length: number; removed: number | null }> | null {
+    return this.fitCurve?.key === this.retouchFitKey ? this.fitCurve.points : null;
+  }
+
+  previewFitLength(mm: number | null): void {
+    // what is being looked at stays while the length changes
+    this.stationAuto = false;
+    this.fitPreview = mm;
+    this.scheduleRetouchIndices();
+  }
+
+  private planContent(): { shape: PlanShape; loops: PlanLoops[]; station: { at: P2; index: number } | null; longest: RetouchIndexResult['longest']; highlight: number | null; tag: string; unit: string | null } | null {
+    const fr = this.retouchFrame, frame = fr?.frame.frame, loaded = this.loaded;
+    if (!fr || !frame || !fr.outline || !loaded) return null;
+    if (this.planShapeOf?.key !== fr.key) this.planShapeOf = { key: fr.key, shape: planShape(drawnOutline(fr.outline)) };
+    const s = this.retouchStation;
+    const point = s ? this.edgeResults.get(s.curveId)?.result?.stations[s.k]?.point : null;
+    const o = loaded.offset;
+    return {
+      shape: this.planShapeOf.shape,
+      loops: this.planLoops?.loops ?? [],
+      station: point && s ? { at: onPlan(frame, [point[0] - o[0], point[1] - o[1], point[2] - o[2]]), index: s.k } : null,
+      longest: this.retouchIndex?.longest ?? null,
+      highlight: this.planMarked,
+      tag: t(`retouch.axis.${frame.kind}`),
+      unit: mmPerUnit(this.store.state.specimen.unit) !== null ? this.store.state.specimen.unit : null,
+    };
+  }
+
+  private drawPlan(): void {
+    const panel = this.planPanel;
+    if (!panel || !this.retouching()) return;
+    const settings = retouchSettingsOf(this.store.state.flake);
+    const fr = this.retouchFrame;
+    panel.setControls(settings.axis, fr?.frame.frame?.kind === 'longest');
+    panel.set(this.planContent(), this.planFace, fr?.frame.reason ? t(`retouch.empty.${fr.frame.reason}`) : null);
+  }
+
+  focusPlanSegment(segment: number): void {
+    this.planMarked = this.planMarked === segment ? null : segment;
+    this.planFace = segment > 8 ? 'ventral' : 'dorsal';
+    this.drawPlan();
+    this.sidebar.refresh('retouch');
+  }
+
+  planMark(): number | null {
+    return this.planMarked;
+  }
+
+  focusRetouchSegment(i: number): void {
+    const r = this.retouchIndex;
+    const row = r?.indices.segments[i], stations = r?.segmentStations[i];
+    if (!row || !stations?.length) return;
+    this.moveRetouchStation(row.curveId, stations[Math.floor(stations.length / 2)]);
+    this.selection.set(row.region);
+  }
+
+  setRetouchMethod(method: EdgeChartMethod): void {
+    this.retouchMethod = method;
+    this.syncEdgeColors();
+    this.syncAnnotations();
+    this.sidebar.refresh('edge');
+  }
+
+  setRetouchSeries(series: string): void {
+    this.retouchSeries = series;
+    // the edge's colours, and the layer shown on the section
+    this.syncEdgeColors();
+    this.syncAnnotations();
+    this.syncStation();
+    this.sidebar.refresh('edge');
+  }
+
+  /** The two preview panels; built again in another language. */
+  private buildRetouchPanels(): void {
+    const section = new RetouchSectionPanel();
+    section.onStation = (k) => {
+      const s = this.retouchStation;
+      if (s) this.moveRetouchStation(s.curveId, k);
+    };
+    section.onCurve = (id) => this.useRetouchCurve(id);
+    section.onExport = (f) => void this.exportRetouchFigure('section', f);
+    const sectionFrame = floatingPanel({ id: 'retouch-section', title: t('retouch.section'), pref: 'retouchSectionPanel', area: this.viewportEl, extras: section.extras, resizable: true, onClose: () => this.setDisplay((d) => (d.retouchSection = false), 'retouch') });
+    sectionFrame.body.append(section.el);
+    if (this.sectionEl) this.sectionEl.replaceWith(sectionFrame.el);
+    else this.viewportEl.append(sectionFrame.el);
+    this.sectionEl = sectionFrame.el;
+    this.sectionFit = sectionFrame.fit;
+    this.sectionPanel = section;
+
+    const plan = new RetouchPlanPanel();
+    plan.onFace = (f) => {
+      this.planFace = f;
+      if (this.planMarked !== null && this.planMarked > 8 !== (f === 'ventral')) this.planMarked = null;
+      this.drawPlan();
+      this.sidebar.refresh('retouch');
+    };
+    plan.onAxis = (a) => setRetouchAxis(this.store, a as RetouchAxisChoice);
+    plan.onFlip = () => setRetouchFlip(this.store, !retouchSettingsOf(this.store.state.flake).flip);
+    plan.onExport = (f) => void this.exportRetouchFigure('plan', f);
+    plan.onPick = (at, reach) => this.pickOnPlan(at, reach);
+    const planFrame = floatingPanel({ id: 'retouch-plan', title: t('retouch.plan'), pref: 'retouchPlanPanel', area: this.viewportEl, extras: plan.extras, resizable: true, onClose: () => this.setDisplay((d) => (d.retouchPlan = false), 'retouch') });
+    planFrame.body.append(plan.el);
+    if (this.planEl) this.planEl.replaceWith(planFrame.el);
+    else this.viewportEl.append(planFrame.el);
+    this.planEl = planFrame.el;
+    this.planFit = planFrame.fit;
+    this.planPanel = plan;
+    this.updateRetouch();
+  }
+
+  /** A press on the plan, near the outline: to the nearest station. */
+  private pickOnPlan(at: P2, reach: number): void {
+    const frame = this.retouchFrame?.frame.frame, loaded = this.loaded;
+    if (!frame || !loaded) return;
+    const o = loaded.offset;
+    let best: { curveId: string; k: number } | null = null, least = reach;
+    for (const c of this.retouchCurves()) {
+      this.edgeResults.get(c.id)?.result?.stations.forEach((s, k) => {
+        if (!s.point) return;
+        const q = onPlan(frame, [s.point[0] - o[0], s.point[1] - o[1], s.point[2] - o[2]]);
+        const d = Math.hypot(q[0] - at[0], q[1] - at[1]);
+        if (d < least) {
+          least = d;
+          best = { curveId: c.id, k };
+        }
+      });
+    }
+    if (best) this.moveRetouchStation((best as { curveId: string }).curveId, (best as { k: number }).k);
+  }
+
+  /** A preview for a publication: the light colours on white, to the figure's scale where the unit is stated. */
+  private retouchPrint(kind: 'section' | 'plan'): { drawing: Drawing; name: string } | null {
+    const st = this.store.state;
+    const mm = mmPerUnit(st.specimen.unit);
+    const pxPerUnit = mm !== null ? mm * this.figure.scale * PX_PER_MM : undefined;
+    const unit = mm !== null ? st.specimen.unit : null;
+    const panelBox = (kind === 'section' ? this.sectionEl : this.planEl)?.querySelector<SVGElement>('svg')?.getBoundingClientRect();
+    const width = panelBox?.width || 420, height = panelBox?.height || 300;
+    if (kind === 'section') {
+      const s = this.retouchStation, model = this.stationModel();
+      const at = s ? this.edgeResults.get(s.curveId)?.result?.stations[s.k] : null;
+      const curve = s ? this.store.curve(s.curveId) : null;
+      if (!s || !model || !at || !curve) return null;
+      const place = Math.round(at.position * (mm ?? 1) * 10) / 10;
+      return { drawing: sectionDrawing(model, { palette: PRINT_PALETTE, whole: this.sectionPanel?.whole ?? false, minWidth: 5 / (mm ?? 1), unit, width, height, pxPerUnit }), name: `${this.stem()}_retouch_section_${curve.label}_${place}` };
+    }
+    const c = this.planContent();
+    return c ? { drawing: planDrawing({ ...c, face: this.planFace, palette: PRINT_PALETTE, unit, width, height, pxPerUnit }), name: `${this.stem()}_retouch_plan_${this.planFace}` } : null;
+  }
+
+  private async exportRetouchFigure(kind: 'section' | 'plan', format: 'svg' | 'png'): Promise<void> {
+    const print = this.retouchPrint(kind);
+    if (!print) return;
+    const name = `${print.name}.${format}`;
+    try {
+      if (format === 'svg') await this.save(name, svgFile(print.drawing, `retouch-${kind}`), 'image/svg+xml');
+      else {
+        const outcome = await saveFile(name, await drawingPng(print.drawing, `retouch-${kind}`, this.figure.dpi), 'image/png');
+        if (outcome === 'saved') this.feedback.toast(t('toast.saved', { name }));
+      }
+    } catch (e) {
+      this.feedback.toast((e as Error).message, 'error');
     }
   }
 
@@ -2590,22 +3128,23 @@ export class App implements AppApi {
       const values = ruleValues(r, this.store.state.sharpEdge);
       return r.stations.map((s, k) => ({ position: s.position, point: s.point, value: values[k] === null && !sharp.mask[k] ? null : sharp.mask[k] ? 1 : 0 }));
     }
-    const series = this.edgeSeries;
-    const retouch = this.retouchAngleResult(c.id);
-    const m = this.edgeMethod === 'layer_face' && !retouch ? 'three_points' : this.edgeMethod;
-    const layers = retouch?.stations.flatMap((s) => s.stretches.map((x) => x.layer)) ?? [];
-    const chosen = series.startsWith('L') ? Number(series.slice(1)) : null;
-    // no line chosen, or one that is not there: the middle distance, or (of layer faces) the layer nearest the edge
-    const layer = chosen !== null && layers.includes(chosen) ? chosen : m === 'layer_face' ? Math.min(...layers) : null;
-    if (layer !== null) {
-      return r.stations.map((s, k) => ({ position: s.position, point: s.point, value: retouch?.stations[k]?.stretches.find((x) => x.layer === layer)?.[m] ?? null }));
+    if (this.mode === 'retouch') {
+      const retouch = this.retouchAngleResult(c.id);
+      const m = this.retouchMethod === 'layer_face' && !retouch ? 'three_points' : this.retouchMethod;
+      const layers = retouch?.stations.flatMap((s) => s.stretches.map((x) => x.layer)) ?? [];
+      const chosen = this.retouchSeries.startsWith('L') ? Number(this.retouchSeries.slice(1)) : null;
+      // no line chosen, or one that is not there: the middle distance, or (of layer faces) the layer nearest the edge
+      const layer = chosen !== null && layers.includes(chosen) ? chosen : m === 'layer_face' ? Math.min(...layers) : null;
+      if (layer !== null) return r.stations.map((s, k) => ({ position: s.position, point: s.point, value: retouch?.stations[k]?.stretches.find((x) => x.layer === layer)?.[m] ?? null }));
+      const middle = EDGE_ANGLE_DISTANCES_MM.indexOf(5);
+      return r.stations.map((s) => ({ position: s.position, point: s.point, value: m === 'layer_face' ? null : s[m][middle] }));
     }
-    const mm = /^d(\d+)$/.exec(series);
+    const mm = /^d(\d+)$/.exec(this.edgeSeries);
     const d = EDGE_ANGLE_DISTANCES_MM.indexOf((mm ? Number(mm[1]) : 5) as (typeof EDGE_ANGLE_DISTANCES_MM)[number]);
-    return r.stations.map((s) => ({ position: s.position, point: s.point, value: m === 'layer_face' ? null : s[m][d] }));
+    return r.stations.map((s) => ({ position: s.position, point: s.point, value: s[this.edgeMethod][d] }));
   }
 
-  setEdgeMethod(method: EdgeChartMethod): void {
+  setEdgeMethod(method: EdgeAngleMethod): void {
     this.edgeMethod = method;
     this.syncEdgeColors();
     this.syncAnnotations();
@@ -2636,6 +3175,7 @@ export class App implements AppApi {
     }
     this.sidebar.refresh('edge');
     this.syncAnnotations();
+    this.updateRetouch();
     if (this.unsaved) {
       this.scheduleAutosave();
       this.scheduleFolderSave();
@@ -2653,19 +3193,22 @@ export class App implements AppApi {
   /** The measure mode: the selected curve drawn by its angles (the middle distance), with the two ends of the scale beside it. */
   private syncEdgeColors(): void {
     const layer = this.edgeLayer, legend = this.edgeLegend, loaded = this.loaded;
-    const c = this.mode === 'measure' ? this.store.curve(this.selection.id ?? '') : undefined;
+    const retouching = this.mode === 'retouch';
+    const c = retouching ? this.store.curve(this.retouchStation?.curveId ?? '') : this.mode === 'measure' ? this.store.curve(this.selection.id ?? '') : undefined;
     const r = c && measuresEdgeAngle(c, this.store.state.specimen.type) ? this.edgeAngleResult(c.id) : null;
     const rule = this.store.state.sharpEdge;
-    const sharp = c && r && this.edgeColorMode === 'sharp' ? this.sharpOf(c.id) : null;
+    const sharp = !retouching && c && r && this.edgeColorMode === 'sharp' ? this.sharpOf(c.id) : null;
     const stations = c && r ? this.edgeColorStations(c, r, sharp) : [];
     const values = stations.flatMap((s) => (s.value !== null && s.point ? [s.value] : []));
     if (!layer || !legend || !loaded || !c || values.length < 2) {
       if (this.edgeColorKey) layer?.clear();
       this.edgeColorKey = '';
+      this.edgeColorCurve = null;
       if (legend) legend.hidden = true;
       return;
     }
-    const key = `${c.id}|${this.edgeMethod}|${this.edgeSeries}|${sharp ? JSON.stringify(rule) : ''}|${this.edgeResults.get(c.id)?.key}|${this.retouchResults.get(c.id)?.key}`;
+    this.edgeColorCurve = c.id;
+    const key = `${this.mode}|${c.id}|${retouching ? `${this.retouchMethod}|${this.retouchSeries}` : `${this.edgeMethod}|${this.edgeSeries}`}|${sharp ? JSON.stringify(rule) : ''}|${this.edgeResults.get(c.id)?.key}|${this.retouchResults.get(c.id)?.key}`;
     if (key === this.edgeColorKey) return;
     this.edgeColorKey = key;
     const lo = Math.min(...values), hi = Math.max(...values);
@@ -2703,7 +3246,7 @@ export class App implements AppApi {
   }
 
   private profileShown(): boolean {
-    return this.display.profile && this.mode !== 'compare' && this.hasMesh() && !!this.localFrame();
+    return this.display.profile && this.mode !== 'compare' && this.mode !== 'retouch' && this.hasMesh() && !!this.localFrame();
   }
 
   private buildProfilePanel(): void {
@@ -3396,6 +3939,14 @@ export class App implements AppApi {
           : []),
       ];
     }
+    if (this.mode === 'retouch')
+      return [
+        csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts, this.retouchIndex?.indices ?? null)),
+        csv('retouch-sections', t('export.retouchSections'), 'retouch_sections.csv', !!this.retouchIndex?.indices.stations.length, () => retouchSectionsCsv(st, this.retouchIndex?.indices ?? null, opts)),
+        csv('retouch-segments', t('export.retouchSegments'), 'retouch_segments.csv', !!this.retouchIndex?.indices.segments.length, () => retouchSegmentsCsv(st, this.retouchIndex?.indices ?? null, opts)),
+        csv('invasiveness', t('export.invasiveness'), 'invasiveness.csv', !!this.retouchIndex?.indices.penetration.length, () => invasivenessCsv(st, this.retouchIndex?.indices ?? null, opts)),
+        csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts)),
+      ];
     if (this.mode === 'measure')
       return [
         ...(this.isFlake() ? [csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts, this.retouchIndex?.indices ?? null))] : []),
@@ -4358,14 +4909,14 @@ export class App implements AppApi {
           const c = this.seedComponent[i];
           if (c < 0 || this.seedComponent.indexOf(c) !== i) return [];
           const hl = !!em && !!r.scarId && em.ids.has(r.scarId);
-          return [{ component: c, color: hl ? em!.color : regionColorOf(r, st.scars, seq), selected: hl || r.id === this.selection.id, faded: !!loose && r.type === 'scar' && !!r.scarId && loose.has(r.scarId) }];
+          return [{ component: c, color: hl ? em!.color : regionColorOf(r, st.scars, seq), selected: hl || r.id === this.selection.id, faded: (!!loose && r.type === 'scar' && !!r.scarId && loose.has(r.scarId)) || (this.mode === 'retouch' && r.type !== 'retouch') }];
         })
       : [];
     const g = loaded?.geometry;
     layer.sync((g?.getAttribute('position') as THREE.BufferAttribute) ?? null, g?.index?.array ?? null, this.partition?.region ?? null, paints, loaded?.offset ?? [0, 0, 0]);
     // the upper layer, fainter, under them
     if (this.upperLayer) {
-      this.upperLayer.dimmed = this.mode === 'measure';
+      this.upperLayer.dimmed = this.mode === 'measure' || this.mode === 'retouch';
       const above = this.display.regions
         ? results.flatMap((r, i) => {
             const c = this.upperComponent[i];
@@ -4570,6 +5121,20 @@ export class App implements AppApi {
     this.retouchIndexToken++;
     this.retouchFrame = null;
     this.retouchFaces = null;
+    this.retouchPieces = new Map();
+    this.retouchLastInput = null;
+    this.retouchFitKey = '';
+    this.fitPreview = null;
+    this.retouchStation = null;
+    this.stationAuto = true;
+    this.stationCache = null;
+    this.planMarked = null;
+    this.planShapeOf = null;
+    this.planLoops = null;
+    this.segmentLines = null;
+    this.fitCurve = null;
+    this.retouchExtrasToken++;
+    this.retouchLayer?.clear();
     this.gm = null;
     this.gmDoneKey = '';
     this.edgeToken++;
@@ -4916,7 +5481,7 @@ export class App implements AppApi {
         if (!e.repeat) this.tools?.setLightHeld(true);
         return;
       }
-      if (e.repeat && !['BracketLeft', 'BracketRight', 'Backspace'].includes(e.code)) return;
+      if (e.repeat && !['BracketLeft', 'BracketRight', 'Backspace', 'ArrowLeft', 'ArrowRight'].includes(e.code)) return;
       switch (e.code) {
         case 'KeyM':
           this.cycleMode();
@@ -4950,6 +5515,16 @@ export class App implements AppApi {
           return;
         case 'KeyX':
           if (this.hasMesh() && this.mode === 'present') this.setTool('section');
+          return;
+        case 'KeyJ':
+          if (this.hasMesh() && this.mode === 'retouch') this.setTool('station');
+          return;
+        case 'ArrowLeft':
+        case 'ArrowRight':
+          if (this.retouching()) {
+            e.preventDefault();
+            this.stepStation((e.code === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+          }
           return;
         case 'KeyD':
         case 'KeyG':
@@ -5186,6 +5761,13 @@ export class App implements AppApi {
         ['D / G / N', 'help.k.measure'],
         ['Backspace', 'help.k.back'],
       ]),
+      ...(this.isFlake()
+        ? group(t('appMode.retouch'), [
+            ['J', 'help.k.station'],
+            ['← / →', 'help.k.stationStep'],
+            ['Shift+← / Shift+→', 'help.k.stationJump'],
+          ])
+        : []),
       ...group(t('appMode.present'), [['X', 'help.k.section']]),
     );
     const body = h('div', { class: 'help-cols', id: 'help-cols' }, left, right);
@@ -5230,6 +5812,29 @@ export class App implements AppApi {
       retouch: () => {
         const r = this.retouchIndex;
         return r ? { ...r.indices, reasons: r.reasons, stationReasons: r.details.map((d) => ({ curveId: d.curveId, station: d.station, reason: d.reason, giurReason: d.giurReason })) } : null;
+      },
+      /** The retouch mode: the current station, and what each view says it is. */
+      retouchView: () => {
+        const panel = (id: string) => document.querySelector(id)?.getAttribute('data-station') ?? null;
+        return {
+          station: this.retouchStationNow(),
+          marker: this.retouchLayer?.stationPoint() ?? null,
+          lines: this.retouchLayer?.counts() ?? null,
+          section: panel('#retouch-section-drawing'),
+          plan: panel('#retouch-plan-station'),
+          chart: document.querySelector('#retouch-chart-cursor')?.getAttribute('data-position') ?? null,
+          tool: this.tools?.activeId ?? null,
+          face: this.planFace,
+          mark: this.planMarked,
+          fitCurve: this.retouchFitCurve(),
+          /** The segments' middles on the model. */
+          segments: this.retouchFrame?.frame.frame && this.planShapeOf
+            ? this.planShapeOf.shape.segments.map((s) => {
+                const f = this.retouchFrame!.frame.frame!, o = this.loaded?.offset ?? [0, 0, 0];
+                return { segment: s.segment, model: [0, 1, 2].map((i) => f.origin[i] + o[i] + s.at[0] * f.x[i] + s.at[1] * f.y[i]) };
+              })
+            : null,
+        };
       },
       /** Its settings, through the actions. */
       retouchSettings: (change: { fitLength?: number | null; axis?: RetouchAxisChoice; flip?: boolean }) => {

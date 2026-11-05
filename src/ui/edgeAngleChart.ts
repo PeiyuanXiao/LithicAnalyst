@@ -57,13 +57,57 @@ export class EdgeAngleChart {
   private dots: SVGElement[] = [];
   private current: (ChartInput & { x: (p: number) => number; y: (a: number) => number; angleAt: (py: number) => number }) | null = null;
   private dragging = false;
+  private cursorAt: number | null = null;
+  private cursorEl: SVGElement | null = null;
+  /** A press on the plot: the position of the station nearest it. */
+  onPick: ((position: number) => void) | null = null;
 
-  constructor() {
-    this.legend = h('div', { class: 'edge-chart-legend', id: 'edge-chart-legend' });
-    this.plot = svg('svg', { id: 'edge-chart', class: 'edge-chart-plot', viewBox: `0 0 ${WIDTH} ${HEIGHT}`, role: 'img', 'aria-label': t('sec.edgeAngle') }) as SVGSVGElement;
-    this.el = h('div', { class: 'edge-chart', id: 'edge-angle-chart' }, this.legend, this.plot);
+  /** `prefix`: of its ids, to tell it from another chart on the page. */
+  constructor(private readonly prefix = 'edge') {
+    this.legend = h('div', { class: 'edge-chart-legend', id: `${prefix}-chart-legend` });
+    this.plot = svg('svg', { id: `${prefix}-chart`, class: 'edge-chart-plot', viewBox: `0 0 ${WIDTH} ${HEIGHT}`, role: 'img', 'aria-label': t('sec.edgeAngle') }) as SVGSVGElement;
+    this.el = h('div', { class: 'edge-chart', id: `${prefix}-angle-chart` }, this.legend, this.plot);
     this.plot.addEventListener('pointermove', (e) => this.hover(e));
     this.plot.addEventListener('pointerleave', () => this.leave());
+    this.plot.addEventListener('pointerdown', (e) => {
+      const c = this.current;
+      if (!c || !this.onPick || e.button !== 0) return;
+      this.onPick(c.positions[this.nearest(e)]);
+    });
+  }
+
+  /** The vertical line of a position along the curve (null: none). */
+  setCursor(position: number | null): void {
+    this.cursorAt = position;
+    this.placeCursor();
+  }
+
+  private placeCursor(): void {
+    const c = this.current, p = this.cursorAt;
+    if (!c || p === null) {
+      this.cursorEl?.remove();
+      this.cursorEl = null;
+      return;
+    }
+    if (!this.cursorEl) {
+      this.cursorEl = svg('line', { y1: TOP, y2: HEIGHT - BOTTOM, id: `${this.prefix}-chart-cursor`, class: 'edge-chart-cursor' });
+      this.plot.append(this.cursorEl);
+    }
+    this.cursorEl.setAttribute('x1', String(c.x(p)));
+    this.cursorEl.setAttribute('x2', String(c.x(p)));
+    this.cursorEl.setAttribute('data-position', String(p));
+  }
+
+  /** The station nearest the pointer. */
+  private nearest(e: PointerEvent): number {
+    const c = this.current!;
+    const r = this.plot.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * WIDTH;
+    let k = 0;
+    c.positions.forEach((p, i) => {
+      if (Math.abs(c.x(p) - px) < Math.abs(c.x(c.positions[k]) - px)) k = i;
+    });
+    return k;
   }
 
   set(input: ChartInput | null): void {
@@ -72,6 +116,7 @@ export class EdgeAngleChart {
     clear(this.plot);
     clear(this.legend);
     this.cross = null;
+    this.cursorEl = null;
     this.dots = [];
     this.current = null;
     this.el.hidden = !input?.positions.length;
@@ -133,6 +178,7 @@ export class EdgeAngleChart {
       return dot;
     });
     this.current = { ...input, x, y, angleAt };
+    this.placeCursor();
   }
 
   /** The threshold: a dashed line in the colour of its series, with a wider line to take hold of. */
@@ -176,14 +222,8 @@ export class EdgeAngleChart {
   private hover(e: PointerEvent): void {
     const c = this.current;
     if (!c || this.dragging) return;
-    const r = this.plot.getBoundingClientRect();
-    if (!(r.width > 0)) return;
-    const px = ((e.clientX - r.left) / r.width) * WIDTH;
-    // the nearest station
-    let k = 0;
-    c.positions.forEach((p, i) => {
-      if (Math.abs(c.x(p) - px) < Math.abs(c.x(c.positions[k]) - px)) k = i;
-    });
+    if (!(this.plot.getBoundingClientRect().width > 0)) return;
+    const k = this.nearest(e);
     const at = c.x(c.positions[k]);
     this.cross?.setAttribute('x1', String(at));
     this.cross?.setAttribute('x2', String(at));

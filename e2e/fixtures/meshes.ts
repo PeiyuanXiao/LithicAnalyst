@@ -174,6 +174,14 @@ export const T4 = { radius: 30, upper: 8, lower: 5 };
 export const t4Ply = (): MeshFile => ({ name: 't4.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(bicone(T4.radius, T4.upper, T4.lower, 96, 8)) });
 /** A tool with two tiers of retouch above a flat ventral face (edge radius 30; the tiers end at radius 24 and 12). */
 export const toolPly = (): MeshFile => ({ name: 'tool.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(steppedTool()) });
+/** The same with a hole: the fan at the middle of its flat face left out. */
+export function openToolPly(): MeshFile {
+  const m = steppedTool();
+  const last = m.positions.length / 3 - 1;
+  const kept: number[] = [];
+  for (let i = 0; i < m.index.length; i += 3) if (m.index[i] !== last && m.index[i + 1] !== last && m.index[i + 2] !== last) kept.push(m.index[i], m.index[i + 1], m.index[i + 2]);
+  return { name: 'open.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly({ positions: m.positions, index: new Uint32Array(kept) }) };
+}
 /** The bicone of T4 with its cones three times as high on one half: an edge of two angles, about 24.4° and 65.2°. */
 export function twoAnglePly(): MeshFile {
   const m = bicone(T4.radius, T4.upper, T4.lower, 240, 12);

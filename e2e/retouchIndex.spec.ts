@@ -1,78 +1,13 @@
-import type { Page } from '@playwright/test';
-import { heightAt, T4, T1, t1Ply, toolPly, type Vec3 } from './fixtures/meshes';
-import { closeDraftToward, curveClick, expect, exportFile, folderPaths, folderText, loadMesh, mockFolder, nextFrames, openApp, openMockFolder, parseCsv, specimenPanel, state, test, toScreen } from './helpers';
+import { T1, t1Ply, type Vec3 } from './fixtures/meshes';
+import { curveClick, expect, exportFile, folderPaths, folderText, loadMesh, mockFolder, nextFrames, openApp, openMockFolder, parseCsv, state, test, toScreen } from './helpers';
+import { annotatedTool, look, regionAt, retouch, setType } from './retouchSetup';
 
-const ON = (r: number, deg: number, z: number): Vec3 => [r * Math.cos((deg * Math.PI) / 180), r * Math.sin((deg * Math.PI) / 180), z];
-const onTool = (r: number, deg: number): Vec3 => ON(r, deg, heightAt(r));
-const rimPoint = (deg: number): Vec3 => ON(0.97 * T4.radius, deg, 0.03 * T4.upper);
-const around = (count: number) => Array.from({ length: count }, (_, k) => (360 * k) / count);
-
-const retouch = (page: Page) => page.evaluate(() => window.lithicanalyst.retouch());
 const NEW_COLUMNS = ['retouch_axis', 'retouch_fit_length', 'removed_volume', 'erp', 'erp_filled_share', 'giur', 'giur_stations', 'invasiveness', 'invasiveness_continuous', 'retouch_perimeter', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral', 'edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth'];
-
-async function setFlake(page: Page): Promise<void> {
-  await specimenPanel(page);
-  await page.locator('#specimen-type').selectOption('flake');
-  await page.keyboard.press('Escape');
-}
-
-const look = async (page: Page, toward: Vec3, up: Vec3) => {
-  await page.evaluate(([t, u]) => window.lithicanalyst.view(t, u), [toward, up] as [Vec3, Vec3]);
-  await nextFrames(page);
-};
-
-/** A closed curve through these points, seen from above; then its type by its key. */
-async function drawLoop(page: Page, points: Vec3[], key: string, inward: Vec3): Promise<string> {
-  const n = (await state(page)).curves.length;
-  await look(page, [0, 0, 1], [0, 1, 0]);
-  await page.evaluate(() => window.lithicanalyst.snap.prepare('ridge'));
-  await page.keyboard.press('p');
-  for (const p of points) await curveClick(page, await toScreen(page, p));
-  await closeDraftToward(page, inward);
-  await expect.poll(async () => (await state(page)).curves[n]?.closed ?? false).toBe(true);
-  await page.keyboard.press('v');
-  await page.keyboard.press(key);
-  return (await state(page)).curves[n].id;
-}
-
-/** Click on the model with the region tool, and give what comes selected its type by its key. */
-async function regionAt(page: Page, p: Vec3, key: string): Promise<string> {
-  const n = (await state(page)).regions.length;
-  const s = await toScreen(page, p);
-  await page.mouse.click(s.x, s.y);
-  await expect.poll(async () => (await state(page)).regions.length).toBe(n + 1);
-  await page.keyboard.press(key);
-  return (await state(page)).regions[n].id;
-}
-
-/** The stepped tool as a flake: its edge, the two borders of retouch, the two layers, the two faces. */
-async function annotatedTool(page: Page): Promise<{ edge: string; first: string; second: string }> {
-  await loadMesh(page, toolPly());
-  await setFlake(page);
-  const edge = await drawLoop(page, around(4).map(rimPoint), '2', [0, 0, T4.upper]);
-  await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('edge');
-  await drawLoop(page, around(8).map((d) => onTool(24, d)), '6', [0, 0, 8]);
-  await expect.poll(async () => (await state(page)).curves[1].attributes.type).toBe('retouch');
-  await drawLoop(page, around(8).map((d) => onTool(12, d)), '6', [0, 0, 8]);
-  await look(page, [0, 0, 1], [0, 1, 0]);
-  await page.keyboard.press('r');
-  const first = await regionAt(page, onTool(27, 45), '8');
-  const second = await regionAt(page, onTool(18, 45), '8');
-  await page.keyboard.press('Shift+Digit2');
-  await expect.poll(async () => (await state(page)).regions[1].retouchLayer).toBe(2);
-  // the two faces, by hand: there is no technical axis to tell them
-  await regionAt(page, onTool(5, 45), '7');
-  await look(page, [0, 0, -1], [0, 1, 0]);
-  await regionAt(page, [10, 10, 0], '6');
-  await expect.poll(async () => (await state(page)).regions.map((r) => r.type)).toEqual(['retouch', 'retouch', 'dorsal', 'ventral']);
-  await page.keyboard.press('v');
-  await page.locator('#app-mode-measure').click();
-  return { edge, first, second };
-}
 
 test('the stepped tool: the indices of two layers and of one, and of another fitted length', async ({ page }) => {
   await openApp(page);
   const { first, second } = await annotatedTool(page);
+  await page.locator('#app-mode-measure').click();
   await expect.poll(async () => (await retouch(page))?.segments.length ?? 0).toBe(2);
   await expect.poll(async () => (await retouch(page))?.invasiveness ?? null).toBe(0.5);
 
@@ -154,7 +89,7 @@ test('the stepped tool: the indices of two layers and of one, and of another fit
 test('the frame: the technical axis while there is one, then the longest axis', async ({ page }) => {
   await openApp(page);
   await loadMesh(page, t1Ply());
-  await setFlake(page);
+  await setType(page, 'flake');
   await expect.poll(async () => (await retouch(page)) !== null).toBe(true);
   // no retouch region: not retouched; no faces, so no frame
   let r = (await retouch(page))!;
@@ -241,7 +176,7 @@ test('a folder: the summary has the indices of its flakes and the manifest their
   await openApp(page);
   await openMockFolder(page);
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.state().mesh?.fileName ?? null)).toBe('a.ply');
-  await setFlake(page);
+  await setType(page, 'flake');
   await expect.poll(async () => (await retouch(page)) !== null).toBe(true);
   await page.locator('#app-mode-measure').click();
   await page.locator('#btn-export').click();

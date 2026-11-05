@@ -81,6 +81,8 @@ export interface StationSection {
   /** The edge on the section. */
   A: Vec3;
   ways: [RetouchWay, RetouchWay];
+  /** The section is a closed line: the first way goes all round it. */
+  closed: boolean;
   /** The layers along each way. */
   runs: [RetouchRun[], RetouchRun[]];
 }
@@ -197,12 +199,28 @@ export function* retouchSectionsSteps(input: RetouchAngleInput): Steps<RetouchSe
     for (const r of runs[1]) stretches.push({ region: r.region, layer: r.layer, distance: r.to, ...stretchAngles(other, one, near.point, r.from, r.to, half, whole) });
     stations.push({ position: s.position, point: [near.point[0] + o[0], near.point[1] + o[1], near.point[2] + o[2]], stretches });
     // only where there is a layer: sections are long
-    if (stretches.length) sections[k] = { normal: s.normal, A: near.point, ways: [one, other], runs };
+    if (stretches.length) sections[k] = { normal: s.normal, A: near.point, ways: [one, other], closed: near.line.closed, runs };
   }
   return { result: { stations }, sections, length: plan.length };
 }
 
 export const retouchSections = (input: RetouchAngleInput): RetouchSections | null => runSync(retouchSectionsSteps(input));
+
+/** The section of one station, cut when it is asked for (a station without a layer keeps none); null where it misses the curve. In the coordinates of the positions. */
+export function sectionAtStation(input: RetouchAngleInput, k: number): StationSection | null {
+  const mm = mmPerUnit(input.unit);
+  if (mm === null || input.points.length < 2) return null;
+  const o: Vec3 = input.offset ?? [0, 0, 0];
+  const plan = stationPlan(input.points.map((p): Vec3 => [p[0] - o[0], p[1] - o[1], p[2] - o[2]]), input.closed, mm);
+  if (!plan || k < 0 || k >= plan.count) return null;
+  const s = plan.at(k);
+  if (!s.normal || !s.crossing) return null;
+  const near = nearestOnLines(sectionByPlane(input.positions, input.index, s.reference, s.normal, input.candidates ?? null), s.crossing);
+  if (!near || near.distance > LINE_REACH_EDGES * input.meanEdge) return null;
+  const [one, other] = ways(near.line, near.seg, near.point);
+  const sliver = SLIVER_EDGES * input.meanEdge;
+  return { normal: s.normal, A: near.point, ways: [one, other], closed: near.line.closed, runs: [layersAlong(one, input, sliver), layersAlong(other, input, sliver)] };
+}
 
 /** The retouch layers along a curve; null without a stated unit, or without a piece in a layer. */
 export function* retouchAnglesSteps(input: RetouchAngleInput): Steps<RetouchAngleResult | null> {

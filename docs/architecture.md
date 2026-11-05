@@ -105,7 +105,7 @@ Curves were added this way; use them as the worked example.
 ## Work modes
 
 The top bar switches between work modes (`AppMode` in `ui/appApi.ts`: annotate, measure,
-present, compare). A mode owns its tools and sidebar sections:
+retouch, present, compare; retouch only on a flake). A mode owns its tools and sidebar sections:
 `App.updateToolbar` shows the toolbar of the current mode, and `SECTIONS` in `ui/sidebar.ts`
 lists which modes show each section. Outside the annotate mode the select tool only navigates
 (`ToolContext.editable()`), and keys that change annotations are ignored. Switching modes
@@ -404,6 +404,15 @@ of the edge angles.
 
 `compute/retouchIndex.ts` is pure and takes no mesh edges or regions as such: `faceOf` says which part of the flake each triangle lies in, `pieceOfFace` and `pieces` which are in a retouch layer, so tests hand them over triangle by triangle. `compute/retouchAngle.ts` keeps what it cut: `retouchSectionsSteps` returns, beside the angles, each retouched station's two ways along the section (`StationSection`: polyline, triangle of each stretch, arc lengths) and the layers along them. These stay in memory, in `App.retouchResults`, and never reach the file, so a change of the fitted length refits without cutting the mesh again. `App.updateRetouchIndices` runs after the retouch layers (`updateRetouchAngles` schedules it) and on changes of the flake's data or the specimen, in slices and keyed by all it reads; the frame of the plan and its outline (`segmentFrameSteps`, `segmentOutlineSteps`, each a pass over the mesh) and the triangles' parts (`faceOfTrianglesSteps`) are kept while their own inputs stay. `RetouchIndexResult` holds what is stored (`indices`), and what is only for the screen: `reasons`, and `details`, per station, with the reason and the fit. The settings are `flake.retouch`, changed by `setRetouchFitLength`, `setRetouchAxis` and `setRetouchFlip`; in the state the key is absent while they are the default (`retouchSettingsOf`), a file always has it. The summary export reads `derived.retouchIndices`, as it does the retouch layers.
 
+## The retouch mode
+
+`App.retouching` is the mode on a flake with a model. Annotating stays in the annotate mode; here one tool, `tools/stationTool.ts`, moves the current station (`App.retouchStation`: a curve and a station number, view state, never in the file), which goes by itself to the largest missing area until the user moves it (`stationAuto`). `App.syncStation` runs at most once a frame (`queueStation`) and tells everything that shows the station: the section's line and the mark on the model, the section panel, the plan's mark (moved, not drawn again), the chart's line (`sidebar.refresh('station')`). A station with no layer keeps no section, so its section is cut when asked for (`sectionAtStation`, one cached).
+
+* **One drawing** (`render/retouchDrawing.ts`, no DOM): `sectionModel` lays a station's section out on the page's plane; `sectionDrawing` and `planDrawing` turn that and the plan into a list of primitives in a palette. The panels (`ui/retouchPanels.ts`) write them as SVG in `SCREEN_PALETTE` (the shell's variables, so the theme follows); an export takes the same primitives in `PRINT_PALETTE` to scale (`svgFile`, in mm), and `drawingPng` rasterises that SVG, or calls `drawPrims` on a canvas where the browser will not hand back one an SVG was drawn on.
+* **The plan** (`compute/retouchPlan.ts`, pure): `planShape` from the outline's cells; `planRegionsSteps` projects the borders of the retouch regions, not their triangles, so the drawing stays small on any scan. `segmentLinesSteps` gives the same lines on the model as level lines of a field over the vertices (`isoLines`), kept while the frame stays. `penetrationAt` runs on across the rows, so the line between the zones is one level line and closes by itself: on the model over the vertices, on the plan over a grid of the outline's cells (`levelRings`). `drawnOutline` closes notches of three cells or less for drawing only: a cell holds the furthest vertex that falls into it, so with rim vertices further apart than the cells the raw outline is a saw. The indices use the raw cells.
+* **The fitted length**: dragging its slider sets `App.fitPreview`, which `updateRetouchIndices` takes in place of the stored value, so the panels and the numbers follow with nothing written; letting go is one `setRetouchFitLength`. `removedVolumeCurveSteps` runs the stations' pass at each length of the small curve, again only when `retouchFitKey` (all the inputs but the length) changed.
+* **The chart**: `ui/edgeAngleChart.ts` takes an id prefix, a cursor and a press; the measure mode's shows distances, this mode's the layers, each with its own method and series (`edgeMethod`, `retouchMethod`). `syncEdgeColors` colours the selected curve in the measure mode and the station's curve here.
+
 ## Sharp edge
 
 `compute/sharpEdge.ts` is pure, and needs no mesh: the stretches come from the stored stations and the rule, so the summary export can judge every model by the folder's rule. `ProjectState.sharpEdge` is a Command like any other; in a folder `App.keepFolderSharp` copies it to `LithicAnalyst/sharp-edge.json` (read-only folder: `App.folderSharp` for the session, and in the ZIP of projects), and `applyProject` puts the folder's rule into each project opened, without marking it as edited. `ui/edgeAngleChart.ts` takes its lines as `ChartSeries`, built by the sidebar: distances in categorical hues, retouch layers in one ordered hue with dashes.
@@ -571,7 +580,7 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   its own copy.
 * `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
-  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices. The longest stretch is what
+  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The longest stretch is what
   design principle 10 limits to about 100 ms.
 
 ## Hosting
