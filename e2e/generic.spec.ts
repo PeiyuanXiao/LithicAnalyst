@@ -3,8 +3,7 @@ import { boxPly, boxPoint } from './fixtures/meshes';
 import { curveClick, displayPanel, dragArrow, expect, loadMesh, nextFrames, openApp, openSection, specimenPanel, state, test, toScreen, viewFromTop } from './helpers';
 
 async function openGeneric(page: Page): Promise<void> {
-  await openApp(page);
-  await page.locator('#start-type-generic').click();
+  await openApp(page, 'generic');
   await loadMesh(page, boxPly());
   await viewFromTop(page);
 }

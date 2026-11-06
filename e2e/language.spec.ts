@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { roofPly, roofPoint } from './fixtures/meshes';
-import { dragArrow, expect, exportFile, loadMesh, openApp, test, viewFromTop } from './helpers';
+import { dragArrow, expect, exportFile, loadMesh, openApp, test, viewFromTop, enterModule } from './helpers';
 
 /** Choose a language in the language menu of the top bar. */
 async function chooseLang(page: Page, code: 'en' | 'zh'): Promise<void> {
@@ -50,12 +50,14 @@ test.describe('in a Chinese browser', () => {
     // the choice is kept
     await page.reload();
     await page.waitForFunction(() => !!window.lithicanalyst);
+    await enterModule(page);
     await expect(page.locator('#empty-open')).toHaveText('打开模型');
     await chooseLang(page, 'en');
     await expect(page.locator('#empty-open')).toHaveText('Open model');
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await page.reload();
     await page.waitForFunction(() => !!window.lithicanalyst);
+    await enterModule(page);
     await expect(page.locator('#btn-lang')).toHaveText('EN');
   });
 });

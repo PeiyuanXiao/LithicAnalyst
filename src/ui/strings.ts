@@ -12,6 +12,7 @@ export const STRINGS = {
   'header.redo': { zh: '重做', en: 'Redo' },
   'header.help': { zh: '快捷键', en: 'Shortcuts' },
   'header.language': { zh: '语言', en: 'Language' },
+  'start.switchLang': { zh: '切换到中文', en: 'Switch to English' },
   'theme.dark': { zh: '深色外观', en: 'Dark appearance' },
   'theme.light': { zh: '浅色外观', en: 'Light appearance' },
 

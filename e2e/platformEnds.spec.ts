@@ -10,8 +10,7 @@ const measures = async (page: Page) => (await page.evaluate(() => window.lithica
 const pill = (page: Page, key: string) => page.locator(`#status-${key}`);
 
 async function openFlake(page: Page): Promise<void> {
-  await openApp(page);
-  await page.locator('#start-type-flake').click();
+  await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
 }
 
@@ -253,8 +252,7 @@ test('a project file from before they followed the curves: its own ends stay; wi
 });
 
 test('on the realistic flake, its curves following the ridges, they give the platform width', async ({ page }) => {
-  await openApp(page);
-  await page.locator('#start-type-flake').click();
+  await openApp(page, 'flake');
   await loadMesh(page, t6Ply(14));
   await page.evaluate(() => window.lithicanalyst.snap.prepare('ridge'));
   // the axis, half a millimetre from the platform's edge

@@ -98,6 +98,8 @@ export interface LithicApi {
   borderLines(): number;
   viewTarget(): Vec3 | null;
   closeModel(): Promise<void>;
+  /** The module the workspace is in; null on the start page. */
+  module(): 'core' | 'flake' | 'generic' | null;
   openFolderHandle(handle: never): Promise<void>;
   specimenIds(): Record<string, string>;
   workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<'core' | 'flake' | 'generic' | null>; completion: Array<{ done: number; total: number } | null>; undownloaded: number } | null;
@@ -157,14 +159,25 @@ export const test = base.extend<{ pageErrors: string[] }>({
 
 export { expect };
 
-/** Open the built app and wait until it has started with a working WebGL view. */
-export async function openApp(page: Page): Promise<void> {
-  // the web fonts are a nicety; tests run offline
-  await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (r) => r.abort());
+/** Open the built app and wait until it has started with a working WebGL view: it is on its start page. */
+export async function openStart(page: Page): Promise<void> {
   await page.goto(APP_URL);
   await page.waitForFunction(() => !!window.lithicanalyst);
   await expect(page.locator('.vp-error')).toHaveCount(0);
   await expect(page.locator('canvas.viewport-canvas')).toBeVisible();
+  await expect(page.locator('#start-page')).toBeVisible();
+}
+
+/** From the start page into a module: `type`, or the one last chosen (its card has the focus). */
+export async function enterModule(page: Page, type?: 'core' | 'flake' | 'generic'): Promise<void> {
+  await page.locator(type ? `#start-type-${type}` : '.start-card:focus').click();
+  await expect(page.locator('#start-page')).toBeHidden();
+}
+
+/** Open the built app and go into a module: `type`, or the one last chosen. */
+export async function openApp(page: Page, type?: 'core' | 'flake' | 'generic'): Promise<void> {
+  await openStart(page);
+  await enterModule(page, type);
 }
 
 /** Choose an item of the File menu in the top bar (#btn-open, #btn-open-project, #btn-open-folder). */

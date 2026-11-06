@@ -51,6 +51,8 @@
   --radius: 6px;
   --radius-lg: 9px;
   --sidebar-w: 368px;
+  /* where the logo's point cloud ends */
+  --la-cloud: currentColor;
   --gutter-l: max(16px, env(safe-area-inset-left, 0px));
   --gutter-r: max(16px, env(safe-area-inset-right, 0px));
 }
@@ -90,6 +92,7 @@
   --cfg-flaking: #8dbd99;
   --cfg-platform: #e2c486;
   --cfg-none: #8f948f;
+  --la-cloud: #f2a33a;
   color-scheme: dark;
 }
 
@@ -202,28 +205,29 @@ kbd {
 
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
   flex: none;
 }
 
-.brand-name {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: var(--step-2);
-  letter-spacing: 0.01em;
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  flex: none;
 }
 
-.brand-ver {
-  color: var(--ink-2);
-  font-size: 11px;
+/* the wordmark's outlines at 18px to the em (see scripts/gen-wordmark.py) */
+.brand-wm {
+  width: calc(18px * 5.302);
+  height: calc(18px * 0.949);
+  flex: none;
 }
 
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 8px 14px;
+  gap: 8px 12px;
   min-width: 0;
 }
 
@@ -906,78 +910,659 @@ kbd {
   display: none;
 }
 
-/* no model: the view and the sidebar give way to this */
-.start-page {
+/* no model: the ways to open one, in the middle of the view */
+.vp-empty {
   position: absolute;
   inset: 0;
-  z-index: 40;
-  overflow: auto;
-  display: flex;
-  background: linear-gradient(to bottom, var(--viewport-bg-top), var(--viewport-bg-bottom));
-}
-
-.start-body {
-  margin: auto;
-  padding: 24px 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.start-cards {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.start-card {
-  width: 148px;
-  height: 132px;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--overlay);
-  color: var(--ink-2);
-  font-size: var(--step-1);
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  gap: 14px;
+  pointer-events: none;
 }
 
-.start-card:hover:not([aria-checked="true"]) {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--ink) 6%, var(--overlay));
+.vp-empty .btn {
+  pointer-events: auto;
 }
 
-.start-card[aria-checked="true"] {
-  background: var(--accent-soft);
-  border-color: transparent;
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-  color: var(--ink);
+.vp-empty .btn-primary {
+  border-color: var(--accent-line);
 }
 
-.start-card svg {
-  width: 44px;
-  height: 44px;
-}
-
-.start-row {
+.vp-empty-row {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
 }
 
-.start-formats {
+.vp-empty-row .btn {
+  min-height: 38px;
+  padding-inline: 16px;
+}
+
+.vp-empty-formats {
   font-size: var(--step--1);
   color: var(--viewport-ink-2);
   letter-spacing: 0.06em;
+}
+
+/* ------------------------------------------------------------ start page
+   As design/brand-22a/startpage-reference.html has it: its colours, sizes, easings and delays. It has its own palette, on top of the shell's. */
+.start-page {
+  --bg-top: #f0ebe0;
+  --bg-bot: #dcd4c1;
+  --ink: #1f1d19;
+  --ink-2: #4f4a3f;
+  --ink-3: #5f594c;
+  --grid: rgba(80, 96, 108, 0.11);
+  --ring: rgba(31, 29, 25, 0.08);
+  --ring-2: rgba(31, 29, 25, 0.15);
+  --card-top: #f8f4eb;
+  --card-bot: #e9e2d2;
+  --card-edge: rgba(31, 29, 25, 0.13);
+  --card-hi: rgba(255, 255, 255, 0.85);
+  --ghost: rgba(31, 29, 25, 0.055);
+  --disc-c: #fffdf8;
+  --disc-e: #e4dccb;
+  --disc-ring: rgba(31, 29, 25, 0.12);
+  --pict: #1f1d19;
+  --dot: #e8a33a;
+  --shadow: 0 2px 4px rgba(60, 50, 30, 0.1), 0 24px 46px -18px rgba(60, 50, 30, 0.38);
+  --shadow-h: 0 4px 10px rgba(60, 50, 30, 0.12), 0 40px 64px -20px rgba(60, 50, 30, 0.5);
+  --accent: #e8a33a;
+  --accent-2: #d9792a;
+  --on-accent: #1a1408;
+  --hover-disc: #fbf1dc;
+  --s1: #3f7f78;
+  --s2: #e8a33a;
+  --s3: #d4572a;
+  --s4: #8f2d24;
+  --btn-h: rgba(31, 29, 25, 0.07);
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: auto;
+  line-height: normal;
+}
+
+:root[data-theme="dark"] .start-page {
+  --bg-top: #262928;
+  --bg-bot: #121413;
+  --ink: #e6e2d6;
+  --ink-2: #b5b1a4;
+  --ink-3: #9a9689;
+  --grid: rgba(230, 226, 214, 0.05);
+  --ring: rgba(230, 226, 214, 0.06);
+  --ring-2: rgba(230, 226, 214, 0.12);
+  --card-top: #2c302e;
+  --card-bot: #1b1e1d;
+  --card-edge: rgba(255, 255, 255, 0.07);
+  --card-hi: rgba(255, 255, 255, 0.08);
+  --ghost: rgba(230, 226, 214, 0.045);
+  --disc-c: #3d4240;
+  --disc-e: #1c1f1e;
+  --disc-ring: rgba(230, 226, 214, 0.1);
+  --pict: #e6e2d6;
+  --dot: #f2a33a;
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.45), 0 26px 50px -18px rgba(0, 0, 0, 0.75);
+  --shadow-h: 0 4px 10px rgba(0, 0, 0, 0.5), 0 42px 70px -20px rgba(0, 0, 0, 0.85);
+  --accent: #f2a33a;
+  --accent-2: #de7a2b;
+  --btn-h: rgba(230, 226, 214, 0.08);
+}
+
+.start-root {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 92px;
+  padding: 84px 48px 72px;
+  background: linear-gradient(180deg, var(--bg-top), var(--bg-bot));
+  color: var(--ink);
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+
+.start-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 34%, #000 0%, transparent 100%);
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 34%, #000 0%, transparent 100%);
+  pointer-events: none;
+}
+
+.start-rings {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  width: 1500px;
+  height: 1500px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(circle, #000 30%, transparent 66%);
+  mask-image: radial-gradient(circle, #000 30%, transparent 66%);
+}
+
+.start-rings svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.start-ctls {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  display: flex;
+  gap: 4px;
+}
+
+.start-ctl {
+  height: 32px;
+  min-width: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--font-data);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.start-ctl:hover {
+  background: var(--btn-h);
+  color: var(--ink);
+}
+
+.start-ctl:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.start-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+}
+
+.start-logo {
+  width: 188px;
+  height: 188px;
+  flex: none;
+  color: var(--ink);
+}
+
+.start-title {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* The box of a line of the wordmark, at its size, with the outlines where its text would be (see scripts/gen-wordmark.py). Its y hangs below the box. */
+.start-wm {
+  position: relative;
+  font-size: 108px;
+  width: 5.398em;
+  height: 0.9em;
+  color: var(--ink);
+}
+
+.start-wm svg {
+  position: absolute;
+  left: 0.068em;
+  top: 0.076em;
+  width: 5.302em;
+  height: 0.949em;
+}
+
+.start-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.start-bar {
+  flex: 1;
+  display: flex;
+  gap: 3px;
+  height: 6px;
+}
+
+.start-bar > span,
+.start-stripe > span {
+  display: block;
+}
+
+.start-bar > :nth-child(1),
+.start-stripe > :nth-child(1) {
+  flex: 38;
+  background: var(--s1);
+}
+
+.start-bar > :nth-child(2),
+.start-stripe > :nth-child(2) {
+  flex: 22;
+  background: var(--s2);
+}
+
+.start-bar > :nth-child(3),
+.start-stripe > :nth-child(3) {
+  flex: 25;
+  background: var(--s3);
+}
+
+.start-bar > :nth-child(4),
+.start-stripe > :nth-child(4) {
+  flex: 15;
+  background: var(--s4);
+}
+
+.start-version {
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.start-cards {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 26px;
+  width: 100%;
+  max-width: 1120px;
+}
+
+.start-card-wrap {
+  display: flex;
+}
+
+.start-card {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 234px;
+  padding: 0;
+  border: 1px solid var(--card-edge);
+  border-radius: 4px;
+  background: linear-gradient(160deg, var(--card-top), var(--card-bot));
+  box-shadow: var(--shadow), inset 0 1px 0 var(--card-hi);
+  overflow: hidden;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.4s, color 0.3s;
+}
+
+.start-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, var(--accent), var(--accent-2));
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+
+/* a line of text 118px high and 0.8 of that tall, as outlines */
+.start-ghost {
+  position: absolute;
+  left: 16px;
+  bottom: 2px;
+  color: var(--ghost);
+  transition: transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1), color 0.35s;
+}
+
+.start-ghost svg {
+  display: block;
+  height: 94.4px;
+  width: auto;
+}
+
+.start-disc {
+  position: absolute;
+  right: -40px;
+  top: 50%;
+  margin-top: -130px;
+  width: 260px;
+  height: 260px;
+  overflow: visible;
+}
+
+.start-hdisc {
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+
+.start-rings-small {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 1.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.start-pict {
+  color: var(--pict);
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.start-card .pc {
+  transition: fill-opacity 0.4s ease;
+}
+
+.start-card .ndl {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  transform: scaleX(0);
+  transition: transform 0.25s ease;
+}
+
+.start-card .ring {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transform: scale(0.3);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.start-card .solid {
+  transition: opacity 0.35s;
+}
+
+.start-card .wire {
+  opacity: 0;
+  transition: opacity 0.35s 0.1s;
+}
+
+.start-card .lmk {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transform: scale(0);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.start-card .mer,
+.start-card .mer2 {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+.start-card-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 26px 28px 30px;
+}
+
+.start-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.start-card-name {
+  font-family: var(--font-display);
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.start-dots {
+  margin-top: 6px;
+  flex: none;
+}
+
+.start-enter {
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.start-stripe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  display: flex;
+  z-index: 1;
+  transition: height 0.25s;
+}
+
+/* a press, or the keyboard's focus; not the focus a card is given when the page comes up */
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) {
+  transform: translateY(-8px);
+  box-shadow: var(--shadow-h), inset 0 1px 0 var(--card-hi);
+  color: var(--on-accent);
+  --pict: #1f1d19;
+  --disc-ring: rgba(26, 20, 8, 0.2);
+  --dot: #1a1408;
+}
+
+.start-page:not(.quiet-focus) .start-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.start-page.quiet-focus .start-card:focus-visible {
+  outline: none;
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .start-fill,
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .start-hdisc,
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .wire {
+  opacity: 1;
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .start-ghost {
+  transform: translateX(16px);
+  color: rgba(26, 20, 8, 0.11);
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .start-rings-small {
+  transform: rotate(40deg) scale(1.05);
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .start-pict {
+  transform: scale(1.04);
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .pc {
+  fill-opacity: 0.14;
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .ndl {
+  transform: none;
+  transition: transform 0.42s cubic-bezier(0.55, 0, 0.15, 1) calc(var(--d) + 0.08s);
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .ring {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.2s var(--d), transform 0.3s cubic-bezier(0.3, 1.6, 0.5, 1) var(--d);
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .solid {
+  opacity: 0;
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .lmk {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.2s var(--d), transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1) var(--d);
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .start-enter {
+  opacity: 1;
+  transform: none;
+}
+
+.start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .start-stripe {
+  height: 7px;
+}
+
+@media (max-width: 980px) {
+  .start-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .start-wm {
+    font-size: 64px;
+  }
+  .start-logo {
+    width: 112px;
+    height: 112px;
+  }
+}
+
+/* (the reference has nothing for a phone: the logo over the name, and the shell's gutter) */
+@media (max-width: 600px) {
+  .start-root {
+    padding-inline: 16px;
+  }
+  .start-hero {
+    flex-direction: column;
+  }
+}
+
+/* The entrance plays while .is-entering is on, once a session; the rings turn all the time. With reduced motion, neither: everything is where it ends. */
+@media (prefers-reduced-motion: no-preference) {
+  .is-entering .st-in {
+    opacity: 0;
+    transform: translateY(28px);
+    animation: st-in 0.85s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .is-entering .st-grow {
+    transform: scaleX(0);
+    transform-origin: left;
+    animation: st-grow 0.45s cubic-bezier(0.6, 0, 0.2, 1) forwards;
+  }
+  .is-entering .st-wipe {
+    clip-path: inset(0 100% 0 0);
+    animation: st-wipe 0.9s cubic-bezier(0.6, 0, 0.2, 1) forwards;
+  }
+  .is-entering .st-bgin {
+    opacity: 0;
+    animation: st-bgin 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .is-entering .st-fade {
+    opacity: 0;
+    animation: st-fade 0.7s ease forwards;
+  }
+  .start-page .st-spin {
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+    animation: st-spin 240s linear infinite;
+  }
+  .start-page .st-spin-r {
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+    animation: st-spin 320s linear infinite reverse;
+  }
+  .is-entering .fx-c {
+    opacity: 0;
+    transform: translateY(-12px);
+    animation: st-fxin 0.75s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .is-entering .fx-l {
+    opacity: 0;
+    transform: translate(-10px, -5px);
+    animation: st-fxin 0.75s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .is-entering .fx-r {
+    opacity: 0;
+    transform: translate(10px, -5px);
+    animation: st-fxin 0.75s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .is-entering .fx-m {
+    opacity: 0;
+    transform: translateY(-6px);
+    animation: st-fxin 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .is-entering .fx-p {
+    opacity: 0;
+    animation: st-fade 0.7s ease forwards;
+  }
+  .start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .mer {
+    animation: st-mer 2.4s ease-in-out 0.4s infinite;
+  }
+  .start-card:is(:hover, .start-page:not(.quiet-focus) :focus-visible) .mer2 {
+    animation: st-mer 2.4s ease-in-out 1.6s infinite;
+  }
+}
+
+@keyframes st-in {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes st-grow {
+  to {
+    transform: none;
+  }
+}
+
+@keyframes st-wipe {
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes st-bgin {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes st-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes st-fxin {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes st-mer {
+  0%,
+  100% {
+    transform: scaleX(1);
+  }
+  50% {
+    transform: scaleX(0.12);
+  }
 }
 
 .btn-lg {
@@ -2083,6 +2668,9 @@ input[type="checkbox"]:disabled {
 }
 
 @media (max-width: 480px) {
+  .brand-wm {
+    display: none;
+  }
   .ctl-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3770,8 +4358,5 @@ input[type="checkbox"]:disabled {
 @media (max-width: 1420px) {
   .mode-btn {
     padding-inline: 8px;
-  }
-  .brand-ver {
-    display: none;
   }
 }

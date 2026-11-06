@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import type { ConfigFace } from '../src/core/fields';
 import { columnPly, columnPoint } from './fixtures/meshes';
-import { displayPanel, dragArrow, expect, exportFile, fileMenu, loadMesh, nextFrames, openApp, parseCsv, state, test, viewFromTop } from './helpers';
+import { displayPanel, dragArrow, expect, exportFile, fileMenu, loadMesh, nextFrames, openApp, parseCsv, state, test, viewFromTop, enterModule } from './helpers';
 
 const config = (page: Page) => page.evaluate(() => window.lithicanalyst.configuration());
 
@@ -181,6 +181,7 @@ test('the panel: switched on in the display settings, moved, folded, kept inside
   expect((await page.evaluate(() => window.lithicanalyst.projectJson())) as unknown as Record<string, unknown>).not.toHaveProperty('configPanel');
   await page.reload();
   await page.waitForFunction(() => !!window.lithicanalyst);
+  await enterModule(page);
   const chooser = page.waitForEvent('filechooser');
   await fileMenu(page, '#btn-open');
   await (await chooser).setFiles(columnPly());

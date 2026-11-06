@@ -26,8 +26,7 @@ async function trace(page: Page, points: Vec3[], close: boolean): Promise<void> 
 }
 
 test('a flake from blank: each pill turns as what it stands for is made, and a click on it goes there', async ({ page }) => {
-  await openApp(page);
-  await page.locator('#start-type-flake').click();
+  await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
   await setUnit(page, '');
 

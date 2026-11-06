@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { roofPly, roofPoint } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, openSection, setAnnotator, setUnit, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
+import { counts, curveClick, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, openSection, setAnnotator, setUnit, state, test, toScreen, viewFromTop, waitForMesh, enterModule } from './helpers';
 
 /** One arrow and one curve, with fields and specimen details filled in. */
 async function annotate(page: Page): Promise<void> {
@@ -103,6 +103,7 @@ test('offers to restore the autosave when the model is opened again', async ({ p
 
   await page.reload();
   await page.waitForFunction(() => !!window.lithicanalyst);
+  await enterModule(page);
   const chooser = page.waitForEvent('filechooser');
   await fileMenu(page, '#btn-open');
   await (await chooser).setFiles(ply);

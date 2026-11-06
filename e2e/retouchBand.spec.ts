@@ -26,8 +26,7 @@ async function trace(page: Page, points: Vec3[], close = false): Promise<void> {
 
 /** T1 as a flake: its axis, the outline round the platform, the edge. */
 async function annotated(page: Page): Promise<void> {
-  await openApp(page);
-  await page.locator('#start-type-flake').click();
+  await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
   await nextFrames(page);

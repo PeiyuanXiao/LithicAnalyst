@@ -2,15 +2,13 @@ import type { Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { boxPly, boxPoint } from './fixtures/meshes';
-import { download, dragArrow, expect, fileMenu, loadMesh, openApp, state, test, viewFromTop } from './helpers';
+import { download, dragArrow, enterModule, expect, fileMenu, loadMesh, openApp, state, test, viewFromTop } from './helpers';
 
 const close = async (page: Page) => fileMenu(page, '#btn-close-model');
 
 async function expectEmpty(page: Page): Promise<void> {
-  await expect(page.locator('#empty-open')).toBeVisible();
-  // one main button: the view's Open model (File stays quiet)
-  await expect(page.locator('#empty-open')).toHaveClass(/btn-primary/);
-  await expect(page.locator('#btn-file')).not.toHaveClass(/btn-primary/);
+  await expect(page.locator('#start-page')).toBeVisible();
+  await expect(page.locator('#empty-open')).toBeHidden();
   const st = await state(page);
   expect([st.mesh, st.scars.length]).toEqual([null, 0]);
   expect(await page.evaluate(() => window.lithicanalyst.selection())).toBeNull();
@@ -18,15 +16,15 @@ async function expectEmpty(page: Page): Promise<void> {
   await expect(page.locator('#specimen-bar')).toBeHidden();
   await expect(page.locator('.vp-toolbar')).toBeHidden();
   await expect(page.locator('#sidebar details.panel:visible')).toHaveCount(0);
+  // from there, the empty view has one main button: its Open model (File stays quiet)
+  await enterModule(page);
+  await expect(page.locator('#empty-open')).toHaveClass(/btn-primary/);
+  await expect(page.locator('#btn-file')).not.toHaveClass(/btn-primary/);
+  await expect(page.locator('#btn-save-project')).toBeDisabled();
 }
 
 test('closes the model: the empty view again, with nothing left of it', async ({ page }) => {
   await openApp(page);
-  // nothing to close yet
-  await page.locator('#btn-file').click();
-  await expect(page.locator('#btn-close-model')).toBeDisabled();
-  await page.keyboard.press('Escape');
-
   await loadMesh(page, boxPly());
   await viewFromTop(page);
   await page.keyboard.press('a');

@@ -121,7 +121,7 @@ keeps the selection and the undo history.
   object opens its section and scrolls its inspector to the top (lists scroll only themselves;
   the narrow layout, where the whole work area scrolls, is left alone). Sections that cannot be
   used are hidden (`Section.visible`); without a model the sidebar is empty but for the folder's
-  list while a folder is open (otherwise the start page stands over it, see below). The data exports
+  list while a folder is open. The data exports
   of a mode are one dialog (`App.openExport`, files from `App.exportables`; several files go
   into a stored ZIP, `io/zip.ts`).
 * **Top bar**: the specimen button (ID and unit; its panel holds ID, unit, annotator, notes and
@@ -142,7 +142,11 @@ keeps the selection and the undo history.
 
 ## Start page
 
-`App.buildStartPage` fills `#start-page`, an element over the view and the sidebar (a child of `.workspace`, above the resizer and below the top bar's menus), shown while there is no model and no folder (`App.startShown`). The view stays under it at its size: nothing has to be set up again when a model opens, and the WebGL canvas is never 0×0. The cards write the `specimenType` preference, which `App.newSpecimenType` reads for a new model and which the specimen panel also writes; a project applied later (`applyProject`) brings its own type. While it is shown the drop outline (`dropEl`) and the busy overlay (`openMeshFile`) go on it, since what is under it cannot be seen. The mode switch is hidden with no model (`updateMeshDependentUi`); `.top-actions` holds the grid's last column, so it stays put.
+`ui/startPage.ts` builds `#start-page`, once: a child of `.app` over everything (fixed, below the dialogs, the toasts and the tooltips); a change of language or theme only repaints its words and its icon (`StartPage.paint`), so the entrance, the focus and the drop outline stay. It is shown until a card is pressed or a model or a folder opens (`App.startShown`; `App.entered` is view state, never in the file). While it is shown the top bar is hidden, `main` is inert and the app's keys are off, so a card's Enter and Space are its own; the view stays under it at its size, so nothing has to be set up again when a model opens, and the WebGL canvas is never 0×0. The cards write the `specimenType` preference, which `App.newSpecimenType` reads for a new model and which the specimen panel also writes; the state's own type changes only with a model, and a project applied later (`applyProject`) brings its own. While it is shown the drop outline (`dropEl`) and the busy overlay (`openMeshFile`) go on it, since what is under it cannot be seen. `App.buildEmptyView` fills `#viewport-empty`, the ways to open something in the middle of the view, shown in the workspace with no model and no folder. The mode switch is hidden with no model (`updateMeshDependentUi`); `.top-actions` holds the grid's last column, so it stays put. `App.closeModel` clears `entered`, with or without a model.
+
+* **Motion.** The page's styles come from `design/brand-22a/startpage-reference.html`, with its own palette on `.start-page`. The entrance's animations apply under `.is-entering`, which `StartPage.leave` takes off for good, so the base state is the end state and there is nothing to undo; the rings' turning and the cards' hover states are apart from it. The rules that stop all motion under `prefers-reduced-motion` cover it.
+* **The focus.** A card pressed or reached by keyboard looks the same (`:is(:hover, … :focus-visible)`). A browser counts the focus a script gives on opening as visible, which would light the last card with nothing done, so `.quiet-focus` holds that back until the first Tab.
+* **The brand.** `src/assets/brand/` holds the drawings, inlined with `?raw` (`ui/brand.ts`). Each copy goes through `brandSvg`, which makes the placeholder `LAID` of its ids and `url(#…)` a prefix of its own (`brandEl`, `brandInner` for an icon placed in a card's disc). The wordmark and the ghost words are outlines from `scripts/gen-wordmark.py`, which is run by hand and whose output is committed: `.start-wm` and `.start-ghost` give them the box of the line of text they replace (in em, from what the script prints), so the layout is that of the text. `vite.config.ts` puts the small logo into the page's head as a data URI, in a fixed ink, which is why the icon needs no script.
 
 ## Annotation status
 
@@ -623,7 +627,7 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
 
 ## Hosting
 
-The IBM Plex fonts (SIL OFL 1.1) come from `@fontsource`: `src/fonts.css` declares only the Latin
+The wordmark and the cards' ghost words are outlines of IBM Plex Sans Condensed (SIL OFL 1.1), made once from the official release (`scripts/gen-wordmark.py`, no font file in the repository). The IBM Plex fonts (SIL OFL 1.1) come from `@fontsource`: `src/fonts.css` declares only the Latin
 subset of the weights the interface uses, and the build inlines them, so the page requests
 no font server. Chinese text uses the system fonts.
 

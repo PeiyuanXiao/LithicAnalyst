@@ -1,5 +1,5 @@
 import { roofPly, roofPoint } from './fixtures/meshes';
-import { counts, curveClick, dragArrow, expect, loadMesh, openApp, state, test, toScreen, viewFromTop } from './helpers';
+import { counts, curveClick, dragArrow, expect, loadMesh, openApp, state, test, toScreen, viewFromTop, enterModule } from './helpers';
 
 const sections = ['arrows', 'curves', 'measure-auto', 'orientation', 'observers'] as const;
 
@@ -74,6 +74,7 @@ test('each mode shows its own tools and sections; switching keeps the selection 
   // the mode is remembered
   await page.reload();
   await page.waitForFunction(() => !!window.lithicanalyst);
+  await enterModule(page);
   await expect(page.locator('#app-mode-measure')).toHaveAttribute('aria-checked', 'true');
 
   await page.keyboard.press('?');

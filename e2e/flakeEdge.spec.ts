@@ -11,8 +11,7 @@ const OUTLINE: Vec3[] = [[-14.8, -0.04, 0.2], [14.8, -0.04, 0.2], [14.8, -1.96, 
 const EDGE: Vec3[] = [[-14.7, 0.3, 0], [-14.7, 59.7, 0], [14.7, 59.7, 0], [14.7, 0.3, 0]];
 
 async function openFlake(page: Page): Promise<void> {
-  await openApp(page);
-  await page.locator('#start-type-flake').click();
+  await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
 }
 

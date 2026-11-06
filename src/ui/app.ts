@@ -104,8 +104,10 @@ import { floatingPanel } from './floatingPanel';
 import { Popovers, onViewport } from './popover';
 import { clear, h, icon, icon20, ICONS, ICONS20 } from './dom';
 import { Feedback } from './feedback';
+import { BRAND, brandEl } from './brand';
 import { getLang, htmlLang, langInfo, LANGS, onLangChange, setLang, t } from './i18n';
 import { buildSidebar, type RefreshKind, type Sidebar } from './sidebar';
+import { buildStartPage, type StartPage } from './startPage';
 import { getTheme, onThemeChange, toggleTheme } from './theme';
 import { tip, tips } from './tooltip';
 
@@ -393,7 +395,14 @@ export class App implements AppApi {
   private header!: HTMLElement;
   private readonly viewportEl: HTMLElement;
   private readonly toolbarEl: HTMLElement;
+  private readonly startPage: StartPage;
   private readonly startEl: HTMLElement;
+  /** The ways to open something, in the middle of the empty view. */
+  private readonly emptyEl: HTMLElement;
+  private mainEl!: HTMLElement;
+  /** A module has been chosen: the workspace shows, with or without a model. */
+  private entered = false;
+  private startOnScreen = false;
   private readonly statusEl: HTMLElement;
   private statusKey = '';
   /** A narrow view's pills are open because the pointer is over them. */
@@ -546,7 +555,9 @@ export class App implements AppApi {
     this.appEl = h('div', { class: 'app' });
     this.viewportEl = h('section', { class: 'viewport', id: 'viewport', 'data-mode': this.mode });
     this.toolbarEl = h('div', { class: 'viewport-ui vp-toolbar' });
-    this.startEl = h('div', { class: 'start-page', id: 'start-page' });
+    this.startPage = buildStartPage((type) => this.enterModule(type));
+    this.startEl = this.startPage.el;
+    this.emptyEl = h('div', { class: 'vp-empty', id: 'viewport-empty', hidden: true });
     this.statusEl = h('div', { class: 'viewport-ui status-pills', id: 'annotation-status', role: 'group', hidden: true });
     this.coordEl = h('span', { class: 'viewport-ui status-coords mono', id: 'status-coords' });
     this.dropEl = h('div', { class: 'drop-overlay', hidden: true }, icon(ICONS.open));
@@ -564,6 +575,7 @@ export class App implements AppApi {
     initHostDownloads();
     this.header = this.buildHeader();
     const main = h('main', { class: 'workspace' }, this.viewportEl, this.sidebar.el);
+    this.mainEl = main;
     this.buildSidebarResizer(main);
     this.appEl.prepend(this.header, main);
     this.appEl.append(this.meshInput, this.projectInput, this.compareInput, this.folderInput);
@@ -588,8 +600,8 @@ export class App implements AppApi {
     const viewer = this.viewer;
     // corner marks of the view (decoration; not part of figures, which are rendered apart)
     const corners = (['tl', 'tr', 'bl', 'br'] as const).map((c) => h('span', { class: `vp-corner vp-corner-${c}`, 'aria-hidden': 'true' }));
-    this.viewportEl.append(...corners, this.toolbarEl, this.statusEl, this.coordEl, this.dropEl);
-    main.append(this.startEl);
+    this.viewportEl.append(...corners, this.emptyEl, this.toolbarEl, this.statusEl, this.coordEl, this.dropEl);
+    this.appEl.append(this.startEl);
     new ResizeObserver(() => this.fitStatus()).observe(this.viewportEl);
     this.statusEl.addEventListener('pointerenter', (e) => {
       if (e.pointerType === 'touch' || !this.statusEl.classList.contains('is-collapsed')) return;
@@ -708,7 +720,7 @@ export class App implements AppApi {
     };
 
     this.buildToolbar();
-    this.buildStartPage();
+    this.buildEmptyView();
     this.buildHarrisPanel();
     this.buildConfigPanel();
     this.buildProfilePanel();
@@ -739,6 +751,7 @@ export class App implements AppApi {
     onLangChange(() => this.rebuildChrome());
     onThemeChange(() => {
       this.paintThemeButton();
+      this.startPage.paint();
       // the configuration's colours are the theme's
       this.viewCube?.repaint();
       this.sketch?.repaint();
@@ -764,7 +777,7 @@ export class App implements AppApi {
   // ------------------------------------------------------------ chrome
 
   /**
-   * Top bar: name and version, the specimen; the modes in the middle; File, Save, undo
+   * Top bar: the logo and the name, the specimen; the modes in the middle; File, Save, undo
    * and redo, language, appearance and shortcuts. Icon buttons have tooltips, no titles.
    */
   private buildHeader(): HTMLElement {
@@ -829,7 +842,7 @@ export class App implements AppApi {
       h(
         'div',
         { class: 'topbar-left' },
-        h('div', { class: 'brand' }, h('span', { class: 'brand-name' }, 'LithicAnalyst'), h('span', { class: 'brand-ver mono' }, `v${__APP_VERSION__}`)),
+        h('div', { class: 'brand' }, brandEl(BRAND.logoSmall, 'brand-logo'), brandEl(BRAND.wordmark, 'brand-wm')),
         this.specimenBar,
       ),
       this.appModeSeg.el,
@@ -1159,57 +1172,45 @@ export class App implements AppApi {
     return SPECIMEN_TYPES.find((x) => x === pref) ?? fallback;
   }
 
-  /** Without a model: what kind of specimen comes next, and open one (or a folder, or a project); dropping a file works too. */
-  private buildStartPage(): void {
-    clear(this.startEl);
-    const chosen = this.newSpecimenType();
-    const icons: Record<SpecimenType, string> = { core: ICONS20.specimenCore, flake: ICONS20.specimenFlake, generic: ICONS20.specimenGeneric };
-    const cards = SPECIMEN_TYPES.map((type) =>
-      h(
-        'button',
-        {
-          type: 'button',
-          class: 'start-card',
-          role: 'radio',
-          id: `start-type-${type}`,
-          'data-value': type,
-          'aria-checked': String(type === chosen),
-          onclick: () => {
-            writePref('specimenType', type);
-            for (const c of cards) c.setAttribute('aria-checked', String(c.dataset.value === type));
-          },
-        },
-        icon20(icons[type]),
-        h('span', { class: 'start-card-name' }, t(`specimen.type.${type}`)),
-      ),
-    );
-    this.startEl.append(
+  /** The empty view: open a model (or a folder, or a project); dropping a file works too. */
+  private buildEmptyView(): void {
+    clear(this.emptyEl);
+    this.emptyEl.append(
+      h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.open), t('header.openMesh')),
       h(
         'div',
-        { class: 'start-body' },
-        h('div', { class: 'start-cards', role: 'radiogroup', 'aria-label': t('field.specimenType') }, ...cards),
-        h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.cube), t('header.openMesh')),
-        h(
-          'div',
-          { class: 'start-row' },
-          h('button', { type: 'button', class: 'btn', id: 'empty-open-folder', onclick: () => void this.openFolder() }, icon(ICONS.open), t('header.openFolder')),
-          h('button', { type: 'button', class: 'btn', id: 'empty-open-project', onclick: () => this.openProject() }, icon(ICONS.project), t('header.openProject')),
-        ),
-        h('span', { class: 'start-formats mono' }, 'PLY · STL · OBJ'),
+        { class: 'vp-empty-row' },
+        h('button', { type: 'button', class: 'btn', id: 'empty-open-folder', onclick: () => void this.openFolder() }, t('header.openFolder')),
+        h('button', { type: 'button', class: 'btn', id: 'empty-open-project', onclick: () => this.openProject() }, t('header.openProject')),
       ),
+      h('span', { class: 'vp-empty-formats mono' }, 'PLY · STL · OBJ'),
     );
   }
 
-  /** The start page stands in for the view and the sidebar without a model; a folder open keeps its list, whatever became of its models. */
+  /** A card of the start page: what a new model will be, and on into the workspace. */
+  private enterModule(type: SpecimenType): void {
+    writePref('specimenType', type);
+    this.entered = true;
+    this.updateMeshDependentUi();
+  }
+
+  /** The start page until a module is chosen; a model dropped on it, or a folder open, leave it too. */
   private startShown(): boolean {
-    return !this.hasMesh() && !this.workspace;
+    return !this.entered && !this.hasMesh() && !this.workspace;
   }
 
   private updateStartPage(): void {
     const shown = this.startShown();
-    const chosen = this.newSpecimenType();
-    if (shown) for (const c of this.startEl.querySelectorAll<HTMLElement>('.start-card')) c.setAttribute('aria-checked', String(c.dataset.value === chosen));
     this.startEl.hidden = !shown;
+    // it has the whole window: nothing under it takes the focus, or the keys
+    this.header.hidden = shown;
+    this.mainEl.inert = shown;
+    this.emptyEl.hidden = shown || this.hasMesh() || !!this.workspace;
+    if (shown !== this.startOnScreen) {
+      this.startOnScreen = shown;
+      if (shown) this.startPage.show(this.newSpecimenType());
+      else this.startPage.leave();
+    }
     // a file dragged in is dropped on whichever is in front
     (shown ? this.startEl : this.viewportEl).append(this.dropEl);
   }
@@ -1316,7 +1317,8 @@ export class App implements AppApi {
     newSidebar.el.scrollTop = scroll;
     if (this.resizerEl) this.resizerEl.title = t('sidebar.resize');
     this.buildToolbar();
-    this.buildStartPage();
+    this.startPage.paint();
+    this.buildEmptyView();
     this.buildHarrisPanel();
     this.buildConfigPanel();
     this.buildProfilePanel();
@@ -1343,7 +1345,8 @@ export class App implements AppApi {
     if (this.appModeSeg) this.appModeSeg.el.hidden = !has;
     this.toolbarEl.hidden = !has;
     this.saveBtn.disabled = !has;
-    if (this.closeItem) this.closeItem.disabled = !has;
+    // (the empty view closes too, back to the choice of module)
+    if (this.closeItem) this.closeItem.disabled = !has && !!this.workspace;
     // File stays quiet (without a model the main button is the view's "Open model"); with one, Save is the main button
     this.saveBtn.classList.toggle('btn-primary', has);
     this.saveBtn.classList.toggle('btn-quiet', !has);
@@ -5720,12 +5723,19 @@ export class App implements AppApi {
   /**
    * Close the model: finish the tool's work and the pending saves, let go of the
    * model and its layers, the undo history, the selection and the observers
-   * compared with it, leave the folder, and show the empty view. Asks first only
+   * compared with it, leave the folder, and go back to the start page. Asks first only
    * when edits would be lost: a read-only folder with edits not downloaded, or
-   * an autosave that failed.
+   * an autosave that failed. With no model, only the last of that.
    */
   async closeModel(): Promise<void> {
-    if (!this.hasMesh() || this.batch) return;
+    if (this.batch) return;
+    if (!this.hasMesh()) {
+      if (this.workspace) return;
+      this.popovers.close();
+      this.entered = false;
+      this.updateMeshDependentUi();
+      return;
+    }
     this.popovers.close();
     this.relationChip?.close();
     this.tools?.cancel();
@@ -5756,6 +5766,7 @@ export class App implements AppApi {
     this.selection.set(null);
     this.store.reset(emptyProject());
     this.showNodule();
+    this.entered = false;
     this.updateMeshDependentUi();
     this.sidebar.refresh('all');
     this.queueCoords();
@@ -5948,6 +5959,8 @@ export class App implements AppApi {
   private wireKeyboard(): void {
     window.addEventListener('keydown', (e) => {
       if (document.querySelector('.modal-backdrop')) return;
+      // the start page's keys are its controls' own
+      if (this.startShown()) return;
       if (e.key === 'Escape' && this.popovers.close()) {
         e.preventDefault();
         return;
@@ -6283,7 +6296,7 @@ export class App implements AppApi {
         ['D / G / N', 'help.k.measure'],
         ['Backspace', 'help.k.back'],
       ]),
-      ...(this.isFlake()
+      ...((this.hasMesh() ? this.isFlake() : this.newSpecimenType() === 'flake')
         ? group(t('appMode.retouch'), [
             ['← / →', 'help.k.stationStep'],
             ['Shift+← / Shift+→', 'help.k.stationJump'],
@@ -6472,6 +6485,7 @@ export class App implements AppApi {
       /** The point the camera turns around. */
       viewTarget: (): Vec3 | null => (this.viewer ? [this.viewer.controls.target.x, this.viewer.controls.target.y, this.viewer.controls.target.z] : null),
       closeModel: () => this.closeModel(),
+      module: () => (this.startShown() ? null : this.hasMesh() ? this.store.state.specimen.type : this.newSpecimenType()),
       /** What the specimen has of what it is annotated with. */
       annotationStatus: () => annotationStatus(this.store.state, this.regions?.results ?? []),
       /** A platform end placed by hand at a point, on the outline, as in a file from before they followed the curves. */

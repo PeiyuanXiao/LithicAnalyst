@@ -104,8 +104,7 @@ test('a landmark keeps its size on the screen when the camera comes four times c
 });
 
 test('close up, a click right beside the point of percussion reaches the model, not the landmark', async ({ page }) => {
-  await openApp(page);
-  await page.locator('#start-type-flake').click();
+  await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
   // the axis puts the landmark at P
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
