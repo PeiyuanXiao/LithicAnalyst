@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { SnapMode } from '../compute/surfacePath';
-import { addCurve } from '../core/actions';
+import { addCurve, addCurveOfType } from '../core/actions';
 import { assembleCurve } from '../core/curveGeometry';
 import type { Vec3 } from '../core/types';
 import { draftCurveColor } from '../render/curveLayer';
@@ -301,7 +301,9 @@ export class DrawCurveTool implements Tool {
     const { points, anchorIndex } = assembleCurve(this.segments, closed);
     const anchors = this.anchors.map((a) => a.p);
     this.reset();
-    const curve = addCurve(this.ctx.store, { anchors, points, anchorIndex, closed });
+    const type = this.ctx.takeNextCurveType();
+    const shape = { anchors, points, anchorIndex, closed };
+    const curve = type ? addCurveOfType(this.ctx.store, shape, type) : addCurve(this.ctx.store, shape);
     this.ctx.selection.set(curve.id);
     this.ctx.changed();
     return true;

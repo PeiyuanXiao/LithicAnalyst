@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, type GmConfig, type ConfigCorrections, type Curve, type FlakeData, type Landmark, type Measurement, type MeshInfo, type Plane, type ProjectState, type Region, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenInfo, type SharpEdgeRule } from './types';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, type GmConfig, type ConfigCorrections, type Curve, type FlakeData, type Landmark, type Measurement, type MeshInfo, type Plane, type ProjectState, type Region, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenInfo, type SharpEdgeRule, type WorkingEdge } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'gm' | 'sharpEdge' | 'flake' | 'scars' | 'curves' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
+export type ChangeKind = 'gm' | 'sharpEdge' | 'flake' | 'scars' | 'curves' | 'workingEdges' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -17,6 +17,7 @@ export function emptyProject(): ProjectState {
     mesh: null,
     scars: [],
     curves: [],
+    workingEdges: [],
     measurements: [],
     planes: [],
     sections: [],
@@ -33,6 +34,7 @@ export function emptyProject(): ProjectState {
     gm: defaultGmConfig(),
     nextLabelNumber: 1,
     nextCurveNumber: 1,
+    nextWorkingEdgeNumber: 1,
     nextMeasureNumber: 1,
     nextPlaneNumber: 1,
     nextSectionNumber: 1,
@@ -88,6 +90,10 @@ export class ProjectStore {
 
   curve(id: string): Curve | undefined {
     return this._state.curves.find((c) => c.id === id);
+  }
+
+  workingEdge(id: string): WorkingEdge | undefined {
+    return this._state.workingEdges.find((e) => e.id === id);
   }
 
   measurement(id: string): Measurement | undefined {
@@ -173,6 +179,11 @@ export class ProjectStore {
     const list = this._state.curves;
     const index = list.findIndex((x) => x.id === c.id);
     if (index >= 0) list[index] = c;
+  }
+
+  _setWorkingEdges(list: WorkingEdge[], next: number): void {
+    this._state.workingEdges = list;
+    this._state.nextWorkingEdgeNumber = next;
   }
 
   _insertMeasurement(m: Measurement, index?: number): void {

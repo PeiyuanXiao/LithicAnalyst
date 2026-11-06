@@ -5,19 +5,21 @@ import { completeLoopSteps, COMPLETE_ANCHOR_STEP_DEG, COMPLETE_STEP_DEG, type Co
 import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
+import { MEASURED_LINE_PARAMETERS, measuredLine, type MeasuredLine } from '../compute/measuredLine';
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addLandmark, completeCurveLoop, deleteTechnicalAxis, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, deleteTechnicalAxis, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
-import { CURVE_FIELDS, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
+import { annotationStatus, type StatusKey } from '../core/annotationStatus';
+import { CURVE_FIELDS, GENERIC_REGION_TYPE, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, retouchSettingsOf, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv } from '../io/csv';
+import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, workingEdgesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { APP_DIR, GM_CONFIG_FILE, SHARP_EDGE_FILE, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
 import { batchOutputs, gmOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
@@ -26,7 +28,7 @@ import { createMeasurer, type MeshMeasurer } from '../io/meshMeasurer';
 import BatchWorker from '../io/batchWorker?worker&inline';
 import { zipStored } from '../io/zip';
 import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
-import { ArrowLayer, arrowColor, ARROW_COLORS, DEFAULT_ARROW_DISPLAY } from '../render/arrowLayer';
+import { ArrowLayer, arrowColor, arrowColorModeOf, ARROW_COLORS, DEFAULT_ARROW_DISPLAY, type ArrowColorMode } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
 import { PlaneLayer, planeColor } from '../render/planeLayer';
@@ -49,7 +51,10 @@ import { retouchSectionsSteps, sectionAtStation, type RetouchAngleResult, type R
 import { drawnOutline, planRegionsSteps, planShape, segmentLinesSteps, type P2, type PlanLoops, type PlanShape, type SegmentLines } from '../compute/retouchPlan';
 import { planDrawing, PRINT_PALETTE, PX_PER_MM, sectionDrawing, sectionModel, svgFile, type Drawing, type SectionModel } from '../render/retouchDrawing';
 import { RetouchLayer } from '../render/retouchLayer';
+import { WorkingEdgeLayer, workingEdgeColor, type DrawnEdge } from '../render/workingEdgeLayer';
 import { StationTool } from '../tools/stationTool';
+import { WorkingEdgeTool, type EdgePlace } from '../tools/workingEdgeTool';
+import { clampedEnd, curveStretch, edgeAxis, ownerAt, placedEdges, pointOnCurve, workingEdgeDetails, WORKING_EDGE_MIN_MM, WORKING_EDGE_PARAMETERS, type WorkingEdgeDetail, type WorkingEdgeRefusal } from '../compute/workingEdge';
 import { drawingPng, RetouchPlanPanel, RetouchSectionPanel, type PlanFace, type SectionReading } from './retouchPanels';
 import { FACE_DORSAL, FACE_PLATFORM, FACE_VENTRAL, faceOfTrianglesSteps, onPlan, removedVolumeCurveSteps, RETOUCH_INDEX_PARAMETERS, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps, stationFaces, type RetouchCurve, type RetouchIndexInput, type RetouchIndexResult, type RetouchStationDetail, type RetouchStationRow, type SegmentFrameResult, type SegmentOutline } from '../compute/retouchIndex';
 import { ruleValues, SHARP_EDGE_PARAMETERS, sharpOfCurve, suggestThreshold, type SharpResult } from '../compute/sharpEdge';
@@ -90,7 +95,7 @@ import { MeasureTool } from '../tools/measureTool';
 import { SelectTool } from '../tools/selectTool';
 import { Selection } from '../tools/selection';
 import { SurfaceSnap } from '../tools/surfaceSnap';
-import type { ToolContext } from '../tools/tool';
+import type { EdgeEnd, ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type EdgeChartMethod, type ConfigPick, type ConfigStatus, type DisplayAspect, type DisplaySettings } from './appApi';
 import { fmtCount, fmtNum, fmtQuantity, mmPerUnit, quantityUnit, type Quantity } from '../core/format';
@@ -105,6 +110,15 @@ import { getTheme, onThemeChange, toggleTheme } from './theme';
 import { tip, tips } from './tooltip';
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
+/** How near a curve the cursor must be for the working edge tool to take it. */
+/** Below this width of the view the status pills are one pill with the count. */
+const STATUS_COLLAPSE_PX = 720;
+/** The status pills whose click asks for a curve of a type. */
+const STATUS_CURVE_TYPES: Partial<Record<StatusKey, string>> = { edge: 'edge', platform_outline: PLATFORM_OUTLINE, core_edge: 'core_edge' };
+const EDGE_PICK_PX = 12;
+/** How near an end of a working edge a new end goes to that very point. */
+const EDGE_SNAP_PX = 9;
 
 /** Gloss of the surface (0 = matte, 1 = glossy); fixed, as is the fill light (DEFAULT_LIGHT). */
 const GLOSS = 0.45;
@@ -371,7 +385,13 @@ export class App implements AppApi {
   private header!: HTMLElement;
   private readonly viewportEl: HTMLElement;
   private readonly toolbarEl: HTMLElement;
-  private readonly emptyEl: HTMLElement;
+  private readonly startEl: HTMLElement;
+  private readonly statusEl: HTMLElement;
+  private statusKey = '';
+  /** A narrow view's pills are open because the pointer is over them. */
+  private statusHovered = false;
+  /** The type asked for the next curve drawn (a click on a status pill): view state, gone once a curve is drawn or the tool changes. */
+  private nextCurveType: string | null = null;
   private readonly coordEl: HTMLElement;
   private readonly dropEl: HTMLElement;
   private undoBtn!: HTMLButtonElement;
@@ -379,6 +399,8 @@ export class App implements AppApi {
   private saveBtn!: HTMLButtonElement;
   private fileBtn!: HTMLButtonElement;
   private specimenBar!: HTMLElement;
+  /** Open the specimen panel, with the unit in focus. */
+  private openUnit: () => void = () => {};
   private specimenRefs: { id: HTMLInputElement; unit: HTMLSelectElement; type: HTMLSelectElement; annotator: HTMLInputElement | HTMLTextAreaElement; notes: HTMLInputElement | HTMLTextAreaElement; meta: HTMLElement; name: HTMLElement; unitText: HTMLElement; framePill: HTMLElement } | null = null;
   readonly popovers = new Popovers();
   private displayCtl: HTMLElement | null = null;
@@ -487,6 +509,13 @@ export class App implements AppApi {
   /** The folder's configuration of those points (null: none yet, or no folder open). */
   private folderGm: GmConfig | null = null;
   private edgeLayer: EdgeAngleLayer | null = null;
+  private workingEdgeLayer: WorkingEdgeLayer | null = null;
+  /** The working edges' measures, while nothing they are made from has changed. */
+  private edgeDetails: WorkingEdgeDetail[] | null = null;
+  /** The row of the working edges drawn on the plan. */
+  private planEdgeId: string | null = null;
+  /** An end being dragged, and where it stands now. */
+  private edgeDrag: { id: string; which: 'start' | 'end'; point: Vec3 } | null = null;
   private edgeLegend: HTMLElement | null = null;
   private edgeColorKey = '';
   /** The split as computed (before `swap`), for the plane or curve it was computed from. */
@@ -510,7 +539,8 @@ export class App implements AppApi {
     this.appEl = h('div', { class: 'app' });
     this.viewportEl = h('section', { class: 'viewport', id: 'viewport', 'data-mode': this.mode });
     this.toolbarEl = h('div', { class: 'viewport-ui vp-toolbar' });
-    this.emptyEl = h('div', { class: 'viewport-ui vp-empty' });
+    this.startEl = h('div', { class: 'start-page', id: 'start-page' });
+    this.statusEl = h('div', { class: 'viewport-ui status-pills', id: 'annotation-status', role: 'group', hidden: true });
     this.coordEl = h('span', { class: 'viewport-ui status-coords mono', id: 'status-coords' });
     this.dropEl = h('div', { class: 'drop-overlay', hidden: true }, icon(ICONS.open));
     this.meshInput = h('input', { type: 'file', accept: '.ply,.stl,.obj', hidden: true, id: 'file-mesh' }) as HTMLInputElement;
@@ -551,7 +581,19 @@ export class App implements AppApi {
     const viewer = this.viewer;
     // corner marks of the view (decoration; not part of figures, which are rendered apart)
     const corners = (['tl', 'tr', 'bl', 'br'] as const).map((c) => h('span', { class: `vp-corner vp-corner-${c}`, 'aria-hidden': 'true' }));
-    this.viewportEl.append(...corners, this.toolbarEl, this.emptyEl, this.coordEl, this.dropEl);
+    this.viewportEl.append(...corners, this.toolbarEl, this.statusEl, this.coordEl, this.dropEl);
+    main.append(this.startEl);
+    new ResizeObserver(() => this.fitStatus()).observe(this.viewportEl);
+    this.statusEl.addEventListener('pointerenter', (e) => {
+      if (e.pointerType === 'touch' || !this.statusEl.classList.contains('is-collapsed')) return;
+      this.statusHovered = true;
+      this.setStatusOpen(true);
+    });
+    this.statusEl.addEventListener('pointerleave', () => {
+      if (!this.statusHovered) return;
+      this.statusHovered = false;
+      this.setStatusOpen(false);
+    });
     this.lights = new LightRig(viewer.scene);
     this.lights.set(this.display.light);
     this.arrows = new ArrowLayer(viewer);
@@ -572,6 +614,8 @@ export class App implements AppApi {
     this.ringLayer = new BorderLayer(viewer, true);
     this.edgeLayer = new EdgeAngleLayer(viewer);
     this.retouchLayer = new RetouchLayer(viewer);
+    this.workingEdgeLayer = new WorkingEdgeLayer(viewer);
+    this.workingEdgeLayer.onLabelClick = (id) => this.selection.set(id);
     this.gmLayer = new GmLayer(viewer);
     this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
     this.viewportEl.append(this.edgeLegend);
@@ -585,6 +629,7 @@ export class App implements AppApi {
         this.lastOcclusion = performance.now();
         this.arrows?.updateOcclusion();
         this.curves?.updateOcclusion();
+        this.workingEdgeLayer?.updateOcclusion();
         this.measures?.updateOcclusion();
         this.landmarkLayer?.updateOcclusion();
         // labels behind the surface give way in the layout: lay them out again
@@ -620,7 +665,14 @@ export class App implements AppApi {
       changed: () => this.updateCursor(),
       editable: () => this.mode === 'annotate',
       hovered: (item) => this.hoverTip(item),
+      takeNextCurveType: () => this.takeNextCurveType(),
       moveAxisEnd: (which, point, normal) => this.moveAxisEnd(which, point, normal),
+      edgeEnds: {
+        at: (x, y) => this.workingEdgeLayer?.handleAt(x, y, this.selection.id) ?? null,
+        highlight: (end) => this.workingEdgeLayer?.highlight(end),
+        drag: (end, x, y) => this.dragEdgeEnd(end, x, y),
+        finish: (commit) => this.finishEdgeDrag(commit),
+      },
     };
     this.tools = new ToolController(ctx, this.viewportEl);
     this.tools.register(new SelectTool(ctx));
@@ -632,6 +684,7 @@ export class App implements AppApi {
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
     this.tools.register(new StationTool((x, y, following) => this.placeStation(x, y, following)));
+    this.tools.register(new WorkingEdgeTool({ locate: (x, y, curveId) => this.edgePlaceAt(x, y, curveId), preview: (first, over) => this.previewEdge(first, over), place: (curveId, start, end) => this.placeWorkingEdge(curveId, start, end) }, () => this.updateCursor()));
     this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p), (l, p) => (l.code === 'platform_end' ? (this.onPlatformOutline(p) ?? l.point) : p)));
     this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => this.recordRelation(a, b, at, from)));
     this.tools.register(new SequenceTool((x, y, hit) => this.scarAt(x, y, hit), (id) => this.toggleInSequence(id)));
@@ -648,7 +701,7 @@ export class App implements AppApi {
     };
 
     this.buildToolbar();
-    this.buildEmptyState();
+    this.buildStartPage();
     this.buildHarrisPanel();
     this.buildConfigPanel();
     this.buildProfilePanel();
@@ -859,6 +912,10 @@ export class App implements AppApi {
       return f ? { label: t(`axis.${f}`) } : null;
     });
     this.specimenRefs = { id, unit, type, annotator: annotator.input, notes: notes.input, meta, name, unitText, framePill };
+    this.openUnit = () => {
+      if (this.popovers.open !== panel) this.popovers.toggle(more, panel);
+      unit.focus();
+    };
     return h('div', { class: 'menu-wrap spec-bar', id: 'specimen-bar' }, more, panel, framePill);
   }
 
@@ -976,6 +1033,7 @@ export class App implements AppApi {
       { value: 'draw', icon: ICONS20.arrow, name: t('mode.draw'), key: 'A' },
       { value: 'curve', icon: ICONS20.curve, name: t('mode.curve'), key: 'P' },
       { value: 'platform-end', icon: ICONS20.platformEnd, name: t('tool.platformEnd'), key: 'E' },
+      { value: 'working-edge', icon: ICONS20.workingEdge, name: t('tool.workingEdge'), key: 'W' },
       { value: 'region', icon: ICONS20.region, name: t('tool.region'), key: 'R' },
       { value: 'relation', icon: ICONS20.relation, name: t('tool.relation'), key: 'B' },
       { value: 'sequence', icon: ICONS20.sequence, name: t('tool.sequence'), key: 'Q' },
@@ -1016,6 +1074,11 @@ export class App implements AppApi {
       for (const id of ['mode-axis', 'mode-platform-end']) {
         const b = this.modeSeg.el.querySelector<HTMLElement>(`#${id}`);
         if (b) b.hidden = !flake;
+      }
+      // scars' relations: not on a generic specimen
+      for (const id of ['mode-relation', 'mode-sequence']) {
+        const b = this.modeSeg.el.querySelector<HTMLElement>(`#${id}`);
+        if (b) b.hidden = this.isGeneric();
       }
     }
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
@@ -1087,19 +1150,149 @@ export class App implements AppApi {
     setScarSequence(this.store, scarId, q.scarIds.includes(scarId) ? null : q.id);
   }
 
-  /** Without a model: open one (or a folder, or a project); dropping a file works too. */
-  private buildEmptyState(): void {
-    clear(this.emptyEl);
-    this.emptyEl.append(
-      h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.cube), t('header.openMesh')),
+  /** What a new specimen is: the card chosen on the start page (or the type last set), else what the last specimen was. */
+  private newSpecimenType(fallback: SpecimenType = 'core'): SpecimenType {
+    const pref = readPref<string>('specimenType', fallback);
+    return SPECIMEN_TYPES.find((x) => x === pref) ?? fallback;
+  }
+
+  /** Without a model: what kind of specimen comes next, and open one (or a folder, or a project); dropping a file works too. */
+  private buildStartPage(): void {
+    clear(this.startEl);
+    const chosen = this.newSpecimenType();
+    const icons: Record<SpecimenType, string> = { core: ICONS20.specimenCore, flake: ICONS20.specimenFlake, generic: ICONS20.specimenGeneric };
+    const cards = SPECIMEN_TYPES.map((type) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'start-card',
+          role: 'radio',
+          id: `start-type-${type}`,
+          'data-value': type,
+          'aria-checked': String(type === chosen),
+          onclick: () => {
+            writePref('specimenType', type);
+            for (const c of cards) c.setAttribute('aria-checked', String(c.dataset.value === type));
+          },
+        },
+        icon20(icons[type]),
+        h('span', { class: 'start-card-name' }, t(`specimen.type.${type}`)),
+      ),
+    );
+    this.startEl.append(
       h(
         'div',
-        { class: 'vp-empty-row' },
-        h('button', { type: 'button', class: 'btn', id: 'empty-open-folder', onclick: () => void this.openFolder() }, icon(ICONS.open), t('header.openFolder')),
-        h('button', { type: 'button', class: 'btn', id: 'empty-open-project', onclick: () => this.openProject() }, icon(ICONS.project), t('header.openProject')),
+        { class: 'start-body' },
+        h('div', { class: 'start-cards', role: 'radiogroup', 'aria-label': t('field.specimenType') }, ...cards),
+        h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.cube), t('header.openMesh')),
+        h(
+          'div',
+          { class: 'start-row' },
+          h('button', { type: 'button', class: 'btn', id: 'empty-open-folder', onclick: () => void this.openFolder() }, icon(ICONS.open), t('header.openFolder')),
+          h('button', { type: 'button', class: 'btn', id: 'empty-open-project', onclick: () => this.openProject() }, icon(ICONS.project), t('header.openProject')),
+        ),
+        h('span', { class: 'start-formats mono' }, 'PLY · STL · OBJ'),
       ),
-      h('span', { class: 'vp-empty-formats mono' }, 'PLY · STL · OBJ'),
     );
+  }
+
+  /** The start page stands in for the view and the sidebar without a model; a folder open keeps its list, whatever became of its models. */
+  private startShown(): boolean {
+    return !this.hasMesh() && !this.workspace;
+  }
+
+  private updateStartPage(): void {
+    const shown = this.startShown();
+    const chosen = this.newSpecimenType();
+    if (shown) for (const c of this.startEl.querySelectorAll<HTMLElement>('.start-card')) c.setAttribute('aria-checked', String(c.dataset.value === chosen));
+    this.startEl.hidden = !shown;
+    // a file dragged in is dropped on whichever is in front
+    (shown ? this.startEl : this.viewportEl).append(this.dropEl);
+  }
+
+  /** What the specimen has of what it is annotated with, as pills over the view; a click goes to where it is made. */
+  private updateStatus(): void {
+    const el = this.statusEl;
+    const st = this.store.state;
+    if (!st.mesh) {
+      el.hidden = true;
+      this.statusKey = '';
+      return;
+    }
+    // (regions not found yet count as not there)
+    const status = annotationStatus(st, this.regions?.results ?? []);
+    const key = JSON.stringify([status.items, this.nextCurveType]);
+    el.hidden = false;
+    if (key === this.statusKey) return;
+    const counted = this.statusKey.length > 0;
+    this.statusKey = key;
+    const armed = this.nextCurveType;
+    clear(el);
+    const toggle = h('button', { type: 'button', class: 'status-pill status-count mono', id: 'status-count', 'aria-expanded': String(el.classList.contains('is-open')), onclick: () => this.toggleStatus() }, `${status.done}/${status.total}`);
+    el.append(toggle);
+    for (const item of status.items) {
+      const pill = h(
+        'button',
+        {
+          type: 'button',
+          class: `status-pill${item.optional ? ' is-optional' : ''}${armed && armed === STATUS_CURVE_TYPES[item.key] ? ' is-armed' : ''}`,
+          id: `status-${item.key}`,
+          'data-done': String(item.done),
+          onclick: () => this.goToStatus(item.key),
+        },
+        h('span', { class: 'status-mark', 'aria-hidden': 'true' }, item.done ? '✓' : '○'),
+        h('span', {}, t(`status.${item.key}`)),
+      );
+      tips.attach(pill, () => ({ label: t(item.notApart ? 'status.why.faces.open' : `status.why.${item.key}`) }), 'above');
+      el.append(pill);
+    }
+    this.fitStatus();
+    // the folder's list says the same of the open model
+    if (counted && this.workspace) this.sidebar.refresh('workspace');
+  }
+
+  /** A narrow view shows the count alone, the pills on hovering over it or clicking it. */
+  private fitStatus(): void {
+    const narrow = this.viewportEl.clientWidth < STATUS_COLLAPSE_PX;
+    this.statusEl.classList.toggle('is-collapsed', narrow);
+    if (!narrow) this.setStatusOpen(false);
+  }
+
+  private setStatusOpen(open: boolean): void {
+    this.statusEl.classList.toggle('is-open', open);
+    this.statusEl.querySelector('#status-count')?.setAttribute('aria-expanded', String(open));
+  }
+
+  /** (Open already while the pointer is over them: a click leaves them so.) */
+  private toggleStatus(): void {
+    if (!this.statusHovered) this.setStatusOpen(!this.statusEl.classList.contains('is-open'));
+  }
+
+  private takeNextCurveType(): string | null {
+    const type = this.nextCurveType;
+    this.nextCurveType = null;
+    if (type) this.updateStatus();
+    return type;
+  }
+
+  /** To the annotate mode and where the missing thing is made. */
+  private goToStatus(key: StatusKey): void {
+    this.setMode('annotate');
+    const curveType = STATUS_CURVE_TYPES[key];
+    if (curveType) {
+      this.setTool('curve');
+      this.nextCurveType = curveType;
+      this.updateStatus();
+      return;
+    }
+    if (key === 'unit') return this.openUnit();
+    if (key === 'axis') return this.setTool('axis');
+    if (key === 'platform_ends') return this.setTool('platform-end');
+    if (key === 'scar_arrows') return this.setTool('draw');
+    // the faces and the retouch regions
+    this.setTool('region');
+    this.sidebar.focusTool('region');
   }
 
   private rebuildChrome(): void {
@@ -1114,13 +1307,14 @@ export class App implements AppApi {
     newSidebar.el.scrollTop = scroll;
     if (this.resizerEl) this.resizerEl.title = t('sidebar.resize');
     this.buildToolbar();
-    this.buildEmptyState();
+    this.buildStartPage();
     this.buildHarrisPanel();
     this.buildConfigPanel();
     this.buildProfilePanel();
     this.buildRetouchPanels();
     this.buildDisplayControl();
     this.updateSpecimenBar();
+    this.statusKey = '';
     this.updateUndoButtons();
     this.updateMeshDependentUi();
     this.updateCursor();
@@ -1135,7 +1329,9 @@ export class App implements AppApi {
 
   private updateMeshDependentUi(): void {
     const has = this.hasMesh();
-    this.emptyEl.hidden = has;
+    this.updateStartPage();
+    this.updateStatus();
+    if (this.appModeSeg) this.appModeSeg.el.hidden = !has;
     this.toolbarEl.hidden = !has;
     this.saveBtn.disabled = !has;
     if (this.closeItem) this.closeItem.disabled = !has;
@@ -1191,7 +1387,8 @@ export class App implements AppApi {
 
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
-    if (sel && this.store.state.flake.axis?.id !== sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel) && !this.store.landmark(sel) && !this.store.semilandmarkSet(sel))
+    this.edgeDetails = null;
+    if (sel && this.store.state.flake.axis?.id !== sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.workingEdge(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel) && !this.store.landmark(sel) && !this.store.semilandmarkSet(sel))
       this.selection.set(null);
     if (['landmarks', 'curves', 'reset', 'specimen', 'flake'].includes(c.kind)) this.landmarks = landmarkTable(this.store.state);
     if (c.kind === 'landmarks') this.rememberLandmarkNames();
@@ -1220,9 +1417,11 @@ export class App implements AppApi {
       else if (c.kind === 'reset' && this.isFlake() && readPref<string>('mode', '') === 'retouch') this.setMode('retouch', false);
       this.updateToolbar();
       this.updateRetouch();
-      // a flake's tools belong to flakes
+      // a flake's tools belong to flakes, the scars' relations not to a generic specimen
       if (!this.isFlake() && ['axis', 'platform-end'].includes(this.tools?.activeId ?? '')) this.setTool('select');
+      if (this.isGeneric() && ['relation', 'sequence'].includes(this.tools?.activeId ?? '')) this.setTool('select');
       if (!this.isFlake() && this.tools) this.selection.set(this.store.landmark(this.selection.id ?? '')?.code || this.store.state.flake.axis?.id === this.selection.id ? null : this.selection.id);
+      if (this.isGeneric() && this.selection.id && (this.store.relation(this.selection.id) || this.store.sequence(this.selection.id))) this.selection.set(null);
       this.paintRegions();
     }
     // technical axis, platform outline, platform region or ends: measured again
@@ -1242,9 +1441,17 @@ export class App implements AppApi {
     if (c.kind === 'gm') this.keepFolderGm();
     if (['gm', 'flake', 'landmarks', 'specimen', 'reset'].includes(c.kind)) this.scheduleGm();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { gm: 'landmarks', sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { gm: 'landmarks', sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', workingEdges: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
+    if (c.kind === 'workingEdges' || c.kind === 'curves' || c.kind === 'sharpEdge') {
+      // what is measured on them, and what shows the station's
+      this.sidebar.refresh('retouch');
+      if (this.retouching()) {
+        this.queueStation();
+        this.drawPlan();
+      }
+    }
     if (c.kind === 'specimen') {
       this.sidebar.refresh('arrows');
       this.sidebar.refresh('curves');
@@ -1272,6 +1479,7 @@ export class App implements AppApi {
     }
     this.scheduleAgreement();
     this.queueCoords();
+    this.updateStatus();
   }
 
   /** The sequence tool is in use: arrows and scar regions are coloured by sequence, the scars in none faded. */
@@ -1301,7 +1509,7 @@ export class App implements AppApi {
   private updateConfiguration(): void {
     const st = this.store.state;
     // a core's: a flake's data do not go through it
-    this.configResult = this.isFlake() ? null : coreConfiguration(st, this.configBox, this.split);
+    this.configResult = this.isCore() ? coreConfiguration(st, this.configBox, this.split) : null;
     // a face of the box with the bicone, or a cone with the box: let go
     if (this.pickedFace && !this.pickFits(this.pickedFace)) this.pickedFace = null;
     this.updateConfigPanel();
@@ -1317,7 +1525,7 @@ export class App implements AppApi {
 
   configStatus(): ConfigStatus | null {
     const st = this.store.state;
-    if (this.isFlake() || st.configuration.model !== 'bicone' || this.configResult || !this.hasMesh()) return null;
+    if (!this.isCore() || st.configuration.model !== 'bicone' || this.configResult || !this.hasMesh()) return null;
     if (!this.measureBase || this.splitBusy) return 'computing';
     return this.measureBase.topology.closed === false ? 'not_closed' : 'split_invalid';
   }
@@ -1348,7 +1556,7 @@ export class App implements AppApi {
 
   /** The configuration panel and the view cube are shown: switched on, in the annotate mode, with a scar with an arrow. */
   private configShown(): boolean {
-    return this.display.configuration && this.mode === 'annotate' && this.hasMesh() && !this.isFlake() && this.store.state.scars.some(hasVector);
+    return this.display.configuration && this.mode === 'annotate' && this.hasMesh() && this.isCore() && this.store.state.scars.some(hasVector);
   }
 
   /** Show or hide the configuration panel (and the cube); hidden, it lets go of the picked face. */
@@ -1525,11 +1733,12 @@ export class App implements AppApi {
     // the user's own colour setting comes back when the sequence tool is left
     const sequencing = this.sequencing();
     if (this.arrows) this.arrows.faded = sequencing ? this.unsequenced() : this.offFace();
-    this.arrows?.sync(this.store.state, this.selection.id, sequencing ? { ...this.display.arrows, colorMode: 'sequence' } : this.display.arrows, handles);
+    this.arrows?.sync(this.store.state, this.selection.id, { ...this.display.arrows, colorMode: sequencing ? 'sequence' : this.arrowColorMode() }, handles);
     this.showBorders();
     this.syncEdgeColors();
     if (this.curves) this.curves.drawnElsewhere = this.edgeColorKey ? this.edgeColorCurve : null;
     this.curves?.sync(this.store.state, this.selection.id, this.display.arrows, handles);
+    this.syncWorkingEdges();
     this.measures?.sync(this.store.state, this.selection.id, this.mode === 'measure', (m) => `${m.label}  ${this.formatMeasurement(m)}`);
     this.landmarkLayer?.sync(this.labelledLandmarks(), this.landmarks.sets, this.selection.id, this.display.arrows.labels, this.display.arrows.showHidden);
     const mesh = this.store.state.mesh;
@@ -1557,6 +1766,7 @@ export class App implements AppApi {
     const shown = (inFigure: boolean) => (this.mode === 'present' ? inFigure : this.mode !== 'compare');
     if (this.arrows) this.arrows.group.visible = shown(f.arrows);
     if (this.curves) this.curves.group.visible = shown(f.curves);
+    if (this.workingEdgeLayer) this.workingEdgeLayer.group.visible = this.mode !== 'present' && this.mode !== 'compare';
     if (this.landmarkLayer) this.landmarkLayer.group.visible = shown(f.landmarks);
     if (this.regionRoot) this.regionRoot.visible = shown(f.regions);
     this.syncGmLayer();
@@ -1567,6 +1777,10 @@ export class App implements AppApi {
     // the retouch mode has its one tool
     const id = this.mode === 'retouch' ? 'station' : wanted === 'station' ? 'select' : wanted;
     const changed = id !== this.tools?.activeId;
+    if (id !== 'curve' && this.nextCurveType) {
+      this.nextCurveType = null;
+      this.updateStatus();
+    }
     if (changed) {
       this.sidebar.focusTool(id);
       this.relationChip?.close();
@@ -1901,8 +2115,9 @@ export class App implements AppApi {
     try {
       return renderFigure(ctx, frame, st.specimen.unit, settings, {
         arrows: (() => {
-          const seq = this.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
-          return st.scars.flatMap((s) => (s.vector ? [{ ...s.vector, color: arrowColor(s, this.display.arrows.colorMode, seq) }] : []));
+          const mode = this.arrowColorMode();
+          const seq = mode === 'sequence' ? sequenceColors(st.sequences) : null;
+          return st.scars.flatMap((s) => (s.vector ? [{ ...s.vector, color: arrowColor(s, mode, seq) }] : []));
         })(),
         curves: st.curves.map((c) => ({ points: c.points, closed: c.closed, color: curveColor(c) })),
         planes: visiblePlanes.flatMap((p) => {
@@ -2024,7 +2239,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves(), retouchIndices: this.retouchIndex?.indices ?? null, gm: this.gm };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves(), retouchIndices: this.retouchIndex?.indices ?? null, gm: this.gm, workingEdges: this.workingEdgeDetails().map((d) => d.row) };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -2073,7 +2288,8 @@ export class App implements AppApi {
         return;
       }
     }
-    const r = addRegion(this.store, [point.x, point.y, point.z], 'scar', this.scarStartingIn(c));
+    const at: Vec3 = [point.x, point.y, point.z];
+    const r = this.isGeneric() ? addRegion(this.store, at, GENERIC_REGION_TYPE, null) : addRegion(this.store, at, 'scar', this.scarStartingIn(c));
     this.selection.set(r.id);
   }
 
@@ -2114,9 +2330,10 @@ export class App implements AppApi {
       const g = loaded.geometry;
       const pos = g.getAttribute('position').array as Float32Array;
       const idx = g.index!.array as Uint32Array;
-      const part = await runSliced(regionsSteps(pos, idx, base.edges, chains.flat()));
+      const cuts = layerCurves(st.curves.map((c, i) => ({ attributes: c.attributes, chain: chains[i] })), st.specimen.type);
+      const part = await runSliced(regionsSteps(pos, idx, base.edges, cuts.lower.flatMap((c) => c.chain)));
       if (token !== this.partitionToken || this.loaded !== loaded) return;
-      const boundary = chains.filter((_, i) => isBoundaryCurve(st.curves[i].attributes.type, st.specimen.type)).flat();
+      const boundary = cuts.upper.flatMap((c) => c.chain);
       const key = JSON.stringify(boundary);
       const upperPart = this.upper?.key === key ? this.upper.partition : await runSliced(regionsSteps(pos, idx, base.edges, boundary));
       const over = await runSliced(overPiecesSteps(part, upperPart));
@@ -2181,7 +2398,7 @@ export class App implements AppApi {
 
   /** The piece of each upper region of a project (−1: none, or a lower region): by its seed, or, one that follows other annotations, as they say, unless a region the user typed is there. */
   private upperComponents(st: Readonly<ProjectState>, part: Partition, platformSeed: Vec3 | null): number[] {
-    const out = st.regions.map((r) => (isUpperRegion(r.type) && !r.auto ? this.pieceAt(part, r.seed) : -1));
+    const out = st.regions.map((r) => (isUpperRegion(r.type, st.specimen.type) && !r.auto ? this.pieceAt(part, r.seed) : -1));
     if (st.specimen.type !== 'flake') return out;
     const platform = platformSeed ? this.pieceAt(part, platformSeed) : -1;
     const hint = st.flake.axis?.matrix ? this.pieceAt(part, st.flake.axis.end) : -1;
@@ -2226,6 +2443,29 @@ export class App implements AppApi {
 
   private isFlake(): boolean {
     return this.store.state.specimen.type === 'flake';
+  }
+
+  /** What a curve is measured along (a flake's edge, without what runs along the platform outline). */
+  private lineOf(c: Curve): MeasuredLine {
+    return measuredLine(c, this.store.state);
+  }
+
+  private isCore(): boolean {
+    return this.store.state.specimen.type === 'core';
+  }
+
+  private isGeneric(): boolean {
+    return this.store.state.specimen.type === 'generic';
+  }
+
+  /** What the arrows are coloured by: the setting, as far as the specimen's type has it. */
+  private arrowColorMode(): ArrowColorMode {
+    return arrowColorModeOf(this.display.arrows.colorMode, this.store.state.specimen.type);
+  }
+
+  /** Whether a region lies in the lower layer of a project: not the upper layer's, nor on a generic specimen one left over that followed a flake's annotations. */
+  private inLowerLayer(st: Readonly<ProjectState>, r: ProjectState['regions'][number]): boolean {
+    return !isUpperRegion(r.type, st.specimen.type) && !(st.specimen.type === 'generic' && r.auto);
   }
 
   flakeMeasures(): FlakeMeasures | null {
@@ -2495,7 +2735,7 @@ export class App implements AppApi {
   /** The curve's sharp stretches under the rule (null without a threshold, or without angles). */
   sharpOf(curveId: string): SharpResult | null {
     const c = this.store.curve(curveId), r = this.edgeAngleResult(curveId);
-    return c && r ? sharpOfCurve(r, c.closed, this.store.state.sharpEdge, this.store.state.specimen.unit) : null;
+    return c && r && !this.isGeneric() ? sharpOfCurve(r, this.lineOf(c).closed, this.store.state.sharpEdge, this.store.state.specimen.unit) : null;
   }
 
   /** A threshold from the angles themselves: of this model, or, in a folder, of every model. */
@@ -2558,7 +2798,8 @@ export class App implements AppApi {
     const pieces = new Map<number, RetouchPiece>();
     st.regions.forEach((r, i) => {
       const c = this.seedComponent[i];
-      if (r.type === 'retouch' && c >= 0 && !pieces.has(c)) pieces.set(c, { region: r.id, layer: r.retouchLayer ?? 1 });
+      // ("retouch" on a generic specimen is the user's own word)
+      if (r.type === 'retouch' && !this.isGeneric() && c >= 0 && !pieces.has(c)) pieces.set(c, { region: r.id, layer: r.retouchLayer ?? 1 });
     });
     const piecesKey = JSON.stringify([this.partitionVersion, [...pieces]]);
     const curves = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type));
@@ -2571,10 +2812,11 @@ export class App implements AppApi {
     const g = loaded.geometry;
     const candidates = bvhPlaneCandidates(g);
     for (const c of curves) {
-      const key = JSON.stringify([c.points, c.closed, st.specimen.unit, piecesKey]);
+      const line = this.lineOf(c);
+      const key = JSON.stringify([line.points, line.closed, st.specimen.unit, piecesKey]);
       if (this.retouchResults.get(c.id)?.key === key) continue;
       const found = pieces.size
-        ? await runSliced(retouchSectionsSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates, pieceOfFace: part.region, pieces }))
+        ? await runSliced(retouchSectionsSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: line.points, closed: line.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates, pieceOfFace: part.region, pieces }))
         : null;
       if (token !== this.retouchToken || this.loaded !== loaded) return;
       this.retouchResults.set(c.id, { key, result: found?.result ?? null, sections: found?.sections ?? [], length: found?.length ?? 0 });
@@ -2603,6 +2845,7 @@ export class App implements AppApi {
     if (!this.isFlake() || !base || !loaded || !part || !up) {
       this.retouchIndex = null;
       this.retouchIndexKey = '';
+      this.edgeDetails = null;
       return;
     }
     const pieces = new Map<number, RetouchPiece>();
@@ -2643,16 +2886,19 @@ export class App implements AppApi {
     }
     const curves: RetouchCurve[] = measured.map((c) => {
       const r = this.retouchResults.get(c.id);
-      return { curveId: c.id, edge: c.attributes.type === 'edge', closed: c.closed, length: r?.length ?? 0, stations: r?.result?.stations ?? [], sections: r?.sections ?? [] };
+      return { curveId: c.id, edge: c.attributes.type === 'edge', closed: this.lineOf(c).closed, length: r?.length ?? 0, stations: r?.result?.stations ?? [], sections: r?.sections ?? [] };
     });
     const input: RetouchIndexInput = { positions, index, offset: loaded.offset, faceOf, pieceOfFace: part.region, pieces, curves, unit: st.specimen.unit, meanEdge: base.meanEdge, volume: base.volume, fitLength, frame: this.retouchFrame.frame, outline: this.retouchFrame.outline };
     const result = await runSliced(retouchIndexSteps(input));
     if (token !== this.retouchIndexToken || this.loaded !== loaded) return;
     this.retouchIndex = result;
+    this.edgeDetails = null;
     this.retouchIndexKey = key;
     this.retouchFitKey = fitKey;
     this.retouchPieces = pieces;
     this.retouchLastInput = input;
+    // the row picked may have gone with a change
+    if (this.planEdgeId && !this.workingEdgeDetails().some((d) => d.row.id === this.planEdgeId)) this.planEdgeId = null;
     this.updateRetouch();
     this.sidebar.refresh('retouch');
     if (this.fitPreview === null && this.unsaved) {
@@ -2731,7 +2977,7 @@ export class App implements AppApi {
     const c = s ? this.store.curve(s.curveId) : null;
     const n = s ? (this.edgeResults.get(s.curveId)?.result?.stations.length ?? 0) : 0;
     if (!s || !c || !n) return;
-    this.moveRetouchStation(s.curveId, c.closed ? ((s.k + step) % n + n) % n : s.k + step);
+    this.moveRetouchStation(s.curveId, this.lineOf(c).closed ? ((s.k + step) % n + n) % n : s.k + step);
   }
 
   /** A press in the view: to the station nearest it, if one is near; held, along the curve it is on. */
@@ -2776,7 +3022,8 @@ export class App implements AppApi {
     const key = JSON.stringify([curveId, k, this.partitionVersion, this.edgeResults.get(curveId)?.key]);
     if (this.stationCache?.key === key) return this.stationCache.section;
     const g = loaded.geometry;
-    const section = sectionAtStation({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: this.store.state.specimen.unit, meanEdge: base.meanEdge, candidates: bvhPlaneCandidates(g), pieceOfFace: part.region, pieces: this.retouchPieces }, k);
+    const line = this.lineOf(c);
+    const section = sectionAtStation({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: line.points, closed: line.closed, unit: this.store.state.specimen.unit, meanEdge: base.meanEdge, candidates: bvhPlaneCandidates(g), pieceOfFace: part.region, pieces: this.retouchPieces }, k);
     this.stationCache = { key, section };
     return section;
   }
@@ -2837,6 +3084,7 @@ export class App implements AppApi {
             station: s.k,
             count: edge.stations.length,
             position: `${fmtNum(at.position, 1)} / ${fmtNum(edge.length, 1)}${st.specimen.unit ? ` ${st.specimen.unit}` : ''}`,
+            edge: this.workingEdgeAt(s.curveId, at.position),
             model: this.stationModel(),
             unit: mm !== null ? st.specimen.unit : null,
             minWidth: 5 / (mm ?? 1),
@@ -2904,7 +3152,7 @@ export class App implements AppApi {
       });
       if (run.length) own.push(run);
       // round a closed curve, the last run goes on into the first
-      if (c.closed && of.has(0) && of.has(stations.length - 1)) {
+      if (this.lineOf(c).closed && of.has(0) && of.has(stations.length - 1)) {
         if (own.length === 1) own[0] = [...own[0], own[0][0]];
         else own[0] = [...own.pop()!, ...own[0]];
       }
@@ -2959,18 +3207,21 @@ export class App implements AppApi {
     this.scheduleRetouchIndices();
   }
 
-  private planContent(): { shape: PlanShape; loops: PlanLoops[]; station: { at: P2; index: number } | null; longest: RetouchIndexResult['longest']; highlight: number | null; tag: string; unit: string | null } | null {
+  private planContent(): { shape: PlanShape; loops: PlanLoops[]; station: { at: P2; index: number } | null; longest: RetouchIndexResult['longest']; edge: { label: string; points: P2[] } | null; highlight: number | null; tag: string; unit: string | null } | null {
     const fr = this.retouchFrame, frame = fr?.frame.frame, loaded = this.loaded;
     if (!fr || !frame || !fr.outline || !loaded) return null;
     if (this.planShapeOf?.key !== fr.key) this.planShapeOf = { key: fr.key, shape: planShape(drawnOutline(fr.outline)) };
     const s = this.retouchStation;
     const point = s ? this.edgeResults.get(s.curveId)?.result?.stations[s.k]?.point : null;
     const o = loaded.offset;
+    // a working edge picked: its own chord instead of that of the longest retouched stretch
+    const picked = this.planEdgeId ? this.workingEdgeDetails().find((d) => d.row.id === this.planEdgeId) ?? null : null;
     return {
       shape: this.planShapeOf.shape,
       loops: this.planLoops?.loops ?? [],
       station: point && s ? { at: onPlan(frame, [point[0] - o[0], point[1] - o[1], point[2] - o[2]]), index: s.k } : null,
-      longest: this.retouchIndex?.longest ?? null,
+      longest: picked ? picked.chord : (this.retouchIndex?.longest ?? null),
+      edge: picked ? { label: picked.row.label || (this.store.curve(picked.row.curveId)?.label ?? ''), points: picked.plan } : null,
       highlight: this.planMarked,
       tag: t(`retouch.axis.${frame.kind}`),
       unit: mmPerUnit(this.store.state.specimen.unit) !== null ? this.store.state.specimen.unit : null,
@@ -3167,12 +3418,14 @@ export class App implements AppApi {
     const g = loaded.geometry;
     const candidates = bvhPlaneCandidates(g);
     for (const c of curves) {
-      const key = JSON.stringify([c.points, c.closed, st.specimen.unit]);
+      const line = this.lineOf(c);
+      const key = JSON.stringify([line.points, line.closed, st.specimen.unit]);
       if (this.edgeResults.get(c.id)?.key === key) continue;
-      const result = await runSliced(edgeAnglesSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: c.points, closed: c.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates }));
+      const result = await runSliced(edgeAnglesSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, points: line.points, closed: line.closed, unit: st.specimen.unit, meanEdge: base.meanEdge, candidates }));
       if (token !== this.edgeToken || this.loaded !== loaded) return;
       this.edgeResults.set(c.id, { key, result });
     }
+    this.edgeDetails = null;
     this.sidebar.refresh('edge');
     this.syncAnnotations();
     this.updateRetouch();
@@ -3180,6 +3433,153 @@ export class App implements AppApi {
       this.scheduleAutosave();
       this.scheduleFolderSave();
     }
+  }
+
+  // ------------------------------------------------------------ working edges
+
+  workingEdgeDetails(): WorkingEdgeDetail[] {
+    if (this.edgeDetails) return this.edgeDetails;
+    const st = this.store.state;
+    const curves = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type)).map((c) => ({ id: c.id, ...this.lineOf(c), stations: this.edgeResults.get(c.id)?.result?.stations ?? [], sharp: this.sharpOf(c.id)?.segments ?? null }));
+    this.edgeDetails = workingEdgeDetails({ curves, edges: st.workingEdges, unit: st.specimen.unit, retouch: this.isFlake() ? this.retouchIndex : null, volume: this.measureBase?.volume ?? null });
+    return this.edgeDetails;
+  }
+
+  workingEdgesOn(curveId: string): Array<{ id: string; label: string; from: number; to: number; color: string }> {
+    const st = this.store.state;
+    const c = this.store.curve(curveId);
+    const own = st.workingEdges.filter((e) => e.curveId === curveId);
+    if (!c || !own.length) return [];
+    return placedEdges(edgeAxis(this.lineOf(c), st.specimen.unit), own).map((p) => ({ id: p.edge.id, label: p.edge.label, from: p.range.from, to: p.range.to, color: workingEdgeColor(p.edge.label) }));
+  }
+
+  workingEdgeAt(curveId: string, position: number): string {
+    const st = this.store.state;
+    const c = this.store.curve(curveId);
+    const own = st.workingEdges.filter((e) => e.curveId === curveId);
+    if (!c || !own.length) return '';
+    const axis = edgeAxis(this.lineOf(c), st.specimen.unit);
+    const placed = placedEdges(axis, own);
+    return placed[ownerAt(placed, position, axis.length)]?.edge.label ?? '';
+  }
+
+  /** Says why a working edge could not be made or changed. */
+  private refuseEdge(r: WorkingEdgeRefusal): void {
+    const text = r.reason === 'overlap' ? t('edges.refused.overlap', { with: r.with }) : r.reason === 'short' ? t('edges.refused.short', { min: WORKING_EDGE_MIN_MM }) : t('edges.refused.notMeasured');
+    this.feedback.toast(text, 'warn');
+  }
+
+  private measuredIds(): Set<string> {
+    const st = this.store.state;
+    return new Set(st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type)).map((c) => c.id));
+  }
+
+  /** The curve measured under the cursor and the point on it; near an end of a working edge, that very point, so that the two can share it. */
+  private edgePlaceAt(x: number, y: number, curveId: string | null): EdgePlace | null {
+    const curves = this.curves, viewer = this.viewer;
+    if (!curves || !viewer) return null;
+    const ids = this.measuredIds();
+    const near = curves.pickAmong(curveId ? new Set([...ids].filter((id) => id === curveId)) : ids, x, y, EDGE_PICK_PX);
+    if (!near) return null;
+    const c = this.store.curve(near.id)!;
+    for (const e of this.store.state.workingEdges) {
+      if (e.curveId !== near.id) continue;
+      for (const p of [e.start, e.end]) {
+        const s = viewer.project(new THREE.Vector3(p[0], p[1], p[2]));
+        if (s.visible && Math.hypot(s.x - x, s.y - y) <= EDGE_SNAP_PX) return { curveId: near.id, point: p };
+      }
+    }
+    return { curveId: near.id, point: pointOnCurve(this.lineOf(c), near.point) };
+  }
+
+  /** The curve under the cursor comes forward; a first point and the stretch so far are shown. */
+  private previewEdge(first: EdgePlace | null, over: EdgePlace | null): void {
+    const layer = this.workingEdgeLayer, curves = this.curves;
+    if (!layer || !curves) return;
+    curves.setHoverItem(over?.curveId ?? null);
+    const n = this.store.state.nextWorkingEdgeNumber;
+    const color = workingEdgeColor(`E${n}`);
+    const c = first ? this.store.curve(first.curveId) : undefined;
+    const stretch = c && first && over ? curveStretch(this.lineOf(c), first.point, over.point) : null;
+    layer.setDraft(stretch, color, [first?.point, over?.point].filter((p): p is Vec3 => !!p));
+  }
+
+  private placeWorkingEdge(curveId: string, start: Vec3, end: Vec3): void {
+    const out = addWorkingEdge(this.store, { curveId, start, end });
+    if (out.refused) this.refuseEdge(out.refused);
+    else this.selection.set(out.edge.id);
+  }
+
+  /** An end is dragged: along its curve, and no further than it may go. */
+  private dragEdgeEnd(end: EdgeEnd, x: number, y: number): void {
+    const st = this.store.state;
+    const e = this.store.workingEdge(end.id);
+    const c = e ? this.store.curve(e.curveId) : undefined;
+    const to = c ? this.curves?.nearestPointOn(c.id, x, y) : null;
+    if (!e || !c || !to) return;
+    const line = this.lineOf(c);
+    const point = clampedEnd(line, edgeAxis(line, st.specimen.unit), e, end.which, st.workingEdges.filter((o) => o.curveId === c.id && o.id !== e.id), to);
+    this.edgeDrag = { ...end, point };
+    this.syncWorkingEdges();
+  }
+
+  private finishEdgeDrag(commit: boolean): void {
+    const d = this.edgeDrag;
+    this.edgeDrag = null;
+    if (commit && d) {
+      const out = updateWorkingEdge(this.store, d.id, { [d.which]: d.point });
+      if (out?.refused) this.refuseEdge(out.refused);
+    }
+    this.syncWorkingEdges();
+  }
+
+  /** The working edges on the model: bands where they are worked on, ticks where the curves show what is measured. */
+  private syncWorkingEdges(): void {
+    const layer = this.workingEdgeLayer, loaded = this.loaded;
+    if (!layer) return;
+    const st = this.store.state;
+    if (!loaded || (this.mode !== 'annotate' && this.mode !== 'measure' && this.mode !== 'retouch')) {
+      layer.sync([], true, false, false, loaded?.offset ?? [0, 0, 0], [0, 0, 0]);
+      return;
+    }
+    const drawn = st.workingEdges.flatMap((e): DrawnEdge[] => {
+      const c = this.store.curve(e.curveId);
+      if (!c) return [];
+      const line = this.lineOf(c);
+      // on the curve as it is now: it may have changed since
+      const start = pointOnCurve(line, this.edgeDrag?.id === e.id && this.edgeDrag.which === 'start' ? this.edgeDrag.point : e.start);
+      const end = pointOnCurve(line, this.edgeDrag?.id === e.id && this.edgeDrag.which === 'end' ? this.edgeDrag.point : e.end);
+      return [{ id: e.id, label: e.label, version: `${c.modifiedAt}|${line.points.length}`, stretch: curveStretch(line, start, end), start, end, selected: e.id === this.selection.id }];
+    });
+    const mesh = st.mesh;
+    const centre: Vec3 = mesh ? [(mesh.bboxMin[0] + mesh.bboxMax[0]) / 2, (mesh.bboxMin[1] + mesh.bboxMax[1]) / 2, (mesh.bboxMin[2] + mesh.bboxMax[2]) / 2] : [0, 0, 0];
+    layer.sync(drawn, this.mode === 'annotate', this.mode === 'annotate' && this.tools?.activeId === 'select', this.display.arrows.labels, loaded.offset, centre);
+  }
+
+  generateWorkingEdges(): void {
+    const curves = [...this.retouchResults.entries()].flatMap(([curveId, r]) => (r.result ? [{ curveId, stations: r.result.stations }] : []));
+    const made = generateWorkingEdges(this.store, curves);
+    this.feedback.toast(made ? t('edges.made', { n: made }) : t('edges.none'), made ? 'info' : 'warn');
+  }
+
+  otherEdgeStretch(id: string): void {
+    const out = otherWorkingEdgeStretch(this.store, id);
+    if (out?.refused) this.refuseEdge(out.refused);
+  }
+
+  focusWorkingEdge(id: string): void {
+    if (this.planEdgeId === id) this.planEdgeId = null;
+    else {
+      this.planEdgeId = id;
+      const d = this.workingEdgeDetails().find((x) => x.row.id === id);
+      if (d && d.focus !== null) this.moveRetouchStation(d.row.curveId, d.focus);
+    }
+    this.drawPlan();
+    this.sidebar.refresh('retouch');
+  }
+
+  planEdge(): string | null {
+    return this.planEdgeId;
   }
 
   /** The curves' edge angles as the derived results hold them. */
@@ -3212,7 +3612,8 @@ export class App implements AppApi {
     if (key === this.edgeColorKey) return;
     this.edgeColorKey = key;
     const lo = Math.min(...values), hi = Math.max(...values);
-    layer.sync(valuesAlongCurve(c.points, c.closed, stations), c.closed, loaded.offset, sharp ? sharpPaint : rampPaint(lo, hi));
+    const line = this.lineOf(c);
+    layer.sync(valuesAlongCurve(line.points, line.closed, stations), line.closed, loaded.offset, sharp ? sharpPaint : rampPaint(lo, hi));
     const ramp = hi - lo < EDGE_ANGLE_FLAT_DEG ? EDGE_ANGLE_RAMP[2] : `linear-gradient(to right,${EDGE_ANGLE_RAMP.join(',')})`;
     clear(legend);
     if (sharp) {
@@ -3328,11 +3729,11 @@ export class App implements AppApi {
     this.ringLayer?.sync(`${this.profileAt}|${JSON.stringify(this.store.state.flake.axis?.matrix)}`, chains, o);
   }
 
-  /** Pieces of surface between these curves (in slices); null when the mesh is not ready or changed meanwhile. */
-  private async partitionFor(curves: readonly Curve[]): Promise<Partition | null> {
+  /** Pieces of surface between these curves (in slices); null when the mesh is not ready or changed meanwhile. `specimen`: the type they belong to (an observer's own). */
+  private async partitionFor(curves: readonly Curve[], specimen?: SpecimenType): Promise<Partition | null> {
     const base = this.measureBase;
     const loaded = this.loaded;
-    const barrier = await this.barrierFor(curves);
+    const barrier = await this.barrierFor(curves, specimen);
     if (!barrier || !base || !loaded || this.loaded !== loaded) return null;
     const g = loaded.geometry;
     const part = await runSliced(regionsSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, base.edges, barrier));
@@ -3340,12 +3741,12 @@ export class App implements AppApi {
   }
 
   /** The mesh edges along these curves (in slices), as vertex pairs; null when the mesh is not ready or changed meanwhile. */
-  private async barrierFor(curves: readonly Curve[]): Promise<number[] | null> {
-    return (await this.curveChains(curves))?.flat() ?? null;
+  private async barrierFor(curves: readonly Curve[], specimen?: SpecimenType): Promise<number[] | null> {
+    return (await this.curveChains(curves, specimen))?.flat() ?? null;
   }
 
   /** The mesh edges along each of these curves (in slices), as vertex pairs; null when the mesh is not ready or changed meanwhile. */
-  private async curveChains(curves: readonly Curve[]): Promise<number[][] | null> {
+  private async curveChains(curves: readonly Curve[], specimen: SpecimenType = this.store.state.specimen.type): Promise<number[][] | null> {
     const base = this.measureBase;
     const loaded = this.loaded;
     const snap = this.surfaceSnap;
@@ -3364,7 +3765,7 @@ export class App implements AppApi {
       if (this.loaded !== loaded) return null;
       chains.push(chain);
     }
-    const joined = await runSliced(joinOpenEndsSteps(chains, curves.map((c) => !c.closed), loaded.geometry.getAttribute('position').array as Float32Array, JOIN_REACH_EDGES * base.meanEdge, path));
+    const joined = await runSliced(joinOpenEndsSteps(chains, curves.map((c) => !c.closed), loaded.geometry.getAttribute('position').array as Float32Array, JOIN_REACH_EDGES * base.meanEdge, path, curves.map((c) => isBoundaryCurve(c.attributes.type, specimen))));
     return this.loaded === loaded ? joined : null;
   }
 
@@ -3374,10 +3775,10 @@ export class App implements AppApi {
     const base = this.measureBase;
     if (!part || !base) return;
     const st = this.store.state;
-    this.seedComponent = st.regions.map((r) => (isUpperRegion(r.type) ? -1 : this.componentAt(r.seed)));
+    this.seedComponent = st.regions.map((r) => (this.inLowerLayer(st, r) ? this.componentAt(r.seed) : -1));
     const up = this.upper;
     this.upperComponent = up ? this.upperComponents(st, up.partition, this.platformOutline() ? (this.platformAuto?.seed ?? null) : null) : st.regions.map(() => -1);
-    this.regions = resolveRegions(st.regions, this.seedComponent, part, base.surfaceArea, up ? { component: this.upperComponent, partition: up.partition, over: up.over } : null);
+    this.regions = resolveRegions(st.regions, this.seedComponent, part, base.surfaceArea, up && !this.isGeneric() ? { component: this.upperComponent, partition: up.partition, over: up.over } : null);
     const conflicts = this.regions.results.filter((r) => r.conflict).map((r) => r.id).join(',');
     if (conflicts && conflicts !== this.conflictKey) this.feedback.toast(t('toast.regionConflict'), 'warn', 4000);
     this.conflictKey = conflicts;
@@ -3389,6 +3790,7 @@ export class App implements AppApi {
     this.scheduleRetouchAngles();
     this.scheduleGm();
     this.sidebar.refresh('regions');
+    this.updateStatus();
   }
 
   /** The planes fitted to surface regions (in slices), once the regions are known. */
@@ -3434,17 +3836,25 @@ export class App implements AppApi {
 
   // ------------------------------------------------------------ workspace
 
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<SpecimenType | null>; undownloaded: number } | null {
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; undownloaded: number } | null {
     const ws = this.workspace;
     if (!ws) return null;
-    return { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex, started: ws.meshes.map((p) => this.started(p)), types: ws.meshes.map((p, i) => this.modelType(p, i)), undownloaded: this.undownloadedCount() };
+    const models = ws.meshes.map((p, i) => this.modelProject(p, i));
+    return { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex, started: ws.meshes.map((p) => this.started(p)), types: models.map((m) => m?.state.specimen.type ?? null), completion: models.map((m) => {
+      if (!m) return null;
+      const { done, total } = annotationStatus(m.state, m.regions);
+      return { done, total };
+    }), undownloaded: this.undownloadedCount() };
   }
 
-  /** What the open model is, or what its project file says (null: no project, or none read yet). */
-  private modelType(path: string, i: number): SpecimenType | null {
-    if (i === this.wsIndex && this.hasMesh()) return this.store.state.specimen.type;
+  /** The open model's project, or what its project file holds, with the regions found on the mesh, as far as they are known (null: no project, or none read yet). */
+  private modelProject(path: string, i: number): { state: Readonly<ProjectState>; regions: ReadonlyArray<{ type: string; area: number | null }> | null } | null {
+    if (i === this.wsIndex && this.hasMesh()) return { state: this.store.state, regions: this.regions?.results ?? [] };
     const index = this.projectIndex;
-    return index?.get(projectPathFor(path))?.state.specimen.type ?? index?.get(legacyProjectPathFor(path))?.state.specimen.type ?? null;
+    const file = index?.get(projectPathFor(path)) ?? index?.get(legacyProjectPathFor(path));
+    if (!file) return null;
+    const stored = file.derived.regions;
+    return { state: file.state, regions: Array.isArray(stored) && stored.length ? (stored as Array<{ type: string; area: number | null }>) : null };
   }
 
   /** A model has a project (in the folder, from an earlier version next to it, or edited in this session); none are read for this. */
@@ -3479,6 +3889,7 @@ export class App implements AppApi {
     if (this.lossOnLeaving() && !(await this.feedback.confirm(t('dlg.closeModel.title'), t('dlg.closeModel.notDownloaded'), t('dlg.closeModel.yes'), t('dlg.cancel')))) return;
     this.workspace = ws;
     this.wsIndex = -1;
+    this.updateStartPage();
     const { ids, duplicates } = specimenIds(ws.meshes);
     this.wsIds = ids;
     this.wsDuplicates = duplicates;
@@ -3686,7 +4097,7 @@ export class App implements AppApi {
       folder: this.workspace?.name ?? null,
       kind,
       options,
-      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, retouchIndex: RETOUCH_INDEX_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: this.folderGm ?? this.store.state.gm },
+      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, measuredLine: MEASURED_LINE_PARAMETERS, retouchIndex: RETOUCH_INDEX_PARAMETERS, workingEdge: WORKING_EDGE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: this.folderGm ?? this.store.state.gm },
       duplicateNames: this.wsDuplicates,
     };
   }
@@ -3777,7 +4188,7 @@ export class App implements AppApi {
       const live: BatchProject = {
         path: primary?.path ?? own,
         state: structuredClone(this.store.state) as ProjectState,
-        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() }, retouchIndices: this.retouchIndex?.indices ?? null, gm: this.gm ? { config: this.store.state.gm, ...this.gm } : null },
+        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() }, retouchIndices: this.retouchIndex?.indices ?? null, workingEdges: { edges: this.workingEdgeDetails().map((d) => d.row) }, gm: this.gm ? { config: this.store.state.gm, ...this.gm } : null },
         appVersion: __APP_VERSION__,
       };
       projects = projects.map((p) => (p === primary ? live : p));
@@ -3913,16 +4324,20 @@ export class App implements AppApi {
       return [
         csv('scar-vectors', t('export.csv'), 'scar_vectors.csv', st.scars.some(hasVector), () => scarVectorCsv(st, opts, this.configResult)),
         // a core's; a flake has none
-        ...(this.isFlake()
-          ? []
-          : [
+        ...(this.isCore()
+          ? [
               csv('configuration', t('export.configuration'), 'configuration.csv', !!this.configResult, () => configurationCsv(st, this.configResult, opts)),
               csv('flaking-surfaces', t('export.flakingSurfaces'), 'flaking_surfaces.csv', !!this.configResult?.surfaces.length, () => flakingSurfacesCsv(st, this.configResult, opts)),
-            ]),
+            ]
+          : []),
         csv('curves', t('export.curvesCsv'), 'curves.csv', st.curves.length > 0, () => curveCsv(st, opts)),
         csv('regions', t('export.regions'), 'regions.csv', !!this.regions?.results.length, () => regionsCsv(st, this.regions?.results ?? [], opts)),
-        csv('relations', t('export.relations'), 'relations.csv', st.relations.length > 0, () => relationsCsv(st, opts)),
-        csv('series', t('export.series'), 'series.csv', st.sequences.some((q) => q.scarIds.length), () => seriesCsv(st, opts)),
+        ...(this.isGeneric()
+          ? []
+          : [
+              csv('relations', t('export.relations'), 'relations.csv', st.relations.length > 0, () => relationsCsv(st, opts)),
+              csv('series', t('export.series'), 'series.csv', st.sequences.some((q) => q.scarIds.length), () => seriesCsv(st, opts)),
+            ]),
         csv('landmarks-tps', t('export.landmarksTps'), 'landmarks.tps', lm.rows.length > 0, () => landmarksTps(st, lm)),
         csv('landmarks-fcsv', t('export.landmarksFcsv'), 'landmarks.fcsv', lm.rows.length > 0, () => landmarksFcsv(lm)),
         csv('landmarks-csv', t('export.landmarksCsv'), 'landmarks.csv', lm.rows.length > 0, () => landmarksCsv(st, lm, opts)),
@@ -3946,12 +4361,13 @@ export class App implements AppApi {
         csv('retouch-segments', t('export.retouchSegments'), 'retouch_segments.csv', !!this.retouchIndex?.indices.segments.length, () => retouchSegmentsCsv(st, this.retouchIndex?.indices ?? null, opts)),
         csv('invasiveness', t('export.invasiveness'), 'invasiveness.csv', !!this.retouchIndex?.indices.penetration.length, () => invasivenessCsv(st, this.retouchIndex?.indices ?? null, opts)),
         csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts)),
+        csv('working-edges', t('export.workingEdges'), 'working_edges.csv', this.workingEdgeDetails().length > 0, () => workingEdgesCsv(st, this.workingEdgeDetails().map((d) => d.row), this.edgeAngleCurves(), opts)),
       ];
     if (this.mode === 'measure')
       return [
         ...(this.isFlake() ? [csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts, this.retouchIndex?.indices ?? null))] : []),
         csv('edge-angles', t('export.edgeAngles'), 'edge_angles.csv', this.edgeAngleCurves().length > 0, () => edgeAnglesCsv(st, this.edgeAngleCurves(), opts)),
-        csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts)),
+        ...(this.isGeneric() ? [] : [csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts))]),
         ...(this.isFlake()
           ? [
               csv('retouch-sections', t('export.retouchSections'), 'retouch_sections.csv', !!this.retouchIndex?.indices.stations.length, () => retouchSectionsCsv(st, this.retouchIndex?.indices ?? null, opts)),
@@ -3959,7 +4375,8 @@ export class App implements AppApi {
               csv('invasiveness', t('export.invasiveness'), 'invasiveness.csv', !!this.retouchIndex?.indices.penetration.length, () => invasivenessCsv(st, this.retouchIndex?.indices ?? null, opts)),
             ]
           : []),
-        csv('edge-sharp', t('export.edgeSharp'), 'edge_sharp.csv', st.sharpEdge.threshold !== null && this.edgeAngleCurves().length > 0, () => edgeSharpCsv(st, this.edgeAngleCurves(), opts)),
+        ...(this.isGeneric() ? [] : [csv('edge-sharp', t('export.edgeSharp'), 'edge_sharp.csv', st.sharpEdge.threshold !== null && this.edgeAngleCurves().length > 0, () => edgeSharpCsv(st, this.edgeAngleCurves(), opts))]),
+        csv('working-edges', t('export.workingEdges'), 'working_edges.csv', this.workingEdgeDetails().length > 0, () => workingEdgesCsv(st, this.workingEdgeDetails().map((d) => d.row), this.edgeAngleCurves(), opts)),
         csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile())),
         csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
         csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
@@ -4266,6 +4683,7 @@ export class App implements AppApi {
     l.arrows.clearAll();
     l.curves.clearAll();
     l.landmarks.clearAll();
+    l.landmarks.dispose();
     for (const g of [l.arrows.group, l.curves.group, l.landmarks.group]) this.viewer.overlay.remove(g);
     o.layers = null;
     this.viewer.requestRender();
@@ -4291,7 +4709,7 @@ export class App implements AppApi {
     if (!st.regions.length) return null;
     const key = JSON.stringify([st.specimen.type, st.flake.axis?.end, st.curves.map((c) => [c.points, c.closed, c.attributes.type]), st.regions.map((r) => [r.seed, r.type, r.auto])]);
     if (o.faces?.key === key) return o.faces;
-    const part = await this.partitionFor(st.curves);
+    const part = await this.partitionFor(st.curves, st.specimen.type);
     if (!part) return null;
     const label = (p: Partition, component: readonly number[]): FaceLabels => {
       const owner = new Int32Array(p.count).fill(-1);
@@ -4308,10 +4726,10 @@ export class App implements AppApi {
       }
       return labels;
     };
-    const labels = label(part, st.regions.map((r) => (isUpperRegion(r.type) ? -1 : this.pieceAt(part, r.seed))));
+    const labels = label(part, st.regions.map((r) => (this.inLowerLayer(st, r) ? this.pieceAt(part, r.seed) : -1)));
     let upper: FaceLabels | null = null;
-    if (st.regions.some((r) => isUpperRegion(r.type))) {
-      const above = await this.partitionFor(st.curves.filter((c) => isBoundaryCurve(c.attributes.type, st.specimen.type)));
+    if (st.regions.some((r) => isUpperRegion(r.type, st.specimen.type))) {
+      const above = await this.partitionFor(st.curves.filter((c) => isBoundaryCurve(c.attributes.type, st.specimen.type)), st.specimen.type);
       const outline = st.specimen.type === 'flake' ? st.curves.find((c) => c.attributes.type === PLATFORM_OUTLINE && c.closed) : undefined;
       if (above) upper = label(above, this.upperComponents(st, above, outline ? await this.outlineSeed(outline) : null));
     }
@@ -4751,7 +5169,7 @@ export class App implements AppApi {
   private updateHarris(): void {
     const el = this.harrisEl, body = this.harrisBody;
     if (!el || !body) return;
-    const shown = (this.display.harris || (this.harrisAuto() && !this.harrisAutoOff)) && this.mode === 'annotate' && this.hasMesh();
+    const shown = (this.display.harris || (this.harrisAuto() && !this.harrisAutoOff)) && this.mode === 'annotate' && this.hasMesh() && !this.isGeneric();
     const wasShown = !el.hidden;
     el.hidden = !shown;
     if (!shown) return;
@@ -4851,7 +5269,7 @@ export class App implements AppApi {
     const loaded = this.loaded;
     const st = this.store.state;
     this.nodule = null;
-    if (part && loaded && this.regions) {
+    if (part && loaded && this.regions && !this.isGeneric()) {
       const used = st.regions.filter((r, i) => r.type === 'cortex' && !st.nodule.exclude.includes(r.id) && this.seedComponent[i] >= 0 && this.seedComponent.indexOf(this.seedComponent[i]) === i);
       const comps = new Set(used.map((r) => this.seedComponent[st.regions.indexOf(r)]));
       if (comps.size) {
@@ -4901,7 +5319,7 @@ export class App implements AppApi {
     const st = this.store.state;
     layer.dimmed = this.mode === 'measure';
     const sequencing = this.sequencing();
-    const seq = this.display.arrows.colorMode === 'sequence' || sequencing ? sequenceColors(st.sequences) : null;
+    const seq = this.arrowColorMode() === 'sequence' || sequencing ? sequenceColors(st.sequences) : null;
     const loose = sequencing ? this.unsequenced() : null;
     const em = this.emphasis();
     const paints = this.display.regions
@@ -5027,6 +5445,7 @@ export class App implements AppApi {
     }
     if (this.mode !== 'annotate') return;
     if (this.store.state.flake.axis?.id === sel) deleteTechnicalAxis(this.store);
+    else if (this.store.workingEdge(sel)) deleteWorkingEdge(this.store, sel);
     else if (this.store.region(sel)) deleteRegion(this.store, sel);
     else if (this.store.relation(sel)) deleteRelation(this.store, sel);
     else if (this.store.sequence(sel)) deleteSequence(this.store, sel);
@@ -5139,6 +5558,10 @@ export class App implements AppApi {
     this.gmDoneKey = '';
     this.edgeToken++;
     this.edgeLayer?.clear();
+    this.workingEdgeLayer?.clear();
+    this.edgeDetails = null;
+    this.planEdgeId = null;
+    this.edgeDrag = null;
     this.edgeColorKey = '';
     if (this.edgeLegend) this.edgeLegend.hidden = true;
     this.flakeMorph = null;
@@ -5189,8 +5612,8 @@ export class App implements AppApi {
       unit: readPref('unit', prev.specimen.unit || 'mm'),
       notes: '',
       frame: null,
-      // a new specimen starts as the last one (a project file then says what it is)
-      type: readPref<string>('specimenType', prev.specimen.type) === 'flake' ? 'flake' : 'core',
+      // the type chosen on the start page, else as the last one (a project file then says what it is)
+      type: this.newSpecimenType(prev.specimen.type),
     };
     this.selection.set(null);
     if (this.workspace && this.folderSharp) fresh.sharpEdge = { ...this.folderSharp };
@@ -5260,7 +5683,7 @@ export class App implements AppApi {
   /** `project`: project files that may be the model's (a folder's); `quiet`: no questions (batch runs); `specimenId`: for a new project. */
   private async openMeshFile(file: File, opts: { project?: ProjectState[]; quiet?: boolean; specimenId?: string } = {}): Promise<void> {
     if (!this.viewer) return;
-    const host = this.viewportEl;
+    const host = this.startShown() ? this.startEl : this.viewportEl;
     try {
       const raw = await readMeshFile(file, async (stage) => {
         this.feedback.busy(t(`load.${stage}`), host);
@@ -5484,7 +5907,8 @@ export class App implements AppApi {
       if (e.repeat && !['BracketLeft', 'BracketRight', 'Backspace', 'ArrowLeft', 'ArrowRight'].includes(e.code)) return;
       switch (e.code) {
         case 'KeyM':
-          this.cycleMode();
+          // (no model: the modes are not shown)
+          if (this.hasMesh()) this.cycleMode();
           return;
         case 'KeyA':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('draw');
@@ -5495,11 +5919,14 @@ export class App implements AppApi {
         case 'KeyP':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('curve');
           return;
+        case 'KeyW':
+          if (this.hasMesh() && this.mode === 'annotate') this.setTool('working-edge');
+          return;
         case 'KeyB':
-          if (this.hasMesh() && this.mode === 'annotate') this.setTool('relation');
+          if (this.hasMesh() && this.mode === 'annotate' && !this.isGeneric()) this.setTool('relation');
           return;
         case 'KeyQ':
-          if (this.hasMesh() && this.mode === 'annotate') this.setTool('sequence');
+          if (this.hasMesh() && this.mode === 'annotate' && !this.isGeneric()) this.setTool('sequence');
           return;
         case 'KeyK':
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('landmark');
@@ -5610,6 +6037,9 @@ export class App implements AppApi {
         return;
       }
       if (digit && sel && this.mode === 'annotate') {
+        // a generic specimen's arrows have no attributes, nor its regions layers
+        const generic = this.isGeneric();
+        if (generic && (e.shiftKey || this.store.scar(sel))) return;
         // Shift + 1–5: the selected arrow's termination, or the selected retouch region's layer
         if (e.shiftKey) {
           const region = this.store.region(sel);
@@ -5676,7 +6106,7 @@ export class App implements AppApi {
       const label = s.state.flake.axis?.id === item.id
         ? t('hover.axis')
         : scar
-        ? `${scar.label} · ${t('hover.arrow')}`
+        ? `${scar.label} · ${t(this.isGeneric() ? 'hover.arrow.generic' : 'hover.arrow')}`
         : curve
           ? `${curve.label} · ${t('hover.curve')}`
           : landmark
@@ -5693,6 +6123,7 @@ export class App implements AppApi {
     const specimen = this.store.state.specimen.type;
     const keyCount = (f: FieldDef | undefined) => (f ? keyedOptions(f, specimen).length : 0);
     const count = Math.max(keyCount(numberKeyField(SCAR_FIELDS)), keyCount(numberKeyField(CURVE_FIELDS)), keyCount(numberKeyField(REGION_FIELDS))) || 5;
+    const generic = this.isGeneric();
     /** Keys ("Ctrl+Z / Ctrl+Shift+Z", "1 / 2 / 3 · Delete") as key caps; `hold`: to be held down. */
     const keys = (spec: string, hold: boolean): HTMLElement => {
       const dt = h('dt', {});
@@ -5742,15 +6173,19 @@ export class App implements AppApi {
         ...(this.isFlake() ? ([['T', 'help.k.axis'], ['F', 'help.k.orient']] as Row[]) : []),
         ['A', 'help.k.draw'],
         ['P', 'help.k.curve'],
+        ['W', 'help.k.workingEdge'],
         ...(this.isFlake() ? ([['E', 'help.k.platformEnd']] as Row[]) : []),
         ['R', 'help.k.region'],
-        ['B', 'help.k.relation'],
-        ['Q', 'help.k.sequence'],
+        ...(generic ? [] : ([['B', 'help.k.relation'], ['Q', 'help.k.sequence']] as Row[])),
         ['K', 'help.k.landmark'],
-        ['1 / 2 / 3 · Delete', 'help.k.relationPick'],
-        ['1 – 9 / N', 'help.k.sequencePick'],
-        [`1 – ${count}`, 'help.k.complete'],
-        [`Shift+1 – ${shiftNumberKeyField(SCAR_FIELDS)?.options?.length ?? 5}`, 'help.k.termination'],
+        ...(generic
+          ? ([['1', 'help.k.customType']] as Row[])
+          : ([
+              ['1 / 2 / 3 · Delete', 'help.k.relationPick'],
+              ['1 – 9 / N', 'help.k.sequencePick'],
+              [`1 – ${count}`, 'help.k.complete'],
+              [`Shift+1 – ${shiftNumberKeyField(SCAR_FIELDS)?.options?.length ?? 5}`, 'help.k.termination'],
+            ] as Row[])),
         ['S', 'help.k.snap'],
         ['Shift', 'help.k.shift', true],
         ['Enter', 'help.k.finish'],
@@ -5859,6 +6294,9 @@ export class App implements AppApi {
       retouchAngles: (curveId: string) => this.retouchAngleResult(curveId),
       sharpEdge: (curveId: string) => this.sharpOf(curveId),
       exportRetouchAnglesCsvText: () => retouchAnglesCsv(this.store.state, this.retouchAngleCurves(), { excelBom: false }),
+      /** Each working edge's row, why what is empty is empty, and how it is drawn. */
+      workingEdges: () => ({ rows: this.workingEdgeDetails().map((d) => ({ ...d.row, reasons: d.reasons, focus: d.focus })), drawn: this.workingEdgeLayer?.counts() ?? null, picked: this.planEdgeId, pending: this.tools?.activeTool instanceof WorkingEdgeTool ? this.tools.activeTool.pending() : null }),
+      exportWorkingEdgesCsvText: () => workingEdgesCsv(this.store.state, this.workingEdgeDetails().map((d) => d.row), this.edgeAngleCurves(), { excelBom: false }),
       exportEdgeSharpCsvText: () => edgeSharpCsv(this.store.state, this.edgeAngleCurves(), { excelBom: false }),
       /** The volumetric configuration (null without arrows or before the mesh is measured). */
       configuration: () => this.configResult,
@@ -5948,6 +6386,12 @@ export class App implements AppApi {
       /** The point the camera turns around. */
       viewTarget: (): Vec3 | null => (this.viewer ? [this.viewer.controls.target.x, this.viewer.controls.target.y, this.viewer.controls.target.z] : null),
       closeModel: () => this.closeModel(),
+      /** What the specimen has of what it is annotated with. */
+      annotationStatus: () => annotationStatus(this.store.state, this.regions?.results ?? []),
+      /** The type asked for the next curve drawn. */
+      nextCurveType: () => this.nextCurveType,
+      /** A landmark's diameter on the screen as drawn, in CSS pixels. */
+      landmarkDiameter: (id: string) => this.landmarkLayer?.screenDiameter(id) ?? null,
       /** Points of the measurement being taken (null when no measuring tool is active). */
       measureDraft: (): Vec3[] | null => {
         const tool = this.tools?.activeTool;

@@ -6,7 +6,7 @@ import { copy } from '../core/vec';
 import type { SurfaceHit } from '../render/viewer';
 import { pointVertex } from './drawArrowTool';
 import { SNAP_PX } from './drawCurveTool';
-import type { HitProvider, Tool, ToolContext } from './tool';
+import type { EdgeEnd, HitProvider, Tool, ToolContext } from './tool';
 
 const CLICK_PX = 4;
 const DRAG_BUDGET = 400_000;
@@ -40,6 +40,8 @@ export class SelectTool implements Tool {
   private curveDrag: CurveDrag | null = null;
   private overHandle: 'start' | 'end' | null = null;
   private overAnchor: number | null = null;
+  private edgeDrag: EdgeEnd | null = null;
+  private overEdgeEnd: EdgeEnd | null = null;
   /** The item a click would select now, and the pick waiting for the next frame. */
   private hovered: string | null = null;
   private hoverAt: { x: number; y: number } | null = null;
@@ -55,11 +57,14 @@ export class SelectTool implements Tool {
     this.clearHover();
     this.endDrag(false);
     this.endCurveDrag(false);
+    this.endEdgeDrag(false);
     this.down = null;
     this.overHandle = null;
     this.overAnchor = null;
+    this.overEdgeEnd = null;
     this.ctx.arrows.highlightHandle(null);
     this.ctx.curves.highlightAnchor(null);
+    this.ctx.edgeEnds.highlight(null);
   }
 
   pointerDown(e: PointerEvent): boolean {
@@ -71,6 +76,8 @@ export class SelectTool implements Tool {
     }
     const id = this.ctx.selection.id;
     const curve = id ? this.ctx.store.curve(id) : undefined;
+    // the selected working edge's ends come first
+    if (id && this.ctx.store.workingEdge(id) && this.startEdgeDrag(e)) return true;
     if (curve) {
       const k = this.ctx.curves.anchorAt(e.clientX, e.clientY);
       if (k !== null && k < curve.anchors.length) {
@@ -99,11 +106,16 @@ export class SelectTool implements Tool {
         return true;
       }
     }
+    if (this.startEdgeDrag(e)) return true;
     this.down = { x: e.clientX, y: e.clientY };
     return false;
   }
 
   pointerMove(e: PointerEvent, hit: HitProvider): void {
+    if (this.edgeDrag) {
+      this.ctx.edgeEnds.drag(this.edgeDrag, e.clientX, e.clientY);
+      return;
+    }
     if (this.curveDrag) {
       this.moveCurveDrag(hit);
       return;
@@ -128,14 +140,17 @@ export class SelectTool implements Tool {
     if (e.buttons === 0) {
       const anchor = this.ctx.curves.anchorAt(e.clientX, e.clientY);
       const over = anchor === null ? this.ctx.arrows.handleAt(e.clientX, e.clientY) : null;
-      if (over !== this.overHandle || anchor !== this.overAnchor) {
+      const end = anchor === null && !over ? this.ctx.edgeEnds.at(e.clientX, e.clientY) : null;
+      if (over !== this.overHandle || anchor !== this.overAnchor || end?.id !== this.overEdgeEnd?.id || end?.which !== this.overEdgeEnd?.which) {
         this.overHandle = over;
         this.overAnchor = anchor;
+        this.overEdgeEnd = end;
         this.ctx.arrows.highlightHandle(over);
         this.ctx.curves.highlightAnchor(anchor);
+        this.ctx.edgeEnds.highlight(end);
         this.ctx.changed();
       }
-      if (over || anchor !== null) this.setHovered(null);
+      if (over || anchor !== null || end) this.setHovered(null);
       else this.queueHover(e.clientX, e.clientY);
     }
   }
@@ -183,6 +198,10 @@ export class SelectTool implements Tool {
   }
 
   pointerUp(e: PointerEvent): void {
+    if (this.edgeDrag) {
+      this.endEdgeDrag(true);
+      return;
+    }
     if (this.curveDrag) {
       this.endCurveDrag(true);
       return;
@@ -200,6 +219,26 @@ export class SelectTool implements Tool {
   doubleClick(_e: MouseEvent, hit: HitProvider): void {
     const h = hit();
     if (h) this.ctx.viewer.setRotationCenter(h.point);
+  }
+
+  // ---- the ends of the working edges
+
+  private startEdgeDrag(e: PointerEvent): boolean {
+    const end = this.ctx.edgeEnds.at(e.clientX, e.clientY);
+    if (!end) return false;
+    this.edgeDrag = end;
+    this.ctx.selection.set(end.id);
+    this.ctx.edgeEnds.highlight(end);
+    this.ctx.changed();
+    return true;
+  }
+
+  private endEdgeDrag(commit: boolean): void {
+    if (!this.edgeDrag) return;
+    this.edgeDrag = null;
+    this.ctx.edgeEnds.finish(commit);
+    this.ctx.edgeEnds.highlight(null);
+    this.ctx.changed();
   }
 
   // ---- arrow endpoints
@@ -321,6 +360,10 @@ export class SelectTool implements Tool {
   }
 
   cancel(): boolean {
+    if (this.edgeDrag) {
+      this.endEdgeDrag(false);
+      return true;
+    }
     if (this.curveDrag) {
       this.endCurveDrag(false);
       return true;
@@ -342,8 +385,8 @@ export class SelectTool implements Tool {
   }
 
   cursor(): string {
-    if (this.drag || this.curveDrag) return 'grabbing';
-    if (this.overHandle || this.overAnchor !== null) return 'grab';
+    if (this.drag || this.curveDrag || this.edgeDrag) return 'grabbing';
+    if (this.overHandle || this.overAnchor !== null || this.overEdgeEnd) return 'grab';
     return this.hovered ? 'pointer' : 'default';
   }
 }

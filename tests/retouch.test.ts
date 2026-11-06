@@ -286,7 +286,7 @@ describe('retouch in the project', () => {
     expect(rows[0]).toBe('specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer');
     expect(rows[1]).toBe(`,${g.label},retouch,,5,mm,,2`);
     const angles = retouchAnglesCsv(s.state, [{ curveId: c.id, stations: [{ position: 0, point: [0, 0, 0], stretches: [{ region: g.id, layer: 2, distance: 4.5, three_points: 30, two_lines: null, layer_face: 12.5 }] }] }], { excelBom: false }).trim().split('\n');
-    expect(angles[0]).toBe('specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg');
-    expect(angles.slice(1)).toEqual([`,C1,0,0,${g.label},2,4.5,three_points,30`, `,C1,0,0,${g.label},2,4.5,two_lines,`, `,C1,0,0,${g.label},2,4.5,layer_face,12.5`]);
+    expect(angles[0]).toBe('specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg,working_edge');
+    expect(angles.slice(1)).toEqual([`,C1,0,0,${g.label},2,4.5,three_points,30,`, `,C1,0,0,${g.label},2,4.5,two_lines,,`, `,C1,0,0,${g.label},2,4.5,layer_face,12.5,`]);
   });
 });

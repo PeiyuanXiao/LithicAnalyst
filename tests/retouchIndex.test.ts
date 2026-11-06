@@ -677,7 +677,7 @@ describe('the tables', () => {
 
   it('retouch_sections.csv: a row per retouched station', () => {
     const [head, ...rows] = retouchSectionsCsv(s.state, r, { excelBom: false }).trim().split('\n');
-    expect(head).toBe('specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur');
+    expect(head).toBe('specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur,working_edge');
     expect(rows.length).toBe(31);
     const c = rows[10].split(',');
     expect(c[1]).toBe('C7');
@@ -690,7 +690,7 @@ describe('the tables', () => {
 
   it('retouch_segments.csv: a row per region, by its label', () => {
     const [head, ...rows] = retouchSegmentsCsv(s.state, r, { excelBom: false }).trim().split('\n');
-    expect(head).toBe('specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth');
+    expect(head).toBe('specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth,working_edge');
     expect(rows.length).toBe(1);
     const c = rows[0].split(',');
     expect(c.slice(1, 7)).toEqual(['C7', 'R4', '1', 'dorsal', '0', '30']);

@@ -41,14 +41,14 @@ export function curveSegments(c: Pick<CurveShape, 'points' | 'anchorIndex' | 'cl
 }
 
 /** Length along the polyline, including the closing segment of a closed curve. */
-export function polylineLength(points: Vec3[], closed: boolean): number {
+export function polylineLength(points: readonly Vec3[], closed: boolean): number {
   let L = 0;
   for (let i = 1; i < points.length; i++) L += distance(points[i - 1], points[i]);
   if (closed && points.length > 2) L += distance(points[points.length - 1], points[0]);
   return L;
 }
 
-export const curveLength = (c: Pick<Curve, 'points' | 'closed'>): number => polylineLength(c.points, c.closed);
+export const curveLength = (c: { points: readonly Vec3[]; closed: boolean }): number => polylineLength(c.points, c.closed);
 
 /** Index of the point halfway along the curve (for placing a label). */
 export function midPointIndex(points: Vec3[]): number {

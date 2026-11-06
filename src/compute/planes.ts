@@ -1,7 +1,17 @@
+import type { SpecimenType } from '../core/fields';
 import type { Plane, PlaneMethod, ProjectState, Vec3 } from '../core/types';
 import { symmetricEigen3 } from './linalg';
 import { fitPlane, type FittedPlane, type PrincipalAxes } from './meshGeometry';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
+
+/** The methods offered on each type of specimen: a flake's planes go by part, a generic specimen has no scars to go by. */
+const PLANE_METHODS: Record<SpecimenType, readonly PlaneMethod[]> = {
+  core: ['all_vertices', 'scar_directions', 'scar_starts', 'curves'],
+  flake: ['curves', 'region'],
+  generic: ['all_vertices', 'curves', 'region'],
+};
+
+export const planeMethodsOf = (type: SpecimenType): readonly PlaneMethod[] => PLANE_METHODS[type];
 
 /** A fitted plane, derived from its inputs. */
 export interface PlaneResult {

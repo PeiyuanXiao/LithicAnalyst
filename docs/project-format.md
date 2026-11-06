@@ -43,9 +43,11 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `flake` | `{ axis, otherFrame, retouch }` | a flake's own data, see "Flakes" and "Retouch indices"; files without it: none |
 | `gm` | object | which points a flake has for geometric morphometrics, see "Geometric morphometrics"; files without it: the default |
 | `sharpEdge` | `{ method, distance, threshold }` | what counts as a sharp edge, see "Sharp edge"; files without it: three points at 2 mm, no threshold |
+| `workingEdges` | array | stretches of the curves measured for edge angles, measured on their own, see "Working edges"; files without it: none |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
+| `nextWorkingEdgeNumber` | integer | next working edge label (`E{n}`) |
 | `nextMeasureNumber` | integer | next measurement label (`M{n}`) |
 | `nextPlaneNumber` | integer | next plane label (`P{n}`) |
 | `nextSectionNumber` | integer | next section label (`X{n}`) |
@@ -84,8 +86,12 @@ faces each have vertices of their own) and degenerate triangles left out.
   bounding box. `source` records how it was set: `view`, or `plane:P1`, or `technical_axis` (a
   flake's technical frame, see "Flakes"), followed by `; vertical:S3` when an arrow set the
   vertical (pointing up, origin at the bottom) or `; turned` when a technical frame was turned on the page.
-* `type`: `core` or `flake`; files without it are read as `core`. It decides which tools, panels
-  and exports the specimen has, nothing else: the other type's data stay in the file.
+* `type`: `core`, `flake` or `generic`; files without it are read as `core`. It decides which tools, panels
+  and exports the specimen has, nothing else: the other types' data stay in the file. On a `generic` specimen curve and region types
+  are the annotator's own text (a preset code from another type stays as it is); a new region's type is `region` until changed, its `scarId` is
+  null and it makes no scar, whatever its text says; all regions lie in one layer, cut by all the curves (a region typed `platform` is that word, not
+  an upper region, and has `parent: null`), and those with `auto: true` are left aside as on a core. `derived.configuration`, `derived.flake`, `derived.nodule` and `derived.retouchAngles` are empty. Arrows keep
+  their `attributes` in the file; `scar_vectors.csv` leaves those columns empty.
 
 ## Derived results
 
@@ -164,6 +170,7 @@ fitted planes, fitted spheres, volumes ….
 * `edgeAngles`: the edge angles of the curves measured, see "Edge angles" (null: none).
 * `retouchAngles`: the retouch layers along those curves, see "Retouch layers" (null: none).
 * `retouchIndices`: a flake's retouch indices, see "Retouch indices" (absent for a core, or before they are computed).
+* `measuredLines` (absent when there are none): the edges not measured along all of their curve, see "The line measured" under "Edge angles": `{ parameters: { EDGE_RIM_REACH_MM, EDGE_RIM_MIN_MM }, curves: [{ curveId, start, end }] }`.
 * `sharpEdge`: their sharp stretches, see "Sharp edge" (null without a threshold, or without edge angles).
 * `gm`: a flake's points for geometric morphometrics, see "Geometric morphometrics" (null for a core, or before they are computed).
 
@@ -308,7 +315,7 @@ the type deletes nothing: the other type's data stay in the file and come back w
   is toward the viewer and the platform down). It is stored because it needs the mesh; the mesh does not change.
 * `specimen.frame` is set to it (`source: "technical_axis"`) when the axis is drawn or moved, and back
   to null when the axis is deleted or gives no frame. The standard views then show the dorsal face in
-  front, the ventral at the back and the platform from below. `otherFrame`: the frame of the type not in use.
+  front, the ventral at the back and the platform from below. `otherFrame`: the frame of the type not in use (a flake has its own; `core` and `generic` share one).
 * The landmark `pop` (`code: "pop"`, named `pop`) is the arrow's start: it moves and goes with the axis
   and cannot be moved or deleted by itself.
 * Platform ends: landmarks with `code: "platform_end"`, at most two, on the platform outline. In the landmark
@@ -318,8 +325,8 @@ the type deletes nothing: the other type's data stay in the file and come back w
   one step; closed) parts the surface in two. The region of type `platform` with `auto: true` is the smaller of the two. All
   regions of type `platform` make the platform region.
 * The faces: with an `edge` curve and a technical frame, the regions of type `ventral` and `dorsal` with `auto: true`: among the pieces of the
-  upper layer, the one under the axis's end, and the largest other than it and the platform (at least 5 % of the surface; else the edge
-  does not part the two, and neither is assigned).
+  upper layer, the one under the axis's end, and the largest other than it and the platform (at least 5 % of the surface; else the edge and
+  the platform outline leave a way round, and neither is assigned). So the edge is open with its ends on a platform outline, and closed where there is none.
 * A region with `auto: true` follows those annotations, and its `seed` says nothing. Given another type by hand it becomes an ordinary region
   at that place; a region the user has typed in that piece stands instead. These regions are the flake's: a core neither shows nor exports them.
 
@@ -364,6 +371,7 @@ what needs them is not measured.
 After Schunk et al. 2023 (3D-EdgeAngle). Measured on curves with `edgeAngle: true`, or, without that key, on a flake's `edge` and a core's
 `core_edge` curves. Lengths are in the coordinate unit; without a stated unit nothing is measured.
 
+* **The line measured**: the curve, but for a flake's `edge` with a closed `platform_outline`: a run of its points within `EDGE_RIM_REACH_MM` (1 mm) of the outline and at least `EDGE_RIM_MIN_MM` (2 mm) long lies along the platform and is no part of the edge. What is measured is the longest stretch off such runs, an open line, each end going on to where it comes nearest the outline; an edge merely reaching the outline keeps all its points. The stations, edge angles, sharp stretches, working edges and retouch indices all go by this line, positions along it. The curve in the file keeps its points and `closed`, and goes on cutting the regions.
 * **Reference curve**: the curve resampled every 1 mm, then a moving average `SMOOTH_WINDOW_MM` long (a closed curve goes round; an open
   one takes fewer points near its ends, which stay). It only sets the sections' direction.
 * **Stations**: every `EDGE_ANGLE_STEP_MM` along it from its start; once round a closed curve (⌈length / step⌉), to the end of an open one (⌊length / step⌋ + 1).
@@ -430,7 +438,35 @@ The two lines meet at A0. Each runs from F (R, or A without retouch) toward the 
 
 **Empty values.** The reasons are for the screen: neither in the file nor in the tables. In order: the reduction: `no_unit`, `no_retouch_on_edge`, `no_faces` (no retouched station is told), `too_many_gaps` (`erp_filled_share` above `ERP_MAX_FILLED_SHARE`), and for `erp` alone `mesh_open`. GIUR: `no_unit`, `no_retouch_on_edge`, `no_faces`, `no_unifacial_station`. Invasiveness: `no_faces`, `no_axis` (`technical` chosen, no technical frame), `frame_failed`. The perimeter: `no_unit`, `no_edge`; the two faces also `no_faces`. The curvature: `no_unit`, `no_retouch_on_edge`, `whole_edge`, `no_axis`, `frame_failed`.
 
-**Derived** (`derived.retouchIndices`): `parameters` (`FIT_RESAMPLE_COUNT` 200, `ORIGINAL_FIT_MM` 5, `ORIGINAL_FIT_MIN_SHARE` 0.5, `MIN_MEET_DEG` 1, `MEET_TOLERANCE_EDGES` 1, `FIT_LENGTH_RANGE_MM` [1, 20], `ERP_MAX_FILLED_SHARE` 0.25, `OUTLINE_BINS` 200, `INVASIVE_BOUNDARY` 0.5, `RETOUCH_MERGE_GAP_MM` 2); `fitLength` (mm) and `axis` (`technical`, `longest` or null) as used; `frame` (`{ origin, x, y, z, y0, y1 }`, original coordinates; null: none); the values `removed_volume`, `erp`, `erp_filled_share`, `giur`, `giur_stations`, `invasiveness`, `invasiveness_continuous`, `retouch_perimeter`, `retouch_perimeter_dorsal`, `retouch_perimeter_ventral`, `edge_curvature`, `edge_curvature_chord`, `edge_curvature_depth`; `stations` (`{ curveId, station, position, segment, x, y, depth_dorsal, depth_ventral, removed_area, filled, original_angle_deg, recession, retouch_height, thickness, giur }`, the retouched ones); `segments` (`{ curveId, region, layer, face, start_position, end_position, length, chord, depth }`, `region` by id); `penetration` (`{ face, segment, penetration, score }`, sixteen; none when they cannot be told).
+**Derived** (`derived.retouchIndices`): `parameters` (`FIT_RESAMPLE_COUNT` 200, `ORIGINAL_FIT_MM` 5, `ORIGINAL_FIT_MIN_SHARE` 0.5, `MIN_MEET_DEG` 1, `MEET_TOLERANCE_EDGES` 1, `FIT_LENGTH_RANGE_MM` [1, 20], `ERP_MAX_FILLED_SHARE` 0.25, `OUTLINE_BINS` 200, `INVASIVE_BOUNDARY` 0.5, `RETOUCH_MERGE_GAP_MM` 2); `fitLength` (mm) and `axis` (`technical`, `longest` or null) as used; `frame` (`{ origin, x, y, z, y0, y1 }`, original coordinates; null: none); the values `removed_volume`, `erp`, `erp_filled_share`, `giur`, `giur_stations`, `invasiveness`, `invasiveness_continuous`, `retouch_perimeter`, `retouch_perimeter_dorsal`, `retouch_perimeter_ventral`, `edge_curvature`, `edge_curvature_chord`, `edge_curvature_depth`; `stations` (`{ curveId, station, position, segment, x, y, depth_dorsal, depth_ventral, removed_area, filled, original_angle_deg, recession, retouch_height, thickness, giur }`, the retouched ones); `segments` (`{ curveId, region, layer, face, start_position, end_position, length, chord, depth, middle }`, `region` by id; `middle`: where its middle station is along the curve); `penetration` (`{ face, segment, penetration, score }`, sixteen; none when they cannot be told).
+
+## Working edges
+
+A working edge is a stretch of a curve measured for edge angles (a flake's `edge` is one outline, on which geometric morphometrics and the faces depend; two edges of a scraper are stretches of it). Core, flake or general specimen alike.
+
+```json
+"workingEdges": [
+  { "id": "…", "label": "E1", "name": "left side", "curveId": "…", "start": [12.1, 3.4, 0.2], "end": [-11.8, 4.0, 0.1], "createdAt": "…", "modifiedAt": "…" }
+],
+"nextWorkingEdgeNumber": 2
+```
+
+* `label`: `E{n}`, given in turn, never used again. `name`: the user's, may be empty. `curveId`: its curve; one on a curve the file does not have is dropped on reading.
+* `start`, `end`: points on the curve, original coordinates. They are placed on the curve's reference curve (see "Edge angles": the nearest point) whenever they are used, so they follow the curve when it changes. Without a stated unit there is no reference curve, and positions are along the curve itself.
+* **Its stretch**: on an open curve, between the two, in either order. Round a closed curve, from `start` in the curve's direction to `end`, which may go on past the curve's start; exchanging the two gives the other stretch.
+* **Limits**: at least `WORKING_EDGE_MIN_MM` (2) long (no check of the length without a stated unit), and no overlap with another on the curve; they may share an end. A curve deleted takes its working edges with it. A curve no longer measured keeps them, and they take no part in anything until it is measured again.
+* **A curve measured without any** counts as one implied working edge, its whole length. It is not in `workingEdges`; in the tables its `working_edge` is empty, and `curve_id` tells it. A curve with some has no implied edge: what lies outside them counts only for the specimen as a whole.
+* **Stations**: each stands for the stretch from half a step before it to half a step after it, within the curve (round a closed curve the last, possibly shorter, gap is shared in its middle). A station's weight (see "Retouch indices") goes to the working edges by the share of that stretch in each, so that edges parting a curve add up exactly to it. A station belongs to the edge whose stretch holds its position; on the boundary of two, to the one that begins there; at the end of one with nothing after it, to that one. That is the `working_edge` of the per-station tables.
+
+**What is measured** on each, with those weights; on a flake only, except the length and the sharp length:
+
+* `removed_volume`: Σ weight × missing area, the missing areas as filled in along the whole curve. `erp_filled_share`: the weight of its filled stations / of its retouched stations; above `ERP_MAX_FILLED_SHARE` its `removed_volume` and `erp` are empty (`too_many_gaps`), whatever the specimen has. `erp`: `removed_volume` / (the specimen's `removed_volume` + the model's volume), so the edges' add up to the specimen's, less the stations in none; empty as the specimen's is, or when the specimen's `removed_volume` is.
+* `giur`, `giur_stations`: as the specimen's, over the stations that belong to it. `retouched_length`: the weights of its retouched stations. `retouch_perimeter`, `_dorsal`, `_ventral`: those weights (of that side's) / its `length`.
+* `edge_curvature`, `_chord`, `_depth`: R6 / R3, R3, R6 as the specimen's, over all the stations it takes in (both ends included, retouched or not) on the plan. An implied edge on a closed curve has none (`whole_edge`).
+* A working edge with no retouched station counts as not retouched: 0 for all of these but the curvature.
+* `length`: the weights of all its stations (the length of its stretch without stations). `sharp_length`: the part of the sharp stretches in it; empty without a threshold.
+
+**Derived** (`derived.workingEdges`, absent while no curve is measured): `parameters` (`WORKING_EDGE_MIN_MM` 2); `edges`: per row of `working_edges.csv`, `{ id, label, name, curveId, start_position, end_position, length, sharp_length, retouched_length, retouch_perimeter, retouch_perimeter_dorsal, retouch_perimeter_ventral, removed_volume, erp, erp_filled_share, giur, giur_stations, edge_curvature, edge_curvature_chord, edge_curvature_depth }` (`id`: the curve's for an implied edge, whose `label` is empty). `start_position`, `end_position`: along the reference curve; round a closed curve the first may lie after the second. `segments` of `derived.retouchIndices` also have `middle`: the position of the region's middle station, which says its working edge.
 
 ## Sharp edge
 
@@ -560,7 +596,7 @@ Only the inputs are stored; the plane is recomputed whenever they change.
 | `curves` | least-squares plane of the curves in `curveIds`, resampled at equal arc length (256 points over all of them) | mean of the resampled points |
 | `region` | least-squares plane of the vertices of the surface regions in `regionIds`, each weighted by a third of the area of its triangles there | the weighted mean |
 
-A flake offers `curves` and `region`, a core the first four (a plane made on the other type keeps its method).
+A flake offers `curves` and `region`, a core the first four, a generic specimen `all_vertices`, `curves` and `region` (a plane made on another type keeps its method).
 
 * A plane is invalid with fewer than 3 points, or (`scar_directions`) fewer than 2 non-parallel
   directions.
@@ -718,16 +754,16 @@ specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length
 
 The last fifteen are the retouch indices, see "Retouch indices": `retouch_axis` `technical` or `longest`, empty without a frame; `retouch_fit_length` in mm; lengths in the unit, `removed_volume` in unit³; shares as decimals from 0 to 1.
 
-Retouched stations (`<specimen>_retouch_sections.csv`, one row per retouched station; `station` counts from 0; `segment` the segment of A, 1 to 8, on the plan, whichever face; `x`, `y` A on the plan; `removed_area` in unit²; `filled` `true` when that area comes from the stations on either side, and then `original_angle_deg` and `recession` are empty; `retouch_height`, `thickness`, `giur` empty where the station takes no part in GIUR):
+Retouched stations (`<specimen>_retouch_sections.csv`, one row per retouched station; `station` counts from 0; `segment` the segment of A, 1 to 8, on the plan, whichever face; `x`, `y` A on the plan; `removed_area` in unit²; `filled` `true` when that area comes from the stations on either side, and then `original_angle_deg` and `recession` are empty; `retouch_height`, `thickness`, `giur` empty where the station takes no part in GIUR; `working_edge` the label of the working edge it belongs to, empty when in none or on a curve without any):
 
 ```
-specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur
+specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur,working_edge
 ```
 
-Retouch regions along the curves (`<specimen>_retouch_segments.csv`, one row per region and curve; `retouch_region` by label; `face` `dorsal` or `ventral`; `chord` and `depth` empty where it goes all round a closed curve):
+Retouch regions along the curves (`<specimen>_retouch_segments.csv`, one row per region and curve; `retouch_region` by label; `face` `dorsal` or `ventral`; `chord` and `depth` empty where it goes all round a closed curve; `working_edge` that of the region's middle station):
 
 ```
-specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth
+specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth,working_edge
 ```
 
 Invasiveness (`<specimen>_invasiveness.csv`, sixteen rows per flake; `segment` 1 to 16, the ventral face's 9 to 16; `penetration` p_max; `score` 0, 0.5 or 1):
@@ -791,10 +827,10 @@ specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer
 
 `retouch_layer`: of a retouch region, else empty.
 
-Retouch layers (`<specimen>_retouch_angles.csv`, long format: one row per station, layer and method; see "Retouch layers"; `retouch_region`: where the layer begins; `distance`: from the edge to the layer's outer end, along the section; `method` `three_points`, `two_lines` or `layer_face`):
+Retouch layers (`<specimen>_retouch_angles.csv`, long format: one row per station, layer and method; see "Retouch layers"; `retouch_region`: where the layer begins; `distance`: from the edge to the layer's outer end, along the section; `method` `three_points`, `two_lines` or `layer_face`; `working_edge` that of the station):
 
 ```
-specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg
+specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg,working_edge
 ```
 
 Geometric morphometrics (flakes with all their points; see "Geometric morphometrics"): the coordinates as the landmarks' (`<specimen>_gm_landmarks.tps`, `.fcsv`, `.csv`; `kind` also `surface`, `set_id` the curve or grid), and for geomorph's sliding:
@@ -806,16 +842,22 @@ index                   <specimen>_gm_surfaces.csv
 
 The summary of a folder has one `gm_landmarks.csv` and `gm_landmarks.tps` of its complete flakes, and one definition of each.
 
-Sharp edge (`<specimen>_edge_sharp.csv`, one row per sharp stretch, under the rule; see "Sharp edge"; `distance` in the coordinate unit, `segment` from 1):
+Working edges (`<specimen>_working_edges.csv`, one row per working edge of each curve measured, and one per such curve without any, `working_edge` empty; see "Working edges"; lengths in the coordinate unit, the volume in unit³, ratios as 0 to 1; those from `retouched_length` on empty for a core or a general specimen; in a folder's summary `sharp_length` is by the folder's rule):
 
 ```
-specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length
+specimen_id,working_edge,name,curve_id,start_position,end_position,length,sharp_length,retouched_length,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,removed_volume,erp,erp_filled_share,giur,giur_stations,edge_curvature,edge_curvature_chord,edge_curvature_depth
 ```
 
-Edge angles (`<specimen>_edge_angles.csv`, long format: one row per station, distance and method of each curve measured; `station` counts from 0, `position` along the reference curve, `distance` d in the coordinate unit; `method` `three_points` or `two_lines`; `angle_deg` empty where there is none; see "Edge angles"):
+Sharp edge (`<specimen>_edge_sharp.csv`, one row per sharp stretch, under the rule, cut in two where a working edge begins or ends: the rows of one stretch have its `segment`, from 1, and their lengths add up to its length; see "Sharp edge"; `distance` in the coordinate unit; `working_edge` the working edge it lies in, empty when in none):
 
 ```
-specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg
+specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length,working_edge
+```
+
+Edge angles (`<specimen>_edge_angles.csv`, long format: one row per station, distance and method of each curve measured; `station` counts from 0, `position` along the reference curve, `distance` d in the coordinate unit; `method` `three_points` or `two_lines`; `angle_deg` empty where there is none; `working_edge` that of the station; see "Edge angles"):
+
+```
+specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg,working_edge
 ```
 
 Relations (`<specimen>_relations.csv`, one row each; scars by label; `relation` is `a_cuts_b`

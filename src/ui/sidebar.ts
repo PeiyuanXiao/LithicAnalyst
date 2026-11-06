@@ -48,11 +48,14 @@ import {
   setScarLabel,
 } from '../core/actions';
 import { curveLength } from '../core/curveGeometry';
+import { measuredLine } from '../compute/measuredLine';
+import { planeMethodsOf } from '../compute/planes';
 import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
 import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
+import { edgeAxis, rangeOf, type EdgeRetouchKey } from '../compute/workingEdge';
 import { FLAKE_MEASURES } from '../compute/flake';
 import { gmCounts, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
 import { landmarkName, platformSides, shownLandmarks } from '../compute/landmarks';
@@ -60,10 +63,12 @@ import type { ConfigurationResult, FlakingSurface } from '../compute/configurati
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
+import { deleteWorkingEdge, updateWorkingEdge } from '../core/actions';
 import { retouchSettingsOf, type AttributeValue, type Curve, type Measurement, type PlaneMethod, type Scar, type Vec3, type GmConfig, type SharpEdgeRule } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
-import { ARROW_COLORS, arrowColor, type ArrowColorMode } from '../render/arrowLayer';
+import { ARROW_COLORS, arrowColor, arrowColorModeOf, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
+import { workingEdgeColor } from '../render/workingEdgeLayer';
 import { MEASURE_COLORS } from '../render/measureLayer';
 import { planeColor } from '../render/planeLayer';
 import { FIGURE_VIEWS } from '../render/figure';
@@ -154,6 +159,7 @@ function arrowsSection(api: AppApi): Section {
   const list = h('ol', { class: 'arrow-list num-list', id: 'scar-list', role: 'listbox', 'aria-label': t('sec.arrows') });
   const inspector = h('div', { class: 'inspector', id: 'arrow-inspector' });
   body.append(list, inspector);
+  const title = el.querySelector('.panel-title') as HTMLElement;
 
   let builtFor: string | null = null;
   let refs: { label: HTMLInputElement; setters: Array<(a: Scar) => void>; coords: HTMLElement; length: HTMLElement } | null = null;
@@ -175,15 +181,18 @@ function arrowsSection(api: AppApi): Section {
 
   const renderList = () => {
     const st = api.store.state;
+    const generic = st.specimen.type === 'generic';
+    title.textContent = t(generic ? 'sec.arrows.generic' : 'sec.arrows');
     badge.textContent = String(st.scars.length);
     list.hidden = st.scars.length === 0;
     clear(list);
     const sel = api.selection.id;
     const unit = st.specimen.unit;
-    const seq = api.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
+    const colorMode = arrowColorModeOf(api.display.arrows.colorMode, st.specimen.type);
+    const seq = colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
     for (const a of st.scars) {
       const isSel = a.id === sel;
-      const color = isSel ? ARROW_COLORS.selected : arrowColor(a, api.display.arrows.colorMode, seq);
+      const color = isSel ? ARROW_COLORS.selected : arrowColor(a, colorMode, seq);
       const li = h(
         'li',
         {
@@ -196,7 +205,7 @@ function arrowsSection(api: AppApi): Section {
         },
         h('span', { class: 'chip', style: `--chip:${color}` }),
         h('span', { class: 'arrow-id mono' }, a.label),
-        h('span', { class: 'arrow-meta' }, listSummary(a.attributes)),
+        h('span', { class: 'arrow-meta' }, generic ? '' : listSummary(a.attributes)),
         ...valueCells(a.vector ? quantity('length', vectorLength(a.vector), unit) : [MISSING, '']),
       );
       list.append(li);
@@ -248,7 +257,9 @@ function arrowsSection(api: AppApi): Section {
       refs = null;
       return;
     }
-    if (force || builtFor !== a.id || !refs) {
+    // a generic specimen's arrows have a label and no scar attributes
+    const built = `${a.id}|${st.specimen.type === 'generic'}`;
+    if (force || builtFor !== built || !refs) {
       clear(inspector);
       const label = h('input', {
         id: 'insp-label',
@@ -269,12 +280,12 @@ function arrowsSection(api: AppApi): Section {
         h('button', { type: 'button', class: 'icon-btn', id: 'insp-focus', title: t('arrows.focus'), 'aria-label': t('arrows.focus'), onclick: () => api.selection.id && api.focusArrow(api.selection.id) }, icon(ICONS.target)),
         deleteButton('insp-delete', () => api.selection.id && deleteScar(api.store, api.selection.id)),
       );
-      const fields = [...SCAR_FIELDS.map((f) => buildField(f, a)), sequenceField()];
+      const fields = st.specimen.type === 'generic' ? [] : [...SCAR_FIELDS.map((f) => buildField(f, a)), sequenceField()];
       const coordsEl = h('dl', { class: 'coord-grid', id: 'arrow-coords' });
       const lengthEl = h('dl', { class: 'num-grid' });
       inspector.append(head, ...fields.map((f) => f.el), coordsEl, lengthEl);
       refs = { label, setters: fields.map((f) => f.set), coords: coordsEl, length: lengthEl };
-      builtFor = a.id;
+      builtFor = built;
     }
     softSet(refs.label, a.label);
     for (const set of refs.setters) set(a);
@@ -418,7 +429,12 @@ function curvesSection(api: AppApi): Section {
     refs.meta.append(...numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), ...textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
     // the platform outline must be closed before it means anything
     if (c.attributes.type === PLATFORM_OUTLINE && !c.closed) refs.meta.append(h('dt', {}), h('dd', { class: 'text', id: 'curve-outline-open' }, h('span', { class: 'pill pill-warn' }, t('curves.notClosed'))));
-    (refs.complete.parentElement as HTMLElement).hidden = c.closed;
+    // what runs along the platform is not measured as edge: say how much is
+    const line = measuredLine(c, st);
+    if (line.points !== c.points) refs.meta.append(...numRow(t('curves.measuredLength'), ...quantity('length', curveLength(line), u), 'curve-measured-length'));
+    // a flake's edge need not close when a platform outline ends it: it would only go along the platform
+    const endsOnOutline = c.attributes.type === 'edge' && st.specimen.type === 'flake' && st.curves.some((x) => x.attributes.type === PLATFORM_OUTLINE && x.closed);
+    (refs.complete.parentElement as HTMLElement).hidden = c.closed || endsOnOutline;
     refs.complete.disabled = c.anchors.length < 3 || api.completingLoop();
   };
 
@@ -430,6 +446,113 @@ function curvesSection(api: AppApi): Section {
   };
   refresh('all');
   return { el, refresh };
+}
+
+/** The stretches of the curves measured that are measured on their own: the list, a name, the other way round a closed curve. */
+function workingEdgesSection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('working-edges', t('sec.workingEdges'), badge);
+  const list = h('ol', { class: 'arrow-list num-list', id: 'working-edge-list', role: 'listbox', 'aria-label': t('sec.workingEdges') });
+  const inspector = h('div', { class: 'inspector', id: 'working-edge-inspector' });
+  const generate = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'working-edge-generate', onclick: () => api.generateWorkingEdges() }, t('edges.generate')) as HTMLButtonElement;
+  const foot = h('div', { class: 'btn-row' }, generate);
+  body.append(list, inspector, foot);
+  let builtFor: string | null = null;
+  let refs: { name: HTMLInputElement; other: HTMLElement; status: HTMLElement } | null = null;
+
+  const renderList = () => {
+    const st = api.store.state;
+    badge.textContent = String(st.workingEdges.length);
+    list.hidden = !st.workingEdges.length;
+    clear(list);
+    const sel = api.selection.id;
+    const rows = api.workingEdgeDetails();
+    for (const e of st.workingEdges) {
+      const c = api.store.curve(e.curveId);
+      const length = rows.find((d) => d.row.id === e.id)?.row.length ?? (c ? rangeOf(edgeAxis(measuredLine(c, st), st.specimen.unit), e.start, e.end).length : null);
+      const li = h(
+        'li',
+        { class: 'arrow-row', role: 'option', 'aria-selected': String(e.id === sel), 'data-id': e.id, onclick: () => api.selection.set(e.id) },
+        h('span', { class: 'chip chip-line', style: `--chip:${e.id === sel ? CURVE_COLORS.selected : workingEdgeColor(e.label)}` }),
+        h('span', { class: 'arrow-id mono' }, e.label),
+        h('span', { class: 'arrow-meta' }, [e.name, c?.label].filter(Boolean).join(' · ')),
+        ...valueCells(quantity('length', length, st.specimen.unit)),
+      );
+      list.append(li);
+      if (e.id === sel) requestAnimationFrame(() => revealInList(list, li));
+    }
+    generate.hidden = st.specimen.type !== 'flake';
+    generate.disabled = !st.curves.some((c) => measuresEdgeAngle(c, st.specimen.type) && !st.workingEdges.some((e) => e.curveId === c.id));
+    foot.hidden = generate.hidden;
+  };
+
+  const renderInspector = () => {
+    const e = api.store.workingEdge(api.selection.id ?? '');
+    if (!e) {
+      clear(inspector);
+      builtFor = null;
+      refs = null;
+      return;
+    }
+    if (builtFor !== e.id || !refs) {
+      clear(inspector);
+      const id = e.id;
+      const name = textRow('working-edge-name', t('edges.name'), e.name, (v) => void updateWorkingEdge(api.store, id, { name: v }));
+      const other = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'working-edge-other', onclick: () => api.otherEdgeStretch(id) }, t('edges.other'));
+      const status = h('span', { class: 'pill pill-warn', id: 'working-edge-not-measured', hidden: true }, t('edges.notMeasured'));
+      inspector.append(
+        h('div', { class: 'insp-head' }, h('span', { class: 'arrow-id mono', id: 'working-edge-label' }, e.label), deleteButton('working-edge-delete', () => deleteWorkingEdge(api.store, id))),
+        h('div', { class: 'field' }, name.el),
+        status,
+        h('div', { class: 'btn-row' }, other),
+      );
+      refs = { name: name.input as HTMLInputElement, other: other.parentElement as HTMLElement, status };
+      builtFor = e.id;
+    }
+    const st = api.store.state;
+    const c = api.store.curve(e.curveId);
+    softSet(refs.name, e.name);
+    refs.other.hidden = !c || !measuredLine(c, st).closed;
+    refs.status.hidden = !!c && measuresEdgeAngle(c, st.specimen.type);
+  };
+
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'mesh', 'curves', 'selection', 'specimen', 'edge', 'retouch', 'figure'].includes(kind)) return;
+    renderList();
+    renderInspector();
+  };
+  refresh('all');
+  return { el, refresh, visible: () => api.store.state.workingEdges.length > 0 || api.store.state.curves.some((c) => measuresEdgeAngle(c, api.store.state.specimen.type)) };
+}
+
+/** Over a chart along a curve: all of it, or one of its working edges. What to show, not what there is: never in the file. */
+function edgeChoice(id: string, onChange: () => void) {
+  const box = h('div', { id: `${id}-box`, hidden: true });
+  let key = '';
+  let chosen = 'all';
+  let control: ReturnType<typeof segmented> | null = null;
+  return {
+    el: box,
+    /** These are the curve's: what the chart is to mark and show. */
+    update<E extends { label: string; from: number; to: number; color: string }>(edges: readonly E[]): { edges: readonly E[]; view: E | null } {
+      const now = edges.map((e) => e.label).join();
+      if (now !== key) {
+        key = now;
+        clear(box);
+        control = edges.length
+          ? segmented(id, t('edges.view'), [{ value: 'all', label: t('edge.series.all') }, ...edges.map((e) => ({ value: e.label, label: e.label }))], chosen, (v) => {
+              chosen = v;
+              onChange();
+            })
+          : null;
+        if (control) box.append(control.el);
+      }
+      if (!edges.some((e) => e.label === chosen)) chosen = 'all';
+      control?.set(chosen);
+      box.hidden = !control;
+      return { edges, view: edges.find((e) => e.label === chosen) ?? null };
+    },
+  };
 }
 
 /** The value that stands for the user's own text in the option list. */
@@ -558,9 +681,13 @@ function displaySection(api: AppApi): Section {
 
   const refresh = (kind: RefreshKind) => {
     // these panels belong to the annotate mode
-    const flake = api.store.state.specimen.type === 'flake';
-    config.el.hidden = api.mode !== 'annotate' || flake;
-    harris.el.hidden = api.mode !== 'annotate';
+    const type = api.store.state.specimen.type;
+    const flake = type === 'flake';
+    config.el.hidden = api.mode !== 'annotate' || type !== 'core';
+    harris.el.hidden = api.mode !== 'annotate' || type === 'generic';
+    // what a generic specimen's arrows do not have is not offered, nor what was chosen on another type shown
+    for (const o of colorMode.el.querySelectorAll('option')) o.hidden = o.disabled = arrowColorModeOf(o.value as ArrowColorMode, type) !== o.value;
+    colorMode.set(arrowColorModeOf(api.display.arrows.colorMode, type));
     config.input.checked = api.display.configuration;
     harris.input.checked = api.display.harris;
     // a flake's: it needs the technical axis
@@ -686,6 +813,7 @@ function edgeAngleSection(api: AppApi): Section {
   let seriesControl: ReturnType<typeof segmented> | null = null;
   const chart = new EdgeAngleChart();
   chart.el.hidden = true;
+  const edgeView = edgeChoice('edge-view', () => refresh('edge'));
   // the rule for what is sharp: reads as "three points, 2 mm, at most 45°"
   const ruleMethod = h('select', { id: 'sharp-method', class: 'ctl-select', 'aria-label': t('edge.sharp') }, ...EDGE_ANGLE_METHODS.map((m) => h('option', { value: m }, t(`edge.method.${m}`)))) as HTMLSelectElement;
   const ruleDistance = h('select', { id: 'sharp-distance', class: 'ctl-select', 'aria-label': t('edge.sharp') }, ...EDGE_ANGLE_DISTANCES_MM.map((d) => h('option', { value: String(d) }, `${d} mm`))) as HTMLSelectElement;
@@ -714,7 +842,7 @@ function edgeAngleSection(api: AppApi): Section {
   );
   const colorBy = segmented('edge-color', null, [{ value: 'angle', label: t('edge.color.angle') }, { value: 'sharp', label: t('edge.color.sharp') }], api.edgeColorMode, (v) => api.setEdgeColorMode(v as 'angle' | 'sharp'));
   const sharpSummary = h('dl', { class: 'num-grid', id: 'sharp-summary' });
-  body.append(status, list, method.el, seriesBox, chart.el, rule, colorBy.el, sharpSummary);
+  body.append(status, list, method.el, seriesBox, edgeView.el, chart.el, rule, colorBy.el, sharpSummary);
   /** The lines of the selected curve in the method shown: the distances. */
   const chartSeries = (edge: EdgeAngleResult, m: EdgeAngleMethod, unit: string): ChartSeries[] => {
     const u = quantityUnit('length', unit);
@@ -764,8 +892,9 @@ function edgeAngleSection(api: AppApi): Section {
     seriesBox.hidden = !seriesControl;
     const rl = st.sharpEdge;
     const sharp = sel && shown ? api.sharpOf(sel) : null;
-    const ruleShown = rl.threshold !== null && rl.method === m && (chosen === 'all' || chosen === `d${rl.distance}`);
+    const ruleShown = st.specimen.type !== 'generic' && rl.threshold !== null && rl.method === m && (chosen === 'all' || chosen === `d${rl.distance}`);
     const ruleIndex = EDGE_ANGLE_DISTANCES_MM.indexOf(rl.distance as (typeof EDGE_ANGLE_DISTANCES_MM)[number]);
+    const stretches = edgeView.update(shown && sel ? api.workingEdgesOn(sel) : []);
     chart.set(
       shown
         ? {
@@ -775,16 +904,19 @@ function edgeAngleSection(api: AppApi): Section {
             series: all.filter((s) => chosen === 'all' || s.id === chosen),
             threshold: ruleShown ? { value: rl.threshold!, color: `var(--series-${ruleIndex + 1})`, onSet: (v) => setRule({ threshold: v }) } : null,
             bands: ruleShown ? sharp?.segments ?? [] : [],
+            edges: stretches.edges,
+            view: stretches.view,
           }
         : null,
     );
-    // the rule stands whichever curve is selected: it is the specimen's
-    rule.hidden = !curves.length;
+    // the rule stands whichever curve is selected: it is the specimen's (no sharp edge on a generic one)
+    const generic = st.specimen.type === 'generic';
+    rule.hidden = !curves.length || generic;
     ruleMethod.value = rl.method;
     ruleDistance.value = String(rl.distance);
     if (document.activeElement !== ruleValue) ruleValue.value = rl.threshold === null ? '' : String(rl.threshold);
     colorBy.set(api.edgeColorMode);
-    (colorBy.el as HTMLElement).hidden = !shown || rl.threshold === null;
+    (colorBy.el as HTMLElement).hidden = !shown || rl.threshold === null || generic;
     clear(sharpSummary);
     sharpSummary.hidden = !sharp;
     if (sharp) sharpSummary.append(...numRow(t('edge.sharp.length'), ...quantity('length', sharp.length, st.specimen.unit), 'sharp-length'), ...numRow(t('edge.sharp.count'), fmtCount(sharp.segments.length), '', 'sharp-count'));
@@ -848,13 +980,47 @@ function retouchIndicesSection(api: AppApi): Section {
       b.setAttribute('aria-pressed', String(api.planMark() === i + 1));
     });
   };
-  body.append(values, h('div', { class: 'retouch-grids' }, grid('dorsal', 0), grid('ventral', 8)), by.el);
+  // each working edge's own values; a press goes to it, and draws it on the plan
+  const edgeRows = h('tbody', { id: 'working-edge-rows' });
+  const edgeTable = h(
+    'table',
+    { class: 'retouch-table', id: 'working-edge-table' },
+    h('thead', {}, h('tr', {}, ...['label', 'erp', 'giur', 'perimeter', 'curvature'].map((k) => h('th', {}, t(`retouch.edge.${k}`))))),
+    edgeRows,
+  );
+  const paintEdges = () => {
+    const shown = api.retouchResult() ? api.workingEdgeDetails() : [];
+    edgeTable.hidden = !shown.length;
+    clear(edgeRows);
+    shown.forEach((d, i) => {
+      const r = d.row;
+      const value = (v: number | null, key: EdgeRetouchKey) => {
+        const c = h('td', { class: 'num' }, fmtQuantity('ratio', v));
+        const why = v === null ? d.reasons[key] : undefined;
+        if (why) tip(c, t(`retouch.empty.${why}`));
+        return c;
+      };
+      edgeRows.append(
+        h(
+          'tr',
+          { id: `working-edge-row-${i}`, 'data-id': r.id, class: api.planEdge() === r.id ? 'is-selected' : '', onclick: () => api.focusWorkingEdge(r.id) },
+          h('td', { class: 'mono' }, r.label || (api.store.curve(r.curveId)?.label ?? '')),
+          value(r.erp, 'erp'),
+          value(r.giur, 'giur'),
+          value(r.retouch_perimeter, 'retouch_perimeter'),
+          value(r.edge_curvature, 'edge_curvature'),
+        ),
+      );
+    });
+  };
+  body.append(values, edgeTable, h('div', { class: 'retouch-grids' }, grid('dorsal', 0), grid('ventral', 8)), by.el);
   let shownKey: unknown = null;
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'retouch', 'specimen', 'figure'].includes(kind)) return;
     const r = api.retouchResult();
     const u = api.store.state.specimen.unit;
     paint();
+    paintEdges();
     // the rows stay under the pointer, with their tips, as long as what they say does
     const key = JSON.stringify([r?.indices.removed_volume, r?.indices.erp, r?.indices.erp_filled_share, r?.indices.giur, r?.indices.giur_stations, r?.indices.invasiveness, r?.indices.invasiveness_continuous, r?.indices.retouch_perimeter, r?.indices.retouch_perimeter_dorsal, r?.indices.retouch_perimeter_ventral, r?.indices.edge_curvature, r?.indices.edge_curvature_chord, r?.indices.edge_curvature_depth, r?.reasons, u]);
     if (key === shownKey) return;
@@ -966,12 +1132,12 @@ function retouchSegmentsSection(api: AppApi): Section {
   const table = h(
     'table',
     { class: 'retouch-table', id: 'retouch-segment-table' },
-    h('thead', {}, h('tr', {}, ...['label', 'layer', 'face', 'length', 'chord', 'depth'].map((k) => h('th', {}, t(`retouch.seg.${k}`))))),
+    h('thead', {}, h('tr', {}, ...['label', 'layer', 'face', 'length', 'chord', 'depth', 'edge'].map((k) => h('th', {}, t(`retouch.seg.${k}`))))),
     rows,
   );
   body.append(table);
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'retouch', 'regions', 'selection', 'specimen', 'figure'].includes(kind)) return;
+    if (!['all', 'mesh', 'retouch', 'regions', 'selection', 'specimen', 'figure', 'curves'].includes(kind)) return;
     const st = api.store.state;
     const segments = api.retouchResult()?.indices.segments ?? [];
     table.hidden = !segments.length;
@@ -992,6 +1158,7 @@ function retouchSegmentsSection(api: AppApi): Section {
           num(s.length),
           why(num(s.chord), s.chord),
           why(num(s.depth), s.depth),
+          h('td', { class: 'mono' }, api.workingEdgeAt(s.curveId, s.middle) || MISSING),
         ),
       );
     });
@@ -1014,7 +1181,8 @@ function retouchAnglesSection(api: AppApi): Section {
     const s = api.retouchStationNow();
     if (s) api.moveRetouchPosition(s.curveId, p);
   };
-  body.append(list, method.el, seriesBox, chart.el);
+  const edgeView = edgeChoice('retouch-view', () => refresh('edge'));
+  body.append(list, method.el, seriesBox, edgeView.el, chart.el);
   const measured = () => api.store.state.curves.filter((c) => api.retouchAngleResult(c.id));
   const refresh = (kind: RefreshKind) => {
     const now = api.retouchStationNow();
@@ -1054,9 +1222,10 @@ function retouchAnglesSection(api: AppApi): Section {
     const chosen = options.some(([id]) => id === api.retouchSeries) ? api.retouchSeries : 'all';
     seriesControl?.set(chosen);
     seriesBox.hidden = !seriesControl;
+    const stretches = edgeView.update(retouch && now ? api.workingEdgesOn(now.curveId) : []);
     chart.set(
       retouch && edge
-        ? { positions: retouch.stations.map((s) => s.position), length: edge.length, unit: api.store.state.specimen.unit, series: all.filter((s) => chosen === 'all' || s.id === chosen), threshold: null, bands: [] }
+        ? { positions: retouch.stations.map((s) => s.position), length: edge.length, unit: api.store.state.specimen.unit, series: all.filter((s) => chosen === 'all' || s.id === chosen), threshold: null, bands: [], edges: stretches.edges, view: stretches.view }
         : null,
     );
     chart.setCursor(now?.position ?? null);
@@ -1100,10 +1269,6 @@ function measureManualSection(api: AppApi): Section {
   return { el, refresh };
 }
 
-const PLANE_METHODS: PlaneMethod[] = ['all_vertices', 'scar_directions', 'scar_starts', 'curves'];
-/** A flake's planes go by part: a curve or a surface region. */
-const FLAKE_PLANE_METHODS: PlaneMethod[] = ['curves', 'region'];
-
 function planesSection(api: AppApi): Section {
   const badge = h('span', { class: 'badge mono' }, '0');
   const { el, body } = section('planes', t('sec.planes'), badge);
@@ -1117,7 +1282,7 @@ function planesSection(api: AppApi): Section {
     const id = api.selection.id;
     const p = id ? api.store.plane(id) : undefined;
     if (!p) return;
-    const offered = api.store.state.specimen.type === 'flake' ? FLAKE_PLANE_METHODS : PLANE_METHODS;
+    const offered = planeMethodsOf(api.store.state.specimen.type);
     // a plane made on the other type of specimen keeps its method
     const methods = offered.includes(p.method) ? offered : [...offered, p.method];
     const method = selectRow('plane-method', t('plane.method'), methods.map((m) => ({ value: m, label: t(`plane.method.${m}`) })), p.method, (v) =>
@@ -1371,6 +1536,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
   const inspector = h('div', { class: 'inspector', id: 'region-inspector' });
   const totals = h('dl', { class: 'num-grid', id: 'region-totals' });
   const facesOpen = h('span', { class: 'pill pill-warn', id: 'region-faces-open', hidden: true }, t('region.facesOpen'));
+  tip(facesOpen, t('status.why.faces.open'));
   body.append(list, inspector, totals, facesOpen);
   const typeField = REGION_FIELDS[0];
   let builtFor = '';
@@ -1383,13 +1549,15 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     const area = (v: number | null) => quantity('area', v, u);
     // those that follow a flake's annotations belong to the flake
     const shownRegions = st.specimen.type === 'flake' ? st.regions : st.regions.filter((x) => !x.auto);
+    const generic = st.specimen.type === 'generic';
+    const upperRegion = (x: { type: string }) => isUpperRegion(x.type, st.specimen.type);
     badge.textContent = String(shownRegions.length);
     list.hidden = shownRegions.length === 0;
     clear(list);
     const sel = api.selection.id;
-    const seq = api.display.arrows.colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
+    const seq = arrowColorModeOf(api.display.arrows.colorMode, st.specimen.type) === 'sequence' ? sequenceColors(st.sequences) : null;
     // the parts of the specimen first, then what lies in them
-    for (const r of [...shownRegions.filter((x) => isUpperRegion(x.type)), ...shownRegions.filter((x) => !isUpperRegion(x.type))]) {
+    for (const r of [...shownRegions.filter(upperRegion), ...shownRegions.filter((x) => !upperRegion(x))]) {
       const res = info?.results.find((x) => x.id === r.id);
       const scar = r.scarId ? st.scars.find((s) => s.id === r.scarId)?.label ?? null : null;
       const isSel = r.id === sel;
@@ -1400,7 +1568,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
           { class: 'arrow-row region-row', role: 'option', 'aria-selected': String(isSel), 'data-id': r.id, onclick: () => api.selection.set(r.id) },
           h('span', { class: 'chip', style: `--chip:${regionColorOf(r, st.scars, seq)}` }),
           h('span', { class: 'arrow-id mono' }, r.label),
-          h('span', { class: 'arrow-meta' }, `${fieldText(typeField, r.type)}${r.type === 'retouch' ? ` · ${t('edge.layer', { n: r.retouchLayer ?? 1 })}` : ''}${scar ? ` · ${scar}` : ''}${parent ? ` · ${parent}` : ''}${res?.conflict ? ` · ${t('region.conflict')}` : ''}`),
+          h('span', { class: 'arrow-meta' }, `${fieldText(typeField, r.type)}${r.type === 'retouch' && !generic ? ` · ${t('edge.layer', { n: r.retouchLayer ?? 1 })}` : ''}${scar ? ` · ${scar}` : ''}${parent ? ` · ${parent}` : ''}${res?.conflict ? ` · ${t('region.conflict')}` : ''}`),
           ...valueCells(area(res?.area ?? null)),
         ),
       );
@@ -1413,13 +1581,13 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
       clear(inspector);
       if (r) {
         inspector.append(customField(api, typeField, 'region-type', r.type, st.specimen.type, (v) => setType(r.id, v)).el);
-        if (r.type === 'scar') {
+        if (r.type === 'scar' && !generic) {
           const scars = h('select', { id: 'region-scar', class: 'ctl-select' }, ...st.scars.map((s) => h('option', { value: s.id }, s.label))) as HTMLSelectElement;
           scars.value = r.scarId ?? '';
           scars.addEventListener('change', () => setRegionScar(api.store, r.id, scars.value));
           inspector.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'region-scar' }, t('region.scarOf')), scars));
         }
-        if (r.type === 'retouch') {
+        if (r.type === 'retouch' && !generic) {
           const layers = segmented('region-layer', t('region.retouchLayer'), RETOUCH_LAYERS.map((n) => ({ value: String(n), label: String(n) })), String(r.retouchLayer ?? 1), (v) => setRegionRetouchLayer(api.store, r.id, Number(v)));
           inspector.append(layers.el);
         }
@@ -1427,8 +1595,9 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
       }
     }
     clear(totals);
-    totals.hidden = !info || shownRegions.length === 0;
-    if (info && shownRegions.length) {
+    // (by the preset types: free text has no totals)
+    totals.hidden = !info || shownRegions.length === 0 || generic;
+    if (info && shownRegions.length && !generic) {
       for (const k of ['scar', 'cortex', 'joint', 'damage', 'retouch', 'flaking_surface', 'platform', 'ventral', 'dorsal'] as const) if (info.totals[k] > 0) totals.append(...numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
       if (info.totals.cortex > 0) totals.append(...numRow(t('region.cortexRatio'), fmtQuantity('ratio', info.totals.cortexRatio), '', 'region-cortex-ratio'));
       totals.hidden = !totals.childElementCount;
@@ -1853,7 +2022,8 @@ function relationsSection(api: AppApi): Section {
     renderSequence();
   };
   refresh('all');
-  return { el, refresh };
+  // the scars' relations and sequences: not on a generic specimen
+  return { el, refresh, visible: () => api.store.state.specimen.type !== 'generic' };
 }
 
 function landmarksSection(api: AppApi): Section {
@@ -2154,8 +2324,8 @@ function noduleSection(api: AppApi): Section {
     (show.querySelector('input') as HTMLInputElement).disabled = !f;
   };
   refresh('all');
-  // a sphere needs cortex
-  return { el, refresh, visible: () => api.store.state.regions.some((r) => r.type === 'cortex') };
+  // a sphere needs cortex, and a generic specimen has none
+  return { el, refresh, visible: () => api.store.state.specimen.type !== 'generic' && api.store.state.regions.some((r) => r.type === 'cortex') };
 }
 
 function splitSection(api: AppApi): Section {
@@ -2297,6 +2467,7 @@ function workspaceSection(api: AppApi): Section {
           h('span', { class: `ws-dot${started ? ' is-started' : ''}`, title: t(started ? 'workspace.started' : 'workspace.notStarted'), 'aria-label': t(started ? 'workspace.started' : 'workspace.notStarted') }),
           h('span', { class: 'ws-path mono' }, ws.meshes[i]),
           ws.types[i] ? h('span', { class: 'ws-type', 'data-type': ws.types[i] }, t(`specimen.type.${ws.types[i]}`)) : null,
+          ws.completion[i] ? h('span', { class: 'ws-done mono', 'data-done': String(ws.completion[i]!.done === ws.completion[i]!.total) }, `${ws.completion[i]!.done}/${ws.completion[i]!.total}`) : null,
         ),
       );
     }
@@ -2537,6 +2708,7 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [arrowsSection, ['annotate']],
   [relationsSection, ['annotate']],
   [curvesSection, ['annotate']],
+  [workingEdgesSection, ['annotate']],
   [(api) => regionsSection(api, (id, type) => api.setRegionType(id, type)), ['annotate']],
   [landmarksSection, ['annotate']],
   [gmSection, ['annotate']],
@@ -2575,6 +2747,7 @@ const TOOL_SECTIONS: Record<string, string> = {
   axis: 'axis',
   'platform-end': 'landmarks',
   curve: 'curves',
+  'working-edge': 'working-edges',
   region: 'regions',
   relation: 'relations',
   sequence: 'relations',
@@ -2592,6 +2765,7 @@ function selectionTarget(api: AppApi): [string, string] | null {
   if (!id) return null;
   if (st.state.flake.axis?.id === id) return ['axis', '#axis-inspector'];
   if (st.scar(id)) return ['arrows', '#arrow-inspector'];
+  if (st.workingEdge(id)) return ['working-edges', '#working-edge-inspector'];
   if (st.curve(id)) return api.mode === 'measure' ? ['edge-angle', '#edge-angle-list [aria-selected="true"]'] : ['curves', '#curve-inspector'];
   if (st.region(id)) return ['regions', '#region-inspector'];
   if (st.relation(id)) return ['relations', '#relation-inspector'];

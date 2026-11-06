@@ -477,6 +477,13 @@ export function sectionDrawing(m: SectionModel, o: SectionOptions): Drawing {
 
 // ---------------------------------------------------------------- the plan
 
+/** A working edge on the plan. */
+export interface PlanEdge {
+  label: string;
+  /** Its stations' points, in order along it. */
+  points: P2[];
+}
+
 export interface PlanOptions {
   shape: PlanShape;
   loops: readonly PlanLoops[];
@@ -484,6 +491,8 @@ export interface PlanOptions {
   /** The current station, on the plan. */
   station: { at: P2; index: number } | null;
   longest: LongestStretch | null;
+  /** A working edge picked (null: none): drawn heavier along the outline, its own chord standing for `longest`. */
+  edge?: PlanEdge | null;
   /** A segment (1–16) marked. */
   highlight: number | null;
   /** Which frame it is. */
@@ -531,6 +540,7 @@ export function planDrawing(o: PlanOptions): Drawing & { toPlan: (x: number, y: 
     const q = page(s.at);
     prims.push({ kind: 'text', x: q[0], y: q[1] + 4, text: String(s.segment + faceBase), size: 11, fill: c.ink2, anchor: 'middle', id: `retouch-plan-seg-${s.segment + faceBase}` });
   }
+  if (o.edge && o.edge.points.length > 1) prims.push({ kind: 'path', rings: [pages(o.edge.points)], stroke: c.accent, width: 3.5, id: 'retouch-plan-edge', data: { edge: o.edge.label } });
   if (o.longest) {
     const a = page(o.longest.a), e = page(o.longest.b), f = page(o.longest.far), g = page(o.longest.foot);
     prims.push({ kind: 'path', rings: [[a, e]], stroke: c.series3, width: 1.25, id: 'retouch-plan-chord' });

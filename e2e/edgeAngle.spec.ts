@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import { T4, t4Ply, type Vec3 } from './fixtures/meshes';
 import { closeDraftToward, curveClick, expect, exportFile, loadMesh, nextFrames, openApp, openSection, parseCsv, setUnit, state, test, toScreen } from './helpers';
 
-const HEADER = 'specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg';
+const HEADER = 'specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg,working_edge';
 const ANGLE = (Math.atan(8 / 30) * 180) / Math.PI + (Math.atan(5 / 30) * 180) / Math.PI;
 
 /** Just inside the edge, seen from above: the point snaps onto it. */

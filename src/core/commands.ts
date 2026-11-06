@@ -1,4 +1,4 @@
-import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, GmConfig, SharpEdgeRule } from './types';
+import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, GmConfig, SharpEdgeRule, WorkingEdge } from './types';
 import type { LandmarkData, ProjectStore } from './store';
 
 /**
@@ -207,6 +207,32 @@ export class UpdateCurveCommand implements Command {
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
     if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = cloneCurve(next.after);
+    return true;
+  }
+}
+
+/** Replace the working edges and their label counter (they are few); typing a name merges. */
+export class SetWorkingEdgesCommand implements Command {
+  readonly createdAt = Date.now();
+  constructor(
+    readonly labelKey: string,
+    private readonly before: { edges: WorkingEdge[]; next: number },
+    private after: { edges: WorkingEdge[]; next: number },
+    private readonly mergeKey: string | null = null,
+  ) {}
+  apply(store: ProjectStore): void {
+    store._setWorkingEdges(structuredClone(this.after.edges), this.after.next);
+    store.notify({ kind: 'workingEdges' });
+  }
+  revert(store: ProjectStore): void {
+    store._setWorkingEdges(structuredClone(this.before.edges), this.before.next);
+    store.notify({ kind: 'workingEdges' });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetWorkingEdgesCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
     return true;
   }
 }

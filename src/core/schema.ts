@@ -6,7 +6,7 @@ import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, 
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
 import { clampFitLength } from '../compute/retouchIndex';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule } from './types';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -32,10 +32,12 @@ export interface ProjectFile {
   flake: FlakeData;
   sharpEdge: SharpEdgeRule;
   gm: GmConfig;
+  workingEdges: WorkingEdge[];
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
   nextCurveNumber: number;
+  nextWorkingEdgeNumber: number;
   nextMeasureNumber: number;
   nextPlaneNumber: number;
   nextSectionNumber: number;
@@ -63,9 +65,11 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     flake: { ...structuredClone(state.flake), retouch: { ...retouchSettingsOf(state.flake) } },
     sharpEdge: { ...state.sharpEdge },
     gm: structuredClone(state.gm),
+    workingEdges: structuredClone(state.workingEdges),
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
+    nextWorkingEdgeNumber: state.nextWorkingEdgeNumber,
     nextMeasureNumber: state.nextMeasureNumber,
     nextPlaneNumber: state.nextPlaneNumber,
     nextSectionNumber: state.nextSectionNumber,
@@ -447,6 +451,16 @@ function parseFlake(raw: unknown): FlakeData {
   };
 }
 
+/** The working edges (files without them: none); one without numeric ends, or on a curve the file does not have, is dropped. */
+function parseWorkingEdges(raw: unknown, curves: readonly Curve[]): WorkingEdge[] {
+  const t = nowIso();
+  return (Array.isArray(raw) ? raw : []).flatMap((v, i): WorkingEdge[] => {
+    const e = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+    if (!isFiniteVec(e.start) || !isFiniteVec(e.end) || !curves.some((c) => c.id === e.curveId)) return [];
+    return [{ id: str(e.id) || uuid(), label: str(e.label) || `E${i + 1}`, name: str(e.name), curveId: e.curveId as string, start: [e.start[0], e.start[1], e.start[2]], end: [e.end[0], e.end[1], e.end[2]], createdAt: str(e.createdAt, t), modifiedAt: str(e.modifiedAt, t) }];
+  });
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -466,6 +480,7 @@ export function parseProjectFile(input: unknown): ProjectState {
   const scars = list.map((v, i) => parseScar(v, i));
   const curveList = Array.isArray(ann?.curves) ? (ann!.curves as unknown[]) : [];
   const curves = curveList.map((c, i) => parseCurve(c, i));
+  const workingEdges = parseWorkingEdges(raw.workingEdges, curves);
   const measureList = Array.isArray(ann?.measurements) ? (ann!.measurements as unknown[]) : [];
   const measurements = measureList.map((m, i) => parseMeasurement(m, i));
   const planeList = Array.isArray(ann?.planes) ? (ann!.planes as unknown[]) : [];
@@ -494,6 +509,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     mesh: (raw.mesh as MeshInfo | null) ?? null,
     scars,
     curves,
+    workingEdges,
     measurements,
     planes,
     sections,
@@ -517,6 +533,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     gm: parseGmConfig(raw.gm),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
+    nextWorkingEdgeNumber: Math.max(positiveInt(raw.nextWorkingEdgeNumber), maxLabelNumber(workingEdges.map((e) => e.label), 'E') + 1),
     nextMeasureNumber: Math.max(positiveInt(raw.nextMeasureNumber), maxLabelNumber(measurements.map((m) => m.label), 'M') + 1),
     nextPlaneNumber: Math.max(positiveInt(raw.nextPlaneNumber), maxLabelNumber(planes.map((p) => p.label), 'P') + 1),
     nextSectionNumber: Math.max(positiveInt(raw.nextSectionNumber), maxLabelNumber(sections.map((s) => s.label), 'X') + 1),

@@ -112,6 +112,9 @@ export function referenceCurve(points: readonly Vec3[], closed: boolean, spacing
   });
 }
 
+/** The reference curve of the edge angles for a curve, at the spacing and window they use. `mm`: millimetres per coordinate unit. */
+export const referenceOf = (curve: readonly Vec3[], closed: boolean, mm: number): Vec3[] => referenceCurve(curve, closed, REFERENCE_SPACING_MM / mm, SMOOTH_WINDOW_MM / mm);
+
 /** Where the plane through `at` with normal `n` crosses the curve, nearest `at`; null when it does not. */
 function curveCrossing(points: readonly Vec3[], closed: boolean, at: Vec3, n: Vec3): Vec3 | null {
   const dist = (p: Vec3) => (p[0] - at[0]) * n[0] + (p[1] - at[1]) * n[1] + (p[2] - at[2]) * n[2];
@@ -201,7 +204,7 @@ export interface StationPlane {
 
 /** Where the stations of a curve lie; null for a curve too short for one. `mm`: millimetres per coordinate unit. */
 export function stationPlan(curve: readonly Vec3[], closed: boolean, mm: number): { length: number; count: number; at: (k: number) => StationPlane } | null {
-  const reference = referenceCurve(curve, closed, REFERENCE_SPACING_MM / mm, SMOOTH_WINDOW_MM / mm);
+  const reference = referenceOf(curve, closed, mm);
   if (reference.length < 2) return null;
   const step = EDGE_ANGLE_STEP_MM / mm;
   const cum = arcLengths(reference, closed);

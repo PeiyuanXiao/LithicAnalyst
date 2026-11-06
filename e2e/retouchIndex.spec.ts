@@ -42,7 +42,7 @@ test('the stepped tool: the indices of two layers and of one, and of another fit
   // the three new files
   const sections = await exportFile(page, 'retouch-sections');
   expect(sections.name).toBe('tool_retouch_sections.csv');
-  expect(sections.text.trim().split('\n')[0]).toBe('specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur');
+  expect(sections.text.trim().split('\n')[0]).toBe('specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur,working_edge');
   const rows = parseCsv(sections.text);
   expect(rows.length).toBe(r.stations.length);
   expect(rows.length).toBeGreaterThan(150);

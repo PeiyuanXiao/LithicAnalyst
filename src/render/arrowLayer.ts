@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { fieldByKey } from '../core/fields';
+import { fieldByKey, type SpecimenType } from '../core/fields';
 import { hasVector, type ProjectState, type Scar, type ScarVector, type Vec3 } from '../core/types';
 import { sequenceColors, UNASSIGNED_COLOR } from './sequenceColor';
 import type { Viewer } from './viewer';
@@ -199,6 +199,9 @@ function hsl(h: number, s: number, l: number): string {
 }
 
 /** `sequences`: scar id → sequence colour (for the `sequence` mode; see sequenceColors). */
+/** What arrows can be coloured by on this type of specimen: a generic specimen's have no attributes and no sequences. */
+export const arrowColorModeOf = (mode: ArrowColorMode, type: SpecimenType): ArrowColorMode => (type === 'generic' && mode !== 'direction' ? 'uniform' : mode);
+
 export function arrowColor(a: Scar, mode: ArrowColorMode, sequences: Map<string, string> | null = null): string {
   if (mode === 'sequence') return sequences?.get(a.id) ?? UNASSIGNED_COLOR;
   if (mode === 'completeness' || mode === 'certainty') {

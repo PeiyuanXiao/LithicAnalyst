@@ -120,7 +120,7 @@ keeps the selection and the undo history.
   object opens its section and scrolls its inspector to the top (lists scroll only themselves;
   the narrow layout, where the whole work area scrolls, is left alone). Sections that cannot be
   used are hidden (`Section.visible`); without a model the sidebar is empty but for the folder's
-  list while a folder is open (models open from the File menu or the empty view). The data exports
+  list while a folder is open (otherwise the start page stands over it, see below). The data exports
   of a mode are one dialog (`App.openExport`, files from `App.exportables`; several files go
   into a stored ZIP, `io/zip.ts`).
 * **Top bar**: the specimen button (ID and unit; its panel holds ID, unit, annotator, notes and
@@ -138,6 +138,24 @@ keeps the selection and the undo history.
   without a free place. `.viewport-labels` is its own stacking context, below every panel over
   the view. `App.updateCursor` puts the active tool in `data-tool` on the viewport: under the tools that place
   things on the model, the style sheet takes `pointer-events` from the labels, so a click reaches the model.
+
+## Start page
+
+`App.buildStartPage` fills `#start-page`, an element over the view and the sidebar (a child of `.workspace`, above the resizer and below the top bar's menus), shown while there is no model and no folder (`App.startShown`). The view stays under it at its size: nothing has to be set up again when a model opens, and the WebGL canvas is never 0×0. The cards write the `specimenType` preference, which `App.newSpecimenType` reads for a new model and which the specimen panel also writes; a project applied later (`applyProject`) brings its own type. While it is shown the drop outline (`dropEl`) and the busy overlay (`openMeshFile`) go on it, since what is under it cannot be seen. The mode switch is hidden with no model (`updateMeshDependentUi`); `.top-actions` holds the grid's last column, so it stays put.
+
+## Annotation status
+
+`core/annotationStatus.ts` is pure: `annotationStatus(state, found)` gives the items of the specimen's type, done or not, and the count without the optional ones. All go by the project but the faces, whose regions come as soon as there are an axis and an edge: those take `found`, the regions as found on the mesh (`area` null: no piece, so the two are not apart, `notApart`). The open model hands in `App.regions`; the folder's list (`App.workspaceInfo().completion`) the states and `derived.regions` in `ProjectIndex`, read in the background when the folder opens, with no model; a file that stored none goes by the regions being there. `App.updateStatus` runs after each store change and redraws the pills (`#annotation-status`, `.viewport-ui`) only when the key changes; a change of the count also refreshes the folder's list. `App.goToStatus` is the click. `App.nextCurveType` is view state: `ToolContext.takeNextCurveType` hands it to `DrawCurveTool.finish`, which calls `addCurveOfType`: one `CompoundCommand` with what `setCurveType` would do (`typeChanges`: the outline it replaces, the regions that follow). Changing tool drops it. `App.fitStatus` follows the view's width by a `ResizeObserver` (`STATUS_COLLAPSE_PX`); a click on the count opens or closes the pills unless the pointer already holds them open.
+
+## Generic specimens
+
+The type is one code in `SPECIMEN_TYPES`, and what it means is said where each thing is decided:
+
+* `core/fields.ts`: `offeredOptions` leaves a field that takes free text with nothing else, so `keyedOptions` gives `['custom']`, and `customValue` keeps what was typed; `isUpperRegion(type, specimen)` and `isBoundaryCurve` say there is no upper layer, `layerCurves` that the lower layer is cut by all the curves; `measuresEdgeAngle` has no default type. `isCustomValue` knows nothing of the type: a preset code from another type keeps its label and is shown, not offered (`customField`), as older codes are.
+* `core/actions.ts`: `isScarRegion` keeps "scar" a word, with no scar made; `setSpecimenType` moves frames only across `flake`, so `core` and `generic` share one, and `updateSpecimen` clears a core's corrections by face whichever of the two turned it.
+* `App.isCore`, `isGeneric` and the sections' `visible` choose tools, panels and exports (`App.exportables`, `batchOutputs`, whose kinds may name who they are for). `compute/planes.ts` holds `planeMethodsOf`. `arrowColorModeOf` falls back to one colour without changing the user's display setting, which comes back with the type. `App.inLowerLayer` keeps out the regions with `auto: true` that a flake left, which on a core go by being upper.
+
+Nothing else needs to know the type: flake-only code already stops at `isFlake`. No field definition file: that was the removed "recording scheme".
 
 ## Shell: theme, icons, tooltips, numbers
 
@@ -219,7 +237,7 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   are located with the BVH (closest triangle). `render/regionLayer.ts` paints the pieces with
   one mesh each, sharing the scan's vertex buffer; it sits in the scene (not the annotation
   overlay), so figures can include the colours.
-* `App.curveChains` joins open curves to others they stop just short of (`joinOpenEndsSteps`), or the two sides would run together through the gap.
+* `App.curveChains` joins open curves to others they stop just short of (`joinOpenEndsSteps`), or the two sides would run together through the gap. An end of a boundary curve goes to another boundary curve when one is within reach, whatever lies nearer, or the upper layer would stay open; with none in reach it goes to what is, for the lower layer. Each chain keeps its links, and the lower layer takes them all, so it still holds all that the upper does.
 * **Two layers**: the type says the layer (`isUpperRegion`). `App.updatePartition` cuts twice: the lower layer along all the curves' mesh edges,
   the upper along those of the boundary curves (`isBoundaryCurve`, by the specimen's type), kept while they do not change. Since one set of edges holds
   the other, each lower piece lies in one upper piece (`overPiecesSteps`), so a lower region has one parent. `App.seedComponent` and
@@ -365,9 +383,9 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
 
 ## Flakes
 
-`specimen.type` (`core`, `flake`) decides what a specimen shows: `App.isFlake` and the sections' `visible` choose
+`specimen.type` (`core`, `flake`, `generic`) decides what a specimen shows: `App.isFlake` and the sections' `visible` choose
 tools, panels and exports; nothing loads or goes when it changes. `setSpecimenType` is one `CompoundCommand` that also exchanges
-`specimen.frame` with `flake.otherFrame`, so each type keeps its orientation and the core's corrections by face stay right
+`specimen.frame` with `flake.otherFrame`, so a flake and the others each keep their orientation and the core's corrections by face stay right
 (`updateSpecimen` leaves them alone on a flake).
 
 * **Technical axis** (`ProjectState.flake.axis`): the tool is a `DrawArrowTool` with options (the start goes to a mesh vertex by `pointVertex`, as it does when the select tool drags it);
@@ -396,6 +414,8 @@ in `App.edgeResults`; they go to `derived.edgeAngles`, which the summary export 
 with vertex colours, one hue, along the curve's own points by `valuesAlongCurve`: straight lines between stations would cut through the mesh; the curve layer then draws only its label, `drawnElsewhere`, since two lines at one depth fight) with a scale of two numbers (`#edge-legend`), and `ui/edgeAngleChart.ts` draws the angle along it in the section
 of the edge angles.
 
+**The line measured** (`compute/measuredLine.ts`, pure): `measuredLine(curve, state)` is what a curve is measured along: a flake's edge without what runs along the closed platform outline, any other curve as it is. It needs the state alone, no mesh, so the app, the tables and the summary export all get the same line, and it is kept per `points` array (curves change by being replaced). Everything that measures goes through it: the stations (`updateEdgeAngles`, `updateRetouchAngles`, `sectionAtStation`), `sharpOf`, the working edges (`edgeAxis`, `edgeLabels`, the actions and the layer), the colours along the curve. What cuts the regions or draws the curve itself reads the curve. `App.lineOf` is the shorthand. GM goes on cutting the edge at the platform ends itself (`edgeLine`).
+
 ## Retouch layers
 
 `compute/retouchAngle.ts` is pure, and shares the stations with the edge angles (`stationPlan`). It takes the partition's piece of each triangle and the pieces in a layer: `SectionLine.faces` says which triangle each stretch of a section lies in, so a layer's ends come from the regions themselves, with no choice of curves to make. `App.updateRetouchAngles` runs after the regions are resolved, in slices, only for what changed (`partitionVersion` and the pieces are in the key), and only when there is a retouch region: the section there is the whole plane, not the sphere of the edge angles.
@@ -412,6 +432,14 @@ of the edge angles.
 * **The plan** (`compute/retouchPlan.ts`, pure): `planShape` from the outline's cells; `planRegionsSteps` projects the borders of the retouch regions, not their triangles, so the drawing stays small on any scan. `segmentLinesSteps` gives the same lines on the model as level lines of a field over the vertices (`isoLines`), kept while the frame stays. `penetrationAt` runs on across the rows, so the line between the zones is one level line and closes by itself: on the model over the vertices, on the plan over a grid of the outline's cells (`levelRings`). `drawnOutline` closes notches of three cells or less for drawing only: a cell holds the furthest vertex that falls into it, so with rim vertices further apart than the cells the raw outline is a saw. The indices use the raw cells.
 * **The fitted length**: dragging its slider sets `App.fitPreview`, which `updateRetouchIndices` takes in place of the stored value, so the panels and the numbers follow with nothing written; letting go is one `setRetouchFitLength`. `removedVolumeCurveSteps` runs the stations' pass at each length of the small curve, again only when `retouchFitKey` (all the inputs but the length) changed.
 * **The chart**: `ui/edgeAngleChart.ts` takes an id prefix, a cursor and a press; the measure mode's shows distances, this mode's the layers, each with its own method and series (`edgeMethod`, `retouchMethod`). `syncEdgeColors` colours the selected curve in the measure mode and the station's curve here.
+
+## Working edges
+
+`ProjectState.workingEdges` holds stretches of the curves measured, as two points each; `compute/workingEdge.ts` (pure) places them on the curve's reference line whenever they are used (`edgeAxis`, `placedEdges`), so a curve that changes takes them along with no change to the data. Every change is one `SetWorkingEdgesCommand` (the list and its counter), through `addWorkingEdge`, `updateWorkingEdge`, `otherWorkingEdgeStretch`, `deleteWorkingEdge` and `generateWorkingEdges`, which check them first (`refusalOf`, by label when it overlaps); `deleteCurve` and a replaced platform outline take theirs in the same step.
+
+Nothing is cut or fitted again for them: `workingEdgeDetails` shares out what the stations already have (`stationWeights`, `ownerAt`). It needs the edge angles' stations and a finished `RetouchIndexResult`, and is cheap, so `App.workingEdgeDetails` keeps it until a store change or a new result clears it. `derived.workingEdges` holds its rows; the screen also takes the reasons, the chord on the plan and the station to go to, which are not stored. The per-station columns of the tables are worked out when they are written (`edgeLabels`, from the state alone), so a summary reads the same from stored results as the open model does; `working_edges.csv` judges `sharp_length` anew for the folder's rule, as `edge_sharp.csv` does (`sharpPieces`).
+
+`tools/workingEdgeTool.ts` takes two clicks on a curve measured (`App.edgePlaceAt`: `CurveLayer.pickAmong`; near an end of another edge, that very point, so the two share it). The select tool drags ends through `ToolContext.edgeEnds`; `clampedEnd` keeps the end from passing its neighbour's (it stops on that point) or coming too close to its own other end. `render/workingEdgeLayer.ts` draws a band in the annotate mode and ticks in the measure and retouch modes, with the labels, and holds the handles. In the charts `EdgeAngleChart` takes `edges` (the strip over the axis) and `view` (one stretch, which may run on past the curve's start: `along`, `onAxis`); the choice is `edgeChoice` in the sidebar, view state of each chart. The row picked in the table of the indices (`App.planEdgeId`) puts that edge and its own chord on the plan (`PlanOptions.edge`).
 
 ## Sharp edge
 
@@ -433,7 +461,9 @@ of the edge angles.
   recomputes the table whenever landmarks or curves change; `io/landmarks.ts` writes TPS, Slicer
   `.fcsv`, the long CSV and the sliders from it, so all exports share one numbering.
 * `tools/landmarkTool.ts` places (snapping like curve points) and drags landmarks;
-  `render/landmarkLayer.ts` draws them with their names, and the semilandmarks. Names carried
+  `render/landmarkLayer.ts` draws them with their names, and the semilandmarks, as spheres scaled on every camera change by
+  `Viewer.worldPerPixel` at their own depth (`LANDMARK_PX`, `SEMILANDMARK_PX`): real geometry, so the surface still hides them. Hiding and picking go by
+  screen pixels too (`hiddenBeyond`, `LANDMARK_PICK_PX`). Figures draw them in 2D at `FIGURE_LANDMARK_MM` on the paper, the outline included. Names carried
   over from the last specimen are kept in local preferences keyed by mesh checksum
   (`App.previousNames`); the queue itself is session state, not project data.
 
@@ -568,7 +598,7 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   a new model, `App.closeModel` (File ▸ Close) to end with none: it cancels the tool, finishes the
   pending saves, asks only when edits would be lost (`unsaved` in a read-only folder — edits since
   the project file was last downloaded —, or `autosaveFailed`), then releases the model, clears the
-  view (`Viewer.clearMesh`), leaves the folder and resets the store (which clears the history).
+  view (`Viewer.clearMesh`), leaves the folder and resets the store (which clears the history); the start page shows again.
 
 ## Performance notes
 

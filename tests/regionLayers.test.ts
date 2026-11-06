@@ -270,7 +270,7 @@ describe('measuring edge angles', () => {
     const c = addCurve(s, shape);
     setCurveAttribute(s, c.id, 'type', 'core_edge');
     const rows = edgeAnglesCsv(s.state, [{ curveId: c.id, distances: [2, 5], length: 0, stations: [{ position: 0, point: [0, 0, 0], three_points: [30.5, null], two_lines: [31, null] }] }], { excelBom: false }).trim().split('\n');
-    expect(rows[0]).toBe('specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg');
-    expect(rows.slice(1)).toEqual([',C1,core_edge,0,0,2,three_points,30.5', ',C1,core_edge,0,0,2,two_lines,31', ',C1,core_edge,0,0,5,three_points,', ',C1,core_edge,0,0,5,two_lines,']);
+    expect(rows[0]).toBe('specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg,working_edge');
+    expect(rows.slice(1)).toEqual([',C1,core_edge,0,0,2,three_points,30.5,', ',C1,core_edge,0,0,2,two_lines,31,', ',C1,core_edge,0,0,5,three_points,,', ',C1,core_edge,0,0,5,two_lines,,']);
   });
 });

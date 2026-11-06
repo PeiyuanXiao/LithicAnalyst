@@ -10,7 +10,7 @@ import type { AttributeValue, LocalizedText } from './types';
  */
 
 /** What a specimen is. Written to project files; keep the codes. */
-export const SPECIMEN_TYPES = ['core', 'flake'] as const;
+export const SPECIMEN_TYPES = ['core', 'flake', 'generic'] as const;
 export type SpecimenType = (typeof SPECIMEN_TYPES)[number];
 
 export interface FieldOption {
@@ -151,9 +151,15 @@ export const CURVE_FIELDS: FieldDef[] = [
 /** The curve that outlines a flake's platform (one per flake, closed). */
 export const PLATFORM_OUTLINE = 'platform_outline';
 
-/** Whether a curve of this type bounds the upper layer of regions: a flake's edge and platform outline, a core's edges. */
+/** Whether a curve of this type bounds the upper layer of regions: a flake's edge and platform outline, a core's edges; a generic specimen has no upper layer. */
 export const isBoundaryCurve = (type: AttributeValue | undefined, specimen: SpecimenType): boolean =>
-  specimen === 'flake' ? type === 'edge' || type === PLATFORM_OUTLINE : type === 'core_edge';
+  specimen === 'flake' ? type === 'edge' || type === PLATFORM_OUTLINE : specimen === 'core' && type === 'core_edge';
+
+/** Which curves cut each layer of regions: the lower layer along all of them, the upper along the boundary curves alone. */
+export const layerCurves = <T extends { attributes: Readonly<Record<string, AttributeValue>> }>(curves: readonly T[], specimen: SpecimenType): { lower: T[]; upper: T[] } => ({
+  lower: [...curves],
+  upper: curves.filter((c) => isBoundaryCurve(c.attributes.type, specimen)),
+});
 
 /**
  * Surface region types. The lower layer: scar (worked), cortex and joint surfaces (unworked), damage, retouch, or the
@@ -185,16 +191,19 @@ export const REGION_FIELDS: FieldDef[] = [
 
 export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'retouch'] as const;
 
+/** What a new region of a generic specimen is until the user says: free text like any other, since a region has a type. */
+export const GENERIC_REGION_TYPE = 'region';
+
 /** The retouch layers on offer; 1 is the nearest the edge. */
 export const RETOUCH_LAYERS = [1, 2, 3, 4, 5] as const;
 
 /** The region types of the upper layer (bounded by the boundary curves alone, so lower regions lie inside them). */
 export const UPPER_REGION_TYPES: readonly string[] = ['flaking_surface', 'platform', 'ventral', 'dorsal'];
-export const isUpperRegion = (type: string): boolean => UPPER_REGION_TYPES.includes(type);
+export const isUpperRegion = (type: string, specimen: SpecimenType = 'core'): boolean => specimen !== 'generic' && UPPER_REGION_TYPES.includes(type);
 
-/** Whether a curve's edge angles are measured: as the user said, else a flake's edge and a core's edge are. */
+/** Whether a curve's edge angles are measured: as the user said, else a flake's edge and a core's edge are; on a generic specimen no type is by default. */
 export const measuresEdgeAngle = (c: { edgeAngle?: boolean; attributes: Readonly<Record<string, AttributeValue>> }, specimen: SpecimenType): boolean =>
-  c.edgeAngle ?? c.attributes.type === (specimen === 'flake' ? 'edge' : 'core_edge');
+  c.edgeAngle ?? (specimen !== 'generic' && c.attributes.type === (specimen === 'flake' ? 'edge' : 'core_edge'));
 
 /**
  * Volumetric configuration of a core (after the Logical Analytical System): the
@@ -247,8 +256,9 @@ export const fieldByKey = (key: string): FieldDef | undefined => SCAR_FIELDS.fin
 
 export const curveFieldByKey = (key: string): FieldDef | undefined => CURVE_FIELDS.find((f) => f.key === key);
 
-/** The options offered for picking on this type of specimen (not those kept only for older files or for the other type). */
-export const offeredOptions = (f: FieldDef, type: SpecimenType = 'core'): FieldOption[] => (f.options ?? []).filter((o) => !o.legacy && (!o.types || o.types.includes(type)));
+/** The options offered for picking on this type of specimen (not those kept only for older files or for another type); a generic specimen has only the user's own text where a field takes it. */
+export const offeredOptions = (f: FieldDef, type: SpecimenType = 'core'): FieldOption[] =>
+  (f.options ?? []).filter((o) => !o.legacy && (o.types ? o.types.includes(type) : type !== 'generic' || !f.allowCustom));
 
 /** What the number keys 1, 2, … pick on this type of specimen: its options and, always last, "custom" (a field that takes the user's own text). */
 export function keyedOptions(f: FieldDef, type: SpecimenType = 'core'): Array<FieldOption | 'custom'> {

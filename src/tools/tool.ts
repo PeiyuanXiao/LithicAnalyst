@@ -9,6 +9,22 @@ import type { SurfaceHit, Viewer } from '../render/viewer';
 import type { Selection } from './selection';
 import type { SurfaceSnap } from './surfaceSnap';
 
+/** An end of a working edge. */
+export interface EdgeEnd {
+  id: string;
+  which: 'start' | 'end';
+}
+
+/** Taking hold of the ends of the working edges. */
+export interface EdgeEnds {
+  at(x: number, y: number): EdgeEnd | null;
+  highlight(end: EdgeEnd | null): void;
+  /** Dragged to a client position: it stops at what it may not pass. */
+  drag(end: EdgeEnd, x: number, y: number): void;
+  /** Let go (false: put back). */
+  finish(commit: boolean): void;
+}
+
 export interface ToolContext {
   viewer: Viewer;
   store: ProjectStore;
@@ -21,6 +37,8 @@ export interface ToolContext {
   snap: () => SurfaceSnap | null;
   /** What curves are drawn toward (ridges, valleys, or nothing). */
   snapMode: () => SnapMode;
+  /** The type asked for the next curve drawn, if any; asking takes it. */
+  takeNextCurveType: () => string | null;
   /** Show a short message (i18n key). */
   notify: (key: string, tone?: 'info' | 'warn') => void;
   /** Tool state changed (status hint, cursor). */
@@ -31,6 +49,7 @@ export interface ToolContext {
   hovered: (item: { id: string; x: number; y: number } | null) => void;
   /** An end of the technical axis was dragged to here. */
   moveAxisEnd: (which: 'start' | 'end', point: Vec3, normal: Vec3) => void;
+  edgeEnds: EdgeEnds;
 }
 
 /** Lazily computed surface hit for the current pointer event (one ray cast at most). */

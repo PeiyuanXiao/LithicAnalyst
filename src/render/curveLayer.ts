@@ -240,7 +240,7 @@ export class CurveVisual {
  * The line (of these, by id) nearest a client position within `maxPx`, in screen space,
  * with its distance in pixels; lines hidden there behind the surface are skipped.
  */
-export function pickPolylines(viewer: Viewer, visuals: Iterable<[string, CurveVisual]>, clientX: number, clientY: number, maxPx: number): { id: string; dist: number } | null {
+export function pickPolylines(viewer: Viewer, visuals: Iterable<[string, CurveVisual]>, clientX: number, clientY: number, maxPx: number, skipHidden = true): { id: string; dist: number; point: Vec3 } | null {
   const rect = viewer.renderer.domElement.getBoundingClientRect();
   const cam = viewer.camera;
   const v = new THREE.Vector3();
@@ -248,7 +248,7 @@ export function pickPolylines(viewer: Viewer, visuals: Iterable<[string, CurveVi
     v.set(p[0], p[1], p[2]).project(cam);
     return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height, v.z > -1 && v.z < 1];
   };
-  let best: { id: string; dist: number } | null = null;
+  let best: { id: string; dist: number; point: Vec3 } | null = null;
   for (const [id, vis] of visuals) {
     if (!vis.root.visible || vis.points.length < 2) continue;
     const pts = vis.points;
@@ -267,8 +267,8 @@ export function pickPolylines(viewer: Viewer, visuals: Iterable<[string, CurveVi
     const a = pts[local.i - 1];
     const b = pts[local.i % pts.length];
     const p = new THREE.Vector3(a[0] + (b[0] - a[0]) * local.t, a[1] + (b[1] - a[1]) * local.t, a[2] + (b[2] - a[2]) * local.t);
-    if (viewer.isOccluded(p, viewer.diagonal * 0.004)) continue;
-    best = { id, dist: local.dist };
+    if (skipHidden && viewer.isOccluded(p, viewer.diagonal * 0.004)) continue;
+    best = { id, dist: local.dist, point: [p.x, p.y, p.z] };
   }
   return best;
 }
@@ -526,6 +526,18 @@ export class CurveLayer {
   pickNearest(clientX: number, clientY: number, maxPx = 8): { id: string; dist: number } | null {
     if (!this.group.visible) return null;
     return pickPolylines(this.viewer, this.visuals, clientX, clientY, maxPx);
+  }
+
+  /** Of these curves, the one under the cursor, with the point on it. */
+  pickAmong(ids: ReadonlySet<string>, clientX: number, clientY: number, maxPx: number): { id: string; dist: number; point: Vec3 } | null {
+    if (!this.group.visible) return null;
+    return pickPolylines(this.viewer, [...this.visuals].filter(([id]) => ids.has(id)), clientX, clientY, maxPx);
+  }
+
+  /** The point of a curve nearest the cursor on the screen, however far (null: it is not in view). */
+  nearestPointOn(id: string, clientX: number, clientY: number): Vec3 | null {
+    const v = this.visuals.get(id);
+    return v ? (pickPolylines(this.viewer, [[id, v]], clientX, clientY, Infinity, false)?.point ?? null) : null;
   }
 
   clearAll(): void {

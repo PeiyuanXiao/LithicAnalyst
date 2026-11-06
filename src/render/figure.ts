@@ -27,6 +27,9 @@ export interface FigureSettings {
   dpi: number;
 }
 
+/** A landmark's diameter on the paper, its outline included. */
+export const FIGURE_LANDMARK_MM = 1.2;
+
 export const DEFAULT_FIGURE: FigureSettings = {
   views: ['front', 'left'],
   lightElevation: 35,
@@ -355,7 +358,7 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
     return { ...lv, image, outline, arrows, lines, dots };
   });
 
-  const stroke = { arrow: mmToPx(0.35), line: mmToPx(0.3), outline: mmToPx(0.25), head: mmToPx(2.2), dot: mmToPx(0.9) };
+  const stroke = { arrow: mmToPx(0.35), line: mmToPx(0.3), outline: mmToPx(0.25), head: mmToPx(2.2), dot: mmToPx(FIGURE_LANDMARK_MM / 2) };
   const drawn = sectionsInPixels(overlays.sections, layout, pxPerUnit);
   return {
     layout,
@@ -469,11 +472,13 @@ interface Strokes {
   line: number;
   outline: number;
   head: number;
-  /** Radius of a fixed landmark (semilandmarks are smaller). */
+  /** Radius of a fixed landmark to the outside of its outline (semilandmarks are smaller). */
   dot: number;
 }
 
-const dotRadius = (d: { fixed: boolean }, stroke: Strokes) => (d.fixed ? stroke.dot : stroke.dot * 0.65);
+const dotOutline = (stroke: Strokes) => stroke.outline * 0.8;
+/** The radius to draw at: the outline lies half outside it. */
+const dotRadius = (d: { fixed: boolean }, stroke: Strokes) => (d.fixed ? stroke.dot : stroke.dot * 0.65) - dotOutline(stroke) / 2;
 
 /** Arrowhead triangle at the tip (x1, y1) of the segment from (x0, y0). */
 function headPoints(seg: [number, number, number, number], size: number): Array<[number, number]> {
@@ -537,7 +542,7 @@ function drawOverlays(g: CanvasRenderingContext2D, v: RenderedView, stroke: Stro
     g.fillStyle = d.color;
     g.fill();
     g.strokeStyle = '#000';
-    g.lineWidth = stroke.outline * 0.8;
+    g.lineWidth = dotOutline(stroke);
     g.stroke();
   }
   g.restore();
@@ -614,7 +619,7 @@ async function composeSvg(views: RenderedView[], sections: DrawnSection[], layou
     }
     out.push('</g>');
     if (v.dots.length) {
-      out.push(`<g class="landmarks" stroke="#000" stroke-width="${f2(stroke.outline * 0.8)}">`);
+      out.push(`<g class="landmarks" stroke="#000" stroke-width="${f2(dotOutline(stroke))}">`);
       for (const d of v.dots) out.push(`<circle class="${d.fixed ? 'fixed' : 'curve'}" cx="${f2(d.at[0])}" cy="${f2(d.at[1])}" r="${f2(dotRadius(d, stroke))}" fill="${esc(d.color)}"/>`);
       out.push('</g>');
     }

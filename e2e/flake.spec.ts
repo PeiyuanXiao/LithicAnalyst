@@ -386,7 +386,7 @@ test('a folder: the list shows and filters the type; the summary has flakes.csv 
 test('the toolbar: the axis after Select, the platform ends after the curve; the automatic measurements are the flake\'s', async ({ page }) => {
   await setType(page, 'flake');
   const order = await page.locator('.tool-group[aria-label="Annotate"] .tool-btn').evaluateAll((els) => els.filter((e) => !(e as HTMLElement).hidden).map((e) => e.id));
-  expect(order).toEqual(['mode-select', 'mode-axis', 'mode-draw', 'mode-curve', 'mode-platform-end', 'mode-region', 'mode-relation', 'mode-sequence', 'mode-landmark']);
+  expect(order).toEqual(['mode-select', 'mode-axis', 'mode-draw', 'mode-curve', 'mode-platform-end', 'mode-working-edge', 'mode-region', 'mode-relation', 'mode-sequence', 'mode-landmark']);
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#sec-measure-auto')).toBeHidden();
   await expect(page.locator('#sec-flake .panel-title')).toHaveText('Automatic measurements');

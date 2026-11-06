@@ -52,7 +52,17 @@ export interface LithicApi {
   retouchAngles(curveId: string): import('../src/compute/retouchAngle').RetouchAngleResult | null;
   sharpEdge(curveId: string): import('../src/compute/sharpEdge').SharpResult | null;
   exportRetouchAnglesCsvText(): string;
+  workingEdges(): {
+    rows: Array<import('../src/compute/workingEdge').WorkingEdgeRow & { reasons: Partial<Record<string, string>>; focus: number | null }>;
+    drawn: { edges: number; lines: number; handles: number } | null;
+    picked: string | null;
+    pending: Vec3 | null;
+  };
+  exportWorkingEdgesCsvText(): string;
   exportEdgeSharpCsvText(): string;
+  annotationStatus(): import('../src/core/annotationStatus').AnnotationStatus;
+  nextCurveType(): string | null;
+  landmarkDiameter(id: string): number | null;
   selectForTest(id: string | null): void;
   exportCurvesCsvText(): string;
   curveDraft(): Vec3[] | null;
@@ -89,7 +99,7 @@ export interface LithicApi {
   closeModel(): Promise<void>;
   openFolderHandle(handle: never): Promise<void>;
   specimenIds(): Record<string, string>;
-  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<'core' | 'flake' | null>; undownloaded: number } | null;
+  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<'core' | 'flake' | 'generic' | null>; completion: Array<{ done: number; total: number } | null>; undownloaded: number } | null;
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;

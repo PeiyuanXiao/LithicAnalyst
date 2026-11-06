@@ -7,11 +7,12 @@ import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { FlakeMeasures } from '../compute/flake';
 import type { RetouchIndices } from '../compute/retouchIndex';
+import type { WorkingEdgesDerived, WorkingEdgeRow } from '../compute/workingEdge';
 import { gmMissingInputs, type GmMissing } from '../compute/gm';
 import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, GmDerived, RetouchAngleCurve } from '../core/derived';
 import { measurementValue } from '../core/measurements';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
-import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, type CsvOptions } from './csv';
+import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, workingEdgesCsv, type CsvOptions } from './csv';
 import { gmCurvesCsv, gmSurfacesCsv, landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
@@ -37,6 +38,8 @@ export interface BatchSpecimen {
   retouchAngles: readonly RetouchAngleCurve[];
   /** A flake's retouch indices, from the project file's derived results (null: none stored). */
   retouchIndices?: RetouchIndices | null;
+  /** The working edges' rows, from the project file's derived results. */
+  workingEdges?: readonly WorkingEdgeRow[];
   /** A flake's points for geometric morphometrics, from the project file's derived results; those of another configuration are made anew before the tables. */
   gm: GmDerived | null;
   /** Each observer's values (annotator → measure → value), from every project file of the model, for the ICC. */
@@ -98,7 +101,7 @@ export function savedResultsUsable(p: BatchProject, appVersion: string): boolean
     p.appVersion === appVersion &&
     !!storedAuto(p.derived.measurements) &&
     (!p.state.planes.length || !!storedAxes(p.derived.vertices)) &&
-    (!p.state.scars.some(hasVector) || p.state.specimen.type === 'flake' || p.state.configuration.model === 'bicone' || !!storedBox(p.derived.configuration))
+    (!p.state.scars.some(hasVector) || p.state.specimen.type !== 'core' || p.state.configuration.model === 'bicone' || !!storedBox(p.derived.configuration))
   );
 }
 
@@ -134,7 +137,7 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     state,
     auto: primary.measures.auto,
     planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices, storedRegionFit(derived.planes, p.id))),
-    configuration: state.specimen.type === 'flake' ? null : coreConfiguration(state, primary.measures.box, storedSplit(derived.split)),
+    configuration: state.specimen.type === 'core' ? coreConfiguration(state, primary.measures.box, storedSplit(derived.split)) : null,
     regions: (derived.regions as BatchSpecimen['regions']) ?? [],
     regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
@@ -143,6 +146,7 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     edgeAngles: (derived.edgeAngles as { curves?: EdgeAngleCurve[] } | null | undefined)?.curves ?? [],
     retouchAngles: (derived.retouchAngles as { curves?: RetouchAngleCurve[] } | null | undefined)?.curves ?? [],
     retouchIndices: state.specimen.type === 'flake' ? ((derived.retouchIndices as RetouchIndices | null | undefined) ?? null) : null,
+    workingEdges: (derived.workingEdges as WorkingEdgesDerived | null | undefined)?.edges ?? [],
     gm: state.specimen.type === 'flake' ? ((derived.gm as GmDerived | null | undefined) ?? null) : null,
     observers,
   };
@@ -244,28 +248,31 @@ export function iccCsv(specimens: readonly BatchSpecimen[]): string | null {
 /** Every CSV kind merged over the specimens (kinds without rows are left out), and one TPS file. */
 export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions): Array<{ suffix: string; text: string }> {
   const plain = { excelBom: false };
-  const merged = (make: (s: BatchSpecimen) => string) => mergeCsv(specimens.map(make), opts.excelBom);
+  const merged = (make: (s: BatchSpecimen) => string, among: readonly BatchSpecimen[] = specimens) => mergeCsv(among.map(make), opts.excelBom);
+  // what a generic specimen does not have, whatever it held on another type
+  const typed = specimens.filter((s) => s.state.specimen.type !== 'generic');
   const out: Array<{ suffix: string; text: string }> = [
     { suffix: 'measurements.csv', text: merged((s) => measurementsCsv(s.state, s.auto, plain, s.regionTotals, s.nodule, s.split, s.file)) },
   ];
-  const kinds: Array<[string, (s: BatchSpecimen) => string]> = [
+  const kinds: Array<[string, (s: BatchSpecimen) => string, (readonly BatchSpecimen[])?]> = [
     ['scar_vectors.csv', (s) => scarVectorCsv(s.state, plain, s.configuration)],
     ['curves.csv', (s) => curveCsv(s.state, plain)],
     ['manual_measurements.csv', (s) => manualMeasurementsCsv(s.state, plain)],
     ['planes.csv', (s) => planesCsv(s.state, s.planes, plain)],
     ['regions.csv', (s) => regionsCsv(s.state, s.regions, plain)],
     ['edge_angles.csv', (s) => edgeAnglesCsv(s.state, s.edgeAngles, plain)],
-    ['retouch_angles.csv', (s) => retouchAnglesCsv(s.state, s.retouchAngles, plain)],
+    ['retouch_angles.csv', (s) => retouchAnglesCsv(s.state, s.retouchAngles, plain), typed],
     ['retouch_sections.csv', (s) => retouchSectionsCsv(s.state, s.retouchIndices ?? null, plain)],
     ['retouch_segments.csv', (s) => retouchSegmentsCsv(s.state, s.retouchIndices ?? null, plain)],
     ['invasiveness.csv', (s) => invasivenessCsv(s.state, s.retouchIndices ?? null, plain)],
-    ['edge_sharp.csv', (s) => edgeSharpCsv(s.state, s.edgeAngles, plain)],
-    ['relations.csv', (s) => relationsCsv(s.state, plain)],
-    ['series.csv', (s) => seriesCsv(s.state, plain)],
+    ['edge_sharp.csv', (s) => edgeSharpCsv(s.state, s.edgeAngles, plain), typed],
+    ['working_edges.csv', (s) => workingEdgesCsv(s.state, s.workingEdges ?? [], s.edgeAngles, plain)],
+    ['relations.csv', (s) => relationsCsv(s.state, plain), typed],
+    ['series.csv', (s) => seriesCsv(s.state, plain), typed],
     ['landmarks.csv', (s) => landmarksCsv(s.state, landmarkTable(s.state), plain)],
   ];
-  for (const [suffix, make] of kinds) {
-    const text = merged(make);
+  for (const [suffix, make, among] of kinds) {
+    const text = merged(make, among);
     if (hasRows(text)) out.push({ suffix, text });
   }
   // flakes only here, and the volumetric configuration only of cores

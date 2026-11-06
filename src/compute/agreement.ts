@@ -377,7 +377,8 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
     const p = sa.scars.find((s) => s.id === x), q = sb.scars.find((s) => s.id === y);
     return p && q ? [[p, q] as const] : [];
   });
-  for (const f of SCAR_FIELDS) {
+  // (a generic specimen's arrows have no attributes)
+  for (const f of sa.specimen?.type === 'generic' ? [] : SCAR_FIELDS) {
     if (f.type !== 'enum') continue;
     // a scar either observer left unfilled (e.g. the termination not judged yet) does not count
     const pairs = matched.map(([p, q]) => [attrCode(p.attributes[f.key]), attrCode(q.attributes[f.key])] as [string, string]).filter(([x, y]) => x && y);
@@ -500,7 +501,7 @@ export function compareObservers(observers: readonly ObserverData[], opts: Compa
   const mapped = (id: string) => others.every((_, k) => maps[k + 1].has(id));
   const scarOf = (k: number, id: string) => others[k].state.scars.find((s) => s.id === maps[k + 1].get(id));
   const items = ref.scars.filter((s) => mapped(s.id));
-  for (const f of SCAR_FIELDS) {
+  for (const f of ref.specimen?.type === 'generic' ? [] : SCAR_FIELDS) {
     if (f.type !== 'enum') continue;
     const cats = items.map((s) => [attrCode(s.attributes[f.key]), ...others.map((_, k) => attrCode(scarOf(k, s.id)?.attributes[f.key]))]).filter((c) => c.every(Boolean));
     if (!cats.length) continue;

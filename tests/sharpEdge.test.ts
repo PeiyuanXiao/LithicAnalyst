@@ -155,12 +155,12 @@ describe('the rule in the project', () => {
     setCurveAttribute(s, c.id, 'type', 'edge');
     const stations = positions(41).map((p) => ({ position: p, point: [p, 0, 0] as Vec3, three_points: [p >= 10 && p <= 20 ? 30 : 80, 50, 60], two_lines: [80, 50, 60] }));
     const curves = [{ curveId: c.id, distances: [2, 5, 10], length: 40, stations }];
-    const header = 'specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length';
+    const header = 'specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length,working_edge';
     // no threshold: no rows
     expect(edgeSharpCsv(s.state, curves, { excelBom: false }).trim()).toBe(header);
     expect(serializeProject(s.state, '0.2.0', { measurements: null, vertices: null, edgeAngles: curves }).derived.sharpEdge).toBeNull();
     setSharpEdge(s, { threshold: 45 });
-    expect(edgeSharpCsv(s.state, curves, { excelBom: false }).trim().split('\n')).toEqual([header, ',C1,three_points,2,45,1,10,20,10']);
+    expect(edgeSharpCsv(s.state, curves, { excelBom: false }).trim().split('\n')).toEqual([header, ',C1,three_points,2,45,1,10,20,10,']);
     const derived = serializeProject(s.state, '0.2.0', { measurements: null, vertices: null, edgeAngles: curves }).derived.sharpEdge!;
     expect(derived.rule.threshold).toBe(45);
     expect(derived.parameters.SHARP_MIN_RUN_MM).toBe(3);

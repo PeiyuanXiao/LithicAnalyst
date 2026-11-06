@@ -10,6 +10,8 @@ import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS } from '../compute/edgeAngl
 import { RETOUCH_ANGLE_METHODS } from '../compute/retouchAngle';
 import { RETOUCH_SUMMARY, type RetouchIndices } from '../compute/retouchIndex';
 import { sharpOfCurve } from '../compute/sharpEdge';
+import { measuredLine } from '../compute/measuredLine';
+import { edgeAxis, edgeLabels, placedEdges, sharpPieces, type WorkingEdgeRow } from '../compute/workingEdge';
 import { frameSource, type AutoMeasurements, type EdgeAngleCurve } from '../core/derived';
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -61,6 +63,8 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
   ];
   const placed = new Map<string, { platform?: string; surface: string | null }>((config?.scars ?? []).map((p) => [p.id, p]));
   const flakeFrame = state.specimen.type === 'flake' ? state.flake.axis?.matrix ?? null : null;
+  // a generic specimen's arrows have no scar attributes, whatever they held on another type
+  const attribute = (a: { attributes: Record<string, unknown> }, key: string) => (state.specimen.type === 'generic' ? '' : csvCell(a.attributes[key]));
   const rows = state.scars.filter(hasVector).map((a) =>
     [
       csvCell(state.specimen.id),
@@ -72,7 +76,7 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
       fmt(a.vector.end[1]),
       fmt(a.vector.end[2]),
       fmt(vectorLength(a.vector)),
-      ...SCAR_FIELDS.map((f) => csvCell(a.attributes[f.key])),
+      ...SCAR_FIELDS.map((f) => attribute(a, f.key)),
       placed.get(a.id)?.platform ?? '',
       placed.get(a.id)?.surface ?? '',
       csvCell(state.specimen.unit),
@@ -86,14 +90,16 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
 
 /** Long format: one row per station, distance and method of each curve measured (`angle_deg` empty where the section ends before the distance). */
 export function edgeAnglesCsv(state: Readonly<ProjectState>, curves: readonly EdgeAngleCurve[], opts: CsvOptions): string {
-  const header = 'specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg';
+  const header = 'specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg,working_edge';
   const rows: string[] = [];
+  const edgeAt = edgeLabels(state);
   for (const r of curves) {
     const c = state.curves.find((x) => x.id === r.curveId);
     if (!c) continue;
     r.stations.forEach((s, k) => {
+      const edge = csvCell(edgeAt(c.id, s.position));
       r.distances.forEach((d, i) => {
-        for (const m of EDGE_ANGLE_METHODS) rows.push([csvCell(state.specimen.id), csvCell(c.label), csvCell(c.attributes.type), String(k), fmt(s.position), fmt(d), m, cell(s[m][i])].join(','));
+        for (const m of EDGE_ANGLE_METHODS) rows.push([csvCell(state.specimen.id), csvCell(c.label), csvCell(c.attributes.type), String(k), fmt(s.position), fmt(d), m, cell(s[m][i]), edge].join(','));
       });
     });
   }
@@ -105,15 +111,17 @@ export function edgeAnglesCsv(state: Readonly<ProjectState>, curves: readonly Ed
  * outer end, along the section; `retouch_region`: the region where the layer begins; `angle_deg` empty where the other side ends first.
  */
 export function retouchAnglesCsv(state: Readonly<ProjectState>, curves: readonly RetouchAngleCurve[], opts: CsvOptions): string {
-  const header = 'specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg';
+  const header = 'specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg,working_edge';
   const rows: string[] = [];
+  const edgeAt = edgeLabels(state);
   for (const r of curves) {
     const c = state.curves.find((x) => x.id === r.curveId);
     if (!c) continue;
     r.stations.forEach((s, k) => {
+      const edge = csvCell(edgeAt(c.id, s.position));
       for (const x of s.stretches) {
         const region = state.regions.find((g) => g.id === x.region)?.label ?? '';
-        for (const m of RETOUCH_ANGLE_METHODS) rows.push([csvCell(state.specimen.id), csvCell(c.label), String(k), fmt(s.position), csvCell(region), String(x.layer), fmt(x.distance), m, cell(x[m])].join(','));
+        for (const m of RETOUCH_ANGLE_METHODS) rows.push([csvCell(state.specimen.id), csvCell(c.label), String(k), fmt(s.position), csvCell(region), String(x.layer), fmt(x.distance), m, cell(x[m]), edge].join(','));
       }
     });
   }
@@ -122,20 +130,22 @@ export function retouchAnglesCsv(state: Readonly<ProjectState>, curves: readonly
 
 /** One row per retouched station of each curve measured (`filled`: its missing area comes from the stations on either side). */
 export function retouchSectionsCsv(state: Readonly<ProjectState>, r: RetouchIndices | null, opts: CsvOptions): string {
-  const header = 'specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur';
+  const header = 'specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur,working_edge';
   const label = new Map(state.curves.map((c) => [c.id, c.label]));
+  const edgeAt = edgeLabels(state);
   const rows = (r?.stations ?? []).filter((s) => label.has(s.curveId)).map((s) =>
-    [csvCell(state.specimen.id), csvCell(label.get(s.curveId)), String(s.station), fmt(s.position), cell(s.segment), cell(s.x), cell(s.y), cell(s.depth_dorsal), cell(s.depth_ventral), cell(s.removed_area), String(s.filled), cell(s.original_angle_deg), cell(s.recession), cell(s.retouch_height), cell(s.thickness), cell(s.giur)].join(','),
+    [csvCell(state.specimen.id), csvCell(label.get(s.curveId)), String(s.station), fmt(s.position), cell(s.segment), cell(s.x), cell(s.y), cell(s.depth_dorsal), cell(s.depth_ventral), cell(s.removed_area), String(s.filled), cell(s.original_angle_deg), cell(s.recession), cell(s.retouch_height), cell(s.thickness), cell(s.giur), csvCell(edgeAt(s.curveId, s.position))].join(','),
   );
   return (opts.excelBom ? '\uFEFF' : '') + [header, ...rows].join('\n') + '\n';
 }
 
 /** One row per retouch region on each curve measured; regions by label; `chord` and `depth` empty where it goes all round the curve. */
 export function retouchSegmentsCsv(state: Readonly<ProjectState>, r: RetouchIndices | null, opts: CsvOptions): string {
-  const header = 'specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth';
+  const header = 'specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth,working_edge';
   const label = new Map(state.curves.map((c) => [c.id, c.label]));
+  const edgeAt = edgeLabels(state);
   const rows = (r?.segments ?? []).filter((s) => label.has(s.curveId)).map((s) =>
-    [csvCell(state.specimen.id), csvCell(label.get(s.curveId)), csvCell(state.regions.find((g) => g.id === s.region)?.label ?? ''), String(s.layer), s.face ?? '', fmt(s.start_position), fmt(s.end_position), fmt(s.length), cell(s.chord), cell(s.depth)].join(','),
+    [csvCell(state.specimen.id), csvCell(label.get(s.curveId)), csvCell(state.regions.find((g) => g.id === s.region)?.label ?? ''), String(s.layer), s.face ?? '', fmt(s.start_position), fmt(s.end_position), fmt(s.length), cell(s.chord), cell(s.depth), csvCell(edgeAt(s.curveId, s.middle ?? (s.start_position + s.end_position) / 2))].join(','),
   );
   return (opts.excelBom ? '\uFEFF' : '') + [header, ...rows].join('\n') + '\n';
 }
@@ -148,17 +158,68 @@ export function invasivenessCsv(state: Readonly<ProjectState>, r: RetouchIndices
 
 /** One row per sharp stretch of each curve measured, under the project's rule (none without a threshold); lengths in the coordinate unit. */
 export function edgeSharpCsv(state: Readonly<ProjectState>, curves: readonly EdgeAngleCurve[], opts: CsvOptions): string {
-  const header = 'specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length';
+  const header = 'specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length,working_edge';
   const rows: string[] = [];
   const rule = state.sharpEdge;
   for (const r of curves) {
     const c = state.curves.find((x) => x.id === r.curveId);
-    const sharp = c ? sharpOfCurve(r, c.closed, rule, state.specimen.unit) : null;
-    if (!c || !sharp) continue;
+    const line = c ? measuredLine(c, state) : null;
+    const sharp = line ? sharpOfCurve(r, line.closed, rule, state.specimen.unit) : null;
+    if (!c || !line || !sharp) continue;
     const distance = r.distances[EDGE_ANGLE_DISTANCES_MM.indexOf(rule.distance as (typeof EDGE_ANGLE_DISTANCES_MM)[number])] ?? null;
-    sharp.segments.forEach((s, k) => rows.push([csvCell(state.specimen.id), csvCell(c.label), rule.method, cell(distance), cell(rule.threshold), String(k + 1), fmt(s.start), fmt(s.end), fmt(s.length)].join(',')));
+    // cut where a working edge begins or ends
+    const axis = edgeAxis(line, state.specimen.unit);
+    const placed = placedEdges(axis, state.workingEdges.filter((e) => e.curveId === c.id));
+    for (const s of sharpPieces(sharp.segments, placed, r.length, line.closed)) rows.push([csvCell(state.specimen.id), csvCell(c.label), rule.method, cell(distance), cell(rule.threshold), String(s.segment), fmt(s.start), fmt(s.end), fmt(s.length), csvCell(s.edge)].join(','));
   }
   return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
+}
+
+/** The columns of working_edges.csv after `specimen_id`. */
+export const WORKING_EDGE_COLUMNS = ['working_edge', 'name', 'curve_id', 'start_position', 'end_position', 'length', 'sharp_length', 'retouched_length', 'retouch_perimeter', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral', 'removed_volume', 'erp', 'erp_filled_share', 'giur', 'giur_stations', 'edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth'] as const;
+
+/**
+ * One row per working edge of the curves measured, and one per such curve without any (`working_edge` empty): lengths in the coordinate
+ * unit, ratios as 0–1. The columns from the retouch indices are empty but for a flake. The sharp length is judged anew by the
+ * state's rule (in a folder, the folder's), from the curves' edge angles.
+ */
+export function workingEdgesCsv(state: Readonly<ProjectState>, edges: readonly WorkingEdgeRow[], curves: readonly EdgeAngleCurve[], opts: CsvOptions): string {
+  const label = new Map(state.curves.map((c) => [c.id, c.label]));
+  const rule = state.sharpEdge;
+  const sharpLength = (e: WorkingEdgeRow): number | null => {
+    const c = state.curves.find((x) => x.id === e.curveId), r = curves.find((x) => x.curveId === e.curveId);
+    const line = c ? measuredLine(c, state) : null;
+    const sharp = line && r && state.specimen.type !== 'generic' ? sharpOfCurve(r, line.closed, rule, state.specimen.unit) : null;
+    if (!c || !line || !r || !sharp) return null;
+    if (!e.label) return sharp.length;
+    const placed = placedEdges(edgeAxis(line, state.specimen.unit), state.workingEdges.filter((x) => x.curveId === c.id));
+    return sharpPieces(sharp.segments, placed, r.length, line.closed).filter((p) => p.edge === e.label).reduce((s, p) => s + p.length, 0);
+  };
+  const rows = edges.filter((e) => label.has(e.curveId)).map((e) =>
+    [
+      csvCell(state.specimen.id),
+      csvCell(e.label),
+      csvCell(e.name),
+      csvCell(label.get(e.curveId)),
+      fmt(e.start_position),
+      fmt(e.end_position),
+      fmt(e.length),
+      cell(sharpLength(e)),
+      cell(e.retouched_length),
+      cell(e.retouch_perimeter),
+      cell(e.retouch_perimeter_dorsal),
+      cell(e.retouch_perimeter_ventral),
+      cell(e.removed_volume),
+      cell(e.erp),
+      cell(e.erp_filled_share),
+      cell(e.giur),
+      cell(e.giur_stations),
+      cell(e.edge_curvature),
+      cell(e.edge_curvature_chord),
+      cell(e.edge_curvature_depth),
+    ].join(','),
+  );
+  return (opts.excelBom ? '\uFEFF' : '') + [['specimen_id', ...WORKING_EDGE_COLUMNS].join(','), ...rows].join('\n') + '\n';
 }
 
 /** What flakes.csv has of the retouch indices, after the measurements. */

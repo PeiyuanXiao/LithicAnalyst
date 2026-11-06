@@ -104,7 +104,7 @@ test('retouch layers: the curves and regions, each layer\'s angles, retouch_angl
   // the export: a row per station, layer and method
   const out = await exportFile(page, 'retouch-angles');
   expect(out.name).toBe('tool_retouch_angles.csv');
-  expect(out.text.trim().split('\n')[0]).toBe('specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg');
+  expect(out.text.trim().split('\n')[0]).toBe('specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg,working_edge');
   const rows = parseCsv(out.text);
   expect(new Set(rows.map((x) => x.method))).toEqual(new Set(['three_points', 'two_lines', 'layer_face']));
   expect(new Set(rows.map((x) => x.retouch_layer))).toEqual(new Set(['1', '2']));
@@ -238,7 +238,7 @@ test('the sharp edge: a threshold, by hand, dragged or suggested; the stretches 
   // the export and the project file
   const out = await exportFile(page, 'edge-sharp');
   expect(out.name).toBe('two_edge_sharp.csv');
-  expect(out.text.trim().split('\n')[0]).toBe('specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length');
+  expect(out.text.trim().split('\n')[0]).toBe('specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length,working_edge');
   const rows = parseCsv(out.text);
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ curve_id: 'C1', method: 'three_points', distance: '5', threshold_deg: '45', segment: '1' });

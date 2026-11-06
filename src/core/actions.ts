@@ -20,6 +20,7 @@ import {
   SetSequencesCommand,
   SetSplitCommand,
   SetSpecimenCommand,
+  SetWorkingEdgesCommand,
   UpdateCurveCommand,
   UpdatePlaneCommand,
   UpdateRegionCommand,
@@ -30,12 +31,15 @@ import {
 import { editedCompletion, type CurveShape } from './curveGeometry';
 import { emptyCorrections, hasFaceCorrections, joinKey } from '../compute/configuration';
 import { orderSequences, relationInputs } from '../compute/relations';
+import type { RetouchStation } from '../compute/retouchAngle';
 import { clampFitLength } from '../compute/retouchIndex';
-import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
+import { measuredLine } from '../compute/measuredLine';
+import { edgeAxis, refusalOf, retouchRunEdges, type WorkingEdgeRefusal } from '../compute/workingEdge';
+import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, measuresEdgeAngle, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
 import { retouchSettingsOf, type RetouchAxisChoice, type RetouchSettings } from './types';
-import type { GmConfig, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3 } from './types';
+import type { GmConfig, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3, WorkingEdge } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -160,7 +164,7 @@ export interface NewCurveInput extends CurveShape {
   label?: string;
 }
 
-export function addCurve(store: ProjectStore, input: NewCurveInput): Curve {
+function newCurve(store: ProjectStore, input: NewCurveInput): { curve: Curve; command: AddCurveCommand } {
   const n = store.state.nextCurveNumber;
   const t = nowIso();
   const curve: Curve = {
@@ -171,7 +175,21 @@ export function addCurve(store: ProjectStore, input: NewCurveInput): Curve {
     createdAt: t,
     modifiedAt: t,
   };
-  store.history.execute(new AddCurveCommand(curve, input.label ? null : n));
+  return { curve, command: new AddCurveCommand(curve, input.label ? null : n) };
+}
+
+export function addCurve(store: ProjectStore, input: NewCurveInput): Curve {
+  const { curve, command } = newCurve(store, input);
+  store.history.execute(command);
+  return curve;
+}
+
+/** A new curve with its type, in one step: what drawing it and then giving it the type would do. */
+export function addCurveOfType(store: ProjectStore, input: NewCurveInput, type: string): Curve {
+  const { curve, command } = newCurve(store, { ...input, attributes: { ...(input.attributes ?? {}), type } });
+  const { replaced, regions } = typeChanges(store, curve, [...store.state.curves, curve], 'cmd.addCurve');
+  const parts = [...replaced, command, ...regions];
+  store.history.execute(parts.length === 1 ? command : new CompoundCommand('cmd.addCurve', parts));
   return curve;
 }
 
@@ -197,10 +215,17 @@ function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[
   return parts;
 }
 
+/** The working edges of these curves go with them. */
+function edgesOfCurvesGone(store: ProjectStore, labelKey: string, ids: readonly string[]): Command[] {
+  const st = store.state;
+  if (!st.workingEdges.some((e) => ids.includes(e.curveId))) return [];
+  return [setEdges(store, labelKey, st.workingEdges.filter((e) => !ids.includes(e.curveId)), st.nextWorkingEdgeNumber)];
+}
+
 export function deleteCurve(store: ProjectStore, id: string): void {
   const c = store.curve(id);
   if (!c) return;
-  const parts: Command[] = [new DeleteCurveCommand(id), ...autoRegionChanges(store, { curves: store.state.curves.filter((x) => x.id !== id), axis: store.state.flake.axis }, c.points[0])];
+  const parts: Command[] = [new DeleteCurveCommand(id), ...edgesOfCurvesGone(store, 'cmd.deleteCurve', [id]), ...autoRegionChanges(store, { curves: store.state.curves.filter((x) => x.id !== id), axis: store.state.flake.axis }, c.points[0])];
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.deleteCurve', parts));
 }
 
@@ -242,22 +267,30 @@ export function completeCurveLoop(store: ProjectStore, id: string, shape: CurveS
 }
 
 /**
- * A curve's type. A flake has one platform outline: a new one takes the place of the old in the same
- * step, and the region that follows the outline comes and goes with it.
+ * What follows from curve `c` having its type in `curves`: a flake has one platform outline, so a new one takes the
+ * place of the old, and the region that follows the outline comes and goes with it.
  */
+function typeChanges(store: ProjectStore, c: Curve, curves: readonly Curve[], labelKey: string): { replaced: Command[]; regions: Command[] } {
+  const st = store.state;
+  const replaced: Command[] = [];
+  let left = curves;
+  if (c.attributes.type === PLATFORM_OUTLINE) {
+    const old = st.curves.filter((o) => o.id !== c.id && o.attributes.type === PLATFORM_OUTLINE);
+    for (const o of old) replaced.push(new DeleteCurveCommand(o.id));
+    replaced.push(...edgesOfCurvesGone(store, labelKey, old.map((o) => o.id)));
+    left = curves.filter((x) => x.id === c.id || x.attributes.type !== PLATFORM_OUTLINE);
+  }
+  return { replaced, regions: autoRegionChanges(store, { curves: left, axis: st.flake.axis }, c.points[0]) };
+}
+
+/** A curve's type. */
 function setCurveType(store: ProjectStore, c: Curve, value: AttributeValue): void {
   const after = structuredClone(c);
   after.attributes.type = value;
   after.modifiedAt = nowIso();
   const update = new UpdateCurveCommand('cmd.editField', structuredClone(c), after);
-  const st = store.state;
-  const parts: Command[] = [];
-  let curves = st.curves.map((x) => (x.id === c.id ? after : x));
-  if (value === PLATFORM_OUTLINE) {
-    for (const o of st.curves) if (o.id !== c.id && o.attributes.type === PLATFORM_OUTLINE) parts.push(new DeleteCurveCommand(o.id));
-    curves = curves.filter((x) => x.id === c.id || x.attributes.type !== PLATFORM_OUTLINE);
-  }
-  parts.push(update, ...autoRegionChanges(store, { curves, axis: st.flake.axis }, c.points[0]));
+  const { replaced, regions } = typeChanges(store, after, store.state.curves.map((x) => (x.id === c.id ? after : x)), 'cmd.editField');
+  const parts = [...replaced, update, ...regions];
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editField', parts));
 }
 
@@ -284,6 +317,83 @@ export function setCurveLabel(store: ProjectStore, id: string, label: string): v
   updateCurve(store, id, 'cmd.renameCurve', (x) => {
     x.label = label;
   }, `curve-label:${id}`);
+}
+
+// ---------------------------------------------------------------- working edges
+
+const setEdges = (store: ProjectStore, labelKey: string, edges: readonly WorkingEdge[], next: number, mergeKey: string | null = null): SetWorkingEdgesCommand =>
+  new SetWorkingEdgesCommand(labelKey, { edges: structuredClone(store.state.workingEdges), next: store.state.nextWorkingEdgeNumber }, { edges: structuredClone([...edges]), next }, mergeKey);
+
+/** What came of a change to the working edges: the edge, or why it was not made. */
+export type WorkingEdgeOutcome = { edge: WorkingEdge; refused: null } | { edge: null; refused: WorkingEdgeRefusal };
+
+/** Why this curve cannot have this stretch as a working edge; `except`: the edge being changed. */
+function refusal(store: ProjectStore, curveId: string, start: Vec3, end: Vec3, except: string | null): WorkingEdgeRefusal | null {
+  const st = store.state;
+  const c = store.curve(curveId);
+  if (!c || !measuresEdgeAngle(c, st.specimen.type)) return { reason: 'not_measured' };
+  return refusalOf(edgeAxis(measuredLine(c, st), st.specimen.unit), start, end, st.workingEdges.filter((e) => e.curveId === curveId && e.id !== except));
+}
+
+/** A new working edge on a curve whose edge angles are measured; not where it is too short or overlaps another. */
+export function addWorkingEdge(store: ProjectStore, input: { curveId: string; start: Vec3; end: Vec3; name?: string }): WorkingEdgeOutcome {
+  const refused = refusal(store, input.curveId, input.start, input.end, null);
+  if (refused) return { edge: null, refused };
+  const st = store.state;
+  const n = st.nextWorkingEdgeNumber;
+  const t = nowIso();
+  const edge: WorkingEdge = { id: uuid(), label: `E${n}`, name: input.name ?? '', curveId: input.curveId, start: copy(input.start), end: copy(input.end), createdAt: t, modifiedAt: t };
+  store.history.execute(setEdges(store, 'cmd.addWorkingEdge', [...st.workingEdges, edge], n + 1));
+  return { edge, refused: null };
+}
+
+/** Its ends or its name; ends that would make it too short or overlap another are refused, and it stays as it is. */
+export function updateWorkingEdge(store: ProjectStore, id: string, patch: { start?: Vec3; end?: Vec3; name?: string }): WorkingEdgeOutcome | null {
+  const e = store.workingEdge(id);
+  if (!e) return null;
+  const start = patch.start ?? e.start, end = patch.end ?? e.end;
+  if (patch.start || patch.end) {
+    const refused = refusal(store, e.curveId, start, end, id);
+    if (refused) return { edge: null, refused };
+  }
+  const after: WorkingEdge = { ...e, start: copy(start), end: copy(end), name: patch.name ?? e.name, modifiedAt: nowIso() };
+  const st = store.state;
+  store.history.execute(setEdges(store, 'cmd.editWorkingEdge', st.workingEdges.map((x) => (x.id === id ? after : x)), st.nextWorkingEdgeNumber, patch.name !== undefined && !patch.start && !patch.end ? `edge-name:${id}` : null));
+  return { edge: after, refused: null };
+}
+
+/** The other way round a closed curve: its two ends exchanged. */
+export function otherWorkingEdgeStretch(store: ProjectStore, id: string): WorkingEdgeOutcome | null {
+  const e = store.workingEdge(id);
+  return e ? updateWorkingEdge(store, id, { start: e.end, end: e.start }) : null;
+}
+
+export function deleteWorkingEdge(store: ProjectStore, id: string): void {
+  const st = store.state;
+  if (!store.workingEdge(id)) return;
+  store.history.execute(setEdges(store, 'cmd.deleteWorkingEdge', st.workingEdges.filter((e) => e.id !== id), st.nextWorkingEdgeNumber));
+}
+
+/** A working edge on each retouched stretch of the curves measured that have none, in one step; those with any stay as they are. Their number. */
+export function generateWorkingEdges(store: ProjectStore, curves: ReadonlyArray<{ curveId: string; stations: readonly RetouchStation[] }>): number {
+  const st = store.state;
+  const edges = [...st.workingEdges];
+  let n = st.nextWorkingEdgeNumber;
+  const t = nowIso();
+  for (const { curveId, stations } of curves) {
+    const c = store.curve(curveId);
+    if (!c || !measuresEdgeAngle(c, st.specimen.type) || st.workingEdges.some((e) => e.curveId === curveId)) continue;
+    const line = measuredLine(c, st);
+    const axis = edgeAxis(line, st.specimen.unit);
+    for (const r of retouchRunEdges(line, stations, st.specimen.unit)) {
+      if (refusalOf(axis, r.start, r.end, edges.filter((e) => e.curveId === curveId))) continue;
+      edges.push({ id: uuid(), label: `E${n}`, name: '', curveId, start: copy(r.start), end: copy(r.end), createdAt: t, modifiedAt: t });
+      n++;
+    }
+  }
+  const made = edges.length - st.workingEdges.length;
+  if (made) store.history.execute(setEdges(store, 'cmd.generateWorkingEdges', edges, n));
+  return made;
 }
 
 // ---------------------------------------------------------------- measurements
@@ -446,16 +556,20 @@ export function addRegion(store: ProjectStore, seed: Vec3, type: RegionType, sca
   const t = nowIso();
   const parts = [];
   let linked = scarId;
-  if (type === 'scar' && !linked) {
+  const scarRegion = isScarRegion(store, type);
+  if (scarRegion && !linked) {
     const s = newAreaScar(store);
     parts.push(s.command);
     linked = s.scar.id;
   }
-  const region: Region = { id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: type === 'scar' ? linked : null, createdAt: t, modifiedAt: t };
+  const region: Region = { id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: scarRegion ? linked : null, createdAt: t, modifiedAt: t };
   parts.push(new AddRegionCommand(region, n));
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.addRegion', parts));
   return region;
 }
+
+/** A region that has a scar: on a generic specimen "scar" would be the user's own word, with no scar to it. */
+const isScarRegion = (store: ProjectStore, type: RegionType): boolean => type === 'scar' && store.state.specimen.type !== 'generic';
 
 /** The scar created for a region (no direction) is removed with it when nothing else uses it. */
 function dropAreaScar(store: ProjectStore, region: Region): Command[] {
@@ -474,12 +588,13 @@ export function setRegionType(store: ProjectStore, id: string, type: RegionType,
   if (!before || before.type === type) return;
   const parts: Command[] = [];
   let linked = scarId ?? before.scarId;
-  if (type === 'scar' && !linked) {
+  const scarRegion = isScarRegion(store, type);
+  if (scarRegion && !linked) {
     const s = newAreaScar(store);
     parts.push(s.command);
     linked = s.scar.id;
   }
-  const after: Region = { ...structuredClone(before), type, scarId: type === 'scar' ? linked : null, modifiedAt: nowIso() };
+  const after: Region = { ...structuredClone(before), type, scarId: scarRegion ? linked : null, modifiedAt: nowIso() };
   if (type === 'retouch') after.retouchLayer = before.retouchLayer ?? 1;
   else delete after.retouchLayer;
   if (after.auto) {
@@ -487,7 +602,7 @@ export function setRegionType(store: ProjectStore, id: string, type: RegionType,
     if (seed) after.seed = copy(seed);
   }
   parts.push(new UpdateRegionCommand(structuredClone(before), after));
-  if (type !== 'scar') parts.push(...dropAreaScar(store, before));
+  if (!scarRegion) parts.push(...dropAreaScar(store, before));
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.editRegion', parts));
 }
 
@@ -777,7 +892,7 @@ export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>
   const corrections = store.state.configuration;
   // the polarity, the model and the bicone's corrections (by side of the split curve, not by face) stay;
   // a flake's frame is not the one the corrections name faces of (see setSpecimenType)
-  const config = turned && before.type === 'core' && hasFaceCorrections(corrections)
+  const config = turned && before.type !== 'flake' && hasFaceCorrections(corrections)
     ? { before: structuredClone(corrections), after: { ...emptyCorrections(), polarity: corrections.polarity, model: corrections.model, bicone: structuredClone(corrections.bicone) } }
     : null;
   store.history.execute(new SetSpecimenCommand(structuredClone(before), after, merge ? `specimen:${key}` : null, config));
@@ -785,12 +900,16 @@ export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>
 }
 
 /**
- * Switch the type of specimen. Nothing is deleted: each type keeps its own frame (the other's
- * waits in `flake.otherFrame`), so the core's corrections by face stay right when it comes back.
+ * Switch the type of specimen. Nothing is deleted: a flake keeps its own frame and the other types share theirs (the one
+ * not in use waits in `flake.otherFrame`), so the core's corrections by face stay right when it comes back.
  */
 export function setSpecimenType(store: ProjectStore, type: SpecimenType): void {
   const before = store.state.specimen;
   if (before.type === type) return;
+  if (before.type !== 'flake' && type !== 'flake') {
+    store.history.execute(new SetSpecimenCommand(structuredClone(before), { ...structuredClone(before), type }));
+    return;
+  }
   const flake = store.state.flake;
   store.history.execute(
     new CompoundCommand('cmd.editSpecimen', [

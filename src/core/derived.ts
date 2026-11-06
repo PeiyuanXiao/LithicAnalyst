@@ -7,6 +7,8 @@ import type { RetouchAngleResult } from '../compute/retouchAngle';
 import type { RetouchIndices } from '../compute/retouchIndex';
 import { SHARP_EDGE_PARAMETERS, sharpOfCurve, type SharpSegment } from '../compute/sharpEdge';
 import { FLAKE_PARAMETERS, type FlakeGeometry, type FlakeMeasures, type FlakeResult } from '../compute/flake';
+import { WORKING_EDGE_PARAMETERS, type WorkingEdgeRow, type WorkingEdgesDerived } from '../compute/workingEdge';
+import { MEASURED_LINE_PARAMETERS, measuredLine } from '../compute/measuredLine';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
@@ -84,6 +86,8 @@ export interface DerivedResults {
   flake: FlakeDerived | null;
   /** The edge angles of the curves measured, with their parameters (null: none). */
   edgeAngles: { parameters: typeof EDGE_ANGLE_PARAMETERS; curves: EdgeAngleCurve[] } | null;
+  /** Edges that run along the platform outline: measured from `start` to `end`, not all round their curve. Absent when there are none. */
+  measuredLines?: { parameters: typeof MEASURED_LINE_PARAMETERS; curves: Array<{ curveId: string; start: Vec3; end: Vec3 }> };
   /** The retouch layers along the curves measured (null: none). */
   retouchAngles: { curves: RetouchAngleCurve[] } | null;
   /** A flake's retouch indices (absent for a core, or before they are computed). */
@@ -92,6 +96,8 @@ export interface DerivedResults {
   sharpEdge: { rule: SharpEdgeRule; parameters: typeof SHARP_EDGE_PARAMETERS; curves: Array<{ curveId: string; length: number; segments: SharpSegment[] }> } | null;
   /** A flake's points for geometric morphometrics, and the configuration they were made by (null for a core, or before they are computed). */
   gm: GmDerived | null;
+  /** The working edges of the curves measured, and the whole of each curve without any (absent: nothing measured). */
+  workingEdges?: WorkingEdgesDerived;
 }
 
 /** What derived results need from the mesh (null before it is measured). */
@@ -116,6 +122,8 @@ export interface MeshResults {
   retouchIndices?: RetouchIndices | null;
   /** A flake's points for geometric morphometrics. */
   gm?: GmResult | null;
+  /** The working edges' rows. */
+  workingEdges?: readonly WorkingEdgeRow[] | null;
 }
 
 /** Where the specimen frame came from, for flakes.csv. */
@@ -130,10 +138,19 @@ function sharpDerived(state: Readonly<ProjectState>, curves: readonly EdgeAngleC
     parameters: SHARP_EDGE_PARAMETERS,
     curves: curves.flatMap((r) => {
       const c = state.curves.find((x) => x.id === r.curveId);
-      const s = c ? sharpOfCurve(r, c.closed, rule, state.specimen.unit) : null;
+      const s = c ? sharpOfCurve(r, measuredLine(c, state).closed, rule, state.specimen.unit) : null;
       return s ? [{ curveId: r.curveId, length: s.length, segments: s.segments }] : [];
     }),
   };
+}
+
+/** The edges not measured along all of their curve, and where that part of them ends (nothing when there are none). */
+function measuredLines(state: Readonly<ProjectState>): Pick<DerivedResults, 'measuredLines'> {
+  const curves = state.curves.flatMap((c) => {
+    const line = measuredLine(c, state);
+    return line.points === c.points ? [] : [{ curveId: c.id, start: line.points[0], end: line.points[line.points.length - 1] }];
+  });
+  return curves.length ? { measuredLines: { parameters: MEASURED_LINE_PARAMETERS, curves } } : {};
 }
 
 export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults | null = null): DerivedResults {
@@ -155,12 +172,14 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     split: mesh?.split ?? null,
     relations: relationResults(state),
     landmarks: landmarkTable(state),
-    configuration: state.specimen.type === 'flake' ? null : coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null),
+    configuration: state.specimen.type === 'core' ? coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null) : null,
     flake: state.specimen.type === 'flake' && mesh?.flake ? { parameters: FLAKE_PARAMETERS, frameSource: frameSource(state), measures: mesh.flake.measures, geometry: mesh.flake.geometry } : null,
     edgeAngles: mesh?.edgeAngles?.length ? { parameters: EDGE_ANGLE_PARAMETERS, curves: [...mesh.edgeAngles] } : null,
     retouchAngles: mesh?.retouchAngles?.length ? { curves: [...mesh.retouchAngles] } : null,
     ...(state.specimen.type === 'flake' && mesh?.retouchIndices ? { retouchIndices: mesh.retouchIndices } : {}),
     sharpEdge: sharpDerived(state, mesh?.edgeAngles ?? []),
     gm: state.specimen.type === 'flake' && mesh?.gm ? { config: structuredClone(state.gm), ...mesh.gm } : null,
+    ...(mesh?.workingEdges?.length ? { workingEdges: { parameters: WORKING_EDGE_PARAMETERS, edges: [...mesh.workingEdges] } } : {}),
+    ...measuredLines(state),
   };
 }

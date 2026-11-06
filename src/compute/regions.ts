@@ -44,26 +44,34 @@ export const JOIN_REACH_EDGES = 4;
 /**
  * Open curves that stop a little short of another curve are joined to it, or the two sides of them would run into
  * each other through the gap: `chains` the curves' mesh edges (vertex pairs), `positions` the mesh's.
+ * `boundary`: the curves that also cut the upper layer. An end of one of them goes to another of them when one is within reach,
+ * whatever lies nearer: the upper layer is cut along these alone, and a join to any other curve would leave it open.
  */
-export function* joinOpenEndsSteps(chains: readonly number[][], open: readonly boolean[], positions: ArrayLike<number>, reach: number, path: (from: number, to: number) => ArrayLike<number> | null): Steps<number[][]> {
+export function* joinOpenEndsSteps(chains: readonly number[][], open: readonly boolean[], positions: ArrayLike<number>, reach: number, path: (from: number, to: number) => ArrayLike<number> | null, boundary: readonly boolean[] = []): Steps<number[][]> {
   const out = chains.map((c) => [...c]);
+  /** Among these curves: whether the end lies on one, and the vertex of one nearest it, within reach. */
+  const nearest = (i: number, end: number, among: (j: number) => boolean): { there: boolean; best: number } => {
+    let best = -1, least = reach * reach, there = false;
+    for (let j = 0; j < chains.length && !there; j++) {
+      if (j === i || !among(j)) continue;
+      for (const v of chains[j]) {
+        if (v === end) there = true;
+        const d = (positions[3 * v] - positions[3 * end]) ** 2 + (positions[3 * v + 1] - positions[3 * end + 1]) ** 2 + (positions[3 * v + 2] - positions[3 * end + 2]) ** 2;
+        if (d <= least) {
+          least = d;
+          best = v;
+        }
+      }
+    }
+    return { there, best };
+  };
   for (let i = 0; i < chains.length; i++) {
     yield;
     const chain = chains[i];
     if (!open[i] || chain.length < 2) continue;
     for (const end of [chain[0], chain[chain.length - 1]]) {
-      let best = -1, least = reach * reach, there = false;
-      for (let j = 0; j < chains.length && !there; j++) {
-        if (j === i) continue;
-        for (const v of chains[j]) {
-          if (v === end) there = true;
-          const d = (positions[3 * v] - positions[3 * end]) ** 2 + (positions[3 * v + 1] - positions[3 * end + 1]) ** 2 + (positions[3 * v + 2] - positions[3 * end + 2]) ** 2;
-          if (d <= least) {
-            least = d;
-            best = v;
-          }
-        }
-      }
+      const first = boundary[i] ? nearest(i, end, (j) => !!boundary[j]) : null;
+      const { there, best } = first && (first.there || first.best >= 0) ? first : nearest(i, end, () => true);
       if (there || best < 0) continue;
       const link = path(end, best);
       yield;
@@ -176,8 +184,8 @@ export function* overPiecesSteps(lower: Partition, upper: Partition): Steps<Int3
 
 /**
  * A flake's faces among the pieces of the upper layer: the ventral face is the piece under the technical axis
- * (`ventral`), the dorsal face the largest other than it and the platform. None when the two are not apart: the
- * edge does not close (nothing else of a size is left, at least 5 % of the surface).
+ * (`ventral`), the dorsal face the largest other than it and the platform. None when the two are not apart: the edge and
+ * the platform outline together leave a way round (nothing else of a size is left, at least 5 % of the surface).
  */
 export function flakeFacePieces(part: Partition, platform: number, ventral: number): { ventral: number; dorsal: number } {
   const none = { ventral: -1, dorsal: -1 };

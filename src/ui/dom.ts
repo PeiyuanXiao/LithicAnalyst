@@ -121,6 +121,10 @@ export const ICONS20 = {
   modePresent: '<rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M9 5.8 C11.3 7.2 11.8 10.5 10.4 13.2 C9.8 14.2 8.2 14.2 7.6 13.2 C6.2 10.5 6.7 7.2 9 5.8 Z" fill="currentColor" fill-opacity="0.25"/><path d="M13 14 H15.5"/>',
   modeRetouch: '<path d="M3 16.5 C4.2 14.6 5.6 14.4 6.6 15 C7.2 13 8.8 12.4 10 13 C10.6 11 12.2 10.4 13.4 11 C14 9 15.6 8.2 17 8.6 V16.5 Z" fill="currentColor" fill-opacity="0.25" stroke="none"/><path d="M3 16.5 C4.2 14.6 5.6 14.4 6.6 15 C7.2 13 8.8 12.4 10 13 C10.6 11 12.2 10.4 13.4 11 C14 9 15.6 8.2 17 8.6"/><path d="M3 16.5 H17 V8.6"/>',
   station: '<path d="M3 13.5 C7 10.5 13 10.5 17 13.5"/><path d="M10 3.5 V16.5"/><circle cx="10" cy="11.2" r="2" fill="currentColor"/>',
+  specimenCore: '<path d="M4.5 6.5 L10.5 2.5 L17 6.5 L16 13.5 L9.5 17.5 L3.5 13 Z"/><path d="M4.5 6.5 L10 9.5 L17 6.5"/><path d="M10 9.5 L9.5 17.5"/>',
+  specimenFlake: '<path d="M10 2.5 C14.5 3.5 16.5 9 15 13.5 C13.8 17 6.2 17 5 13.5 C3.5 9 5.5 3.5 10 2.5 Z"/><path d="M10 2.5 V6"/><path d="M7.2 8.2 C8.8 9.4 11.2 9.4 12.8 8.2"/><path d="M6.4 11.6 C8.6 13 11.4 13 13.6 11.6"/>',
+  specimenGeneric: '<circle cx="10" cy="10" r="7.5"/><ellipse cx="10" cy="10" rx="7.5" ry="2.8"/><ellipse cx="10" cy="10" rx="2.8" ry="7.5"/>',
+  workingEdge: '<path d="M2.5 13 C6.5 9.5 13.5 9.5 17.5 13" stroke-opacity="0.45"/><path d="M6 10.6 C8.5 9.4 11.5 9.4 14 10.6" stroke-width="2.6"/><path d="M6 7.8 V13.4"/><path d="M14 7.8 V13.4"/>',
   modeCompare: '<circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><path d="M10 5.67 A5 5 0 0 1 10 14.33 A5 5 0 0 1 10 5.67 Z" fill="currentColor" fill-opacity="0.3" stroke="none"/>',
 };
 

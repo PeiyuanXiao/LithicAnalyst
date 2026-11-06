@@ -139,7 +139,7 @@ export interface AppApi {
    * The open folder: its models (paths), which one is open (−1: none of them), which have a
    * project and of which type (null: no project, or not read yet), and (read-only folder) how many edited models were not downloaded.
    */
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<import('../core/fields').SpecimenType | null>; undownloaded: number } | null;
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<import('../core/fields').SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; undownloaded: number } | null;
   openWorkspaceMesh(i: number): Promise<void>;
   stepWorkspace(step: number): void;
   /** Open the next model without a project. */
@@ -229,4 +229,18 @@ export interface AppApi {
   readonly retouchSeries: string;
   setRetouchMethod(method: EdgeChartMethod): void;
   setRetouchSeries(series: string): void;
+  /** The working edges of the curves measured and the whole of each curve without any, with what is measured on them. */
+  workingEdgeDetails(): import('../compute/workingEdge').WorkingEdgeDetail[];
+  /** A curve's working edges along it, in order. */
+  workingEdgesOn(curveId: string): Array<{ id: string; label: string; from: number; to: number; color: string }>;
+  /** The label of the working edge a position along a curve lies in (empty: none). */
+  workingEdgeAt(curveId: string, position: number): string;
+  /** A retouched stretch of each curve measured that has no working edge: one each. */
+  generateWorkingEdges(): void;
+  /** The other stretch round a closed curve; says so when it cannot. */
+  otherEdgeStretch(id: string): void;
+  /** A row of the table of working edges: to its largest missing area, and drawn on the plan; again to let go. */
+  focusWorkingEdge(id: string): void;
+  /** The row picked (its id; null: none). */
+  planEdge(): string | null;
 }

@@ -256,6 +256,25 @@ export interface Sequence {
   modifiedAt: string;
 }
 
+/**
+ * A working edge: a stretch of a curve whose edge angles are measured. Its ends are kept as points and placed on the
+ * curve's reference line when used (compute/workingEdge.ts), so they follow the curve when it is changed. Round a closed
+ * curve it runs from `start` along the curve to `end`; on an open one it lies between them, in either order.
+ */
+export interface WorkingEdge {
+  /** Stable unique id (UUID). Never reused. */
+  id: string;
+  /** "E1", "E2", … */
+  label: string;
+  /** The user's own name; may be empty. */
+  name: string;
+  curveId: string;
+  start: Vec3;
+  end: Vec3;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 export type LandmarkCode = 'pop' | 'platform_end';
 
 /** A fixed landmark: a surface point with a free name. The list order is the export order. */
@@ -396,6 +415,8 @@ export interface ProjectState {
   mesh: MeshInfo | null;
   scars: Scar[];
   curves: Curve[];
+  /** Working edges, on the curves whose edge angles are measured. */
+  workingEdges: WorkingEdge[];
   measurements: Measurement[];
   planes: Plane[];
   sections: Section[];
@@ -424,6 +445,8 @@ export interface ProjectState {
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */
   nextCurveNumber: number;
+  /** Next number used for working edge labels (E1, E2, …). */
+  nextWorkingEdgeNumber: number;
   /** Next number used for measurement labels (M1, M2, …). */
   nextMeasureNumber: number;
   /** Next number used for plane labels (P1, P2, …). */

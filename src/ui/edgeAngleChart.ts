@@ -18,6 +18,8 @@ const LEFT = 34;
 const RIGHT = 10;
 const TOP = 8;
 const BOTTOM = 20;
+/** The working edges' strip, over the axis. */
+const STRIP = 11;
 
 /** Round steps for the axis of angles. */
 const STEPS = [1, 2, 5, 10, 20, 30, 45];
@@ -43,6 +45,10 @@ export interface ChartInput {
   /** The line of the threshold, which can be dragged; and the stretches at or under it. */
   threshold: { value: number; color: string; onSet: (value: number) => void } | null;
   bands: readonly SharpSegment[];
+  /** The working edges along the curve: a pale strip over the axis, with its label. */
+  edges?: ReadonlyArray<{ label: string; from: number; to: number; color: string }>;
+  /** Only this stretch of the curve, which may run on past its start. */
+  view?: { from: number; to: number } | null;
 }
 
 /**
@@ -55,7 +61,7 @@ export class EdgeAngleChart {
   private readonly plot: SVGSVGElement;
   private cross: SVGElement | null = null;
   private dots: SVGElement[] = [];
-  private current: (ChartInput & { x: (p: number) => number; y: (a: number) => number; angleAt: (py: number) => number }) | null = null;
+  private current: (ChartInput & { x: (p: number) => number; y: (a: number) => number; angleAt: (py: number) => number; order: number[]; shows: (p: number) => boolean }) | null = null;
   private dragging = false;
   private cursorAt: number | null = null;
   private cursorEl: SVGElement | null = null;
@@ -96,6 +102,7 @@ export class EdgeAngleChart {
     this.cursorEl.setAttribute('x1', String(c.x(p)));
     this.cursorEl.setAttribute('x2', String(c.x(p)));
     this.cursorEl.setAttribute('data-position', String(p));
+    this.cursorEl.setAttribute('visibility', c.shows(p) ? 'visible' : 'hidden');
   }
 
   /** The station nearest the pointer. */
@@ -103,10 +110,8 @@ export class EdgeAngleChart {
     const c = this.current!;
     const r = this.plot.getBoundingClientRect();
     const px = ((e.clientX - r.left) / r.width) * WIDTH;
-    let k = 0;
-    c.positions.forEach((p, i) => {
-      if (Math.abs(c.x(p) - px) < Math.abs(c.x(c.positions[k]) - px)) k = i;
-    });
+    let k = c.order[0];
+    for (const i of c.order) if (Math.abs(c.x(c.positions[i]) - px) < Math.abs(c.x(c.positions[k]) - px)) k = i;
     return k;
   }
 
@@ -120,23 +125,50 @@ export class EdgeAngleChart {
     this.dots = [];
     this.current = null;
     this.el.hidden = !input?.positions.length;
+    this.plot.removeAttribute('data-stations');
     if (!input?.positions.length) return;
-    const values = input.series.flatMap((s) => s.values.filter((a): a is number => a !== null));
+    // the stretch shown: along it from where it begins, all of the curve when none is asked for
+    const whole = input.length;
+    const view = input.view ?? null;
+    const along = (p: number) => (view ? (((p - view.from) % whole) + whole) % whole : p);
+    const span = view ? (view.to >= view.from ? view.to - view.from : whole - view.from + view.to) : input.positions[input.positions.length - 1] || 1;
+    const shows = (p: number) => along(p) <= span + 1e-9;
+    const order = input.positions.flatMap((p, k) => (shows(p) ? [k] : [])).sort((a, b) => along(input.positions[a]) - along(input.positions[b]));
+    if (!order.length) return;
+    this.plot.setAttribute('data-stations', String(order.length));
+    const values = input.series.flatMap((s) => order.flatMap((k) => (s.values[k] === null || s.values[k] === undefined ? [] : [s.values[k] as number])));
     if (input.threshold) values.push(input.threshold.value);
     if (!values.length) return;
     const lo = Math.min(...values), hi = Math.max(...values);
     const want = Math.max(hi - lo, 1) / 4;
     const step = STEPS.find((s) => s >= want) ?? 60;
     const y0 = Math.floor(lo / step) * step, y1 = Math.max(Math.ceil(hi / step) * step, y0 + step);
-    const length = input.positions[input.positions.length - 1] || 1;
-    const x = (p: number) => LEFT + (p / length) * (WIDTH - LEFT - RIGHT);
+    const length = span;
+    const atU = (u: number) => LEFT + (u / length) * (WIDTH - LEFT - RIGHT);
+    const x = (p: number) => atU(along(p));
     const y = (a: number) => HEIGHT - BOTTOM - ((a - y0) / (y1 - y0)) * (HEIGHT - BOTTOM - TOP);
     const angleAt = (py: number) => y0 + ((HEIGHT - BOTTOM - py) / (HEIGHT - BOTTOM - TOP)) * (y1 - y0);
+    /** A stretch from `a` to `b` along the curve, as what of it is shown: from where to where along the axis. */
+    const onAxis = (a: number, b: number): Array<[number, number]> => {
+      if (!view) return a <= b ? [[a, b]] : [[a, length], [0, b]];
+      const u = along(a), long = b >= a ? b - a : whole - a + b;
+      return ([[u, u + long], [u - whole, u + long - whole]] as Array<[number, number]>).flatMap(([p, q]): Array<[number, number]> => (Math.min(q, span) > Math.max(p, 0) ? [[Math.max(p, 0), Math.min(q, span)]] : []));
+    };
     // the sharp stretches behind everything; one that goes on past the end comes back at the start
     for (const b of input.bands) {
-      for (const [from, to] of b.start <= b.end ? [[b.start, b.end]] : [[b.start, length], [0, b.end]]) {
-        this.plot.append(svg('rect', { x: x(from), y: TOP, width: Math.max(1, x(to) - x(from)), height: HEIGHT - BOTTOM - TOP, class: 'edge-chart-band' }));
+      for (const [from, to] of onAxis(b.start, b.end)) {
+        this.plot.append(svg('rect', { x: atU(from), y: TOP, width: Math.max(1, atU(to) - atU(from)), height: HEIGHT - BOTTOM - TOP, class: 'edge-chart-band' }));
       }
+    }
+    // the working edges: a pale strip along the axis, each with its label on the longer of its parts
+    for (const e of input.edges ?? []) {
+      const parts = onAxis(e.from, e.to);
+      for (const [from, to] of parts) this.plot.append(svg('rect', { x: atU(from), y: HEIGHT - BOTTOM - STRIP, width: Math.max(1, atU(to) - atU(from) - 1), height: STRIP, class: 'edge-chart-edge', style: `fill:${e.color}`, 'data-edge': e.label }));
+      if (!parts.length) continue;
+      const main = parts.reduce((m, q) => (q[1] - q[0] > m[1] - m[0] ? q : m));
+      const label = svg('text', { x: (atU(main[0]) + atU(main[1])) / 2, y: HEIGHT - BOTTOM - 3, id: `${this.prefix}-chart-edge-${e.label}`, class: 'edge-chart-edge-label', 'text-anchor': 'middle' });
+      label.textContent = e.label;
+      this.plot.append(label);
     }
     // recessive grid, one axis of angles
     for (let a = y0; a <= y1 + 1e-9; a += step) {
@@ -146,23 +178,24 @@ export class EdgeAngleChart {
       this.plot.append(label);
     }
     const u = quantityUnit('length', input.unit);
-    for (const [p, anchor] of [[0, 'start'], [length, 'end']] as const) {
-      const label = svg('text', { x: x(p), y: HEIGHT - 6, class: 'edge-chart-tick', 'text-anchor': anchor });
-      label.textContent = `${fmtNum(p, 0)}${p && u ? ` ${u}` : ''}`;
+    for (const [p, at, anchor] of [[view?.from ?? 0, 0, 'start'], [view?.to ?? length, length, 'end']] as const) {
+      const label = svg('text', { x: atU(at), y: HEIGHT - 6, class: 'edge-chart-tick', 'text-anchor': anchor });
+      label.textContent = `${fmtNum(p, 0)}${at && u ? ` ${u}` : ''}`;
       this.plot.append(label);
     }
     const keys = new Set<string>();
     for (const s of input.series) {
       let path = '';
       let pen = false;
-      s.values.forEach((a, k) => {
+      for (const k of order) {
+        const a = s.values[k];
         if (a === null) {
           pen = false;
-          return;
+          continue;
         }
         path += `${pen ? 'L' : 'M'}${x(input.positions[k]).toFixed(1)} ${y(a).toFixed(1)}`;
         pen = true;
-      });
+      }
       this.plot.append(svg('path', { d: path, class: `edge-chart-line${s.faint ? ' is-faint' : ''}`, 'data-series': s.id, style: `stroke:${s.color}${s.dash ? `;stroke-dasharray:${s.dash}` : ''}` }));
       if (keys.has(s.key)) continue;
       keys.add(s.key);
@@ -177,7 +210,7 @@ export class EdgeAngleChart {
       this.plot.append(dot);
       return dot;
     });
-    this.current = { ...input, x, y, angleAt };
+    this.current = { ...input, x, y, angleAt, order, shows };
     this.placeCursor();
   }
 

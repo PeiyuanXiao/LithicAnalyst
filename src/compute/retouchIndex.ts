@@ -228,7 +228,7 @@ export function* segmentFrameSteps(input: SegmentFrameInput): Steps<SegmentFrame
 export const segmentFrame = (input: SegmentFrameInput): SegmentFrameResult => runSync(segmentFrameSteps(input));
 
 /** A point on the plan. */
-export const onPlan = (f: SegmentFrame, p: Vec3): [number, number] => {
+export const onPlan = (f: Pick<SegmentFrame, 'origin' | 'x' | 'y'>, p: Vec3): [number, number] => {
   const d = sub(p, f.origin);
   return [dot(d, f.x), dot(d, f.y)];
 };
@@ -638,6 +638,8 @@ export interface RetouchSegmentRow {
   length: number;
   chord: number | null;
   depth: number | null;
+  /** Where its middle station is along the curve (says which working edge the row belongs to). */
+  middle: number;
 }
 
 /** One segment of the sixteen (as invasiveness.csv has it). */
@@ -701,6 +703,8 @@ export interface RetouchIndexResult {
   details: RetouchStationDetail[];
   /** The plan's outline, for the next run on the same frame. */
   outline: SegmentOutline | null;
+  /** Why there is no plan (null: there is). */
+  frameReason: 'no_axis' | 'frame_failed' | null;
   longest: LongestStretch | null;
   /** The stations of each row of `indices.segments`, in order along it. */
   segmentStations: number[][];
@@ -1011,6 +1015,7 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
           length: ordered.reduce((s, k) => s + weightOf(c, k, step), 0),
           chord: shape ? shape.chord : null,
           depth: shape ? shape.depth : null,
+          middle: c.stations[ordered[Math.floor(ordered.length / 2)]].position,
         });
         segmentStations.push(ordered);
       }
@@ -1031,6 +1036,7 @@ export function* retouchIndexSteps(input: RetouchIndexInput): Steps<RetouchIndex
     reasons,
     details,
     outline,
+    frameReason: chosen.reason,
     longest,
     segmentStations,
   };

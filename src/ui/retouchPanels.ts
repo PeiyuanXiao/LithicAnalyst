@@ -1,7 +1,7 @@
 import type { LongestStretch } from '../compute/retouchIndex';
 import type { P2, PlanLoops, PlanShape } from '../compute/retouchPlan';
 import { pngWithDpi } from '../io/png';
-import { drawPrims, planDrawing, primsMarkup, sectionDrawing, SCREEN_PALETTE, svgFile, type Drawing, type SectionModel } from '../render/retouchDrawing';
+import { drawPrims, planDrawing, primsMarkup, sectionDrawing, SCREEN_PALETTE, svgFile, type Drawing, type PlanEdge, type SectionModel } from '../render/retouchDrawing';
 import { numRow } from './controls';
 import { clear, h } from './dom';
 import { t } from './i18n';
@@ -68,6 +68,8 @@ export interface SectionContent {
   count: number;
   /** "12.0 / 58.3 mm". */
   position: string;
+  /** The working edge the station is in (empty: none). */
+  edge: string;
   model: SectionModel | null;
   /** For the scale bar; null: none. */
   unit: string | null;
@@ -105,6 +107,7 @@ export class RetouchSectionPanel {
   onExport: (format: 'svg' | 'png') => void = () => {};
   private readonly curve: HTMLSelectElement;
   private readonly position: HTMLElement;
+  private readonly edge: HTMLElement;
   private readonly slider: HTMLInputElement;
   private readonly readings: HTMLElement;
   private readonly drawing: { el: HTMLElement; svg: SVGSVGElement };
@@ -114,12 +117,13 @@ export class RetouchSectionPanel {
     this.curve = h('select', { class: 'ctl-select retouch-curve', id: 'retouch-section-curve', 'aria-label': t('retouch.curve') }) as HTMLSelectElement;
     this.curve.addEventListener('change', () => this.onCurve(this.curve.value));
     this.position = h('span', { class: 'mono retouch-position', id: 'retouch-section-position' });
+    this.edge = h('span', { class: 'pill retouch-edge-tag mono', id: 'retouch-section-edge', hidden: true });
     const wholeBox = h('input', { type: 'checkbox', id: 'retouch-section-whole' }) as HTMLInputElement;
     wholeBox.addEventListener('change', () => {
       this.whole = wholeBox.checked;
       this.draw();
     });
-    this.extras = [this.curve, this.position, h('label', { class: 'ctl-check retouch-whole', for: 'retouch-section-whole' }, wholeBox, h('span', {}, t('retouch.whole'))), ...exportButtons('retouch-section', (f) => this.onExport(f))];
+    this.extras = [this.curve, this.position, this.edge, h('label', { class: 'ctl-check retouch-whole', for: 'retouch-section-whole' }, wholeBox, h('span', {}, t('retouch.whole'))), ...exportButtons('retouch-section', (f) => this.onExport(f))];
     this.drawing = stage('retouch-section-drawing', t('retouch.section'), () => this.draw());
     this.slider = h('input', { type: 'range', id: 'retouch-section-slider', class: 'profile-slider', min: 0, max: 0, step: 1, value: 0, 'aria-label': t('retouch.station') }) as HTMLInputElement;
     this.slider.addEventListener('input', () => this.onStation(Number(this.slider.value)));
@@ -134,6 +138,8 @@ export class RetouchSectionPanel {
     this.curve.hidden = (c?.curves.length ?? 0) < 2;
     if (c) this.curve.value = c.curveId;
     this.position.textContent = c?.position ?? '';
+    this.edge.textContent = c?.edge ?? '';
+    this.edge.hidden = !c?.edge;
     this.slider.max = String(Math.max(0, (c?.count ?? 1) - 1));
     this.slider.value = String(c?.station ?? 0);
     this.slider.disabled = !c;
@@ -169,6 +175,8 @@ export interface PlanContent {
   loops: readonly PlanLoops[];
   station: { at: P2; index: number } | null;
   longest: LongestStretch | null;
+  /** A working edge picked: its stations on the plan; its own chord then stands for `longest`. */
+  edge: PlanEdge | null;
   highlight: number | null;
   /** Which frame it is on. */
   tag: string;
