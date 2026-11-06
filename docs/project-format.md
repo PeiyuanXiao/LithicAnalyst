@@ -318,7 +318,7 @@ the type deletes nothing: the other type's data stay in the file and come back w
   front, the ventral at the back and the platform from below. `otherFrame`: the frame of the type not in use (a flake has its own; `core` and `generic` share one).
 * The landmark `pop` (`code: "pop"`, named `pop`) is the arrow's start: it moves and goes with the axis
   and cannot be moved or deleted by itself.
-* Platform ends: landmarks with `code: "platform_end"`, at most two, on the platform outline. In the landmark
+* Platform ends: landmarks with `code: "platform_end"`, at most two, on the platform outline. With `auto: true` one follows the curves: it is the point of the outline nearest an end of the edge, off what runs along the outline (see "The line measured"; an end counts within 4 mean segments of the two curves; with several edges, the two points furthest apart), and it moves or goes with them in the same step. Moved by hand it loses the key and stays where it was put; a file without the key has its ends placed by hand, which take the nearest such point, and the rest come when the file is opened. No edge or no closed outline: none. In the landmark
   exports they are named `platform_left` (−X) and `platform_right` (+X) of the technical frame (with both on one
   side, by X), without an axis `platform_end`. Landmarks with a `code` are shown and exported only for flakes.
 * The platform: the curve of type `platform_outline` (one per flake; a new one takes the place of the old in
@@ -386,6 +386,8 @@ After Schunk et al. 2023 (3D-EdgeAngle). Measured on curves with `edgeAngle: tru
 along the reference curve, `point` A in original coordinates, the angles in the order of `distances`).
 
 ## Retouch layers
+
+On a flake, an open curve of type `retouch` with both ends within reach of an `edge` curve (`JOIN_REACH_EDGES`, 4, mean segments of those curves) has a region that follows it: `type: "retouch"`, `auto: true`, `curveId`: that curve, `retouchLayer`: 1 until changed. Its `seed` says nothing. It is what lies between the curve and the edge: of the two sides of the curve, on the surface cut along the boundary curves and this curve, the smaller. On the curve, `retouchSide: "larger"` takes the other side, and `retouchSide: "off"` says the curve has no such region: the user deleted it, or gave it another type, which makes it an ordinary region at that place. All the pieces of the lower layer on that side are one region; a piece a region typed by hand holds stays that region's, and a piece in the bands of two curves goes to the smaller. A file from before these curves gains none: on opening, a curve that would qualify and has no such region is marked `off`.
 
 A region of type `retouch` has a `retouchLayer` (integer from 1; 1 is the layer nearest the edge). Along the curves measured for edge angles, at the same
 stations: the whole section by the same plane, followed from A both ways across the retouch regions it meets, without leaving them. A stretch shorter than

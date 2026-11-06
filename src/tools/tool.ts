@@ -37,6 +37,8 @@ export interface ToolContext {
   snap: () => SurfaceSnap | null;
   /** What curves are drawn toward (ridges, valleys, or nothing). */
   snapMode: () => SnapMode;
+  /** The point of the platform outline nearest a point; null without an outline. */
+  onPlatformOutline: (point: Vec3) => Vec3 | null;
   /** The type asked for the next curve drawn, if any; asking takes it. */
   takeNextCurveType: () => string | null;
   /** Show a short message (i18n key). */

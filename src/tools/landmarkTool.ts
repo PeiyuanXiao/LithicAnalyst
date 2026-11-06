@@ -7,6 +7,22 @@ import type { HitProvider, Tool, ToolContext } from './tool';
 
 const CLICK_PX = 4;
 
+/** Where a press on the surface puts a landmark: the point, or the ridge / valley vertex it snaps to (`point`: as a point does, not along the feature). */
+export function landmarkTarget(ctx: ToolContext, h: SurfaceHit, exact: boolean, point: boolean): Vec3 {
+  const at: Vec3 = [h.point.x, h.point.y, h.point.z];
+  const snap = ctx.snap();
+  const mode = exact ? 'off' : ctx.snapMode();
+  if (!snap || mode === 'off') return at;
+  if (!snap.ready(mode)) {
+    void snap.prepare(mode);
+    return at;
+  }
+  const v0 = snap.vertexOfHit(h);
+  const radius = ctx.viewer.worldPerPixel(h.point) * SNAP_PX;
+  const v = point ? snap.snapPoint(v0, radius, mode) : snap.snap(v0, radius, mode);
+  return v === v0 ? at : snap.point(v);
+}
+
 /**
  * Fixed landmarks: click the surface to place one (snapped onto the nearest place of a
  * ridge or valley as the snap setting says; Shift places it exactly), drag one to
@@ -54,7 +70,7 @@ export class LandmarkTool implements Tool {
     if (!h) return;
     const l = this.ctx.store.landmark(this.drag.id);
     // a platform end goes on to the platform outline: from wherever the curve tool would take it
-    this.drag.point = l ? this.constrain(l, this.target(h, e.shiftKey, l.code !== 'platform_end')) : null;
+    this.drag.point = l ? this.constrain(l, landmarkTarget(this.ctx, h, e.shiftKey, l.code !== 'platform_end')) : null;
     this.layer.setPreview(this.drag.point);
   }
 
@@ -67,23 +83,7 @@ export class LandmarkTool implements Tool {
     this.down = null;
     if (e.button !== 0 || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > CLICK_PX) return;
     const h = hit();
-    if (h) this.onPlace(this.target(h, e.shiftKey || d.shift, true));
-  }
-
-  /** The clicked point, or the ridge / valley vertex it snaps to (`point`: as a point does, not along the feature). */
-  private target(h: SurfaceHit, exact: boolean, point: boolean): Vec3 {
-    const at: Vec3 = [h.point.x, h.point.y, h.point.z];
-    const snap = this.ctx.snap();
-    const mode = exact ? 'off' : this.ctx.snapMode();
-    if (!snap || mode === 'off') return at;
-    if (!snap.ready(mode)) {
-      void snap.prepare(mode);
-      return at;
-    }
-    const v0 = snap.vertexOfHit(h);
-    const radius = this.ctx.viewer.worldPerPixel(h.point) * SNAP_PX;
-    const v = point ? snap.snapPoint(v0, radius, mode) : snap.snap(v0, radius, mode);
-    return v === v0 ? at : snap.point(v);
+    if (h) this.onPlace(landmarkTarget(this.ctx, h, e.shiftKey || d.shift, true));
   }
 
   private endDrag(commit: boolean): void {

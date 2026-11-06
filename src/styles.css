@@ -1120,7 +1120,6 @@ kbd {
 .viewport[data-tool="draw"] .arrow-label,
 .viewport[data-tool="curve"] .arrow-label,
 .viewport[data-tool="axis"] .arrow-label,
-.viewport[data-tool="platform-end"] .arrow-label,
 .viewport[data-tool="working-edge"] .arrow-label,
 .viewport[data-tool="landmark"] .arrow-label,
 .viewport[data-tool^="measure-"] .arrow-label,

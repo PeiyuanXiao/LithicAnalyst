@@ -1,10 +1,11 @@
 import type { SnapMode } from '../compute/surfacePath';
-import { moveEndpoint, setCurveShape } from '../core/actions';
+import { moveEndpoint, moveLandmark, setCurveShape } from '../core/actions';
 import { assembleCurve, curveSegments, type CurveShape } from '../core/curveGeometry';
 import type { Vec3 } from '../core/types';
 import { copy } from '../core/vec';
 import type { SurfaceHit } from '../render/viewer';
 import { pointVertex } from './drawArrowTool';
+import { landmarkTarget } from './landmarkTool';
 import { SNAP_PX } from './drawCurveTool';
 import type { EdgeEnd, HitProvider, Tool, ToolContext } from './tool';
 
@@ -29,8 +30,8 @@ interface CurveDrag {
 }
 
 /**
- * Select arrows, curves, landmarks and measurements, drag arrow endpoints and curve
- * points (the neighbouring stretches are traced again), double-click to set the
+ * Select arrows, curves, landmarks and measurements, drag arrow endpoints, curve
+ * points (the neighbouring stretches are traced again) and landmarks, double-click to set the
  * rotation centre. What a click would select is shown under the cursor (hover).
  */
 export class SelectTool implements Tool {
@@ -41,6 +42,8 @@ export class SelectTool implements Tool {
   private overHandle: 'start' | 'end' | null = null;
   private overAnchor: number | null = null;
   private edgeDrag: EdgeEnd | null = null;
+  /** A landmark being moved (a platform end along the outline). */
+  private landmarkMove: { id: string; point: Vec3 | null } | null = null;
   private overEdgeEnd: EdgeEnd | null = null;
   /** The item a click would select now, and the pick waiting for the next frame. */
   private hovered: string | null = null;
@@ -58,6 +61,7 @@ export class SelectTool implements Tool {
     this.endDrag(false);
     this.endCurveDrag(false);
     this.endEdgeDrag(false);
+    this.finishLandmarkMove(false);
     this.down = null;
     this.overHandle = null;
     this.overAnchor = null;
@@ -107,6 +111,16 @@ export class SelectTool implements Tool {
       }
     }
     if (this.startEdgeDrag(e)) return true;
+    const near = this.ctx.landmarks.pickNearest(e.clientX, e.clientY);
+    // (the point of percussion goes with the technical axis)
+    if (near && this.ctx.store.landmark(near.id)?.code !== 'pop') {
+      this.landmarkMove = { id: near.id, point: null };
+      this.ctx.selection.set(near.id);
+      const mode = this.ctx.snapMode();
+      if (mode !== 'off') void this.ctx.snap()?.prepare(mode);
+      this.ctx.changed();
+      return true;
+    }
     this.down = { x: e.clientX, y: e.clientY };
     return false;
   }
@@ -114,6 +128,20 @@ export class SelectTool implements Tool {
   pointerMove(e: PointerEvent, hit: HitProvider): void {
     if (this.edgeDrag) {
       this.ctx.edgeEnds.drag(this.edgeDrag, e.clientX, e.clientY);
+      return;
+    }
+    if (this.landmarkMove) {
+      const h = hit();
+      const l = this.ctx.store.landmark(this.landmarkMove.id);
+      if (h && l) {
+        const end = l.code === 'platform_end';
+        const at = landmarkTarget(this.ctx, h, e.shiftKey, !end);
+        const p = end ? this.ctx.onPlatformOutline(at) : at;
+        if (p) {
+          this.landmarkMove.point = p;
+          this.ctx.landmarks.setPreview(p);
+        }
+      }
       return;
     }
     if (this.curveDrag) {
@@ -202,6 +230,10 @@ export class SelectTool implements Tool {
       this.endEdgeDrag(true);
       return;
     }
+    if (this.landmarkMove) {
+      this.finishLandmarkMove(true);
+      return;
+    }
     if (this.curveDrag) {
       this.endCurveDrag(true);
       return;
@@ -219,6 +251,17 @@ export class SelectTool implements Tool {
   doubleClick(_e: MouseEvent, hit: HitProvider): void {
     const h = hit();
     if (h) this.ctx.viewer.setRotationCenter(h.point);
+  }
+
+  // ---- landmarks
+
+  private finishLandmarkMove(commit: boolean): void {
+    const m = this.landmarkMove;
+    if (!m) return;
+    this.landmarkMove = null;
+    this.ctx.landmarks.setPreview(null);
+    if (commit && m.point) moveLandmark(this.ctx.store, m.id, m.point);
+    this.ctx.changed();
   }
 
   // ---- the ends of the working edges
@@ -364,6 +407,10 @@ export class SelectTool implements Tool {
       this.endEdgeDrag(false);
       return true;
     }
+    if (this.landmarkMove) {
+      this.finishLandmarkMove(false);
+      return true;
+    }
     if (this.curveDrag) {
       this.endCurveDrag(false);
       return true;
@@ -385,8 +432,10 @@ export class SelectTool implements Tool {
   }
 
   cursor(): string {
-    if (this.drag || this.curveDrag || this.edgeDrag) return 'grabbing';
+    if (this.drag || this.curveDrag || this.edgeDrag || this.landmarkMove) return 'grabbing';
     if (this.overHandle || this.overAnchor !== null || this.overEdgeEnd) return 'grab';
+    const landmark = this.hovered && this.ctx.editable() ? this.ctx.store.landmark(this.hovered) : undefined;
+    if (landmark && landmark.code !== 'pop') return 'grab';
     return this.hovered ? 'pointer' : 'default';
   }
 }

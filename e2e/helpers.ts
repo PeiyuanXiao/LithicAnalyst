@@ -62,6 +62,7 @@ export interface LithicApi {
   exportEdgeSharpCsvText(): string;
   annotationStatus(): import('../src/core/annotationStatus').AnnotationStatus;
   nextCurveType(): string | null;
+  placePlatformEnd(point: Vec3): void;
   landmarkDiameter(id: string): number | null;
   selectForTest(id: string | null): void;
   exportCurvesCsvText(): string;

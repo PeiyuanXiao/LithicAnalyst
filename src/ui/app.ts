@@ -6,10 +6,11 @@ import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
 import { MEASURED_LINE_PARAMETERS, measuredLine, type MeasuredLine } from '../compute/measuredLine';
+import { assignBands, bandPiecesSteps, mergePieces, retouchSideSteps, type RetouchSide } from '../compute/retouchBand';
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, deleteTechnicalAxis, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -63,7 +64,6 @@ import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/
 import { technicalFrameSteps } from '../compute/technicalFrame';
 import { frameSource } from '../core/derived';
 import { bvhPlaneCandidates, bvhRayCandidates } from '../render/bvhPlane';
-import { PlatformEndTool } from '../tools/platformEndTool';
 import { ProfilePanel } from './profilePanel';
 import { gmCurvesCsv, gmSurfacesCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { GmLayer } from '../render/gmLayer';
@@ -115,7 +115,7 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => set
 /** Below this width of the view the status pills are one pill with the count. */
 const STATUS_COLLAPSE_PX = 720;
 /** The status pills whose click asks for a curve of a type. */
-const STATUS_CURVE_TYPES: Partial<Record<StatusKey, string>> = { edge: 'edge', platform_outline: PLATFORM_OUTLINE, core_edge: 'core_edge' };
+const STATUS_CURVE_TYPES: Partial<Record<StatusKey, string>> = { edge: 'edge', platform_outline: PLATFORM_OUTLINE, core_edge: 'core_edge', retouch: 'retouch' };
 const EDGE_PICK_PX = 12;
 /** How near an end of a working edge a new end goes to that very point. */
 const EDGE_SNAP_PX = 9;
@@ -300,6 +300,14 @@ export class App implements AppApi {
   /** The upper layer: pieces between the boundary curves, the upper piece of each lower piece, and the piece of each upper region (−1: none, or a lower region). */
   private upper: { key: string; partition: Partition; over: Int32Array } | null = null;
   private upperComponent: number[] = [];
+  /** The lower layer as the curves cut it, before each retouch band is made one piece. */
+  private rawLower: { partition: Partition; over: Int32Array } | null = null;
+  /** Where each retouch curve's band lies in it, by curve id. */
+  private retouchBands = new Map<string, { pieces: number[]; area: number }>();
+  private retouchSides = new Map<string, { key: string; side: RetouchSide | null }>();
+  /** The piece of each region that follows a retouch curve, by region id. */
+  private bandPiece = new Map<string, number>();
+  private bandKey = '';
   private upperLayer: RegionLayer | null = null;
   private regionRoot: THREE.Group | null = null;
   /** The smaller piece along each platform outline, by the outline's points. */
@@ -410,7 +418,6 @@ export class App implements AppApi {
   private snapEl: HTMLElement | null = null;
   private measureSeg: ToolRow | null = null;
   private presentSeg: ToolRow | null = null;
-  private retouchSeg: ToolRow | null = null;
   private toolSep: HTMLElement | null = null;
   private orientBtn: HTMLButtonElement | null = null;
   private themeBtn: HTMLButtonElement | null = null;
@@ -666,6 +673,7 @@ export class App implements AppApi {
       editable: () => this.mode === 'annotate',
       hovered: (item) => this.hoverTip(item),
       takeNextCurveType: () => this.takeNextCurveType(),
+      onPlatformOutline: (p) => this.onPlatformOutline(p),
       moveAxisEnd: (which, point, normal) => this.moveAxisEnd(which, point, normal),
       edgeEnds: {
         at: (x, y) => this.workingEdgeLayer?.handleAt(x, y, this.selection.id) ?? null,
@@ -679,7 +687,6 @@ export class App implements AppApi {
     this.tools.register(new DrawArrowTool(ctx));
     this.tools.register(new DrawCurveTool(ctx));
     this.tools.register(new DrawArrowTool(ctx, { id: 'axis', snapStart: true, onFinish: (s, e) => this.drawAxis(s, e) }));
-    this.tools.register(new PlatformEndTool(ctx, this.landmarkLayer, (p) => this.onPlatformOutline(p), (p) => this.selection.set(placePlatformEnd(this.store, p))));
     for (const type of ['distance', 'geodesic', 'angle'] as const) this.tools.register(new MeasureTool(ctx, type));
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
@@ -1032,7 +1039,6 @@ export class App implements AppApi {
       { value: 'axis', icon: ICONS20.axis, name: t('tool.axis'), key: 'T' },
       { value: 'draw', icon: ICONS20.arrow, name: t('mode.draw'), key: 'A' },
       { value: 'curve', icon: ICONS20.curve, name: t('mode.curve'), key: 'P' },
-      { value: 'platform-end', icon: ICONS20.platformEnd, name: t('tool.platformEnd'), key: 'E' },
       { value: 'working-edge', icon: ICONS20.workingEdge, name: t('tool.workingEdge'), key: 'W' },
       { value: 'region', icon: ICONS20.region, name: t('tool.region'), key: 'R' },
       { value: 'relation', icon: ICONS20.relation, name: t('tool.relation'), key: 'B' },
@@ -1041,7 +1047,6 @@ export class App implements AppApi {
     ]);
     this.measureSeg = this.toolRow('measure-tool', t('appMode.measure'), [select, ...MEASURE_TOOLS.map(([value, key, k, ic]) => ({ value, icon: ic, name: t(key), key: k }))]);
     this.presentSeg = this.toolRow('present-tool', t('appMode.present'), [select, { value: 'section', icon: ICONS20.section, name: t('tool.section'), key: 'X' }]);
-    this.retouchSeg = this.toolRow('retouch-tool', t('appMode.retouch'), [{ value: 'station', icon: ICONS20.station, name: t('tool.station'), key: 'J' }]);
     this.snapSeg = segmented('snap', null, SNAP_MODES.map((m) => ({ value: m, label: t(`snap.${m}`) })), this.display.curveSnap, (v) =>
       this.setDisplay((d) => (d.curveSnap = v as SnapMode), 'snap'),
     );
@@ -1055,7 +1060,7 @@ export class App implements AppApi {
     const orient = h('button', { type: 'button', class: 'tool-btn', id: 'btn-orient', 'aria-label': `${t('view.orient')} (F)`, onclick: () => this.orientToAxis() }, icon20(ICONS20.orient), h('span', { class: 'tool-key', 'aria-hidden': 'true' }, 'F')) as HTMLButtonElement;
     tips.attach(orient, () => ({ label: t(this.store.state.flake.axis?.matrix ? 'view.orient' : 'view.orientNone'), key: 'F' }));
     this.orientBtn = orient;
-    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.retouchSeg.el, this.presentSeg.el, this.toolSep, fit, orient, this.snapEl);
+    this.toolbarEl.append(this.modeSeg.el, this.measureSeg.el, this.presentSeg.el, this.toolSep, fit, orient, this.snapEl);
     // the sequences, under the toolbar while the sequence tool is in use
     const bar = h('div', { class: 'viewport-ui vp-seqbar', id: 'sequence-bar', role: 'radiogroup', 'aria-label': t('sequence.title'), hidden: true });
     if (this.sequenceBarEl) this.sequenceBarEl.replaceWith(bar);
@@ -1071,10 +1076,8 @@ export class App implements AppApi {
       this.modeSeg.el.hidden = !annotate;
       // a flake's own tools
       const flake = this.isFlake();
-      for (const id of ['mode-axis', 'mode-platform-end']) {
-        const b = this.modeSeg.el.querySelector<HTMLElement>(`#${id}`);
-        if (b) b.hidden = !flake;
-      }
+      const axisBtn = this.modeSeg.el.querySelector<HTMLElement>('#mode-axis');
+      if (axisBtn) axisBtn.hidden = !flake;
       // scars' relations: not on a generic specimen
       for (const id of ['mode-relation', 'mode-sequence']) {
         const b = this.modeSeg.el.querySelector<HTMLElement>(`#${id}`);
@@ -1083,11 +1086,11 @@ export class App implements AppApi {
     }
     if (this.measureSeg) this.measureSeg.el.hidden = this.mode !== 'measure';
     if (this.presentSeg) this.presentSeg.el.hidden = this.mode !== 'present';
-    if (this.retouchSeg) this.retouchSeg.el.hidden = this.mode !== 'retouch';
     // the retouch mode belongs to flakes
     const modeBtn = this.header?.querySelector<HTMLElement>('#app-mode-retouch');
     if (modeBtn) modeBtn.hidden = !this.isFlake();
-    if (this.toolSep) this.toolSep.hidden = this.mode === 'compare';
+    // (the retouch mode has its one tool always on: no button for it)
+    if (this.toolSep) this.toolSep.hidden = this.mode === 'compare' || this.mode === 'retouch';
     if (this.orientBtn) {
       this.orientBtn.hidden = !this.isFlake() || this.mode === 'compare';
       this.orientBtn.disabled = !this.store.state.flake.axis?.matrix;
@@ -1244,7 +1247,7 @@ export class App implements AppApi {
         h('span', { class: 'status-mark', 'aria-hidden': 'true' }, item.done ? '✓' : '○'),
         h('span', {}, t(`status.${item.key}`)),
       );
-      tips.attach(pill, () => ({ label: t(item.notApart ? 'status.why.faces.open' : `status.why.${item.key}`) }), 'above');
+      tips.attach(pill, () => ({ label: t(item.notApart ? 'status.why.faces.open' : item.notMeeting ? 'status.why.edge.open' : `status.why.${item.key}`) }), 'above');
       el.append(pill);
     }
     this.fitStatus();
@@ -1279,6 +1282,13 @@ export class App implements AppApi {
   /** To the annotate mode and where the missing thing is made. */
   private goToStatus(key: StatusKey): void {
     this.setMode('annotate');
+    // an edge not reaching the outline: that edge, to move its ends
+    const st = this.store.state;
+    if (key === 'edge' && annotationStatus(st, this.regions?.results ?? []).items.find((i) => i.key === 'edge')?.notMeeting) {
+      this.setTool('select');
+      this.selection.set(st.curves.find((c) => c.attributes.type === 'edge')?.id ?? null);
+      return;
+    }
     const curveType = STATUS_CURVE_TYPES[key];
     if (curveType) {
       this.setTool('curve');
@@ -1288,7 +1298,6 @@ export class App implements AppApi {
     }
     if (key === 'unit') return this.openUnit();
     if (key === 'axis') return this.setTool('axis');
-    if (key === 'platform_ends') return this.setTool('platform-end');
     if (key === 'scar_arrows') return this.setTool('draw');
     // the faces and the retouch regions
     this.setTool('region');
@@ -1359,7 +1368,6 @@ export class App implements AppApi {
     this.modeSeg?.set(tools.activeId ?? 'select');
     this.measureSeg?.set(tools.activeId ?? 'select');
     this.presentSeg?.set(tools.activeId ?? 'select');
-    this.retouchSeg?.set(tools.activeId ?? 'select');
     this.updateToolbar();
   }
 
@@ -1418,7 +1426,7 @@ export class App implements AppApi {
       this.updateToolbar();
       this.updateRetouch();
       // a flake's tools belong to flakes, the scars' relations not to a generic specimen
-      if (!this.isFlake() && ['axis', 'platform-end'].includes(this.tools?.activeId ?? '')) this.setTool('select');
+      if (!this.isFlake() && this.tools?.activeId === 'axis') this.setTool('select');
       if (this.isGeneric() && ['relation', 'sequence'].includes(this.tools?.activeId ?? '')) this.setTool('select');
       if (!this.isFlake() && this.tools) this.selection.set(this.store.landmark(this.selection.id ?? '')?.code || this.store.state.flake.axis?.id === this.selection.id ? null : this.selection.id);
       if (this.isGeneric() && this.selection.id && (this.store.relation(this.selection.id) || this.store.sequence(this.selection.id))) this.selection.set(null);
@@ -2301,8 +2309,19 @@ export class App implements AppApi {
     const r = this.store.region(id);
     if (!r) return;
     // a region that followed other annotations stays where it is, the user's from now on
-    const seed = r.auto ? this.autoRegionSeed(this.store.state.regions.indexOf(r)) : undefined;
+    const seed = r.auto ? (r.curveId ? this.bandSeed(this.store.state.regions.indexOf(r)) : this.autoRegionSeed(this.store.state.regions.indexOf(r))) : undefined;
     setRegionType(this.store, id, type, type === 'scar' ? this.scarStartingIn(this.componentAt(seed ?? r.seed)) : null, seed);
+  }
+
+  /** Where a region that follows a retouch curve lies (original coordinates). */
+  private bandSeed(i: number): Vec3 | undefined {
+    const part = this.partition, loaded = this.loaded;
+    const c = this.seedComponent[i];
+    if (!part || !loaded || c === undefined || c < 0) return undefined;
+    const g = loaded.geometry;
+    const s = runSync(pieceSeedSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, part, c));
+    const o = loaded.offset;
+    return [s[0] + o[0], s[1] + o[1], s[2] + o[2]];
   }
 
   /** Where a region that follows other annotations lies (original coordinates). */
@@ -2337,14 +2356,68 @@ export class App implements AppApi {
       const key = JSON.stringify(boundary);
       const upperPart = this.upper?.key === key ? this.upper.partition : await runSliced(regionsSteps(pos, idx, base.edges, boundary));
       const over = await runSliced(overPiecesSteps(part, upperPart));
+      const bands = await this.bandsOf(st, chains, part, boundary, this.retouchSides);
       if (token !== this.partitionToken || this.loaded !== loaded) return;
       this.partition = part;
       this.partitionVersion++;
       this.upper = { key, partition: upperPart, over };
+      this.rawLower = { partition: part, over };
+      this.retouchBands = bands;
+      this.bandKey = '';
       await this.updatePlatformAuto();
       if (token !== this.partitionToken) return;
       this.resolveRegionsNow();
     })();
+  }
+
+  /** Where the bands of a project's retouch curves lie among the pieces `part` of its lower layer (in slices). `known`: what is kept while the curves stay. */
+  private async bandsOf(st: Readonly<ProjectState>, chains: readonly number[][], part: Partition, boundary: readonly number[], known: Map<string, { key: string; side: RetouchSide | null }>): Promise<Map<string, { pieces: number[]; area: number }>> {
+    const out = new Map<string, { pieces: number[]; area: number }>();
+    const base = this.measureBase, loaded = this.loaded;
+    if (!base || !loaded || st.specimen.type !== 'flake') return out;
+    const g = loaded.geometry;
+    const pos = g.getAttribute('position').array as Float32Array;
+    const idx = g.index!.array as Uint32Array;
+    for (const r of st.regions) {
+      const i = r.auto && r.curveId ? st.curves.findIndex((c) => c.id === r.curveId) : -1;
+      if (i < 0) continue;
+      const c = st.curves[i];
+      const which = c.retouchSide === 'larger' ? 'larger' : 'smaller';
+      const key = JSON.stringify([boundary, chains[i], which]);
+      let had = known.get(c.id);
+      if (had?.key !== key) {
+        had = { key, side: await runSliced(retouchSideSteps(pos, idx, base.edges, boundary, chains[i], which)) };
+        known.set(c.id, had);
+      }
+      if (had.side) out.set(c.id, { pieces: await runSliced(bandPiecesSteps(part, had.side)), area: had.side.cut.areas[had.side.piece] });
+    }
+    return out;
+  }
+
+  /** Each band's pieces (those a region of its own holds stay that region's), by the id of the region following its curve. */
+  private bandGroups(st: Readonly<ProjectState>, part: Partition, bands: ReadonlyMap<string, { pieces: number[]; area: number }>): Map<string, number[]> {
+    const taken = new Set(st.regions.filter((r) => this.inLowerLayer(st, r) && !r.curveId).map((r) => this.pieceAt(part, r.seed)));
+    return assignBands(st.regions.flatMap((r) => {
+      const b = r.auto && r.curveId ? bands.get(r.curveId) : undefined;
+      return b ? [{ regionId: r.id, pieces: b.pieces, area: b.area }] : [];
+    }), taken);
+  }
+
+  /** Each retouch band one piece in the lower layer, for what comes after to go by. */
+  private applyBands(): void {
+    const raw = this.rawLower, up = this.upper;
+    if (!raw || !up) return;
+    const groups = this.bandGroups(this.store.state, raw.partition, this.retouchBands);
+    const key = JSON.stringify([...groups]);
+    if (key === this.bandKey) return;
+    this.bandKey = key;
+    const { partition, map } = mergePieces(raw.partition, [...groups.values()]);
+    const over = new Int32Array(partition.count);
+    raw.over.forEach((u, p) => (over[map[p]] = u));
+    this.partition = partition;
+    this.upper = { ...up, over };
+    this.bandPiece = new Map([...groups].map(([id, pieces]) => [id, map[pieces[0]]]));
+    this.partitionVersion++;
   }
 
   /** The closed platform outline of a flake. */
@@ -2463,9 +2536,9 @@ export class App implements AppApi {
     return arrowColorModeOf(this.display.arrows.colorMode, this.store.state.specimen.type);
   }
 
-  /** Whether a region lies in the lower layer of a project: not the upper layer's, nor on a generic specimen one left over that followed a flake's annotations. */
+  /** Whether a region lies in the lower layer of a project: not the upper layer's, nor on another type of specimen one left over that followed a flake's annotations. */
   private inLowerLayer(st: Readonly<ProjectState>, r: ProjectState['regions'][number]): boolean {
-    return !isUpperRegion(r.type, st.specimen.type) && !(st.specimen.type === 'generic' && r.auto);
+    return !isUpperRegion(r.type, st.specimen.type) && !(st.specimen.type !== 'flake' && r.auto);
   }
 
   flakeMeasures(): FlakeMeasures | null {
@@ -3765,17 +3838,19 @@ export class App implements AppApi {
       if (this.loaded !== loaded) return null;
       chains.push(chain);
     }
-    const joined = await runSliced(joinOpenEndsSteps(chains, curves.map((c) => !c.closed), loaded.geometry.getAttribute('position').array as Float32Array, JOIN_REACH_EDGES * base.meanEdge, path, curves.map((c) => isBoundaryCurve(c.attributes.type, specimen))));
+    const joined = await runSliced(joinOpenEndsSteps(chains, curves.map((c) => !c.closed), loaded.geometry.getAttribute('position').array as Float32Array, JOIN_REACH_EDGES * base.meanEdge, path, curves.map((c) => isBoundaryCurve(c.attributes.type, specimen)), curves.map((c) => isBoundaryCurve(c.attributes.type, specimen) || (specimen === 'flake' && c.attributes.type === 'retouch'))));
     return this.loaded === loaded ? joined : null;
   }
 
   /** Which piece each region's seed falls in; areas, totals and conflicts; repaint. */
   private resolveRegionsNow(): void {
-    const part = this.partition;
+    let part = this.partition;
     const base = this.measureBase;
     if (!part || !base) return;
     const st = this.store.state;
-    this.seedComponent = st.regions.map((r) => (this.inLowerLayer(st, r) ? this.componentAt(r.seed) : -1));
+    this.applyBands();
+    part = this.partition ?? part;
+    this.seedComponent = st.regions.map((r) => (!this.inLowerLayer(st, r) ? -1 : r.curveId ? (this.bandPiece.get(r.id) ?? -1) : this.componentAt(r.seed)));
     const up = this.upper;
     this.upperComponent = up ? this.upperComponents(st, up.partition, this.platformOutline() ? (this.platformAuto?.seed ?? null) : null) : st.regions.map(() => -1);
     this.regions = resolveRegions(st.regions, this.seedComponent, part, base.surfaceArea, up && !this.isGeneric() ? { component: this.upperComponent, partition: up.partition, over: up.over } : null);
@@ -4707,10 +4782,22 @@ export class App implements AppApi {
   /** Region of each triangle by an observer's curves and region seeds, in the two layers (cached until they change). */
   private async observerFaces(o: Observer, st: Readonly<ProjectState>): Promise<{ labels: FaceLabels | null; upper: FaceLabels | null } | null> {
     if (!st.regions.length) return null;
-    const key = JSON.stringify([st.specimen.type, st.flake.axis?.end, st.curves.map((c) => [c.points, c.closed, c.attributes.type]), st.regions.map((r) => [r.seed, r.type, r.auto])]);
+    const key = JSON.stringify([st.specimen.type, st.flake.axis?.end, st.curves.map((c) => [c.points, c.closed, c.attributes.type, c.retouchSide]), st.regions.map((r) => [r.seed, r.type, r.auto, r.curveId])]);
     if (o.faces?.key === key) return o.faces;
-    const part = await this.partitionFor(st.curves, st.specimen.type);
-    if (!part) return null;
+    const chains = await this.curveChains(st.curves, st.specimen.type);
+    const raw = await this.partitionFor(st.curves, st.specimen.type);
+    if (!raw || !chains) return null;
+    // its retouch bands one piece each, as the open project's
+    const boundary = chains.filter((_, i) => isBoundaryCurve(st.curves[i].attributes.type, st.specimen.type)).flat();
+    const groups = this.bandGroups(st, raw, await this.bandsOf(st, chains, raw, boundary, new Map()));
+    const { partition: part, map } = mergePieces(raw, [...groups.values()]);
+    const lowerPiece = (r: ProjectState['regions'][number]): number => {
+      if (r.curveId) {
+        const g = groups.get(r.id);
+        return g ? map[g[0]] : -1;
+      }
+      return this.inLowerLayer(st, r) ? this.pieceAt(part, r.seed) : -1;
+    };
     const label = (p: Partition, component: readonly number[]): FaceLabels => {
       const owner = new Int32Array(p.count).fill(-1);
       component.forEach((c, i) => {
@@ -4726,7 +4813,7 @@ export class App implements AppApi {
       }
       return labels;
     };
-    const labels = label(part, st.regions.map((r) => (this.inLowerLayer(st, r) ? this.pieceAt(part, r.seed) : -1)));
+    const labels = label(part, st.regions.map(lowerPiece));
     let upper: FaceLabels | null = null;
     if (st.regions.some((r) => isUpperRegion(r.type, st.specimen.type))) {
       const above = await this.partitionFor(st.curves.filter((c) => isBoundaryCurve(c.attributes.type, st.specimen.type)), st.specimen.type);
@@ -5513,6 +5600,11 @@ export class App implements AppApi {
     this.upperLayer?.clear();
     this.borderLayer?.clear();
     this.partition = null;
+    this.rawLower = null;
+    this.retouchBands = new Map();
+    this.retouchSides.clear();
+    this.bandPiece = new Map();
+    this.bandKey = '';
     this.regions = null;
     this.seedComponent = [];
     this.upper = null;
@@ -5670,6 +5762,8 @@ export class App implements AppApi {
   }
 
   private applyProject(state: ProjectState, toastKey: string | null = 'toast.projectLoaded'): void {
+    withPlatformEnds(state);
+    withRetouchCurvesKept(state);
     state.mesh = this.store.state.mesh;
     this.tools?.cancel();
     this.selection.set(null);
@@ -5934,17 +6028,11 @@ export class App implements AppApi {
         case 'KeyT':
           if (this.hasMesh() && this.mode === 'annotate' && this.isFlake()) this.setTool('axis');
           return;
-        case 'KeyE':
-          if (this.hasMesh() && this.mode === 'annotate' && this.isFlake()) this.setTool('platform-end');
-          return;
         case 'KeyF':
           if (this.hasMesh() && this.mode !== 'compare') this.orientToAxis();
           return;
         case 'KeyX':
           if (this.hasMesh() && this.mode === 'present') this.setTool('section');
-          return;
-        case 'KeyJ':
-          if (this.hasMesh() && this.mode === 'retouch') this.setTool('station');
           return;
         case 'ArrowLeft':
         case 'ArrowRight':
@@ -6174,7 +6262,6 @@ export class App implements AppApi {
         ['A', 'help.k.draw'],
         ['P', 'help.k.curve'],
         ['W', 'help.k.workingEdge'],
-        ...(this.isFlake() ? ([['E', 'help.k.platformEnd']] as Row[]) : []),
         ['R', 'help.k.region'],
         ...(generic ? [] : ([['B', 'help.k.relation'], ['Q', 'help.k.sequence']] as Row[])),
         ['K', 'help.k.landmark'],
@@ -6198,7 +6285,6 @@ export class App implements AppApi {
       ]),
       ...(this.isFlake()
         ? group(t('appMode.retouch'), [
-            ['J', 'help.k.station'],
             ['← / →', 'help.k.stationStep'],
             ['Shift+← / Shift+→', 'help.k.stationJump'],
           ])
@@ -6388,6 +6474,11 @@ export class App implements AppApi {
       closeModel: () => this.closeModel(),
       /** What the specimen has of what it is annotated with. */
       annotationStatus: () => annotationStatus(this.store.state, this.regions?.results ?? []),
+      /** A platform end placed by hand at a point, on the outline, as in a file from before they followed the curves. */
+      placePlatformEnd: (p: Vec3) => {
+        const on = this.onPlatformOutline(p);
+        if (on) this.selection.set(placePlatformEnd(this.store, on));
+      },
       /** The type asked for the next curve drawn. */
       nextCurveType: () => this.nextCurveType,
       /** A landmark's diameter on the screen as drawn, in CSS pixels. */

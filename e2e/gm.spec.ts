@@ -27,7 +27,7 @@ async function drawAxis(page: Page): Promise<void> {
   await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.flake()))?.axis?.matrix ?? null).not.toBeNull();
 }
 
-/** The outline round the P–E face, its ends, and the edge along the ventral face's boundary. */
+/** The outline round the P–E face, and the edge along the ventral face's boundary; its ends give the platform's, and without them it stops well short of the outline. */
 async function annotate(page: Page, ends = true): Promise<void> {
   await drawAxis(page);
   await page.evaluate(() => window.lithicanalyst.view([0, -0.98, 0.196], [0, 0.196, 0.98]));
@@ -45,20 +45,14 @@ async function annotate(page: Page, ends = true): Promise<void> {
   await page.keyboard.press('v');
   await page.keyboard.press('5');
   if (ends) {
-    await page.keyboard.press('e');
-    for (const x of [-14.9, 14.9]) {
-      const s = await toScreen(page, [x, -0.02, 0.1]);
-      const n = (await state(page)).landmarks.length;
-      await page.mouse.click(s.x, s.y);
-      await expect.poll(async () => (await state(page)).landmarks.length).toBe(n + 1);
-    }
-    await page.keyboard.press('v');
+    for (const x of [-14.9, 14.9]) await page.evaluate((p) => window.lithicanalyst.placePlatformEnd(p), [x, -0.02, 0.1] as Vec3);
   }
   if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [-1, 0, 0]));
   await nextFrames(page);
   await page.keyboard.press('p');
-  for (const p of [[-14.7, 0.3, 0], [-14.7, 59.7, 0], [14.7, 59.7, 0], [14.7, 0.3, 0]] as Vec3[]) await curveClick(page, await toScreen(page, p), { shift: true });
+  const from = ends ? 0.3 : 12;
+  for (const p of [[-14.7, from, 0], [-14.7, 59.7, 0], [14.7, 59.7, 0], [14.7, from, 0]] as Vec3[]) await curveClick(page, await toScreen(page, p), { shift: true });
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await state(page)).curves.length).toBe(2);
   await page.keyboard.press('v');

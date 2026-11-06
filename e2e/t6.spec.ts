@@ -71,16 +71,10 @@ async function drawOutline(page: Page): Promise<void> {
   await expect.poll(async () => (await state(page)).curves[n].attributes.type).toBe('platform_outline');
 }
 
-/** The two platform ends. */
+/** The two platform ends, placed by hand beside the outline's corners. */
 async function placeEnds(page: Page): Promise<void> {
-  await page.keyboard.press('e');
-  for (const s of [-0.98, 0.98]) {
-    const at = await toScreen(page, t6Ventral(s, 0));
-    const n = (await state(page)).landmarks.length;
-    await page.mouse.click(at.x, at.y);
-    await expect.poll(async () => (await state(page)).landmarks.length).toBe(n + 1);
-  }
-  await page.keyboard.press('v');
+  for (const s of [-0.98, 0.98]) await page.evaluate((p) => window.lithicanalyst.placePlatformEnd(p), t6Ventral(s, 0));
+  expect((await state(page)).landmarks.filter((l) => l.code === 'platform_end')).toHaveLength(2);
 }
 
 /** The edge from one end of the platform round the distal end to the other, its ridge followed; its type by its key. */

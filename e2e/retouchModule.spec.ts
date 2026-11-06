@@ -50,10 +50,12 @@ test('the mode is a flake\'s: it shows, and goes, with the type', async ({ page 
   await page.keyboard.press('m');
   await page.keyboard.press('m');
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.mode())).toBe('retouch');
-  await expect(page.locator('#retouch-tool-station')).toHaveAttribute('aria-checked', 'true');
+  // its one tool, always on, with no button or key of its own
+  await expect(page.locator('#retouch-tool-station')).toHaveCount(0);
   await expect.poll(async () => (await view(page)).tool).toBe('station');
-  // its one tool: V does not leave it
   await page.keyboard.press('v');
+  expect((await view(page)).tool).toBe('station');
+  await page.keyboard.press('j');
   expect((await view(page)).tool).toBe('station');
   await expect(page.locator('#sec-retouch-indices')).toBeVisible();
   // a core: back to measuring
@@ -66,7 +68,7 @@ test('the mode is a flake\'s: it shows, and goes, with the type', async ({ page 
   // the shortcuts say so, on a flake
   await setType(page, 'flake');
   await page.keyboard.press('Shift+Slash');
-  await expect(page.locator('#help-cols')).toContainText('Station');
+  await expect(page.locator('#help-cols')).toContainText('Previous / next station');
   await page.keyboard.press('Escape');
 });
 
@@ -251,8 +253,9 @@ test('the frame and its direction: the ends exchanged on the plan and in invasiv
   await expect.poll(async () => (await state(page)).curves.length).toBe(2);
   await page.keyboard.press('v');
   await page.keyboard.press('6');
+  // between the curve and the edge, by itself
+  await expect.poll(async () => (await state(page)).regions.map((r) => r.type)).toEqual(['retouch']);
   await page.keyboard.press('r');
-  await regionAt(page, onTool(28.5, 0), '8');
   await regionAt(page, onTool(5, 45), '7');
   await look(page, [0, 0, -1], [0, 1, 0]);
   await regionAt(page, [10, 10, 0], '6');

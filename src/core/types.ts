@@ -112,6 +112,8 @@ export interface Curve {
   completion?: CurveCompletion;
   /** Measure its edge angles; absent: as its type says (edgeAngleByDefault). */
   edgeAngle?: boolean;
+  /** A retouch curve with both ends on an edge: which side of it its region is on. Absent: the smaller; `off`: it has none. */
+  retouchSide?: 'larger' | 'off';
   /** Values for the fields in CURVE_FIELDS (src/core/fields.ts). */
   attributes: Record<string, AttributeValue>;
   createdAt: string;
@@ -221,10 +223,12 @@ export interface Region {
   retouchLayer?: number;
   /**
    * A part of a flake that follows from other annotations (the seed is not used): the platform is the smaller of the two pieces
-   * the platform outline makes, the ventral face the piece under the technical axis, the dorsal face the largest other one.
-   * Gone once the user gives it a type.
+   * the platform outline makes, the ventral face the piece under the technical axis, the dorsal face the largest other one, and a
+   * retouch region what lies between its curve and the edge. Gone once the user gives it a type.
    */
   auto?: boolean;
+  /** The retouch curve a region with `auto` follows. */
+  curveId?: string;
   createdAt: string;
   modifiedAt: string;
 }
@@ -285,6 +289,8 @@ export interface Landmark {
   point: Vec3;
   /** A landmark of the flake's own: `pop` (the technical axis's start, locked), `platform_end`. Only flakes show them. */
   code?: LandmarkCode;
+  /** A platform end that follows the curves: where the edge meets the platform outline. Moved by hand, it stays where it was put. */
+  auto?: true;
   createdAt: string;
   modifiedAt: string;
 }

@@ -185,6 +185,7 @@ function parseCurve(raw: unknown, i: number): Curve {
     closed: isClosed,
     ...(completion ? { completion } : {}),
     ...(typeof r.edgeAngle === 'boolean' ? { edgeAngle: r.edgeAngle } : {}),
+    ...(r.retouchSide === 'larger' || r.retouchSide === 'off' ? { retouchSide: r.retouchSide } : {}),
     attributes: readAttributes(r.attributes, defaultCurveAttributes()),
     createdAt: str(r.createdAt, t),
     modifiedAt: str(r.modifiedAt, t),
@@ -284,7 +285,7 @@ function parseRegion(raw: unknown, i: number): Region {
     type,
     scarId: typeof r.scarId === 'string' ? r.scarId : null,
     ...(type === 'retouch' ? { retouchLayer: Number.isInteger(r.retouchLayer) && (r.retouchLayer as number) >= 1 ? (r.retouchLayer as number) : 1 } : {}),
-    ...(r.auto === true ? { auto: true } : {}),
+    ...(r.auto === true ? { auto: true, ...(typeof r.curveId === 'string' ? { curveId: r.curveId } : {}) } : {}),
     createdAt: str(r.createdAt, t),
     modifiedAt: str(r.modifiedAt, t),
   };
@@ -359,7 +360,7 @@ function parseLandmark(raw: unknown, i: number): Landmark {
   const r = raw as Record<string, unknown>;
   if (!isFiniteVec(r.point)) throw new ProjectFileError(`Landmark ${i + 1} needs a numeric "point" [x, y, z].`);
   const t = nowIso();
-  const code: Pick<Landmark, 'code'> = r.code === 'pop' || r.code === 'platform_end' ? { code: r.code } : {};
+  const code: Pick<Landmark, 'code' | 'auto'> = r.code === 'pop' || r.code === 'platform_end' ? { code: r.code, ...(r.code === 'platform_end' && r.auto === true ? { auto: true as const } : {}) } : {};
   return { id: str(r.id) || uuid(), name: str(r.name, `LM${i + 1}`), point: [r.point[0], r.point[1], r.point[2]], ...code, createdAt: str(r.createdAt, t), modifiedAt: str(r.modifiedAt, t) };
 }
 

@@ -46,8 +46,9 @@ export const JOIN_REACH_EDGES = 4;
  * each other through the gap: `chains` the curves' mesh edges (vertex pairs), `positions` the mesh's.
  * `boundary`: the curves that also cut the upper layer. An end of one of them goes to another of them when one is within reach,
  * whatever lies nearer: the upper layer is cut along these alone, and a join to any other curve would leave it open.
+ * `toBoundary`: the curves that go to them first (these, and a curve that needs to close off a stretch of a face against them).
  */
-export function* joinOpenEndsSteps(chains: readonly number[][], open: readonly boolean[], positions: ArrayLike<number>, reach: number, path: (from: number, to: number) => ArrayLike<number> | null, boundary: readonly boolean[] = []): Steps<number[][]> {
+export function* joinOpenEndsSteps(chains: readonly number[][], open: readonly boolean[], positions: ArrayLike<number>, reach: number, path: (from: number, to: number) => ArrayLike<number> | null, boundary: readonly boolean[] = [], toBoundary: readonly boolean[] = boundary): Steps<number[][]> {
   const out = chains.map((c) => [...c]);
   /** Among these curves: whether the end lies on one, and the vertex of one nearest it, within reach. */
   const nearest = (i: number, end: number, among: (j: number) => boolean): { there: boolean; best: number } => {
@@ -70,7 +71,7 @@ export function* joinOpenEndsSteps(chains: readonly number[][], open: readonly b
     const chain = chains[i];
     if (!open[i] || chain.length < 2) continue;
     for (const end of [chain[0], chain[chain.length - 1]]) {
-      const first = boundary[i] ? nearest(i, end, (j) => !!boundary[j]) : null;
+      const first = toBoundary[i] ? nearest(i, end, (j) => !!boundary[j]) : null;
       const { there, best } = first && (first.there || first.best >= 0) ? first : nearest(i, end, () => true);
       if (there || best < 0) continue;
       const link = path(end, best);
@@ -108,31 +109,33 @@ export function* regionsSteps(positions: ArrayLike<number>, index: ArrayLike<num
   return { region, count, areas };
 }
 
-/**
- * Where the smaller of the pieces along a closed line lies (a point of the triangle nearest
- * the piece's centre), for the platform outline: `barrier` the line's mesh edges, as
- * vertex pairs, `partition` the pieces it makes. Null when it does not part the surface.
- */
-export function* smallerPieceSteps(positions: ArrayLike<number>, index: ArrayLike<number>, edges: EdgeTable, barrier: ArrayLike<number>, partition: Partition): Steps<{ seed: Vec3; area: number } | null> {
+/** The pieces a line borders: `barrier` its mesh edges, as vertex pairs (only the pieces the line touches: a mesh may have others apart from it). */
+export function* piecesAlongSteps(index: ArrayLike<number>, edges: EdgeTable, barrier: ArrayLike<number>, partition: Partition): Steps<number[]> {
   const onLine = new Uint8Array(edges.v0.length);
   for (let i = 0; i + 1 < barrier.length; i += 2) {
     const e = edgeId(edges, barrier[i], barrier[i + 1]);
     if (e >= 0) onLine[e] = 1;
   }
-  // only the pieces the line touches: a mesh may have others apart from it
   const touching = new Uint8Array(partition.count);
   const n = Math.floor(index.length / 3);
   for (let t = 0; t < n; t++) {
     if (t % YIELD_EVERY === 0) yield;
     if (onLine[edges.ofSide[3 * t]] || onLine[edges.ofSide[3 * t + 1]] || onLine[edges.ofSide[3 * t + 2]]) touching[partition.region[t]] = 1;
   }
-  let piece = -1, sides = 0;
-  for (let c = 0; c < partition.count; c++) {
-    if (!touching[c]) continue;
-    sides++;
-    if (piece < 0 || partition.areas[c] < partition.areas[piece]) piece = c;
-  }
-  if (sides < 2 || piece < 0) return null;
+  const out: number[] = [];
+  for (let c = 0; c < partition.count; c++) if (touching[c]) out.push(c);
+  return out;
+}
+
+/**
+ * Where the smaller of the pieces along a closed line lies (a point of the triangle nearest
+ * the piece's centre), for the platform outline: `barrier` the line's mesh edges, as
+ * vertex pairs, `partition` the pieces it makes. Null when it does not part the surface.
+ */
+export function* smallerPieceSteps(positions: ArrayLike<number>, index: ArrayLike<number>, edges: EdgeTable, barrier: ArrayLike<number>, partition: Partition): Steps<{ seed: Vec3; area: number } | null> {
+  const sides = yield* piecesAlongSteps(index, edges, barrier, partition);
+  if (sides.length < 2) return null;
+  const piece = sides.reduce((best, c) => (partition.areas[c] < partition.areas[best] ? c : best), sides[0]);
   const seed = yield* pieceSeedSteps(positions, index, partition, piece);
   return { seed, area: partition.areas[piece] };
 }

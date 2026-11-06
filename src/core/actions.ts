@@ -33,7 +33,8 @@ import { emptyCorrections, hasFaceCorrections, joinKey } from '../compute/config
 import { orderSequences, relationInputs } from '../compute/relations';
 import type { RetouchStation } from '../compute/retouchAngle';
 import { clampFitLength } from '../compute/retouchIndex';
-import { measuredLine } from '../compute/measuredLine';
+import { measuredLine, platformEndsOf } from '../compute/measuredLine';
+import { autoRetouchCurves } from '../compute/retouchBand';
 import { edgeAxis, refusalOf, retouchRunEdges, type WorkingEdgeRefusal } from '../compute/workingEdge';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, measuresEdgeAngle, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
@@ -184,6 +185,15 @@ export function addCurve(store: ProjectStore, input: NewCurveInput): Curve {
   return curve;
 }
 
+/** What of the landmarks follows from the curves being `curves`: a flake's platform ends where the edge meets the outline. */
+function endChanges(store: ProjectStore, curves: readonly Curve[], labelKey: string, type = store.state.specimen.type): Command[] {
+  if (type !== 'flake') return [];
+  const before = landmarkData(store.state);
+  const after = structuredClone(before);
+  syncPlatformEnds(after, curves);
+  return JSON.stringify(after) === JSON.stringify(before) ? [] : [new SetLandmarksCommand(labelKey, before, after)];
+}
+
 /** A new curve with its type, in one step: what drawing it and then giving it the type would do. */
 export function addCurveOfType(store: ProjectStore, input: NewCurveInput, type: string): Curve {
   const { curve, command } = newCurve(store, { ...input, attributes: { ...(input.attributes ?? {}), type } });
@@ -195,7 +205,8 @@ export function addCurveOfType(store: ProjectStore, input: NewCurveInput, type: 
 
 /**
  * The commands that bring a flake's regions that follow other annotations in line with `after`: the platform comes with a
- * platform outline, the ventral and dorsal faces with an edge and a technical frame. `seed`: any point, for those that are new.
+ * platform outline, the ventral and dorsal faces with an edge and a technical frame, a retouch region with a retouch curve that has
+ * both ends on an edge. `seed`: any point, for those that are new (their pieces are worked out from what they follow).
  */
 function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[]; axis: TechnicalAxis | null }, seed: Vec3): Command[] {
   const st = store.state;
@@ -204,12 +215,18 @@ function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[
     if (after.curves.some((c) => c.attributes.type === PLATFORM_OUTLINE)) wanted.push('platform');
     if (after.axis?.matrix && after.curves.some((c) => c.attributes.type === 'edge')) wanted.push('ventral', 'dorsal');
   }
-  const parts: Command[] = st.regions.filter((r) => r.auto && !wanted.includes(r.type)).map((r) => new DeleteRegionCommand(r.id));
+  const bands = st.specimen.type === 'flake' ? autoRetouchCurves(after.curves) : [];
+  const parts: Command[] = st.regions.filter((r) => r.auto && (r.curveId ? !bands.some((c) => c.id === r.curveId) : !wanted.includes(r.type))).map((r) => new DeleteRegionCommand(r.id));
   let n = st.nextRegionNumber;
   const t = nowIso();
   for (const type of wanted) {
     if (st.regions.some((r) => r.auto && r.type === type)) continue;
     parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: null, auto: true, createdAt: t, modifiedAt: t }, n));
+    n++;
+  }
+  for (const c of bands) {
+    if (st.regions.some((r) => r.auto && r.curveId === c.id)) continue;
+    parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(c.points[0]), type: 'retouch', scarId: null, retouchLayer: 1, auto: true, curveId: c.id, createdAt: t, modifiedAt: t }, n));
     n++;
   }
   return parts;
@@ -225,7 +242,8 @@ function edgesOfCurvesGone(store: ProjectStore, labelKey: string, ids: readonly 
 export function deleteCurve(store: ProjectStore, id: string): void {
   const c = store.curve(id);
   if (!c) return;
-  const parts: Command[] = [new DeleteCurveCommand(id), ...edgesOfCurvesGone(store, 'cmd.deleteCurve', [id]), ...autoRegionChanges(store, { curves: store.state.curves.filter((x) => x.id !== id), axis: store.state.flake.axis }, c.points[0])];
+  const left = store.state.curves.filter((x) => x.id !== id);
+  const parts: Command[] = [new DeleteCurveCommand(id), ...edgesOfCurvesGone(store, 'cmd.deleteCurve', [id]), ...autoRegionChanges(store, { curves: left, axis: store.state.flake.axis }, c.points[0]), ...endChanges(store, left, 'cmd.deleteCurve')];
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.deleteCurve', parts));
 }
 
@@ -244,9 +262,22 @@ function updateCurve(
   store.history.execute(new UpdateCurveCommand(labelKey, structuredClone(before), after, mergeKey));
 }
 
+/** A change of a curve's points: with what follows from them, in one step. */
+function reshapeCurve(store: ProjectStore, id: string, labelKey: string, change: (c: Curve) => void): void {
+  const before = store.curve(id);
+  if (!before) return;
+  const after = structuredClone(before);
+  change(after);
+  after.modifiedAt = nowIso();
+  const update = new UpdateCurveCommand(labelKey, structuredClone(before), after);
+  const curves = store.state.curves.map((x) => (x.id === id ? after : x));
+  const parts: Command[] = [update, ...autoRegionChanges(store, { curves, axis: store.state.flake.axis }, after.points[0]), ...endChanges(store, curves, labelKey)];
+  store.history.execute(parts.length === 1 ? update : new CompoundCommand(labelKey, parts));
+}
+
 /** Replace the traced geometry (after moving an anchor); automatic anchors of a completed loop that moved become the user's. */
 export function setCurveShape(store: ProjectStore, id: string, shape: CurveShape): void {
-  updateCurve(store, id, 'cmd.editCurve', (c) => {
+  reshapeCurve(store, id, 'cmd.editCurve', (c) => {
     const completion = shape.closed ? editedCompletion(c.completion, c.anchors, shape.anchors) : undefined;
     Object.assign(c, copyShape(shape));
     if (completion) c.completion = completion;
@@ -259,7 +290,7 @@ export function setCurveShape(store: ProjectStore, id: string, shape: CurveShape
  * takes back to the open curve; `completion` marks the anchors placed automatically (null: none).
  */
 export function completeCurveLoop(store: ProjectStore, id: string, shape: CurveShape, completion: CurveCompletion | null): void {
-  updateCurve(store, id, 'cmd.completeLoop', (c) => {
+  reshapeCurve(store, id, 'cmd.completeLoop', (c) => {
     Object.assign(c, copyShape(shape));
     if (completion) c.completion = structuredClone(completion);
     else delete c.completion;
@@ -280,7 +311,7 @@ function typeChanges(store: ProjectStore, c: Curve, curves: readonly Curve[], la
     replaced.push(...edgesOfCurvesGone(store, labelKey, old.map((o) => o.id)));
     left = curves.filter((x) => x.id === c.id || x.attributes.type !== PLATFORM_OUTLINE);
   }
-  return { replaced, regions: autoRegionChanges(store, { curves: left, axis: st.flake.axis }, c.points[0]) };
+  return { replaced, regions: [...autoRegionChanges(store, { curves: left, axis: st.flake.axis }, c.points[0]), ...endChanges(store, left, labelKey)] };
 }
 
 /** A curve's type. */
@@ -288,6 +319,8 @@ function setCurveType(store: ProjectStore, c: Curve, value: AttributeValue): voi
   const after = structuredClone(c);
   after.attributes.type = value;
   after.modifiedAt = nowIso();
+  // (made a retouch curve anew, it starts anew)
+  if (value === 'retouch') delete after.retouchSide;
   const update = new UpdateCurveCommand('cmd.editField', structuredClone(c), after);
   const { replaced, regions } = typeChanges(store, after, store.state.curves.map((x) => (x.id === c.id ? after : x)), 'cmd.editField');
   const parts = [...replaced, update, ...regions];
@@ -571,6 +604,13 @@ export function addRegion(store: ProjectStore, seed: Vec3, type: RegionType, sca
 /** A region that has a scar: on a generic specimen "scar" would be the user's own word, with no scar to it. */
 const isScarRegion = (store: ProjectStore, type: RegionType): boolean => type === 'scar' && store.state.specimen.type !== 'generic';
 
+/** A region that follows a retouch curve, given up by the user: the curve has none from now on. */
+function bandGivenUp(store: ProjectStore, region: Region): Command[] {
+  const c = region.auto && region.curveId ? store.curve(region.curveId) : undefined;
+  if (!c) return [];
+  return [new UpdateCurveCommand('cmd.editRegion', structuredClone(c), { ...structuredClone(c), retouchSide: 'off', modifiedAt: nowIso() })];
+}
+
 /** The scar created for a region (no direction) is removed with it when nothing else uses it. */
 function dropAreaScar(store: ProjectStore, region: Region): Command[] {
   const scar = region.scarId ? store.scar(region.scarId) : undefined;
@@ -597,8 +637,10 @@ export function setRegionType(store: ProjectStore, id: string, type: RegionType,
   const after: Region = { ...structuredClone(before), type, scarId: scarRegion ? linked : null, modifiedAt: nowIso() };
   if (type === 'retouch') after.retouchLayer = before.retouchLayer ?? 1;
   else delete after.retouchLayer;
+  parts.push(...bandGivenUp(store, before));
   if (after.auto) {
     delete after.auto;
+    delete after.curveId;
     if (seed) after.seed = copy(seed);
   }
   parts.push(new UpdateRegionCommand(structuredClone(before), after));
@@ -625,8 +667,25 @@ export function setRegionRetouchLayer(store: ProjectStore, id: string, layer: nu
 export function deleteRegion(store: ProjectStore, id: string): void {
   const r = store.region(id);
   if (!r) return;
-  const drop = dropAreaScar(store, r);
+  const drop = [...dropAreaScar(store, r), ...bandGivenUp(store, r)];
   store.history.execute(drop.length ? new CompoundCommand('cmd.deleteRegion', [new DeleteRegionCommand(id), ...drop]) : new DeleteRegionCommand(id));
+}
+
+/** The region that follows a retouch curve goes to the curve's other side. */
+export function otherRetouchSide(store: ProjectStore, regionId: string): void {
+  const r = store.region(regionId);
+  if (!r?.auto || !r.curveId) return;
+  updateCurve(store, r.curveId, 'cmd.editRegion', (c) => {
+    if (c.retouchSide === 'larger') delete c.retouchSide;
+    else c.retouchSide = 'larger';
+  });
+}
+
+/** A flake read from a file: retouch curves that reach an edge and have no region following them stay so (regions were marked by hand then). */
+export function withRetouchCurvesKept(state: ProjectState): ProjectState {
+  if (state.specimen.type !== 'flake') return state;
+  for (const c of autoRetouchCurves(state.curves)) if (!state.regions.some((r) => r.curveId === c.id)) c.retouchSide = 'off';
+  return state;
 }
 
 // ---------------------------------------------------------------- relations and sequences
@@ -781,7 +840,11 @@ export function addLandmark(store: ProjectStore, point: Vec3, name?: string): La
 export const moveLandmark = (store: ProjectStore, id: string, point: Vec3): void =>
   changeLandmarks(store, 'cmd.moveLandmark', (d) => {
     const l = d.landmarks.find((x) => x.id === id);
-    if (l && l.code !== 'pop' && JSON.stringify(l.point) !== JSON.stringify(point)) touch(l).point = copy(point);
+    if (l && l.code !== 'pop' && JSON.stringify(l.point) !== JSON.stringify(point)) {
+      touch(l).point = copy(point);
+      // moved by hand, it stays where it was put
+      delete l.auto;
+    }
   });
 
 export const renameLandmark = (store: ProjectStore, id: string, name: string): void =>
@@ -799,20 +862,63 @@ export const reorderLandmark = (store: ProjectStore, id: string, index: number):
     d.landmarks.splice(Math.max(0, Math.min(index, d.landmarks.length)), 0, l);
   });
 
-/** Delete a landmark; semilandmark sets that ended at it run to the curve's end instead. */
+/** A landmark out of the list; semilandmark sets that ended at it run to the curve's end instead. */
+function removeLandmark(d: LandmarkData, id: string): void {
+  d.landmarks = d.landmarks.filter((x) => x.id !== id);
+  for (const q of d.semilandmarks) {
+    if (q.startLandmarkId === id) touch(q).startLandmarkId = null;
+    if (q.endLandmarkId === id) touch(q).endLandmarkId = null;
+  }
+}
+
+/**
+ * Delete a landmark. The point of percussion goes only with the technical axis. A platform end that follows the curves
+ * goes with them, and one moved by hand goes back to following them (it goes only if they have no place for it).
+ */
 export const deleteLandmark = (store: ProjectStore, id: string): void =>
   changeLandmarks(store, 'cmd.deleteLandmark', (d) => {
-    // the point of percussion goes only with the technical axis
-    if (d.landmarks.find((x) => x.id === id)?.code === 'pop') return;
-    d.landmarks = d.landmarks.filter((x) => x.id !== id);
-    for (const q of d.semilandmarks) {
-      if (q.startLandmarkId === id) touch(q).startLandmarkId = null;
-      if (q.endLandmarkId === id) touch(q).endLandmarkId = null;
-    }
+    const l = d.landmarks.find((x) => x.id === id);
+    if (l?.code === 'pop' || l?.auto) return;
+    if (l?.code !== 'platform_end' || store.state.specimen.type !== 'flake') return removeLandmark(d, id);
+    touch(l).auto = true;
+    syncPlatformEnds(d, store.state.curves);
   });
 
 /** At most two platform ends: a third click moves the nearest of the two. */
 export const MAX_PLATFORM_ENDS = 2;
+
+/**
+ * The platform ends that follow the curves, where the edge meets the outline. Those moved by hand (or in an earlier file) stay, and take the place
+ * nearest them; what is left goes to the others, which keep their ids, so that what refers to them stays with them.
+ */
+function syncPlatformEnds(d: LandmarkData, curves: readonly Curve[]): void {
+  let found = platformEndsOf(curves);
+  const take = (from: Vec3): Vec3 | null => {
+    if (!found.length) return null;
+    const near = found.reduce((b, p) => (distance(p, from) < distance(b, from) ? p : b), found[0]);
+    found = found.filter((p) => p !== near);
+    return near;
+  };
+  const ends = d.landmarks.filter((l) => l.code === 'platform_end');
+  const byHand = ends.filter((l) => !l.auto);
+  for (const l of byHand) take(l.point);
+  found = found.slice(0, Math.max(0, MAX_PLATFORM_ENDS - byHand.length));
+  for (const l of ends.filter((x) => x.auto)) {
+    const p = take(l.point);
+    if (!p) removeLandmark(d, l.id);
+    else if (JSON.stringify(l.point) !== JSON.stringify(p)) touch(l).point = copy(p);
+  }
+  const t = nowIso();
+  for (const p of found) d.landmarks.push({ id: uuid(), name: 'platform_end', point: copy(p), code: 'platform_end', auto: true, createdAt: t, modifiedAt: t });
+}
+
+/** A flake read from a file: its ends as the curves say, for a file from before they did. */
+export function withPlatformEnds(state: ProjectState): ProjectState {
+  if (state.specimen.type !== 'flake') return state;
+  const d = landmarkData(state);
+  syncPlatformEnds(d, state.curves);
+  return Object.assign(state, d);
+}
 
 /** A platform end at `point` (on the platform outline). */
 export function placePlatformEnd(store: ProjectStore, point: Vec3): string {
@@ -915,6 +1021,7 @@ export function setSpecimenType(store: ProjectStore, type: SpecimenType): void {
     new CompoundCommand('cmd.editSpecimen', [
       new SetFlakeCommand('cmd.editSpecimen', structuredClone(flake), { ...structuredClone(flake), otherFrame: structuredClone(before.frame) }),
       new SetSpecimenCommand(structuredClone(before), { ...structuredClone(before), type, frame: structuredClone(flake.otherFrame) }),
+      ...endChanges(store, store.state.curves, 'cmd.editSpecimen', type),
     ]),
   );
 }

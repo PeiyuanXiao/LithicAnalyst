@@ -53,16 +53,10 @@ async function drawOutline(page: Page): Promise<void> {
   await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('platform_outline');
 }
 
-/** The two platform ends, clicked beside the outline's corners. */
+/** The two platform ends placed by hand, beside the outline's corners, with no edge yet to give them (as a file from before they followed the curves has them). */
 async function placeEnds(page: Page): Promise<void> {
-  await page.keyboard.press('e');
-  await expect(page.locator('#mode-platform-end')).toHaveAttribute('aria-checked', 'true');
-  for (const x of [-14.9, 14.9]) {
-    const s = await toScreen(page, [x, -0.02, 0.1]);
-    const n = (await state(page)).landmarks.length;
-    await page.mouse.click(s.x, s.y);
-    await expect.poll(async () => (await state(page)).landmarks.length).toBe(n + 1);
-  }
+  for (const x of [-14.9, 14.9]) await page.evaluate((p) => window.lithicanalyst.placePlatformEnd(p), [x, -0.02, 0.1] as Vec3);
+  expect((await state(page)).landmarks.filter((l) => l.code === 'platform_end')).toHaveLength(2);
 }
 
 async function annotate(page: Page): Promise<void> {
@@ -383,10 +377,10 @@ test('a folder: the list shows and filters the type; the summary has flakes.csv 
   expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3 });
 });
 
-test('the toolbar: the axis after Select, the platform ends after the curve; the automatic measurements are the flake\'s', async ({ page }) => {
+test('the toolbar: the axis after Select, no tool for the platform ends; the automatic measurements are the flake\'s', async ({ page }) => {
   await setType(page, 'flake');
   const order = await page.locator('.tool-group[aria-label="Annotate"] .tool-btn').evaluateAll((els) => els.filter((e) => !(e as HTMLElement).hidden).map((e) => e.id));
-  expect(order).toEqual(['mode-select', 'mode-axis', 'mode-draw', 'mode-curve', 'mode-platform-end', 'mode-working-edge', 'mode-region', 'mode-relation', 'mode-sequence', 'mode-landmark']);
+  expect(order).toEqual(['mode-select', 'mode-axis', 'mode-draw', 'mode-curve', 'mode-working-edge', 'mode-region', 'mode-relation', 'mode-sequence', 'mode-landmark']);
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#sec-measure-auto')).toBeHidden();
   await expect(page.locator('#sec-flake .panel-title')).toHaveText('Automatic measurements');
@@ -553,7 +547,7 @@ test('the tools that place things click through the labels; the select tool take
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.selection())).toBe(id);
   // each of the other tools that place, and the two that pick by label
   const pointerEvents = () => label.evaluate((e) => getComputedStyle(e).pointerEvents);
-  for (const [key, none] of [['a', true], ['e', true], ['k', true], ['r', true], ['b', false], ['q', false]] as const) {
+  for (const [key, none] of [['a', true], ['k', true], ['r', true], ['b', false], ['q', false]] as const) {
     await page.keyboard.press(key);
     await expect.poll(pointerEvents).toBe(none ? 'none' : 'auto');
     await page.keyboard.press('Escape');

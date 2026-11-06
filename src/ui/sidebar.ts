@@ -3,7 +3,7 @@ import {
   deleteTechnicalAxis,
   setCurveEdgeAngle,
   setPlaneRegion,
-  setRegionRetouchLayer, setRegionScar, setGmConfig, setSharpEdge,
+  setRegionRetouchLayer, otherRetouchSide, setRegionScar, setGmConfig, setSharpEdge,
   addSemilandmarkSet,
   deleteLandmark,
   deleteSemilandmarkSet,
@@ -1575,7 +1575,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     }
     const r = sel ? api.store.region(sel) : undefined;
     // (built anew only for another region or type: a box being typed in stays)
-    const key = r ? `${r.id}|${r.type}|${r.scarId}|${r.retouchLayer}|${st.specimen.type}|${st.scars.map((s) => s.label).join()}` : '';
+    const key = r ? `${r.id}|${r.type}|${r.scarId}|${r.retouchLayer}|${r.curveId}|${st.specimen.type}|${st.scars.map((s) => s.label).join()}` : '';
     if (key !== builtFor) {
       builtFor = key;
       clear(inspector);
@@ -1591,7 +1591,8 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
           const layers = segmented('region-layer', t('region.retouchLayer'), RETOUCH_LAYERS.map((n) => ({ value: String(n), label: String(n) })), String(r.retouchLayer ?? 1), (v) => setRegionRetouchLayer(api.store, r.id, Number(v)));
           inspector.append(layers.el);
         }
-        inspector.append(h('div', { class: 'btn-row' }, deleteButton('region-delete', () => deleteRegion(api.store, r.id))));
+        // one that follows a retouch curve may lie on the wrong side of it
+        inspector.append(h('div', { class: 'btn-row' }, r.curveId ? iconButton(ICONS.swap, t('region.otherSide'), () => otherRetouchSide(api.store, r.id), { id: 'region-other-side' }) : null, deleteButton('region-delete', () => deleteRegion(api.store, r.id))));
       }
     }
     clear(totals);
@@ -2145,7 +2146,8 @@ function landmarksSection(api: AppApi): Section {
           { class: 'btn-row' },
           iconButton(ICONS.up, t('landmark.up'), () => reorderLandmark(api.store, l.id, i - 1), { id: 'landmark-up', disabled: i === 0 }),
           iconButton(ICONS.down, t('landmark.down'), () => reorderLandmark(api.store, l.id, i + 1), { id: 'landmark-down', disabled: i === st.landmarks.length - 1 }),
-          l.code === 'pop' ? null : deleteButton('landmark-delete', () => deleteLandmark(api.store, l.id)),
+          // what follows the curves stays; one moved by hand can go back to them
+          l.code === 'pop' || l.auto ? null : l.code === 'platform_end' ? iconButton(ICONS.undo, t('landmark.resetEnd'), () => deleteLandmark(api.store, l.id), { id: 'landmark-end-reset' }) : deleteButton('landmark-delete', () => deleteLandmark(api.store, l.id)),
         ),
       );
     }
@@ -2745,7 +2747,6 @@ export interface Sidebar {
 const TOOL_SECTIONS: Record<string, string> = {
   draw: 'arrows',
   axis: 'axis',
-  'platform-end': 'landmarks',
   curve: 'curves',
   'working-edge': 'working-edges',
   region: 'regions',

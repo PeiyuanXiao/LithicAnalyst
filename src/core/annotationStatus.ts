@@ -1,9 +1,10 @@
 import type { SpecimenType } from './fields';
 import { PLATFORM_OUTLINE } from './fields';
+import { platformEndsOf } from '../compute/measuredLine';
 import { hasVector, type ProjectState } from './types';
 
 /** What a specimen may still lack; `retouch` is optional (not every flake is retouched). */
-export type StatusKey = 'unit' | 'axis' | 'edge' | 'platform_outline' | 'platform_ends' | 'faces' | 'retouch' | 'scar_arrows' | 'core_edge';
+export type StatusKey = 'unit' | 'axis' | 'edge' | 'platform_outline' | 'faces' | 'retouch' | 'scar_arrows' | 'core_edge';
 
 export interface StatusItem {
   key: StatusKey;
@@ -12,6 +13,8 @@ export interface StatusItem {
   optional: boolean;
   /** The dorsal and ventral regions are there and were not found on the mesh: the two faces are not apart. */
   notApart?: true;
+  /** There is an edge and a closed platform outline, and the edge does not reach it at both ends. */
+  notMeeting?: true;
 }
 
 export interface AnnotationStatus {
@@ -27,12 +30,15 @@ type StatusInput = Pick<ProjectState, 'specimen' | 'flake' | 'curves' | 'landmar
 type RegionFound = { type: string; area: number | null };
 
 const STATUS_ITEMS: Record<SpecimenType, readonly StatusKey[]> = {
-  flake: ['unit', 'axis', 'edge', 'platform_outline', 'platform_ends', 'faces', 'retouch'],
+  flake: ['unit', 'axis', 'edge', 'platform_outline', 'faces', 'retouch'],
   core: ['unit', 'scar_arrows', 'core_edge'],
   generic: ['unit'],
 };
 
 const OPTIONAL: readonly StatusKey[] = ['retouch'];
+
+/** The edge should reach the closed outline at both ends: that gives the platform ends, and parts the faces. */
+const edgeMeetsOutline = (st: StatusInput): boolean => !st.curves.some((c) => c.attributes.type === PLATFORM_OUTLINE && c.closed) || platformEndsOf(st.curves).length >= 2;
 
 const isDone = (key: StatusKey, st: StatusInput, found: readonly RegionFound[] | null): boolean => {
   const curveOfType = (type: string) => st.curves.some((c) => c.attributes.type === type);
@@ -43,11 +49,9 @@ const isDone = (key: StatusKey, st: StatusInput, found: readonly RegionFound[] |
     case 'axis':
       return !!st.flake.axis?.matrix;
     case 'edge':
-      return curveOfType('edge');
+      return curveOfType('edge') && edgeMeetsOutline(st);
     case 'platform_outline':
       return st.curves.some((c) => c.attributes.type === PLATFORM_OUTLINE && c.closed);
-    case 'platform_ends':
-      return st.landmarks.filter((l) => l.code === 'platform_end').length >= 2;
     case 'faces':
       // the regions come as soon as there are an axis and an edge: it takes the mesh to say the two faces are apart
       return found ? ['dorsal', 'ventral'].every((type) => found.some((r) => r.type === type && r.area !== null)) : regionOfType('dorsal') && regionOfType('ventral');
@@ -68,7 +72,8 @@ export function annotationStatus(st: StatusInput, found: readonly RegionFound[] 
   const items = STATUS_ITEMS[st.specimen.type].map((key): StatusItem => {
     const done = isDone(key, st, found);
     const there = st.regions.some((r) => r.type === 'dorsal') && st.regions.some((r) => r.type === 'ventral');
-    return { key, done, optional: OPTIONAL.includes(key), ...(key === 'faces' && !done && there ? { notApart: true as const } : {}) };
+    const notMeeting = key === 'edge' && !done && st.curves.some((c) => c.attributes.type === 'edge');
+    return { key, done, optional: OPTIONAL.includes(key), ...(key === 'faces' && !done && there ? { notApart: true as const } : {}), ...(notMeeting ? { notMeeting: true as const } : {}) };
   });
   const counted = items.filter((i) => !i.optional);
   return { items, done: counted.filter((i) => i.done).length, total: counted.length };

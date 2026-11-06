@@ -1,6 +1,7 @@
 import { PLATFORM_OUTLINE, type SpecimenType } from '../core/fields';
 import { mmPerUnit } from '../core/format';
 import type { Curve, Vec3 } from '../core/types';
+import { JOIN_REACH_EDGES } from './regions';
 
 /**
  * What a flake's edge is measured along. The edge is where the dorsal and ventral faces meet, so a stretch of the curve
@@ -127,4 +128,71 @@ export function measuredLine(c: CurveOf, state: { specimen: { type: SpecimenType
   const line = lineOffOutline(raw, outline, EDGE_RIM_REACH_MM / mm, EDGE_RIM_MIN_MM / mm);
   known.set(c.points, { outline, mm, closed: c.closed, line });
   return line;
+}
+
+/** The point of a line nearest a point, and how far it is. */
+export const nearestOnLine = (p: Vec3, line: readonly Vec3[], closed: boolean): { point: Vec3; distance: number } => {
+  let point = line[0], least = Infinity;
+  const count = closed ? line.length : line.length - 1;
+  for (let j = 0; j < count; j++) {
+    const a = line[j], b = line[(j + 1) % line.length];
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const len2 = ux * ux + uy * uy + uz * uz;
+    const k = len2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * ux + (p[1] - a[1]) * uy + (p[2] - a[2]) * uz) / len2)) : 0;
+    const q: Vec3 = [a[0] + k * ux, a[1] + k * uy, a[2] + k * uz];
+    const d = dist(p, q);
+    if (d < least) {
+      least = d;
+      point = q;
+    }
+  }
+  return { point, distance: least };
+};
+
+/** Curves run along the mesh's edges, so their segments stand for those, where there is no mesh to ask. */
+export const meanSegment = (lines: ReadonlyArray<readonly Vec3[]>): number => {
+  let sum = 0, n = 0;
+  for (const l of lines)
+    for (let i = 0; i + 1 < l.length; i++) {
+      sum += dist(l[i], l[i + 1]);
+      n++;
+    }
+  return n ? sum / n : 0;
+};
+
+/**
+ * Where a flake's edge meets its closed platform outline: the points of the outline nearest the two ends of the edge, off what runs along the
+ * outline. An end counts within the reach at which curves are joined (curves run along the mesh's edges, so their segments stand for
+ * those, and no unit or mesh is needed). At most two, the two furthest apart when there are more edges than one. None without an edge or a closed outline.
+ */
+export function platformEndsOf(curves: readonly CurveOf[]): Vec3[] {
+  const had = endsOf.get(curves);
+  if (had && had.curves.length === curves.length && had.curves.every((c, i) => c === curves[i])) return had.ends;
+  const ends = findPlatformEnds(curves);
+  endsOf.set(curves, { curves: [...curves], ends });
+  return ends;
+}
+
+/** (Worked out once per state of a list: a folder's list asks for every model each time it draws. The store changes a list in place, and replaces the curves in it.) */
+const endsOf = new WeakMap<readonly CurveOf[], { curves: readonly CurveOf[]; ends: Vec3[] }>();
+
+function findPlatformEnds(curves: readonly CurveOf[]): Vec3[] {
+  const outline = curves.find((c) => c.attributes.type === PLATFORM_OUTLINE && c.closed)?.points;
+  const edges = curves.filter((c) => c.attributes.type === 'edge' && c.points.length > 1);
+  if (!outline || outline.length < 3 || !edges.length) return [];
+  const reach = JOIN_REACH_EDGES * meanSegment([outline, ...edges.map((e) => e.points)]);
+  const found: Vec3[] = [];
+  for (const e of edges) {
+    const line = lineOffOutline({ points: e.points, closed: e.closed }, outline, reach, 2 * reach);
+    if (line.closed) continue;
+    for (const end of [line.points[0], line.points[line.points.length - 1]]) {
+      const near = nearestOnLine(end, outline, true);
+      // (two ends at one place are one)
+      if (near.distance <= reach && !found.some((p) => dist(p, near.point) <= reach)) found.push(near.point);
+    }
+  }
+  if (found.length <= 2) return found;
+  let best: [Vec3, Vec3] = [found[0], found[1]];
+  for (let i = 0; i < found.length; i++) for (let j = i + 1; j < found.length; j++) if (dist(found[i], found[j]) > dist(best[0], best[1])) best = [found[i], found[j]];
+  return best;
 }

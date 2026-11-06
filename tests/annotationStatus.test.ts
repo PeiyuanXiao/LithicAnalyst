@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { annotationStatus } from '../src/core/annotationStatus';
 import { emptyProject } from '../src/core/store';
-import type { Curve, Landmark, ProjectState, Region, Scar, TechnicalAxis } from '../src/core/types';
+import type { Curve, ProjectState, Region, Scar, TechnicalAxis, Vec3 } from '../src/core/types';
 import { defaultAttributes, type SpecimenType } from '../src/core/fields';
 
 const project = (type: SpecimenType, unit = ''): ProjectState => {
@@ -11,7 +11,14 @@ const project = (type: SpecimenType, unit = ''): ProjectState => {
 };
 const curve = (type: string, closed = false): Curve => ({ id: type, label: 'C1', anchors: [], points: [], anchorIndex: [], closed, attributes: { type, note: '' }, createdAt: '', modifiedAt: '' });
 const region = (type: string): Region => ({ id: type, label: 'R1', seed: [0, 0, 0], type, scarId: null, createdAt: '', modifiedAt: '' });
-const end = (id: string): Landmark => ({ id, name: id, point: [0, 0, 0], code: 'platform_end', createdAt: '', modifiedAt: '' });
+const along = (a: Vec3, b: Vec3): Vec3[] => {
+  const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])));
+  return Array.from({ length: n }, (_, k): Vec3 => [a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, a[2] + ((b[2] - a[2]) * k) / n]);
+};
+/** Round a platform, 30 wide, and an edge from one of its corners round to the other, or stopping short of them by `short`. */
+const RIM: Vec3[] = [...along([-15, 0, 0], [15, 0, 0]), ...along([15, 0, 0], [15, -2, 10]), ...along([15, -2, 10], [-15, -2, 10]), ...along([-15, -2, 10], [-15, 0, 0])];
+const edgeLine = (short = 0): Vec3[] => [...along([-15, short, 0], [-15, 60, 0]), ...along([-15, 60, 0], [15, 60, 0]), ...along([15, 60, 0], [15, short, 0]), [15, short, 0]];
+const onCurve = (c: Curve, points: Vec3[]): Curve => ({ ...c, points });
 const axis = (matrix: number[] | undefined): TechnicalAxis => ({ id: 'a', start: [0, 0, 0], end: [0, 1, 0], startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix }) as unknown as TechnicalAxis;
 const scar = (vector: Scar['vector']): Scar => ({ id: 's', label: 'S1', vector, attributes: defaultAttributes(), createdAt: '', modifiedAt: '' });
 const VECTOR = { start: [0, 0, 0], end: [1, 0, 0], startNormal: [0, 0, 1], endNormal: [0, 0, 1] } as Scar['vector'];
@@ -23,17 +30,17 @@ const count = (st: ProjectState) => {
 };
 
 describe('the annotation status of a flake', () => {
-  it('has six items that count and one that does not, none done on a blank specimen', () => {
+  it('has five items that count and one that does not, none done on a blank specimen', () => {
     const s = annotationStatus(project('flake'));
-    expect(s.items.map((i) => i.key)).toEqual(['unit', 'axis', 'edge', 'platform_outline', 'platform_ends', 'faces', 'retouch']);
+    expect(s.items.map((i) => i.key)).toEqual(['unit', 'axis', 'edge', 'platform_outline', 'faces', 'retouch']);
     expect(s.items.filter((i) => i.optional).map((i) => i.key)).toEqual(['retouch']);
     expect(s.items.every((i) => !i.done)).toBe(true);
-    expect([s.done, s.total]).toEqual([0, 6]);
+    expect([s.done, s.total]).toEqual([0, 5]);
   });
 
   it('counts each item by its own condition', () => {
     const st = project('flake', 'mm');
-    expect(count(st)).toBe('1/6');
+    expect(count(st)).toBe('1/5');
     expect(doneOf(st).unit).toBe(true);
 
     // an axis without a frame is none
@@ -41,42 +48,62 @@ describe('the annotation status of a flake', () => {
     expect(doneOf(st).axis).toBe(false);
     st.flake.axis = axis([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
     expect(doneOf(st).axis).toBe(true);
-    expect(count(st)).toBe('2/6');
+    expect(count(st)).toBe('2/5');
 
     // a core's edge is not a flake's
     st.curves.push(curve('core_edge'));
     expect(doneOf(st).edge).toBe(false);
-    st.curves.push(curve('edge'));
+    st.curves.push(onCurve(curve('edge'), edgeLine()));
     expect(doneOf(st).edge).toBe(true);
-    expect(count(st)).toBe('3/6');
+    expect(count(st)).toBe('3/5');
 
     // the outline has to be closed
     st.curves.push(curve('platform_outline', false));
     expect(doneOf(st).platform_outline).toBe(false);
-    st.curves[st.curves.length - 1] = curve('platform_outline', true);
+    st.curves[st.curves.length - 1] = onCurve(curve('platform_outline', true), RIM);
     expect(doneOf(st).platform_outline).toBe(true);
-    expect(count(st)).toBe('4/6');
-
-    // two ends; other landmarks do not count
-    st.landmarks.push(end('l'), { ...end('p'), code: 'pop' });
-    expect(doneOf(st).platform_ends).toBe(false);
-    st.landmarks.push(end('r'));
-    expect(doneOf(st).platform_ends).toBe(true);
-    expect(count(st)).toBe('5/6');
+    expect(count(st)).toBe('4/5');
 
     // both faces
     st.regions.push(region('dorsal'));
     expect(doneOf(st).faces).toBe(false);
     st.regions.push(region('ventral'));
     expect(doneOf(st).faces).toBe(true);
-    expect(count(st)).toBe('6/6');
+    expect(count(st)).toBe('5/5');
+  });
+
+  it('an edge not reaching the closed outline is not done, and says so', () => {
+    const st = project('flake', 'mm');
+    st.curves.push(onCurve(curve('edge'), edgeLine(20)));
+    const item = () => annotationStatus(st).items.find((i) => i.key === 'edge')!;
+    // no outline yet: nothing for it to reach
+    expect(item().done).toBe(true);
+    expect(item().notMeeting).toBeUndefined();
+    st.curves.push(onCurve(curve('platform_outline', true), RIM));
+    expect(item().done).toBe(false);
+    expect(item().notMeeting).toBe(true);
+    st.curves[0] = onCurve(curve('edge'), edgeLine());
+    expect(item().done).toBe(true);
+    expect(item().notMeeting).toBeUndefined();
+    // an outline not closed asks nothing of it
+    st.curves[0] = onCurve(curve('edge'), edgeLine(20));
+    st.curves[1] = onCurve(curve('platform_outline', false), RIM);
+    expect(item().done).toBe(true);
+  });
+
+  it('no edge: not done, and nothing to say about reaching', () => {
+    const st = project('flake', 'mm');
+    st.curves.push(onCurve(curve('platform_outline', true), RIM));
+    const item = annotationStatus(st).items.find((i) => i.key === 'edge')!;
+    expect(item.done).toBe(false);
+    expect(item.notMeeting).toBeUndefined();
   });
 
   it('leaves the optional item out of the count', () => {
     const st = project('flake');
     st.regions.push(region('retouch'));
     expect(doneOf(st).retouch).toBe(true);
-    expect(count(st)).toBe('0/6');
+    expect(count(st)).toBe('0/5');
   });
 });
 

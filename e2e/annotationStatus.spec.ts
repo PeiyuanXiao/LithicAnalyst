@@ -32,10 +32,10 @@ test('a flake from blank: each pill turns as what it stands for is made, and a c
   await setUnit(page, '');
 
   // all the items, none yet; the retouch regions apart
-  await expect(page.locator('#annotation-status .status-pill:not(.status-count)')).toHaveText(['○Unit', '○Technical axis', '○Edge', '○Platform outline', '○Platform ends', '○Dorsal / ventral', '○Retouch regions']);
+  await expect(page.locator('#annotation-status .status-pill:not(.status-count)')).toHaveText(['○Unit', '○Technical axis', '○Edge', '○Platform outline', '○Dorsal / ventral', '○Retouch regions']);
   await expect(pill(page, 'retouch')).toHaveClass(/is-optional/);
   await expect(page.locator('#status-count')).toBeHidden();
-  expect(await status(page)).toMatchObject({ done: 0, total: 6 });
+  expect(await status(page)).toMatchObject({ done: 0, total: 5 });
 
   // what is missing and why, in the tooltip
   await pill(page, 'platform_outline').hover();
@@ -84,7 +84,7 @@ test('a flake from blank: each pill turns as what it stands for is made, and a c
   // with the axis the regions follow, and the two faces are not apart until the outline ends the edge
   await expect.poll(async () => (await state(page)).regions.map((r) => r.type).sort()).toEqual(['dorsal', 'ventral']);
   await notDone(page, 'faces');
-  expect(await status(page)).toMatchObject({ done: 3, total: 6 });
+  expect(await status(page)).toMatchObject({ done: 3, total: 5 });
 
   // one step: undo takes the curve and its type back
   await page.keyboard.press('Control+z');
@@ -117,29 +117,28 @@ test('a flake from blank: each pill turns as what it stands for is made, and a c
   await page.evaluate((id) => window.lithicanalyst.selectForTest(id), outline.id);
   await expect(page.locator('#curve-field-type-platform_outline')).toHaveAttribute('aria-checked', 'true');
 
-  // the platform ends
-  await pill(page, 'platform_ends').click();
-  await toolIs(page, 'platform-end');
-  for (const x of [-14.9, 14.9]) {
-    const at = await toScreen(page, [x, -0.02, 0.1]);
-    const n = (await state(page)).landmarks.length;
-    await page.mouse.click(at.x, at.y);
-    await expect.poll(async () => (await state(page)).landmarks.length).toBe(n + 1);
-  }
-  await done(page, 'platform_ends');
-  expect(await status(page)).toMatchObject({ done: 6, total: 6 });
+  // the platform ends came with the edge and the outline: no pill of their own
+  await expect(pill(page, 'platform_ends')).toHaveCount(0);
+  expect((await state(page)).landmarks.filter((l) => l.code === 'platform_end')).toHaveLength(2);
+  expect(await status(page)).toMatchObject({ done: 5, total: 5 });
   await notDone(page, 'retouch');
 
-  // the faces and the retouch regions: the region tool, its section open
-  await page.locator('#sec-regions').evaluate((d) => ((d as HTMLDetailsElement).open = false));
+  // the retouch regions come with their curve
   await pill(page, 'retouch').click();
+  await toolIs(page, 'curve');
+  expect(await nextType(page)).toBe('retouch');
+  await page.keyboard.press('v');
+
+  // the faces: the region tool, its section open
+  await page.locator('#sec-regions').evaluate((d) => ((d as HTMLDetailsElement).open = false));
+  await pill(page, 'faces').click();
   await toolIs(page, 'region');
   await expect(page.locator('#sec-regions')).toHaveJSProperty('open', true);
 
   // a narrow view: the count alone, the pills on hovering over it
   await page.setViewportSize({ width: 1000, height: 700 });
   await expect(page.locator('#status-count')).toBeVisible();
-  await expect(page.locator('#status-count')).toHaveText('6/6');
+  await expect(page.locator('#status-count')).toHaveText('5/5');
   await expect(pill(page, 'unit')).toBeHidden();
   await page.locator('#status-count').hover();
   await expect(pill(page, 'unit')).toBeVisible();
@@ -203,9 +202,9 @@ test('the folder\'s list shows the same count, from the project files, with no m
   await openMockFolder(page);
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.state().mesh?.fileName ?? null)).toBe('a.ply');
   // the open model, the file not opened, and a model with no project
-  await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.workspace()))?.completion).toEqual([{ done: 1, total: 3 }, { done: 1, total: 6 }, null]);
+  await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.workspace()))?.completion).toEqual([{ done: 1, total: 3 }, { done: 1, total: 5 }, null]);
   await expect(page.locator('#workspace-list .ws-row[data-index="0"] .ws-done')).toHaveText('1/3');
-  await expect(page.locator('#workspace-list .ws-row[data-index="1"] .ws-done')).toHaveText('1/6');
+  await expect(page.locator('#workspace-list .ws-row[data-index="1"] .ws-done')).toHaveText('1/5');
   await expect(page.locator('#workspace-list .ws-row[data-index="2"] .ws-done')).toHaveCount(0);
 
   // the open model's follows it at once
