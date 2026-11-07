@@ -201,9 +201,15 @@ export const RETOUCH_LAYERS = [1, 2, 3, 4, 5] as const;
 export const UPPER_REGION_TYPES: readonly string[] = ['flaking_surface', 'platform', 'ventral', 'dorsal'];
 export const isUpperRegion = (type: string, specimen: SpecimenType = 'core'): boolean => specimen !== 'generic' && UPPER_REGION_TYPES.includes(type);
 
-/** Whether a curve's edge angles are measured: as the user said, else a flake's edge and a core's edge are; on a generic specimen no type is by default. */
+/** Edge angles and working edges belong to flakes. On another type their data stay in the file and nothing of them shows or is computed. */
+export const hasEdgeAngles = (specimen: SpecimenType): boolean => specimen === 'flake';
+
+/** The volume split and its upper and lower volumes belong to cores (the bicone stands on it); the same holds. */
+export const hasVolumeSplit = (specimen: SpecimenType): boolean => specimen === 'core';
+
+/** Whether a curve's edge angles are measured: only on a flake; as the user said, else an edge is (a core's too, when its specimen has become a flake, so what it measured still shows). */
 export const measuresEdgeAngle = (c: { edgeAngle?: boolean; attributes: Readonly<Record<string, AttributeValue>> }, specimen: SpecimenType): boolean =>
-  c.edgeAngle ?? (specimen !== 'generic' && c.attributes.type === (specimen === 'flake' ? 'edge' : 'core_edge'));
+  hasEdgeAngles(specimen) && (c.edgeAngle ?? (c.attributes.type === 'edge' || c.attributes.type === 'core_edge'));
 
 /**
  * Volumetric configuration of a core (after the Logical Analytical System): the

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint } from './fixtures/meshes';
-import { curveClick, displayPanel, dragArrow, expect, loadMesh, nextFrames, openApp, openSection, specimenPanel, state, test, toScreen, viewFromTop } from './helpers';
+import { curveClick, displayPanel, dragArrow, expect, loadMesh, nextFrames, openApp, specimenPanel, state, test, toScreen, viewFromTop } from './helpers';
 
 async function openGeneric(page: Page): Promise<void> {
   await openApp(page, 'generic');
@@ -27,10 +27,10 @@ async function drawCurve(page: Page, y: number): Promise<void> {
 
 test('a generic specimen has none of the tools, panels and sections of a core or a flake', async ({ page }) => {
   await openGeneric(page);
-  for (const id of ['mode-axis', 'mode-platform-end', 'mode-relation', 'mode-sequence', 'app-mode-retouch', 'btn-orient']) await expect(page.locator(`#${id}`)).toBeHidden();
-  for (const id of ['mode-select', 'mode-draw', 'mode-curve', 'mode-working-edge', 'mode-region', 'mode-landmark']) await expect(page.locator(`#${id}`)).toBeVisible();
+  for (const id of ['mode-axis', 'mode-platform-end', 'mode-working-edge', 'mode-relation', 'mode-sequence', 'app-mode-retouch', 'btn-orient']) await expect(page.locator(`#${id}`)).toBeHidden();
+  for (const id of ['mode-select', 'mode-draw', 'mode-curve', 'mode-region', 'mode-landmark']) await expect(page.locator(`#${id}`)).toBeVisible();
   // nor their keys
-  for (const key of ['b', 'q', 't', 'e']) {
+  for (const key of ['b', 'q', 't', 'e', 'w']) {
     await page.keyboard.press(key);
     await expect(page.locator('#mode-select')).toHaveAttribute('aria-checked', 'true');
   }
@@ -62,11 +62,11 @@ test('a generic specimen has none of the tools, panels and sections of a core or
   expect(await page.evaluate(() => window.lithicanalyst.configPanelShown())).toBe(false);
   expect(await page.evaluate(() => window.lithicanalyst.harrisShown())).toBe(false);
 
-  // the measure mode: dimensions, area and volume; no flake's, no nodule, no sharp edge
+  // the measure mode: dimensions, area and volume; no flake's, no nodule, no edge angles, no volume split
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#sec-measure-auto')).toBeVisible();
   await expect(page.locator('#auto-length')).not.toHaveText('—');
-  for (const id of ['flake', 'nodule', 'edge-angle']) await expect(page.locator(`#sec-${id}`)).toBeHidden();
+  for (const id of ['flake', 'nodule', 'edge-angle', 'split']) await expect(page.locator(`#sec-${id}`)).toBeHidden();
   // planes by all the vertices, curves or regions
   await expect(page.locator('#sec-planes')).toBeVisible();
   await page.locator('#plane-add').click();
@@ -110,21 +110,10 @@ test('curves and regions take the user\'s own text alone: key 1, and what was ty
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await state(page)).curves[1].attributes.type).toBe('rim');
 
-  // no edge angles until asked for
-  await expect(page.locator('#curve-edge-angle')).not.toBeChecked();
+  // no edge angles to ask for
+  await expect(page.locator('#curve-edge-angle')).toBeHidden();
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#sec-edge-angle')).toBeHidden();
-  await page.locator('#app-mode-annotate').click();
-  await page.locator('#curve-edge-angle').check();
-  await page.locator('#app-mode-measure').click();
-  await expect(page.locator('#sec-edge-angle')).toBeVisible();
-  await openSection(page, 'edge-angle');
-  // ... and no sharp edge in it
-  await expect(page.locator('#edge-angle-list .arrow-row')).toHaveCount(1);
-  await page.locator('#edge-angle-list .arrow-row').click();
-  await expect(page.locator('#edge-angle-chart')).toBeVisible();
-  await expect(page.locator('#sharp-box')).toBeHidden();
-  await expect(page.locator('#sharp-summary')).toBeHidden();
 });
 
 test('every curve cuts the one layer of regions; a region is no scar, and has the user\'s own text', async ({ page }) => {
@@ -189,8 +178,8 @@ test('the export dialog has no file of the other types', async ({ page }) => {
   for (const key of ['scar-vectors', 'curves', 'regions', 'landmarks-csv', 'landmarks-tps']) expect(annotate).toContain(key);
   await page.locator('#app-mode-measure').click();
   const measure = await offered();
-  for (const key of ['flakes', 'retouch-sections', 'retouch-segments', 'invasiveness', 'retouch-angles', 'edge-sharp']) expect(measure).not.toContain(key);
-  for (const key of ['edge-angles', 'working-edges', 'measurements', 'manual', 'planes']) expect(measure).toContain(key);
+  for (const key of ['flakes', 'retouch-sections', 'retouch-segments', 'invasiveness', 'retouch-angles', 'edge-sharp', 'edge-angles', 'working-edges']) expect(measure).not.toContain(key);
+  for (const key of ['measurements', 'manual', 'planes']) expect(measure).toContain(key);
 });
 
 test('from another type and back: nothing is lost, and a preset type on a curve is shown but not offered', async ({ page }) => {

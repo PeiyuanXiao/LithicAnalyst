@@ -2,21 +2,19 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { SemilandmarkResult } from '../compute/landmarks';
 import type { Landmark, Vec3 } from '../core/types';
+import { dotDiameterPx, type DotKind } from './landmarkSize';
 import type { Viewer } from './viewer';
 
 /** A landmark being moved keeps the fixed landmarks' colour; yellow only marks the selected one. */
 export const LANDMARK_COLORS = { fixed: '#00a6a6', semi: '#8c5cf0', selected: '#ffc61a', draft: '#00a6a6' };
 
-/** Diameters on the screen, in CSS pixels. */
-export const LANDMARK_PX = 9;
-export const SEMILANDMARK_PX = 6;
 /** How far from a landmark, in screen pixels, the cursor still counts as on it. */
 export const LANDMARK_PICK_PX = 8;
 const SELECTED_SCALE = 1.3;
 const HOVER_SCALE = 1.12;
 const PREVIEW_SCALE = 1.25;
-/** A landmark counts as hidden when the surface in front of it is further off than this many of its radii. */
-const HIDDEN_BEYOND_RADII = 3;
+/** A landmark counts as hidden when the surface in front of it is further off than this, in CSS pixels at its depth. */
+const HIDDEN_BEYOND_PX = 13.5;
 
 const BALL = new THREE.SphereGeometry(1, 16, 12);
 const materials = new Map<string, THREE.Material>();
@@ -36,21 +34,28 @@ function material(color: string, kind: 'solid' | 'ghost' | 'dim'): THREE.Materia
   return m;
 }
 
-/** A ball with a faint copy that shows through the surface; `fit` keeps its size on the screen. */
+/**
+ * A ball with a faint copy that shows through the surface; `fit` keeps its size within the limits on the screen, and
+ * rests it on the surface it marks, one radius toward the camera along the line of sight, so that surface hides none of it and its place on the screen stays.
+ */
 class Dot {
   readonly root = new THREE.Group();
   private readonly solid = new THREE.Mesh(BALL);
   private readonly ghost = new THREE.Mesh(BALL);
-  private px = LANDMARK_PX;
+  private readonly at = new THREE.Vector3();
+  private kind: DotKind = 'fixed';
+  private emphasis = 1;
 
   constructor() {
     this.ghost.renderOrder = 900;
     this.root.add(this.solid, this.ghost);
   }
 
-  set(viewer: Viewer, p: Vec3, px: number, color: string, ghost: boolean, dim = false): void {
-    this.root.position.set(p[0], p[1], p[2]);
-    this.px = px;
+  /** `emphasis`: larger than its kind (selected, under the cursor, being placed). */
+  set(viewer: Viewer, p: Vec3, kind: DotKind, emphasis: number, color: string, ghost: boolean, dim = false): void {
+    this.at.set(p[0], p[1], p[2]);
+    this.kind = kind;
+    this.emphasis = emphasis;
     this.fit(viewer);
     this.solid.material = material(color, dim ? 'dim' : 'solid');
     this.ghost.material = material(color, 'ghost');
@@ -58,7 +63,13 @@ class Dot {
   }
 
   fit(viewer: Viewer): void {
-    this.root.scale.setScalar((viewer.worldPerPixel(this.root.position) * this.px) / 2);
+    const radiusAt = (q: THREE.Vector3) => {
+      const perPx = viewer.worldPerPixel(q);
+      return (perPx * dotDiameterPx(this.kind, viewer.diagonal, perPx) * this.emphasis) / 2;
+    };
+    const toward = viewer.camera.position.clone().sub(this.at).normalize();
+    this.root.position.copy(this.at).addScaledVector(toward, radiusAt(this.at));
+    this.root.scale.setScalar(radiusAt(this.root.position));
   }
 }
 
@@ -106,7 +117,7 @@ export class LandmarkLayer {
 
   /** How far in front of a point the surface must be to hide it. */
   private hiddenBeyond(q: THREE.Vector3): number {
-    return (this.viewer.worldPerPixel(q) * LANDMARK_PX * HIDDEN_BEYOND_RADII) / 2;
+    return this.viewer.worldPerPixel(q) * HIDDEN_BEYOND_PX;
   }
 
   /** `selected`: a landmark id, a set id (its points are highlighted) or `<set id>#<point index>` (one point). */
@@ -137,7 +148,7 @@ export class LandmarkLayer {
       const isHov = !isSel && l.id === this.hovered;
       const color = isSel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.fixed;
       v.point = l.point;
-      v.dot.set(this.viewer, l.point, LANDMARK_PX * (isSel ? SELECTED_SCALE : isHov ? HOVER_SCALE : 1), color, ghost, this.dimmed && !isSel);
+      v.dot.set(this.viewer, l.point, 'fixed', isSel ? SELECTED_SCALE : isHov ? HOVER_SCALE : 1, color, ghost, this.dimmed && !isSel);
       v.label.visible = labels;
       const el = v.label.element;
       if (el.textContent !== l.name) el.textContent = l.name;
@@ -159,7 +170,7 @@ export class LandmarkLayer {
     }
     this.semi.forEach((d, i) => {
       d.root.visible = i < pts.length;
-      if (i < pts.length) d.set(this.viewer, pts[i].p, SEMILANDMARK_PX, pts[i].sel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.semi, ghost, this.dimmed && !pts[i].sel);
+      if (i < pts.length) d.set(this.viewer, pts[i].p, 'semi', 1, pts[i].sel ? LANDMARK_COLORS.selected : this.fixedColor ?? LANDMARK_COLORS.semi, ghost, this.dimmed && !pts[i].sel);
     });
     this.viewer.requestRender();
   }
@@ -175,7 +186,7 @@ export class LandmarkLayer {
   /** Where a landmark being dragged would go (null hides it). */
   setPreview(p: Vec3 | null): void {
     this.preview.root.visible = !!p;
-    if (p) this.preview.set(this.viewer, p, LANDMARK_PX * PREVIEW_SCALE, LANDMARK_COLORS.draft, true);
+    if (p) this.preview.set(this.viewer, p, 'fixed', PREVIEW_SCALE, LANDMARK_COLORS.draft, true);
     this.viewer.requestRender();
   }
 

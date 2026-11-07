@@ -15,7 +15,7 @@ import type { AutoMeasurements, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { annotationStatus, type StatusKey } from '../core/annotationStatus';
-import { CURVE_FIELDS, GENERIC_REGION_TYPE, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
+import { CURVE_FIELDS, GENERIC_REGION_TYPE, hasVolumeSplit, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, retouchSettingsOf, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
@@ -45,7 +45,7 @@ import { SequenceTool } from '../tools/sequenceTool';
 import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjacency';
 import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
-import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
+import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_PARAMETERS, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { gmMissingInputs, gmSteps, type GmResult } from '../compute/gm';
 import { retouchSectionsSteps, sectionAtStation, type RetouchAngleResult, type RetouchPiece, type StationSection } from '../compute/retouchAngle';
@@ -76,7 +76,9 @@ import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
 import { facesOfPiecesSteps, flakeFacePieces, overPiecesSteps, pieceSeedSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
-import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type VolumeSplit } from '../compute/split';
+import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type SplitResult, type VolumeSplit } from '../compute/split';
+import { boxHint, flakeHint, MEASURE_HINT_PARAMETERS, noduleHint, sharpHint, splitHint, stationsHint, wholeModelHint, type MeasureHint } from '../compute/measureHint';
+import { HintLayer } from '../render/hintLayer';
 import { assembleCurve, curveSegments } from '../core/curveGeometry';
 
 /** What "Complete loop" says when it cannot. */
@@ -522,6 +524,15 @@ export class App implements AppApi {
   private gmTimer = 0;
   private gmToken = 0;
   private gmLayer: GmLayer | null = null;
+  private hintLayer: HintLayer | null = null;
+  /** The row of a measure the pointer is on, the one with the keyboard's focus, the one fixed by a click (the first of them is drawn). */
+  private hintHover: string | null = null;
+  private hintFocus: string | null = null;
+  private hintPinned: string | null = null;
+  /** Just let go, with the pointer still on it: not drawn again until the pointer has left it. */
+  private hintMuted: string | null = null;
+  private hintTimer = 0;
+  private hintShown: { key: string; hint: MeasureHint } | null = null;
   /** The folder's configuration of those points (null: none yet, or no folder open). */
   private folderGm: GmConfig | null = null;
   private edgeLayer: EdgeAngleLayer | null = null;
@@ -535,7 +546,7 @@ export class App implements AppApi {
   private edgeLegend: HTMLElement | null = null;
   private edgeColorKey = '';
   /** The split as computed (before `swap`), for the plane or curve it was computed from. */
-  private splitRaw: { key: string; value: VolumeSplit | null } | null = null;
+  private splitRaw: { key: string; value: SplitResult | null } | null = null;
   /** The split is being computed (the bicone waits for it). */
   private splitBusy = false;
   /** A curve being completed into a loop (its id). */
@@ -636,6 +647,7 @@ export class App implements AppApi {
     this.workingEdgeLayer = new WorkingEdgeLayer(viewer);
     this.workingEdgeLayer.onLabelClick = (id) => this.selection.set(id);
     this.gmLayer = new GmLayer(viewer);
+    this.hintLayer = new HintLayer(viewer);
     this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
     this.viewportEl.append(this.edgeLegend);
     this.viewCube = new ViewCube(viewer);
@@ -755,6 +767,7 @@ export class App implements AppApi {
       // the configuration's colours are the theme's
       this.viewCube?.repaint();
       this.sketch?.repaint();
+      this.refreshHint();
     });
 
     this.wireFiles();
@@ -1089,8 +1102,10 @@ export class App implements AppApi {
       this.modeSeg.el.hidden = !annotate;
       // a flake's own tools
       const flake = this.isFlake();
-      const axisBtn = this.modeSeg.el.querySelector<HTMLElement>('#mode-axis');
-      if (axisBtn) axisBtn.hidden = !flake;
+      for (const id of ['mode-axis', 'mode-working-edge']) {
+        const b = this.modeSeg.el.querySelector<HTMLElement>(`#${id}`);
+        if (b) b.hidden = !flake;
+      }
       // scars' relations: not on a generic specimen
       for (const id of ['mode-relation', 'mode-sequence']) {
         const b = this.modeSeg.el.querySelector<HTMLElement>(`#${id}`);
@@ -1248,7 +1263,7 @@ export class App implements AppApi {
         h('span', { class: 'status-mark', 'aria-hidden': 'true' }, item.done ? '✓' : '○'),
         h('span', {}, t(`status.${item.key}`)),
       );
-      tips.attach(pill, () => ({ label: t(item.notApart ? 'status.why.faces.open' : item.notMeeting ? 'status.why.edge.open' : `status.why.${item.key}`) }), 'above');
+      tips.attach(pill, () => ({ label: t(item.notApart ? 'status.why.faces.open' : item.notMeeting ? 'status.why.edge.open' : item.key === 'unit' && !this.isFlake() ? 'status.why.unit.plain' : `status.why.${item.key}`) }), 'above');
       el.append(pill);
     }
     this.fitStatus();
@@ -1429,9 +1444,9 @@ export class App implements AppApi {
       this.updateToolbar();
       this.updateRetouch();
       // a flake's tools belong to flakes, the scars' relations not to a generic specimen
-      if (!this.isFlake() && this.tools?.activeId === 'axis') this.setTool('select');
+      if (!this.isFlake() && ['axis', 'working-edge'].includes(this.tools?.activeId ?? '')) this.setTool('select');
       if (this.isGeneric() && ['relation', 'sequence'].includes(this.tools?.activeId ?? '')) this.setTool('select');
-      if (!this.isFlake() && this.tools) this.selection.set(this.store.landmark(this.selection.id ?? '')?.code || this.store.state.flake.axis?.id === this.selection.id ? null : this.selection.id);
+      if (!this.isFlake() && this.tools) this.selection.set(this.store.landmark(this.selection.id ?? '')?.code || this.store.state.flake.axis?.id === this.selection.id || this.store.workingEdge(this.selection.id ?? '') ? null : this.selection.id);
       if (this.isGeneric() && this.selection.id && (this.store.relation(this.selection.id) || this.store.sequence(this.selection.id))) this.selection.set(null);
       this.paintRegions();
     }
@@ -1439,12 +1454,15 @@ export class App implements AppApi {
     // (of the specimen's details, its type and unit count)
     const specimenKey = `${this.store.state.specimen.type}|${this.store.state.specimen.unit}`;
     const specimenCounts = c.kind === 'specimen' && specimenKey !== this.specimenKey;
+    // another specimen or another type: what was shown of a measure goes, fixed or not
+    if (c.kind === 'reset' || (specimenCounts && !this.specimenKey.startsWith(`${this.store.state.specimen.type}|`))) this.clearHints();
     this.specimenKey = specimenKey;
     if (['flake', 'landmarks', 'regions', 'reset'].includes(c.kind) || specimenCounts) this.scheduleFlake();
     // a flake has a platform outline to follow, a core does not
     if (specimenCounts) {
       this.updatePartition();
       this.scheduleEdgeAngles();
+      this.updateSplit();
     }
     if (c.kind === 'curves' || c.kind === 'reset') this.scheduleEdgeAngles();
     if (['flake', 'specimen', 'reset'].includes(c.kind)) this.scheduleRetouchIndices();
@@ -1491,6 +1509,131 @@ export class App implements AppApi {
     this.scheduleAgreement();
     this.queueCoords();
     this.updateStatus();
+    this.refreshHint();
+  }
+
+  // ------------------------------------------------------------ how a measure was taken
+
+  hoverHint(key: string | null): void {
+    clearTimeout(this.hintTimer);
+    if (key !== this.hintMuted) this.hintMuted = null;
+    if (key === null || key === this.hintMuted) {
+      if (this.hintHover === null) return;
+      this.hintHover = null;
+      this.syncHint();
+      return;
+    }
+    if (key === this.hintHover) return;
+    this.hintTimer = window.setTimeout(() => {
+      this.hintHover = key;
+      this.syncHint();
+    }, MEASURE_HINT_PARAMETERS.HOVER_MS);
+  }
+
+  focusHint(key: string | null): void {
+    if (key === this.hintFocus) return;
+    this.hintFocus = key;
+    this.syncHint();
+  }
+
+  pinHint(key: string): void {
+    // (a click on a curve's row selects the curve: its colours and chart are what is wanted then)
+    if (key.startsWith('edge:')) return;
+    clearTimeout(this.hintTimer);
+    if (this.hintPinned === key) {
+      this.letGoOfPin();
+      if (this.hintFocus === key) this.hintFocus = null;
+    } else this.hintPinned = key;
+    this.syncHint();
+  }
+
+  /** Esc: what is fixed goes. Whether there was anything to let go. */
+  private unpinHint(): boolean {
+    if (!this.hintPinned) return false;
+    clearTimeout(this.hintTimer);
+    this.letGoOfPin();
+    this.syncHint();
+    return true;
+  }
+
+  /** What is fixed goes, and with the pointer on its row it does not come straight back. */
+  private letGoOfPin(): void {
+    if (this.hintHover === this.hintPinned) {
+      this.hintMuted = this.hintPinned;
+      this.hintHover = null;
+    }
+    this.hintPinned = null;
+  }
+
+  private clearHints(): void {
+    clearTimeout(this.hintTimer);
+    this.hintHover = this.hintFocus = this.hintPinned = this.hintMuted = null;
+    this.syncHint();
+  }
+
+  /** What it was drawn from changed: drawn again. */
+  private refreshHint(): void {
+    if (this.hintHover ?? this.hintFocus ?? this.hintPinned) this.syncHint();
+  }
+
+  /** What is asked for, drawn from what the measures returned; nothing where a value is empty. */
+  private syncHint(): void {
+    const layer = this.hintLayer, loaded = this.loaded;
+    const key = this.hintHover ?? this.hintFocus ?? this.hintPinned;
+    const hint = key && layer && loaded ? this.hintOf(key) : null;
+    this.hintShown = key && hint ? { key, hint } : null;
+    if (hint) {
+      const css = getComputedStyle(document.documentElement);
+      const colour = (name: string) => css.getPropertyValue(name).trim();
+      layer!.show(hint, { current: colour('--accent'), other: colour('--hint-other'), otherHalo: colour('--hint-other-halo') }, loaded!.offset, loaded!.geometry.getAttribute('position') as THREE.BufferAttribute, loaded!.geometry.index!);
+    } else layer?.clear();
+    this.paintHintRows();
+  }
+
+  /** Which rows of measures are shown and fixed. */
+  paintHintRows(): void {
+    if (!this.sidebar) return;
+    const shown = this.hintShown?.key ?? null;
+    for (const el of this.sidebar.el.querySelectorAll<HTMLElement>('[data-hint]')) {
+      el.classList.toggle('is-hinted', el.dataset.hint === shown);
+      el.classList.toggle('is-pinned', el.dataset.hint === this.hintPinned);
+    }
+  }
+
+  /** The drawing of a row of the measure mode (`group:item`). */
+  private hintOf(key: string): MeasureHint | null {
+    const loaded = this.loaded;
+    if (this.mode !== 'measure' || !loaded) return null;
+    const st = this.store.state;
+    const unit = st.specimen.unit;
+    const at = key.indexOf(':');
+    const group = key.slice(0, at), item = key.slice(at + 1);
+    const whole = (item === 'area' && !!this.auto) || (item === 'volume' && this.auto?.volume != null);
+    switch (group) {
+      case 'flake':
+        if (item === 'area' || item === 'volume') return whole ? wholeModelHint() : null;
+        return this.flake && this.isFlake() ? flakeHint(item as FlakeMeasure, this.flake, unit) : null;
+      case 'auto': {
+        if (item === 'area' || item === 'volume') return whole ? wholeModelHint() : null;
+        const a = this.auto;
+        return a && this.configBox ? boxHint(item as 'length' | 'width' | 'thickness', this.configBox, { length: a.length, width: a.width, thickness: a.thickness }, unit) : null;
+      }
+      case 'split': {
+        const parts = this.split ? this.splitRaw?.value?.parts : null;
+        return parts && this.viewer ? splitHint(parts, !!st.split?.swap, loaded.offset, this.viewer.diagonal) : null;
+      }
+      case 'edge': {
+        const c = this.store.curve(item), r = this.edgeAngleResult(item);
+        return c && r ? stationsHint(this.lineOf(c), r.stations) : null;
+      }
+      case 'sharp': {
+        const c = this.store.curve(item), r = this.edgeAngleResult(item), s = this.sharpOf(item);
+        return c && r && s ? sharpHint(this.lineOf(c), r.stations, s, unit) : null;
+      }
+      case 'nodule':
+        return this.nodule ? noduleHint(this.nodule, unit) : null;
+    }
+    return null;
   }
 
   /** The sequence tool is in use: arrows and scar regions are coloured by sequence, the scars in none faded. */
@@ -1817,6 +1960,7 @@ export class App implements AppApi {
     this.relationChip?.close();
     this.tools?.activeTool?.clearHover?.();
     this.mode = mode;
+    this.clearHints();
     this.setTool(mode === 'retouch' ? 'station' : 'select');
     if (remember) writePref('mode', mode);
     // the picked face belongs to the annotate mode's panel; the panel and the cube show only there
@@ -2652,6 +2796,7 @@ export class App implements AppApi {
     this.sidebar.refresh('flake');
     this.updateProfile();
     this.syncCrossSection();
+    this.refreshHint();
     // the file holds the results too
     if (this.unsaved) {
       this.scheduleAutosave();
@@ -2811,7 +2956,7 @@ export class App implements AppApi {
   /** The curve's sharp stretches under the rule (null without a threshold, or without angles). */
   sharpOf(curveId: string): SharpResult | null {
     const c = this.store.curve(curveId), r = this.edgeAngleResult(curveId);
-    return c && r && !this.isGeneric() ? sharpOfCurve(r, this.lineOf(c).closed, this.store.state.sharpEdge, this.store.state.specimen.unit) : null;
+    return c && r ? sharpOfCurve(r, this.lineOf(c).closed, this.store.state.sharpEdge, this.store.state.specimen.unit) : null;
   }
 
   /** A threshold from the angles themselves: of this model, or, in a folder, of every model. */
@@ -2874,8 +3019,7 @@ export class App implements AppApi {
     const pieces = new Map<number, RetouchPiece>();
     st.regions.forEach((r, i) => {
       const c = this.seedComponent[i];
-      // ("retouch" on a generic specimen is the user's own word)
-      if (r.type === 'retouch' && !this.isGeneric() && c >= 0 && !pieces.has(c)) pieces.set(c, { region: r.id, layer: r.retouchLayer ?? 1 });
+      if (r.type === 'retouch' && c >= 0 && !pieces.has(c)) pieces.set(c, { region: r.id, layer: r.retouchLayer ?? 1 });
     });
     const piecesKey = JSON.stringify([this.partitionVersion, [...pieces]]);
     const curves = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type));
@@ -3505,6 +3649,7 @@ export class App implements AppApi {
     this.sidebar.refresh('edge');
     this.syncAnnotations();
     this.updateRetouch();
+    this.refreshHint();
     if (this.unsaved) {
       this.scheduleAutosave();
       this.scheduleFolderSave();
@@ -3516,8 +3661,10 @@ export class App implements AppApi {
   workingEdgeDetails(): WorkingEdgeDetail[] {
     if (this.edgeDetails) return this.edgeDetails;
     const st = this.store.state;
+    // a flake's: on another type its working edges stay in the file, with nothing measured on them
+    if (!this.isFlake()) return (this.edgeDetails = []);
     const curves = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type)).map((c) => ({ id: c.id, ...this.lineOf(c), stations: this.edgeResults.get(c.id)?.result?.stations ?? [], sharp: this.sharpOf(c.id)?.segments ?? null }));
-    this.edgeDetails = workingEdgeDetails({ curves, edges: st.workingEdges, unit: st.specimen.unit, retouch: this.isFlake() ? this.retouchIndex : null, volume: this.measureBase?.volume ?? null });
+    this.edgeDetails = workingEdgeDetails({ curves, edges: st.workingEdges, unit: st.specimen.unit, retouch: this.retouchIndex, volume: this.measureBase?.volume ?? null });
     return this.edgeDetails;
   }
 
@@ -3614,7 +3761,7 @@ export class App implements AppApi {
     const layer = this.workingEdgeLayer, loaded = this.loaded;
     if (!layer) return;
     const st = this.store.state;
-    if (!loaded || (this.mode !== 'annotate' && this.mode !== 'measure' && this.mode !== 'retouch')) {
+    if (!loaded || !this.isFlake() || (this.mode !== 'annotate' && this.mode !== 'measure' && this.mode !== 'retouch')) {
       layer.sync([], true, false, false, loaded?.offset ?? [0, 0, 0], [0, 0, 0]);
       return;
     }
@@ -4443,18 +4590,19 @@ export class App implements AppApi {
       ];
     if (this.mode === 'measure')
       return [
-        ...(this.isFlake() ? [csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts, this.retouchIndex?.indices ?? null))] : []),
-        csv('edge-angles', t('export.edgeAngles'), 'edge_angles.csv', this.edgeAngleCurves().length > 0, () => edgeAnglesCsv(st, this.edgeAngleCurves(), opts)),
-        ...(this.isGeneric() ? [] : [csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts))]),
+        // a flake's files: edge angles and working edges have no rows on another type
         ...(this.isFlake()
           ? [
+              csv('flakes', t('export.flakes'), 'flakes.csv', !!this.flake, () => flakesCsv(st, this.flake?.measures ?? null, opts, this.retouchIndex?.indices ?? null)),
+              csv('edge-angles', t('export.edgeAngles'), 'edge_angles.csv', this.edgeAngleCurves().length > 0, () => edgeAnglesCsv(st, this.edgeAngleCurves(), opts)),
+              csv('retouch-angles', t('export.retouchAngles'), 'retouch_angles.csv', this.retouchAngleCurves().length > 0, () => retouchAnglesCsv(st, this.retouchAngleCurves(), opts)),
               csv('retouch-sections', t('export.retouchSections'), 'retouch_sections.csv', !!this.retouchIndex?.indices.stations.length, () => retouchSectionsCsv(st, this.retouchIndex?.indices ?? null, opts)),
               csv('retouch-segments', t('export.retouchSegments'), 'retouch_segments.csv', !!this.retouchIndex?.indices.segments.length, () => retouchSegmentsCsv(st, this.retouchIndex?.indices ?? null, opts)),
               csv('invasiveness', t('export.invasiveness'), 'invasiveness.csv', !!this.retouchIndex?.indices.penetration.length, () => invasivenessCsv(st, this.retouchIndex?.indices ?? null, opts)),
+              csv('edge-sharp', t('export.edgeSharp'), 'edge_sharp.csv', st.sharpEdge.threshold !== null && this.edgeAngleCurves().length > 0, () => edgeSharpCsv(st, this.edgeAngleCurves(), opts)),
+              csv('working-edges', t('export.workingEdges'), 'working_edges.csv', this.workingEdgeDetails().length > 0, () => workingEdgesCsv(st, this.workingEdgeDetails().map((d) => d.row), this.edgeAngleCurves(), opts)),
             ]
           : []),
-        ...(this.isGeneric() ? [] : [csv('edge-sharp', t('export.edgeSharp'), 'edge_sharp.csv', st.sharpEdge.threshold !== null && this.edgeAngleCurves().length > 0, () => edgeSharpCsv(st, this.edgeAngleCurves(), opts))]),
-        csv('working-edges', t('export.workingEdges'), 'working_edges.csv', this.workingEdgeDetails().length > 0, () => workingEdgesCsv(st, this.workingEdgeDetails().map((d) => d.row), this.edgeAngleCurves(), opts)),
         csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile())),
         csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
         csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
@@ -5308,7 +5456,7 @@ export class App implements AppApi {
     const snap = this.surfaceSnap;
     const key = sp ? JSON.stringify([sp.source, sp.id, sp.upHint]) : '';
     this.splitBusy = true;
-    const done = (v: VolumeSplit | null) => {
+    const done = (v: SplitResult | null) => {
       if (token !== this.splitToken) return;
       this.splitBusy = false;
       this.splitRaw = { key, value: v };
@@ -5316,7 +5464,10 @@ export class App implements AppApi {
       this.sidebar.refresh('split');
       // the bicone stands on the split
       this.updateConfiguration();
+      this.refreshHint();
     };
+    // a core's: on another type the split stays in the file and nothing is computed
+    if (!hasVolumeSplit(this.store.state.specimen.type)) return done(null);
     if (reuse && sp && this.splitRaw?.key === key) return done(this.splitRaw.value);
     if (!sp || !base || !loaded || !base.topology.closed) return done(null);
     const g = loaded.geometry;
@@ -5380,6 +5531,7 @@ export class App implements AppApi {
     }
     this.showNodule();
     this.sidebar.refresh('nodule');
+    this.refreshHint();
   }
 
   /** The fitted sphere as a wireframe, in the measure mode when asked for. */
@@ -5490,6 +5642,7 @@ export class App implements AppApi {
     this.sidebar.refresh('measure');
     this.updateConfiguration();
     if (this.pickedFace) this.syncAnnotations();
+    this.refreshHint();
   }
 
   saveProject(): void {
@@ -5586,6 +5739,7 @@ export class App implements AppApi {
   /** Let go of the model and of everything drawn or computed for it (another model follows, or none). */
   private releaseMesh(): void {
     this.relationChip?.close();
+    this.clearHints();
     this.surfaceSnap?.dispose();
     this.curvature?.dispose();
     this.meshView?.dispose();
@@ -6027,7 +6181,7 @@ export class App implements AppApi {
           if (this.hasMesh() && this.mode === 'annotate') this.setTool('curve');
           return;
         case 'KeyW':
-          if (this.hasMesh() && this.mode === 'annotate') this.setTool('working-edge');
+          if (this.hasMesh() && this.mode === 'annotate' && this.isFlake()) this.setTool('working-edge');
           return;
         case 'KeyB':
           if (this.hasMesh() && this.mode === 'annotate' && !this.isGeneric()) this.setTool('relation');
@@ -6077,6 +6231,8 @@ export class App implements AppApi {
           if (tool?.commit?.()) e.preventDefault();
           return;
         case 'Escape':
+          // first what is fixed of a measure's drawing
+          if (this.unpinHint()) return;
           if (!this.tools?.cancel()) {
             if (this.pickedFace) this.selectConfigFace(null);
             this.selection.set(null);
@@ -6274,7 +6430,7 @@ export class App implements AppApi {
         ...(this.isFlake() ? ([['T', 'help.k.axis'], ['F', 'help.k.orient']] as Row[]) : []),
         ['A', 'help.k.draw'],
         ['P', 'help.k.curve'],
-        ['W', 'help.k.workingEdge'],
+        ...(this.isFlake() ? ([['W', 'help.k.workingEdge']] as Row[]) : []),
         ['R', 'help.k.region'],
         ...(generic ? [] : ([['B', 'help.k.relation'], ['Q', 'help.k.sequence']] as Row[])),
         ['K', 'help.k.landmark'],
@@ -6444,6 +6600,14 @@ export class App implements AppApi {
       },
       exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile()),
       volumeSplit: () => this.split,
+      /** The drawing of how a measure was taken: which row, what is fixed, its parts and what is on the view. */
+      measureHint: () => ({
+        key: this.hintShown?.key ?? null,
+        pinned: this.hintPinned,
+        prims: (this.hintShown?.hint ?? []).map((p) => ({ kind: p.kind, part: p.part, role: p.kind === 'faces' ? p.tint : p.role, label: p.kind === 'line' || p.kind === 'arc' ? (p.label ?? null) : null, points: p.kind === 'faces' ? null : p.points })),
+        drawn: this.hintLayer?.counts() ?? null,
+        labels: [...document.querySelectorAll<HTMLElement>('.hint-label')].map((el) => el.textContent ?? ''),
+      }),
       nodule: () => this.nodule,
       regions: () => this.regions,
       regionCount: () => this.partition?.count ?? null,

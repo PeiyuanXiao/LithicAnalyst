@@ -156,7 +156,8 @@ keeps the selection and the undo history.
 
 The type is one code in `SPECIMEN_TYPES`, and what it means is said where each thing is decided:
 
-* `core/fields.ts`: `offeredOptions` leaves a field that takes free text with nothing else, so `keyedOptions` gives `['custom']`, and `customValue` keeps what was typed; `isUpperRegion(type, specimen)` and `isBoundaryCurve` say there is no upper layer, `layerCurves` that the lower layer is cut by all the curves; `measuresEdgeAngle` has no default type. `isCustomValue` knows nothing of the type: a preset code from another type keeps its label and is shown, not offered (`customField`), as older codes are.
+* `core/fields.ts`: `offeredOptions` leaves a field that takes free text with nothing else, so `keyedOptions` gives `['custom']`, and `customValue` keeps what was typed; `isUpperRegion(type, specimen)` and `isBoundaryCurve` say there is no upper layer, `layerCurves` that the lower layer is cut by all the curves. `isCustomValue` knows nothing of the type: a preset code from another type keeps its label and is shown, not offered (`customField`), as older codes are.
+* `hasEdgeAngles` and `hasVolumeSplit` (`core/fields.ts`) say what belongs to which type: edge angles and working edges to a flake, the split to a core. `measuresEdgeAngle` is false on any other type, so nothing downstream runs on them; `App.updateSplit` gives null there and `App.workingEdgeDetails` none. Their data stay in the state and the file (`edgeAngle` on a curve, `workingEdges`, `sharpEdge`, `split`), and come back with the type. `batchSpecimen` leaves out what a file stored under another type, so the tables say the same as the open model.
 * `core/actions.ts`: `isScarRegion` keeps "scar" a word, with no scar made; `setSpecimenType` moves frames only across `flake`, so `core` and `generic` share one, and `updateSpecimen` clears a core's corrections by face whichever of the two turned it.
 * `App.isCore`, `isGeneric` and the sections' `visible` choose tools, panels and exports (`App.exportables`, `batchOutputs`, whose kinds may name who they are for). `compute/planes.ts` holds `planeMethodsOf`. `arrowColorModeOf` falls back to one colour without changing the user's display setting, which comes back with the type. `App.inLowerLayer` keeps out the regions with `auto: true` that a flake left, which on a core go by being upper.
 
@@ -214,6 +215,15 @@ camera moves: no coordinates change.
   `tools/measureTool.ts` takes the points (three registered tools: distance, geodesic, angle);
   a geodesic is a `PathSearch` over mesh edges, pulled taut with `relaxPath` and kept on the
   surface (`SurfaceSnap.hug`). `render/measureLayer.ts` draws them (only in the measure mode).
+
+### How a measure was taken
+
+A row of a measure in the measure mode shows on the model how it was taken. What is drawn is only what the measuring functions returned, so what is drawn is what was computed: they return the numbers and their construction together (`MorphDimensions.construction`, `TechDimensions.construction`, `FlakeResult.construction` in original coordinates, `FrameMeasures.box`, `SplitResult.parts`, the stations of `EdgeAngleResult`, `SharpResult.mask`, `SphereFit`). None of this is stored: `swappedSplit` hands on the volumes alone, and `computeDerived` picks what it stores from a `FlakeResult`.
+
+* `compute/measureHint.ts` (pure) turns those into a `MeasureHint`: lines, dots, arcs and pieces of surface, each `current` (the measure of the row) or `other` (the rest of the drawing). An arc carries its vertex and its two directions, so the tests can read the angle back. An empty value gives null. `MEASURE_HINT_PARAMETERS` holds the delay and the shares that size arcs and such.
+* `render/hintLayer.ts` draws one in the overlay (so figures leave it out): `Line2` lines of a constant width on the screen, point sprites, CSS labels that let the pointer through, all without a depth test and over everything else. Pieces of surface share the mesh's vertex buffer; the platform shows through the model, a whole model or a split's two sides are tinted where they are seen (seen through, they would only add up to a blur).
+* `App`: `hoverHint` (after `HOVER_MS`), `focusHint` (the keyboard's, `:focus-visible`), `pinHint`; the first of hover, focus and pinned is drawn (`syncHint`, from `hintOf`, which goes by the key `group:item` the row has in `data-hint`). `refreshHint` runs when what it draws from changes; `clearHints` on another mode, specimen or type. `hintMuted` keeps a row just let go from coming straight back under the pointer. A curve's row of edge angles has no pin: a click selects the curve, as ever.
+* `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks).
 
 ## Specimen frame
 
@@ -420,7 +430,7 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
 
 ## Edge angles
 
-`compute/edgeAngle.ts` is pure: `referenceCurve`, then per station a section (`sectionByPlane` with a `SectionReach`: the BVH, `render/bvhPlane.ts`, also prunes by the
+A flake's (`hasEdgeAngles`). `compute/edgeAngle.ts` is pure: `referenceCurve`, then per station a section (`sectionByPlane` with a `SectionReach`: the BVH, `render/bvhPlane.ts`, also prunes by the
 sphere), A on it and the two ways along the line. `App.updateEdgeAngles` runs it in slices, per curve and only when the curve or the unit changed, and keeps the results
 in `App.edgeResults`; they go to `derived.edgeAngles`, which the summary export reads as it does the regions. In the measure mode the selected curve is drawn by `render/edgeAngleLayer.ts` (`Line2`
 with vertex colours, one hue, along the curve's own points by `valuesAlongCurve`: straight lines between stations would cut through the mesh; the curve layer then draws only its label, `drawnElsewhere`, since two lines at one depth fight) with a scale of two numbers (`#edge-legend`), and `ui/edgeAngleChart.ts` draws the angle along it in the section
@@ -473,9 +483,8 @@ Nothing is cut or fitted again for them: `workingEdgeDetails` shares out what th
   recomputes the table whenever landmarks or curves change; `io/landmarks.ts` writes TPS, Slicer
   `.fcsv`, the long CSV and the sliders from it, so all exports share one numbering.
 * `tools/landmarkTool.ts` places (snapping like curve points) and drags landmarks;
-  `render/landmarkLayer.ts` draws them with their names, and the semilandmarks, as spheres scaled on every camera change by
-  `Viewer.worldPerPixel` at their own depth (`LANDMARK_PX`, `SEMILANDMARK_PX`): real geometry, so the surface still hides them. Hiding and picking go by
-  screen pixels too (`hiddenBeyond`, `LANDMARK_PICK_PX`). Figures draw them in 2D at `FIGURE_LANDMARK_MM` on the paper, the outline included. Names carried
+  `render/landmarkLayer.ts` draws them with their names, and the semilandmarks, as spheres fitted on every camera change: `render/landmarkSize.ts` (no three.js) gives the diameter, a share of the model's diagonal held within limits in CSS pixels (`dotDiameterPx`), at `Viewer.worldPerPixel` of their own depth, and the ball rests one radius toward the camera along the line of sight, so the surface it marks hides none of it and its place on the screen stays. Real geometry, so other parts of the surface still hide them. `render/gmLayer.ts` does the same in its vertex shader, as point sprites of `renderer.getPixelRatio()` device pixels per CSS pixel. Hiding and picking go by
+  screen pixels (`hiddenBeyond`, `LANDMARK_PICK_PX`). Figures draw them in 2D at `FIGURE_LANDMARK_MM` on the paper, the outline included. Names carried
   over from the last specimen are kept in local preferences keyed by mesh checksum
   (`App.previousNames`); the queue itself is session state, not project data.
 
@@ -546,7 +555,7 @@ chosen cortex pieces, and keeps the result for `derived.nodule` and the measurem
 
 ## Volume split
 
-`compute/split.ts`: `splitByPlaneSteps` sums signed tetrahedra from a point on the plane over the
+A core's (`hasVolumeSplit`). `compute/split.ts`: `splitByPlaneSteps` sums signed tetrahedra from a point on the plane over the
 triangles (clipped at the plane) on its upper side; `splitByLoopSteps` partitions along a closed
 chain of mesh edges and sums each side from the chain's centre. In both, the cap closing each
 part has zero volume relative to that reference point, so no cap is built. The app recomputes

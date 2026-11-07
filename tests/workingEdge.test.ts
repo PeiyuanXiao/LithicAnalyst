@@ -255,6 +255,7 @@ describe('working edges on the stepped tool', () => {
 
   it('the other stretch of E1 would be E2: refused, and E1 stays', () => {
     const store = new ProjectStore(emptyProject());
+    store.state.specimen.type = 'flake';
     const { edge } = tool();
     const c = addCurve(store, { ...shape(edge, true), attributes: { type: 'core_edge' } });
     const a = addWorkingEdge(store, { curveId: c.id, start: rim(0), end: rim(180) });
@@ -283,6 +284,7 @@ describe('working edges on the stepped tool', () => {
     for (let tri = 0; tri < tris; tri++) pieceOf[tri] = part.region[tri] === band && centre(tri)[1] > 0 ? 1 : 0;
     const sec = retouchSections({ positions: m.positions, index: m.index, points: edge, closed: true, unit: 'mm', meanEdge: meanEdgeOf(m), pieceOfFace: pieceOf, pieces: new Map([[1, { region: 'R1', layer: 1 }]]) })!;
     const store = new ProjectStore(emptyProject());
+    store.state.specimen.type = 'flake';
     const c = addCurve(store, { ...shape(edge, true), attributes: { type: 'core_edge' } });
     expect(generateWorkingEdges(store, [{ curveId: c.id, stations: sec.result.stations }])).toBe(1);
     const made = store.state.workingEdges[0];

@@ -87,7 +87,7 @@ faces each have vertices of their own) and degenerate triangles left out.
   flake's technical frame, see "Flakes"), followed by `; vertical:S3` when an arrow set the
   vertical (pointing up, origin at the bottom) or `; turned` when a technical frame was turned on the page.
 * `type`: `core`, `flake` or `generic`; files without it are read as `core`. It decides which tools, panels
-  and exports the specimen has, nothing else: the other types' data stay in the file. On a `generic` specimen curve and region types
+  and exports the specimen has, nothing else: the other types' data stay in the file. Edge angles and working edges are a flake's, the volume split a core's: `edgeAngle` on a curve, `workingEdges`, `sharpEdge` and `split` are kept as they are on any type and read again when the type has them, while on another type `derived.edgeAngles`, `derived.retouchAngles`, `derived.sharpEdge`, `derived.workingEdges` and `derived.split` are empty, `edge_angles.csv`, `retouch_angles.csv`, `edge_sharp.csv` and `working_edges.csv` have no rows for it and `measurements.csv` leaves `volume_upper`, `volume_lower` and `volume_ratio` empty. On a `generic` specimen curve and region types
   are the annotator's own text (a preset code from another type stays as it is); a new region's type is `region` until changed, its `scarId` is
   null and it makes no scar, whatever its text says; all regions lie in one layer, cut by all the curves (a region typed `platform` is that word, not
   an upper region, and has `parent: null`), and those with `auto: true` are left aside as on a core. `derived.configuration`, `derived.flake`, `derived.nodule` and `derived.retouchAngles` are empty. Arrows keep
@@ -134,7 +134,7 @@ fitted planes, fitted spheres, volumes ….
 * `nodule`: the sphere fitted to the chosen cortex regions: `{ center, radius, rms, count, regions }`
   (least squares on their vertices — algebraic fit, then Gauss–Newton on the distances; at most
   about 200 000 vertices, evenly picked), or null.
-* `split`: `{ upper, lower, ratio }` (unit³; ratio = upper / lower), or null. By a plane: each side
+* `split`: `{ upper, lower, ratio }` (unit³; ratio = upper / lower), or null (always on a flake or a generic specimen). By a plane: each side
   is closed by the section; with a reference point on the plane the cap adds no volume, so the
   clipped triangles on each side are summed (divergence theorem). By a closed curve: the curve's
   mesh edges split the surface in two; each side is closed by a fan from the centre of the curve
@@ -368,8 +368,8 @@ what needs them is not measured.
 
 ## Edge angles
 
-After Schunk et al. 2023 (3D-EdgeAngle). Measured on curves with `edgeAngle: true`, or, without that key, on a flake's `edge` and a core's
-`core_edge` curves. Lengths are in the coordinate unit; without a stated unit nothing is measured.
+After Schunk et al. 2023 (3D-EdgeAngle). On a flake only. Measured on curves with `edgeAngle: true`, or, without that key, on `edge` curves (and `core_edge` curves, which a specimen has from when it was a core).
+Lengths are in the coordinate unit; without a stated unit nothing is measured.
 
 * **The line measured**: the curve, but for a flake's `edge` with a closed `platform_outline`: a run of its points within `EDGE_RIM_REACH_MM` (1 mm) of the outline and at least `EDGE_RIM_MIN_MM` (2 mm) long lies along the platform and is no part of the edge. What is measured is the longest stretch off such runs, an open line, each end going on to where it comes nearest the outline; an edge merely reaching the outline keeps all its points. The stations, edge angles, sharp stretches, working edges and retouch indices all go by this line, positions along it. The curve in the file keeps its points and `closed`, and goes on cutting the regions.
 * **Reference curve**: the curve resampled every 1 mm, then a moving average `SMOOTH_WINDOW_MM` long (a closed curve goes round; an open
@@ -444,7 +444,7 @@ The two lines meet at A0. Each runs from F (R, or A without retouch) toward the 
 
 ## Working edges
 
-A working edge is a stretch of a curve measured for edge angles (a flake's `edge` is one outline, on which geometric morphometrics and the faces depend; two edges of a scraper are stretches of it). Core, flake or general specimen alike.
+A working edge is a stretch of a curve measured for edge angles (a flake's `edge` is one outline, on which geometric morphometrics and the faces depend; two edges of a scraper are stretches of it). A flake's: on another type they stay in the file with nothing measured on them.
 
 ```json
 "workingEdges": [

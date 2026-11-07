@@ -12,13 +12,14 @@ async function clickLandmark(page: Page, at: { x: number; y: number }): Promise<
   await page.keyboard.up('Shift');
 }
 
-/** The camera moves toward the point under the cursor, by this factor of its distance (several wheel events: each is limited). */
+/** The camera moves toward (or, above 1, away from) the point under the cursor, by this factor of its distance (several wheel events: each is limited). */
 async function zoomInAt(page: Page, at: { x: number; y: number }, factor: number): Promise<void> {
   await page.mouse.move(at.x, at.y);
-  let left = -Math.log(factor) / 0.0016;
+  const way = factor < 1 ? -1 : 1;
+  let left = Math.abs(Math.log(factor)) / 0.0016;
   while (left > 0.5) {
     const d = Math.min(400, left);
-    await page.mouse.wheel(0, -d);
+    await page.mouse.wheel(0, way * d);
     left -= d;
     await nextFrames(page);
   }
@@ -53,7 +54,12 @@ async function dotOnScreen(page: Page, at: { x: number; y: number }): Promise<{ 
   }, png.toString('base64'));
 }
 
-test('a landmark keeps its size on the screen when the camera comes four times closer', async ({ page }) => {
+const SHOTS = 'test-results/23';
+/** The box's diagonal, and a fixed landmark's diameter on it. */
+const WORLD_DIAMETER = 2 * 0.005 * Math.hypot(40, 20, 10);
+
+/** A landmark on the top of the box, nothing selected, the labels off. */
+async function landmarkOnBox(page: Page): Promise<{ p: Vec3; diameter: () => Promise<number>; pxPerUnit: () => Promise<number> }> {
   await openApp(page);
   await loadMesh(page, boxPly());
   await displayPanel(page);
@@ -65,42 +71,98 @@ test('a landmark keeps its size on the screen when the camera comes four times c
   await clickLandmark(page, await toScreen(page, p));
   await expect.poll(async () => (await landmarkIds(page)).length).toBe(1);
   const [id] = await landmarkIds(page);
-  const diameter = () => page.evaluate((x) => window.lithicanalyst.landmarkDiameter(x), id);
+  return {
+    p,
+    diameter: async () => (await page.evaluate((x) => window.lithicanalyst.landmarkDiameter(x), id))!,
+    pxPerUnit: async () => {
+      const a = await toScreen(page, boxPoint(-1, 0, 5)), b = await toScreen(page, boxPoint(1, 0, 5));
+      return Math.hypot(a.x - b.x, a.y - b.y) / 2;
+    },
+  };
+}
 
-  // the one just placed is selected: 1.3 times the size
-  expect(await diameter()).toBeCloseTo(9 * 1.3, 0);
+/** Let go of the selection and take the pointer off the model. */
+async function plain(page: Page): Promise<void> {
   await page.evaluate(() => window.lithicanalyst.selectForTest(null));
   await nextFrames(page, 3);
   await page.mouse.move(5, 5);
-  await nextFrames(page, 2);
-  expect(await diameter()).toBeCloseTo(9, 0);
-
-  const at = await toScreen(page, p);
-  const far = await dotOnScreen(page, at);
-  expect(Math.abs(far.w - 9)).toBeLessThanOrEqual(1.5);
-  expect(Math.abs(far.h - 9)).toBeLessThanOrEqual(1.5);
-  const span = async () => {
-    const a = await toScreen(page, boxPoint(-1, 0, 5)), b = await toScreen(page, boxPoint(1, 0, 5));
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  };
-  const before = await span();
-
-  await zoomInAt(page, at, 0.25);
-  // (the camera did come that close)
-  expect((await span()) / before).toBeGreaterThan(3.6);
-  expect((await span()) / before).toBeLessThan(4.4);
-  await page.mouse.move(5, 5);
   await nextFrames(page, 3);
-  expect(Math.abs((await diameter())! - 9)).toBeLessThan(0.2);
+}
+
+test('a landmark is a share of the model, held between 6 and 16 pixels: far, in the middle and close up', async ({ page }) => {
+  const { p, diameter, pxPerUnit } = await landmarkOnBox(page);
+  // the one just placed is selected: 1.3 times the size
+  const selected = await diameter();
+  await plain(page);
+  // (a little off: the larger ball rests a little nearer the camera)
+  expect(selected / (await diameter())).toBeCloseTo(1.3, 2);
+
+  // the camera moved out: the lower limit
+  await zoomInAt(page, await toScreen(page, p), 2.5);
+  await plain(page);
+  expect(WORLD_DIAMETER * (await pxPerUnit())).toBeLessThan(6);
+  expect(Math.abs((await diameter()) - 6)).toBeLessThan(0.1);
+  const far = await dotOnScreen(page, await toScreen(page, p));
+  expect(Math.abs(far.w - 6)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(far.h - 6)).toBeLessThanOrEqual(1.5);
+  await page.screenshot({ path: `${SHOTS}/landmark-far.png` });
+
+  // a little closer than the whole model in view: by the model
+  await viewFromTop(page);
+  await zoomInAt(page, await toScreen(page, p), 0.6);
+  await plain(page);
+  const between = WORLD_DIAMETER * (await pxPerUnit());
+  expect(between).toBeGreaterThan(6);
+  expect(between).toBeLessThan(16);
+  expect(Math.abs((await diameter()) - between)).toBeLessThan(0.2);
+  const middle = await dotOnScreen(page, await toScreen(page, p));
+  expect(Math.abs(middle.w - between)).toBeLessThanOrEqual(1.5);
+  await page.screenshot({ path: `${SHOTS}/landmark-middle.png` });
+
+  // close up: the upper limit, however close
+  await zoomInAt(page, await toScreen(page, p), 0.2);
+  await plain(page);
+  expect(WORLD_DIAMETER * (await pxPerUnit())).toBeGreaterThan(16);
+  expect(Math.abs((await diameter()) - 16)).toBeLessThan(0.1);
   const near = await dotOnScreen(page, await toScreen(page, p));
-  expect(Math.abs(near.w - far.w)).toBeLessThanOrEqual(1);
-  expect(Math.abs(near.h - far.h)).toBeLessThanOrEqual(1);
+  expect(Math.abs(near.w - 16)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(near.h - 16)).toBeLessThanOrEqual(1.5);
+  await page.screenshot({ path: `${SHOTS}/landmark-near.png` });
+});
 
-  // in the distance too
-  await page.evaluate(() => window.lithicanalyst.view([0, 0, 1], [0, 1, 0]));
+test('seen at a slant, the surface it lies on hides none of a landmark', async ({ page }) => {
+  const { p, diameter } = await landmarkOnBox(page);
+  await page.evaluate(() => window.lithicanalyst.view([0, -0.8, 0.6], [0, 0.6, 0.8]));
   await nextFrames(page, 3);
-  await zoomInAt(page, await toScreen(page, p), 1.5);
-  expect(Math.abs((await diameter())! - 9)).toBeLessThan(0.2);
+  await zoomInAt(page, await toScreen(page, p), 0.3);
+  await plain(page);
+  const d = await diameter();
+  // as high as it is wide: half sunk into the surface, it would show less than that
+  const seen = await dotOnScreen(page, await toScreen(page, p));
+  expect(Math.abs(seen.w - d)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(seen.h - d)).toBeLessThanOrEqual(1.5);
+});
+
+test.describe('on a screen of twice the density', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('the same in CSS pixels, drawn with twice the pixels', async ({ page }) => {
+    const { p, diameter, pxPerUnit } = await landmarkOnBox(page);
+    await zoomInAt(page, await toScreen(page, p), 0.6);
+    await plain(page);
+    const between = WORLD_DIAMETER * (await pxPerUnit());
+    expect(between).toBeGreaterThan(6);
+    expect(between).toBeLessThan(16);
+    expect(Math.abs((await diameter()) - between)).toBeLessThan(0.2);
+    // the picture has twice the pixels of the page
+    const seen = await dotOnScreen(page, await toScreen(page, p));
+    expect(Math.abs(seen.w / 2 - between)).toBeLessThanOrEqual(1);
+    expect(Math.abs(seen.h / 2 - between)).toBeLessThanOrEqual(1);
+    // and the limits too
+    await zoomInAt(page, await toScreen(page, p), 0.2);
+    await plain(page);
+    expect(Math.abs((await diameter()) - 16)).toBeLessThan(0.1);
+  });
 });
 
 test('close up, a click right beside the point of percussion reaches the model, not the landmark', async ({ page }) => {

@@ -77,6 +77,14 @@ export interface AppApi {
   focusCurve(id: string): void;
   /** Null while the mesh is being measured (or without a mesh). */
   autoMeasurements(): AutoMeasurements | null;
+  /** The row of a measure (`group:item`) the pointer is on, after a moment drawn on the model (null: none). */
+  hoverHint(key: string | null): void;
+  /** The row of a measure with the keyboard's focus: drawn at once. */
+  focusHint(key: string | null): void;
+  /** A click on such a row: fixed; again to let go. */
+  pinHint(key: string): void;
+  /** The rows were made anew: mark those shown and fixed. */
+  paintHintRows(): void;
   measuringBusy(): boolean;
   formatMeasurement(m: Measurement): string;
   planeResults(): PlaneResult[];

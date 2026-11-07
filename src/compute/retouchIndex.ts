@@ -160,7 +160,7 @@ export interface SegmentFrameInput {
   /** The technical frame (null: none). */
   matrix: readonly number[] | null;
   /** The longest distance's direction (null: none). */
-  morph: MorphDimensions | null;
+  morph: Pick<MorphDimensions, 'lengthDir'> | null;
   /** The specimen frame: which way the longest axis points (null: none). */
   specimenFrame: readonly number[] | null;
 }

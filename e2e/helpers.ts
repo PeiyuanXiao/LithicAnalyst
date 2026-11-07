@@ -78,6 +78,14 @@ export interface LithicApi {
   regions(): { results: import('../src/compute/regions').RegionResult[]; totals: import('../src/compute/regions').RegionTotals } | null;
   regionCount(): number | null;
   volumeSplit(): import('../src/compute/split').VolumeSplit | null;
+  /** The drawing of how a measure was taken: which row, what is fixed, its parts and what is on the view. */
+  measureHint(): {
+    key: string | null;
+    pinned: string | null;
+    prims: Array<{ kind: 'line' | 'dots' | 'arc' | 'faces'; part: string; role: string; label: string | null; points: Vec3[] | null }>;
+    drawn: { lines: number; dots: number; arcs: number; faces: number; labels: number } | null;
+    labels: string[];
+  };
   nodule(): (import('../src/compute/sphere').SphereFit & { regions: string[] }) | null;
   exportRegionsCsvText(): string;
   figure(format: 'png' | 'svg'): Promise<{ layout: import('../src/render/figure').FigureLayout; data: string } | null>;

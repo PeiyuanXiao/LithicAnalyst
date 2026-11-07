@@ -73,8 +73,9 @@ test('retouch layers: the curves and regions, each layer\'s angles, retouch_angl
   const table = parseCsv(await page.evaluate(() => window.lithicanalyst.exportRegionsCsvText()));
   expect(table.map((r) => [r.type, r.retouch_layer])).toEqual([['retouch', '1'], ['retouch', '2']]);
 
-  // the edge, in the measure mode
+  // the edge, in the measure mode: edge angles are a flake's, and what a core had shows there
   await page.keyboard.press('v');
+  await setType(page, 'flake');
   await page.evaluate((id) => window.lithicanalyst.selectForTest(id), edge);
   await page.locator('#app-mode-measure').click();
   await openSection(page, 'edge-angle');
@@ -117,7 +118,6 @@ test('retouch layers: the curves and regions, each layer\'s angles, retouch_angl
 
   // the layers are the retouch mode's, and that mode a flake's: all the lines, a layer; the method of the layers' own faces
   await page.locator('#app-mode-annotate').click();
-  await setType(page, 'flake');
   await page.evaluate((id) => window.lithicanalyst.selectForTest(id), edge);
   await page.keyboard.press('2');
   await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('edge');
@@ -170,7 +170,7 @@ test('an open retouch curve that stops just short of the edge still cuts off its
 });
 
 test('the sharp edge: a threshold, by hand, dragged or suggested; the stretches and edge_sharp.csv', async ({ page }) => {
-  await openApp(page);
+  await openApp(page, 'flake');
   await loadMesh(page, twoAnglePly());
   const edge = await drawRim(page, 3 * T4.upper);
   await page.locator('#app-mode-measure').click();
@@ -254,7 +254,7 @@ test('the sharp edge: a threshold, by hand, dragged or suggested; the stretches 
 });
 
 test('an edge of one angle: no threshold is suggested, and it says so', async ({ page }) => {
-  await openApp(page);
+  await openApp(page, 'flake');
   await loadMesh(page, t4Ply());
   const edge = await drawRim(page);
   await page.locator('#app-mode-measure').click();
@@ -267,7 +267,7 @@ test('an edge of one angle: no threshold is suggested, and it says so', async ({
 
 test('a folder has one threshold: in its own file, for every model and the summary', async ({ page }) => {
   await mockFolder(page, 'dig', { 'a.ply': twoAnglePly().buffer, 'b.ply': t4Ply().buffer });
-  await openApp(page);
+  await openApp(page, 'flake');
   await openMockFolder(page);
   const meshName = () => page.evaluate(() => window.lithicanalyst.state().mesh?.fileName ?? null);
   const FILE = 'LithicAnalyst/sharp-edge.json';

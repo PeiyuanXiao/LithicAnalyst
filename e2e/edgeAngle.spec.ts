@@ -20,18 +20,18 @@ async function drawEdge(page: Page): Promise<string> {
   await expect.poll(async () => (await state(page)).curves[0]?.closed ?? false).toBe(true);
   await page.keyboard.press('v');
   await page.keyboard.press('2');
-  await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('core_edge');
+  await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('edge');
   return (await state(page)).curves[0].id;
 }
 
 test.beforeEach(async ({ page }) => {
-  await openApp(page);
+  await openApp(page, 'flake');
   await loadMesh(page, t4Ply());
 });
 
 test('the edge of the bicone: results and edge_angles.csv; the curve drawn by its angles; off, they are gone', async ({ page }) => {
   const id = await drawEdge(page);
-  // a core's edge is measured by default
+  // a flake's edge is measured by default
   await expect(page.locator('#curve-edge-angle')).toBeChecked();
   await expect.poll(async () => (await angles(page, id))?.stations.length ?? 0).toBeGreaterThan(150);
   const r = (await angles(page, id))!;
@@ -67,7 +67,7 @@ test('the edge of the bicone: results and edge_angles.csv; the curve drawn by it
   expect(out.text.trim().split('\n')[0]).toBe(HEADER);
   const rows = parseCsv(out.text);
   expect(rows.length).toBe(r.stations.length * 3 * 2);
-  expect(rows[0]).toMatchObject({ curve_id: 'C1', curve_type: 'core_edge', station: '0', position: '0', distance: '2', method: 'three_points' });
+  expect(rows[0]).toMatchObject({ curve_id: 'C1', curve_type: 'edge', station: '0', position: '0', distance: '2', method: 'three_points' });
   expect(rows.at(-1)).toMatchObject({ distance: '10', method: 'two_lines' });
   expect(Math.abs(Number(rows[0].angle_deg) - ANGLE)).toBeLessThan(2);
 

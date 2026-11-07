@@ -246,14 +246,17 @@ describe('the scar of a region', () => {
 describe('measuring edge angles', () => {
   const pts: Vec3[] = [[0, 0, 0], [1, 0, 0]];
   const shape = { anchors: pts, points: pts, anchorIndex: [0, 1], closed: false };
-  it('by default a flake\'s edge and a core\'s edge; the user decides, in one undo step; a file keeps it', () => {
+  it('by default a flake\'s edge; not on a core; the user decides, in one undo step; a file keeps it', () => {
     const s = new ProjectStore(emptyProject());
     const c = addCurve(s, shape);
     const on = () => measuresEdgeAngle(s.curve(c.id)!, s.state.specimen.type);
     expect(on()).toBe(false);
     setCurveAttribute(s, c.id, 'type', 'core_edge');
-    expect(on()).toBe(true);
+    expect(on()).toBe(false);
+    // what a core held shows on a flake
     setSpecimenType(s, 'flake');
+    expect(on()).toBe(true);
+    setCurveAttribute(s, c.id, 'type', 'scar_boundary');
     expect(on()).toBe(false);
     setCurveAttribute(s, c.id, 'type', 'edge');
     expect(on()).toBe(true);

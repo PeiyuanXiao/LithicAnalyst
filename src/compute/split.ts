@@ -9,6 +9,17 @@ export interface VolumeSplit {
   ratio: number | null;
 }
 
+/**
+ * What a split was made along, for drawing it, in the coordinates of the positions; never stored. `upper[t]` says on which
+ * side triangle t lies (as computed, before any swap): by a plane, a triangle it crosses goes with the side holding more of its corners.
+ */
+export type SplitParts =
+  | { kind: 'plane'; point: Vec3; normal: Vec3; upper: Uint8Array }
+  /** `segments`: the chain of mesh edges, two points each; `reference`: the point the volumes are summed from. */
+  | { kind: 'loop'; segments: Vec3[]; reference: Vec3; upper: Uint8Array };
+
+export type SplitResult = VolumeSplit & { parts: SplitParts };
+
 const tet = (o: Vec3, p: ArrayLike<number>, a: number, b: number, c: number): number => {
   const ax = p[3 * a] - o[0], ay = p[3 * a + 1] - o[1], az = p[3 * a + 2] - o[2];
   const bx = p[3 * b] - o[0], by = p[3 * b + 1] - o[1], bz = p[3 * b + 2] - o[2];
@@ -29,7 +40,7 @@ const tetPts = (o: Vec3, a: Vec3, b: Vec3, c: Vec3): number => {
  * reference point on the plane those caps add no volume (divergence theorem),
  * so only the triangles (clipped at the plane) are summed.
  */
-export function* splitByPlaneSteps(positions: ArrayLike<number>, index: ArrayLike<number>, point: Vec3, normal: Vec3): Steps<VolumeSplit> {
+export function* splitByPlaneSteps(positions: ArrayLike<number>, index: ArrayLike<number>, point: Vec3, normal: Vec3): Steps<SplitResult> {
   const n = Math.floor(positions.length / 3);
   const d = new Float64Array(n);
   for (let v = 0; v < n; v++) {
@@ -41,6 +52,7 @@ export function* splitByPlaneSteps(positions: ArrayLike<number>, index: ArrayLik
     const t = d[a] / (d[a] - d[b]);
     return [positions[3 * a] + t * (positions[3 * b] - positions[3 * a]), positions[3 * a + 1] + t * (positions[3 * b + 1] - positions[3 * a + 1]), positions[3 * a + 2] + t * (positions[3 * b + 2] - positions[3 * a + 2])];
   };
+  const side = new Uint8Array(Math.floor(index.length / 3));
   let upper = 0, total = 0;
   for (let t = 0; t + 2 < index.length; t += 3) {
     if (t % YIELD_EVERY === 0) yield;
@@ -48,6 +60,7 @@ export function* splitByPlaneSteps(positions: ArrayLike<number>, index: ArrayLik
     total += tet(point, positions, tri[0], tri[1], tri[2]);
     const up = tri.map((v) => d[v] >= 0);
     const count = up.filter(Boolean).length;
+    if (count >= 2) side[t / 3] = 1;
     if (count === 3) upper += tet(point, positions, tri[0], tri[1], tri[2]);
     else if (count > 0) {
       // the part of the triangle on the upper side, keeping its winding
@@ -63,7 +76,7 @@ export function* splitByPlaneSteps(positions: ArrayLike<number>, index: ArrayLik
   // triangles may face inward: measure along the mesh's own orientation
   const sign = total < 0 ? -1 : 1;
   const u = upper * sign, all = total * sign;
-  return { upper: u, lower: all - u, ratio: all - u > 0 ? u / (all - u) : null };
+  return { upper: u, lower: all - u, ratio: all - u > 0 ? u / (all - u) : null, parts: { kind: 'plane', point, normal, upper: side } };
 }
 
 /**
@@ -73,7 +86,7 @@ export function* splitByPlaneSteps(positions: ArrayLike<number>, index: ArrayLik
  * reference point). `normal` picks the upper side; null when the chain does
  * not separate the surface into exactly two pieces.
  */
-export function* splitByLoopSteps(positions: ArrayLike<number>, index: ArrayLike<number>, edges: EdgeTable, chain: number[], normal: Vec3): Steps<VolumeSplit | null> {
+export function* splitByLoopSteps(positions: ArrayLike<number>, index: ArrayLike<number>, edges: EdgeTable, chain: number[], normal: Vec3): Steps<SplitResult | null> {
   const { region, count } = yield* partitionFacesSteps(index, chain, edges);
   if (count !== 2) return null;
   const verts = new Set(chain);
@@ -92,9 +105,12 @@ export function* splitByLoopSteps(positions: ArrayLike<number>, index: ArrayLike
   const sign = vol[0] + vol[1] < 0 ? -1 : 1;
   const up = lean[0] >= lean[1] ? 0 : 1;
   const upper = vol[up] * sign, lower = vol[1 - up] * sign;
-  return { upper, lower, ratio: lower > 0 ? upper / lower : null };
+  const side = new Uint8Array(region.length);
+  for (let t = 0; t < region.length; t++) if (region[t] === up) side[t] = 1;
+  const segments = chain.map((v): Vec3 => [positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]]);
+  return { upper, lower, ratio: lower > 0 ? upper / lower : null, parts: { kind: 'loop', segments, reference: o, upper: side } };
 }
 
-/** The split with upper and lower exchanged when `swap` is set. */
+/** The volumes (only: nothing to draw with), upper and lower exchanged when `swap` is set. */
 export const swappedSplit = (v: VolumeSplit, swap: boolean): VolumeSplit =>
-  swap ? { upper: v.lower, lower: v.upper, ratio: v.upper > 0 ? v.lower / v.upper : null } : v;
+  swap ? { upper: v.lower, lower: v.upper, ratio: v.upper > 0 ? v.lower / v.upper : null } : { upper: v.upper, lower: v.lower, ratio: v.ratio };

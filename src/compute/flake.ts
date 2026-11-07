@@ -83,12 +83,25 @@ export function angleDeg(u: Vec3, v: Vec3): number | null {
 
 // ---------------------------------------------------------------- dimensions
 
+/** How the morphological dimensions were taken: for drawing, in the coordinates of the positions. */
+export interface MorphConstruction {
+  /** The farthest pair of vertices. */
+  length: [Vec3, Vec3];
+  /** The width and the thickness as lines of their very lengths: in the plane across the middle of the length. */
+  width: [Vec3, Vec3];
+  thickness: [Vec3, Vec3];
+  /** The vertices they were reached on. */
+  widthVertices: [Vec3, Vec3];
+  thicknessVertices: [Vec3, Vec3];
+}
+
 export interface MorphDimensions {
   length: number;
   width: number;
   thickness: number;
   /** Unit direction of the length (from one end of the longest pair to the other). */
   lengthDir: Vec3;
+  construction: MorphConstruction;
 }
 
 /** The farthest of all the vertices from `p`, and that distance. */
@@ -175,13 +188,13 @@ export function* morphDimensionsSteps(positions: ArrayLike<number>): Steps<Morph
   const vl = Math.hypot(v0[0], v0[1], v0[2]);
   const v: Vec3 = [v0[0] / vl, v0[1] / vl, v0[2] / vl];
   const w: Vec3 = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
-  // the width is reached on the outline of the projection (convex hull in 2D, monotone chain)
-  const flat: Array<[number, number]> = [];
-  for (let i = 0; i < h; i++) flat.push([dot(at(i), v), dot(at(i), w)]);
+  // the width is reached on the outline of the projection (convex hull in 2D, monotone chain); each point knows its vertex
+  const flat: Array<[number, number, number]> = [];
+  for (let i = 0; i < h; i++) flat.push([dot(at(i), v), dot(at(i), w), hull[i]]);
   flat.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
   yield;
-  const side = (o: [number, number], p: [number, number], q: [number, number]) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
-  const outline: Array<[number, number]> = [];
+  const side = (o: readonly number[], p: readonly number[], q: readonly number[]) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+  const outline: Array<[number, number, number]> = [];
   for (const p of flat) {
     while (outline.length >= 2 && side(outline[outline.length - 2], outline[outline.length - 1], p) <= 0) outline.pop();
     outline.push(p);
@@ -192,7 +205,7 @@ export function* morphDimensionsSteps(positions: ArrayLike<number>): Steps<Morph
     while (outline.length >= lower && side(outline[outline.length - 2], outline[outline.length - 1], p) <= 0) outline.pop();
     outline.push(p);
   }
-  let width2 = 0, ax = 0, ay = 0, bx = 0, by = 0;
+  let width2 = 0, ax = 0, ay = 0, bx = 0, by = 0, aVertex = hull[a], bVertex = hull[b];
   for (let i = 0; i < outline.length; i++) {
     if (i % 256 === 0) yield;
     for (let j = i + 1; j < outline.length; j++) {
@@ -202,8 +215,10 @@ export function* morphDimensionsSteps(positions: ArrayLike<number>): Steps<Morph
         width2 = d;
         ax = outline[i][0];
         ay = outline[i][1];
+        aVertex = outline[i][2];
         bx = outline[j][0];
         by = outline[j][1];
+        bVertex = outline[j][2];
       }
     }
   }
@@ -211,7 +226,7 @@ export function* morphDimensionsSteps(positions: ArrayLike<number>): Steps<Morph
   let width = Math.sqrt(width2);
   const n = Math.floor(positions.length / 3);
   for (let guard = 0; guard < 4; guard++) {
-    let top = -1, tx = 0, ty = 0;
+    let top = -1, tx = 0, ty = 0, tVertex = 0;
     for (let i = 0; i < n; i++) {
       if (i % YIELD_EVERY === 0) yield;
       const x = positions[3 * i] * v[0] + positions[3 * i + 1] * v[1] + positions[3 * i + 2] * v[2];
@@ -221,36 +236,76 @@ export function* morphDimensionsSteps(positions: ArrayLike<number>): Steps<Morph
         top = d;
         tx = x;
         ty = y;
+        tVertex = i;
       }
     }
     if (Math.sqrt(top) <= width && guard > 0) break;
     width = Math.max(width, Math.sqrt(top));
     bx = ax;
     by = ay;
+    bVertex = aVertex;
     ax = tx;
     ay = ty;
+    aVertex = tVertex;
   }
   width = Math.hypot(ax - bx, ay - by);
   // perpendicular to the length and the width
   const across: [number, number] = width > 0 ? [-(by - ay) / width, (bx - ax) / width] : [1, 0];
-  let lo = Infinity, hi = -Infinity;
+  let lo = Infinity, hi = -Infinity, loVertex = 0, hiVertex = 0;
   for (let i = 0; i < n; i++) {
     if (i % YIELD_EVERY === 0) yield;
     const x = positions[3 * i] * v[0] + positions[3 * i + 1] * v[1] + positions[3 * i + 2] * v[2];
     const y = positions[3 * i] * w[0] + positions[3 * i + 1] * w[1] + positions[3 * i + 2] * w[2];
     const d = x * across[0] + y * across[1];
-    if (d < lo) lo = d;
-    if (d > hi) hi = d;
+    if (d < lo) {
+      lo = d;
+      loVertex = i;
+    }
+    if (d > hi) {
+      hi = d;
+      hiVertex = i;
+    }
   }
-  return { length: best, width, thickness: hi >= lo ? hi - lo : 0, lengthDir: u };
+  // what was reached, as lines: across the middle of the length; the thickness through the middle of the width
+  const middle = (dot(pa, u) + dot(pb, u)) / 2;
+  const onPlane = (x: number, y: number): Vec3 => [middle * u[0] + x * v[0] + y * w[0], middle * u[1] + x * v[1] + y * w[1], middle * u[2] + x * v[2] + y * w[2]];
+  const along: [number, number] = [across[1], -across[0]];
+  const centre2 = ((ax + bx) / 2) * along[0] + ((ay + by) / 2) * along[1];
+  const onThickness = (d: number): Vec3 => onPlane(along[0] * centre2 + across[0] * d, along[1] * centre2 + across[1] * d);
+  const vertex = (i: number): Vec3 => [positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]];
+  return {
+    length: best,
+    width,
+    thickness: hi >= lo ? hi - lo : 0,
+    lengthDir: u,
+    construction: {
+      length: [pa, pb],
+      width: [onPlane(ax, ay), onPlane(bx, by)],
+      thickness: [onThickness(lo), onThickness(hi)],
+      widthVertices: [vertex(aVertex), vertex(bVertex)],
+      thicknessVertices: [vertex(loVertex), vertex(hiVertex)],
+    },
+  };
 }
 
 export const morphDimensions = (positions: ArrayLike<number>): MorphDimensions | null => runSync(morphDimensionsSteps(positions));
+
+/** How the technical dimensions were taken: for drawing, in the coordinates of the positions. A point of the box is `origin` + X·axes[0] + Y·axes[1] + Z·axes[2]. */
+export interface TechConstruction {
+  origin: Vec3;
+  axes: [Vec3, Vec3, Vec3];
+  /** The box in the frame: X and Z ranges, Y from 0 (P) to the largest. */
+  min: Vec3;
+  max: Vec3;
+  /** The vertices that reached each side of it. */
+  extremes: { xMin: Vec3; xMax: Vec3; yMax: Vec3; zMin: Vec3; zMax: Vec3 };
+}
 
 export interface TechDimensions {
   tech_length: number;
   tech_width: number;
   tech_thickness: number;
+  construction: TechConstruction;
 }
 
 /**
@@ -260,17 +315,39 @@ export interface TechDimensions {
 export function* techDimensionsSteps(positions: ArrayLike<number>, frame: FrameAxes): Steps<TechDimensions> {
   const { x: ax, y: ay, z: az, origin: o } = frame;
   let x0 = Infinity, x1 = -Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  let xMin = 0, xMax = 0, yMax = 0, zMin = 0, zMax = 0;
   for (let i = 0; i + 2 < positions.length; i += 3) {
     if (i % YIELD_EVERY === 0) yield;
     const dx = positions[i] - o[0], dy = positions[i + 1] - o[1], dz = positions[i + 2] - o[2];
     const x = dx * ax[0] + dy * ax[1] + dz * ax[2], y = dx * ay[0] + dy * ay[1] + dz * ay[2], z = dx * az[0] + dy * az[1] + dz * az[2];
-    if (x < x0) x0 = x;
-    if (x > x1) x1 = x;
-    if (y > y1) y1 = y;
-    if (z < z0) z0 = z;
-    if (z > z1) z1 = z;
+    if (x < x0) {
+      x0 = x;
+      xMin = i;
+    }
+    if (x > x1) {
+      x1 = x;
+      xMax = i;
+    }
+    if (y > y1) {
+      y1 = y;
+      yMax = i;
+    }
+    if (z < z0) {
+      z0 = z;
+      zMin = i;
+    }
+    if (z > z1) {
+      z1 = z;
+      zMax = i;
+    }
   }
-  return { tech_length: y1, tech_width: x1 - x0, tech_thickness: z1 - z0 };
+  const vertex = (i: number): Vec3 => [positions[i], positions[i + 1], positions[i + 2]];
+  return {
+    tech_length: y1,
+    tech_width: x1 - x0,
+    tech_thickness: z1 - z0,
+    construction: { origin: o, axes: [ax, ay, az], min: [x0, 0, z0], max: [x1, y1, z1], extremes: { xMin: vertex(xMin), xMax: vertex(xMax), yMax: vertex(yMax), zMin: vertex(zMin), zMax: vertex(zMax) } },
+  };
 }
 
 /** The morphological length's direction, projected onto the technical frame's XY plane: its angle with the Y axis, 0–90°. */
@@ -278,6 +355,15 @@ export function morphTechAngle(lengthDir: Vec3, frame: FrameAxes): number | null
   const x = dot(lengthDir, frame.x), y = dot(lengthDir, frame.y);
   if (!(Math.hypot(x, y) > 1e-12)) return null;
   return (Math.atan2(Math.abs(x), Math.abs(y)) * 180) / Math.PI;
+}
+
+/** What that angle was taken from: the projected direction as a unit vector, on the +Y side, so the angle between it and +Y is the angle. Null where there is none. */
+export function morphAxisOnFrame(lengthDir: Vec3, frame: FrameAxes): Vec3 | null {
+  const x = dot(lengthDir, frame.x), y = dot(lengthDir, frame.y);
+  const l = Math.hypot(x, y);
+  if (!(l > 1e-12)) return null;
+  const s = (y < 0 ? -1 : 1) / l;
+  return [s * (x * frame.x[0] + y * frame.y[0]), s * (x * frame.x[1] + y * frame.y[1]), s * (x * frame.x[2] + y * frame.y[2])];
 }
 
 // ---------------------------------------------------------------- platform
@@ -318,10 +404,13 @@ export interface PlatformProfile {
   epa2: Array<number | null>;
   /** Where EPA was taken along the section, by distance. */
   q: Array<Vec3 | null>;
+  /** The chord taken as the tangent there, by distance, its far end last (null where it runs past the section's end). */
+  chords: Array<[Vec3, Vec3] | null>;
   ipa: number | null;
-  /** The ventral profile IPA was fitted to, and the fitted line. */
+  /** The ventral profile IPA was fitted to, the fitted line and its direction. */
   ventral: Vec3[] | null;
   ventralLine: [Vec3, Vec3] | null;
+  ventralDir: Vec3 | null;
 }
 
 /**
@@ -385,7 +474,7 @@ export function platformProfile(line: SectionLine, P: Vec3, frame: FrameAxes, in
   }
 
   // EPA: from E along the section
-  const epa3: Array<number | null> = [], epa2: Array<number | null> = [], q: Array<Vec3 | null> = [];
+  const epa3: Array<number | null> = [], epa2: Array<number | null> = [], q: Array<Vec3 | null> = [], chords: Array<[Vec3, Vec3] | null> = [];
   const cum = arcLengths(dorsal, false);
   const L = cum[cum.length - 1];
   for (const d of EPA_DISTANCES_MM) {
@@ -393,6 +482,7 @@ export function platformProfile(line: SectionLine, P: Vec3, frame: FrameAxes, in
       epa3.push(null);
       epa2.push(null);
       q.push(null);
+      chords.push(null);
       continue;
     }
     const dm = d / mm;
@@ -400,13 +490,16 @@ export function platformProfile(line: SectionLine, P: Vec3, frame: FrameAxes, in
     const Q = dm <= L ? pointAtArc(dorsal, false, cum, dm) : null;
     q.push(Q);
     epa3.push(Q ? angleDeg(neg(lineDir), sub(Q, E)) : null);
-    epa2.push(Q && dm + half <= L ? angleDeg(neg(lineDir), sub(pointAtArc(dorsal, false, cum, dm + half), pointAtArc(dorsal, false, cum, dm - half))) : null);
+    const chord: [Vec3, Vec3] | null = Q && dm + half <= L ? [pointAtArc(dorsal, false, cum, dm - half), pointAtArc(dorsal, false, cum, dm + half)] : null;
+    chords.push(chord);
+    epa2.push(chord ? angleDeg(neg(lineDir), sub(chord[1], chord[0])) : null);
   }
 
   // IPA: from P along the ventral side, the band of the technical length, up to the distal end
   let ipa: number | null = null;
   let ventral: Vec3[] | null = null;
   let ventralLine: [Vec3, Vec3] | null = null;
+  let ventralDir: Vec3 | null = null;
   if (techLength !== null && lineDir) {
     const lo = IPA_BAND[0] * techLength, hi = IPA_BAND[1] * techLength;
     const ys = ventralWalk.map((p) => inFrame(frame, p)[1]);
@@ -428,6 +521,7 @@ export function platformProfile(line: SectionLine, P: Vec3, frame: FrameAxes, in
       const d = dot(band.dir, frame.y) < 0 ? neg(band.dir) : band.dir;
       ipa = angleDeg(lineDir, d);
       ventral = part;
+      ventralDir = d;
       const on = (p: Vec3): Vec3 => {
         const s = dot(sub(p, band.point), d);
         return [band.point[0] + s * d[0], band.point[1] + s * d[1], band.point[2] + s * d[2]];
@@ -435,7 +529,7 @@ export function platformProfile(line: SectionLine, P: Vec3, frame: FrameAxes, in
       ventralLine = [on(part[0]), on(part[part.length - 1])];
     }
   }
-  return { stretch, E, lineDir, line: segment, epa3, epa2, q, ipa, ventral, ventralLine };
+  return { stretch, E, lineDir, line: segment, epa3, epa2, q, chords, ipa, ventral, ventralLine, ventralDir };
 }
 
 // ---------------------------------------------------------------- all together
@@ -475,6 +569,42 @@ export interface FlakeGeometry {
   ventralLine: [Vec3, Vec3] | null;
 }
 
+/**
+ * How a flake's measurements were taken, in original coordinates, for drawing them: exactly what the numbers came from (`compute/measureHint.ts`). Not stored.
+ * Each part is null while what it needs is lacking.
+ */
+export interface FlakeConstruction {
+  tech: TechConstruction | null;
+  morph: MorphConstruction | null;
+  /** The two axes of the angle, from one point; `reach`: how far to draw them. */
+  angle: { origin: Vec3; tech: Vec3; morph: Vec3; reach: number } | null;
+  /** The platform's width: its two ends, and the way between them over the platform. */
+  width: { ends: [Vec3, Vec3]; path: Vec3[] | null } | null;
+  /** The platform's depth: P to E, and the way between them over the platform. */
+  depth: { P: Vec3; E: Vec3; path: Vec3[] | null } | null;
+  /** The triangles of the platform. */
+  platformFaces: ArrayLike<number> | null;
+  /** What was taken on the longitudinal section. */
+  profile: ProfileConstruction | null;
+}
+
+export interface ProfileConstruction {
+  P: Vec3;
+  E: Vec3;
+  /** The section on the model. */
+  section: Vec3[];
+  closed: boolean;
+  platformLine: [Vec3, Vec3] | null;
+  /** The platform line's unit direction, P to E. */
+  lineDir: Vec3 | null;
+  /** By the distances of EPA. */
+  q: Array<Vec3 | null>;
+  chords: Array<[Vec3, Vec3] | null>;
+  ventral: Vec3[] | null;
+  ventralLine: [Vec3, Vec3] | null;
+  ventralDir: Vec3 | null;
+}
+
 export interface FlakeResult {
   measures: FlakeMeasures;
   /** Why each empty measure is empty: the first of `FLAKE_EMPTY_REASONS` that holds; not stored. */
@@ -482,6 +612,7 @@ export interface FlakeResult {
   geometry: FlakeGeometry;
   /** The longitudinal section (coordinates relative to the mesh's offset); not stored. */
   section: SectionLine | null;
+  construction: FlakeConstruction;
 }
 
 /** Every measurement of a flake from its annotations. */
@@ -491,6 +622,10 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   const m = emptyFlakeMeasures();
   const geometry: FlakeGeometry = { P, E: null, platformLine: null, epaPoints: [], ventral: null, ventralLine: null };
   const reasons: FlakeResult['reasons'] = {};
+  const toLocal = (p: Vec3): Vec3 => [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+  const toOriginal = (p: Vec3): Vec3 => [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
+  const pair = (x: [Vec3, Vec3] | null): [Vec3, Vec3] | null => (x ? [toOriginal(x[0]), toOriginal(x[1])] : null);
+  const construction: FlakeConstruction = { tech: null, morph: null, angle: null, width: null, depth: null, platformFaces: platformFaces?.length ? platformFaces : null, profile: null };
   /** Those of these measures still empty, for this reason. */
   const why = (reason: FlakeEmptyReason, keys: readonly FlakeMeasure[]) => {
     for (const k of keys) if (m[k] === null && !reasons[k]) reasons[k] = reason;
@@ -499,19 +634,25 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
     m.morph_length = morph.length;
     m.morph_width = morph.width;
     m.morph_thickness = morph.thickness;
+    const c = morph.construction;
+    construction.morph = { length: pair(c.length)!, width: pair(c.width)!, thickness: pair(c.thickness)!, widthVertices: pair(c.widthVertices)!, thicknessVertices: pair(c.thicknessVertices)! };
   } else why('no_hull', ['morph_length', 'morph_width', 'morph_thickness']);
   if (!matrix || !P) {
     why(P ? 'frame_failed' : 'no_axis', AXIS_MEASURES);
-    return { measures: m, reasons, geometry, section: null };
+    return { measures: m, reasons, geometry, section: null, construction };
   }
-  const toLocal = (p: Vec3): Vec3 => [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
-  const toOriginal = (p: Vec3): Vec3 => [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
   const axes = frameAxes(matrix);
   const frame: FrameAxes = { ...axes, origin: toLocal(axes.origin) };
   const tech = yield* techDimensionsSteps(positions, frame);
-  Object.assign(m, tech);
+  m.tech_length = tech.tech_length;
+  m.tech_width = tech.tech_width;
+  m.tech_thickness = tech.tech_thickness;
+  const e = tech.construction.extremes;
+  construction.tech = { ...tech.construction, origin: axes.origin, extremes: { xMin: toOriginal(e.xMin), xMax: toOriginal(e.xMax), yMax: toOriginal(e.yMax), zMin: toOriginal(e.zMin), zMax: toOriginal(e.zMax) } };
   if (morph) {
     m.morph_tech_angle_deg = morphTechAngle(morph.lengthDir, frame);
+    const on = morphAxisOnFrame(morph.lengthDir, frame);
+    if (on) construction.angle = { origin: axes.origin, tech: frame.y, morph: on, reach: tech.tech_length };
     why('along_z', ['morph_tech_angle_deg']);
   } else why('no_hull', ['morph_tech_angle_deg']);
   const localP = toLocal(P);
@@ -519,18 +660,18 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   yield;
   if (!platformFaces?.length) {
     why('no_platform', PLATFORM_MEASURES);
-    return { measures: m, reasons, geometry, section };
+    return { measures: m, reasons, geometry, section, construction };
   }
   if (!section) {
     why('section_misses_platform', PLATFORM_MEASURES);
-    return { measures: m, reasons, geometry, section };
+    return { measures: m, reasons, geometry, section, construction };
   }
   const mask = new Uint8Array(Math.floor(index.length / 3));
   for (let i = 0; i < platformFaces.length; i++) mask[platformFaces[i]] = 1;
   const profile = platformProfile(section, localP, frame, (f) => mask[f] === 1, meanEdge, tech.tech_length, mmPerUnit(unit));
   if (!profile) {
     why('section_misses_platform', PLATFORM_MEASURES);
-    return { measures: m, reasons, geometry, section };
+    return { measures: m, reasons, geometry, section, construction };
   }
   m.platform_area = platformArea;
   why('no_platform', ['platform_area']);
@@ -538,12 +679,14 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   const depth = yield* regionPathSteps(positions, index, platformFaces, localP, profile.E);
   m.platform_depth_path = depth?.length ?? null;
   why('no_path', ['platform_depth_path']);
+  construction.depth = { P, E: toOriginal(profile.E), path: depth ? depth.points.map(toOriginal) : null };
   if (ends.length >= 2) {
     const a = toLocal(ends[0]), b = toLocal(ends[1]);
     m.platform_width_chord = dist(a, b);
     const width = yield* regionPathSteps(positions, index, platformFaces, a, b);
     m.platform_width_path = width?.length ?? null;
     why('no_path', ['platform_width_path']);
+    construction.width = { ends: [ends[0], ends[1]], path: width ? width.points.map(toOriginal) : null };
   } else why('no_ends', ['platform_width_chord', 'platform_width_path']);
   m.epa_3pt_1mm = profile.epa3[0];
   m.epa_3pt_2mm = profile.epa3[1];
@@ -554,13 +697,25 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   m.ipa = profile.ipa;
   why(mmPerUnit(unit) === null ? 'no_unit' : 'section_ends', EPA_MEASURES);
   why('band_not_reached', ['ipa']);
-  const pair = (x: [Vec3, Vec3] | null): [Vec3, Vec3] | null => (x ? [toOriginal(x[0]), toOriginal(x[1])] : null);
   geometry.E = toOriginal(profile.E);
   geometry.platformLine = pair(profile.line);
   geometry.epaPoints = profile.q.map((x) => (x ? toOriginal(x) : null));
   geometry.ventral = profile.ventral ? pair([profile.ventral[0], profile.ventral[profile.ventral.length - 1]]) : null;
   geometry.ventralLine = pair(profile.ventralLine);
-  return { measures: m, reasons, geometry, section };
+  construction.profile = {
+    P,
+    E: geometry.E,
+    section: section.points.map(toOriginal),
+    closed: section.closed,
+    platformLine: geometry.platformLine,
+    lineDir: profile.lineDir,
+    q: geometry.epaPoints,
+    chords: profile.chords.map(pair),
+    ventral: profile.ventral ? profile.ventral.map(toOriginal) : null,
+    ventralLine: geometry.ventralLine,
+    ventralDir: profile.ventralDir,
+  };
+  return { measures: m, reasons, geometry, section, construction };
 }
 
 export const flakeMeasures = (input: FlakeInput): FlakeResult => runSync(flakeMeasuresSteps(input));

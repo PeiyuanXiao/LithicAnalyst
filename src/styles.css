@@ -21,6 +21,9 @@
   --accent-text: #8a5200;
   --accent-line: #a8670f;
   --accent-soft: #f6dcae;
+  /* the grey of what goes with a measure's drawing, and its edge */
+  --hint-other: #686866;
+  --hint-other-halo: #ffffff;
   --danger: #b3261e;
   --danger-line: #e0a9a3;
   --ok: #2e7322;
@@ -76,6 +79,8 @@
   --accent-text: #f2a33a;
   --accent-line: #f2a33a;
   --accent-soft: #3a2c18;
+  --hint-other: #b4b4b0;
+  --hint-other-halo: #000000;
   --danger: #f0716a;
   --danger-line: #5a2f2c;
   --ok: #7fbf6a;
@@ -2080,6 +2085,46 @@ input[type="checkbox"]:disabled {
   text-align: right;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* a measure that shows on the model how it was taken: on the pointer or the focus, and fixed by a click */
+.num-grid [data-hint] {
+  cursor: pointer;
+}
+
+.num-grid [data-hint].is-hinted {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.num-grid [data-hint].is-pinned {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+[data-hint]:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+}
+
+.arrow-row[data-hint].is-hinted {
+  box-shadow: inset 2px 0 0 var(--accent-line);
+}
+
+/* the value at the middle of a dimension line; it lets the pointer through, as the labels' layer does */
+.hint-label {
+  font: 600 11px/1.25 var(--font-data);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.hint-label-current {
+  border-color: var(--accent-line);
+  color: var(--accent-text);
 }
 
 /* label | x | y | z | unit */

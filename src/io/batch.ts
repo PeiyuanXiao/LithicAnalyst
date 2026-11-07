@@ -10,6 +10,7 @@ import type { RetouchIndices } from '../compute/retouchIndex';
 import type { WorkingEdgesDerived, WorkingEdgeRow } from '../compute/workingEdge';
 import { gmMissingInputs, type GmMissing } from '../compute/gm';
 import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, GmDerived, RetouchAngleCurve } from '../core/derived';
+import { hasEdgeAngles, hasVolumeSplit } from '../core/fields';
 import { measurementValue } from '../core/measurements';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
 import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, workingEdgesCsv, type CsvOptions } from './csv';
@@ -127,26 +128,29 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     const nod = p.derived.nodule as { radius?: number } | null | undefined;
     if (typeof nod?.radius === 'number') values.nodule_radius = nod.radius;
     const sp = p.derived.split as { ratio?: number | null } | null | undefined;
-    if (typeof sp?.ratio === 'number') values.volume_ratio = sp.ratio;
+    if (hasVolumeSplit(st.specimen.type) && typeof sp?.ratio === 'number') values.volume_ratio = sp.ratio;
     for (const m of st.measurements) values[m.label] = measurementValue(m);
     observers.set(who, values);
   }
   const { state, derived } = primary.project;
+  // what a file stored under another type is not exported under this one
+  const split = hasVolumeSplit(state.specimen.type) ? storedSplit(derived.split) : null;
+  const edges = hasEdgeAngles(state.specimen.type);
   return {
     file,
     state,
     auto: primary.measures.auto,
     planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices, storedRegionFit(derived.planes, p.id))),
-    configuration: state.specimen.type === 'core' ? coreConfiguration(state, primary.measures.box, storedSplit(derived.split)) : null,
+    configuration: state.specimen.type === 'core' ? coreConfiguration(state, primary.measures.box, split) : null,
     regions: (derived.regions as BatchSpecimen['regions']) ?? [],
     regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
-    split: storedSplit(derived.split),
+    split,
     flake: state.specimen.type === 'flake' ? ((derived.flake as FlakeDerived | null | undefined)?.measures ?? null) : null,
-    edgeAngles: (derived.edgeAngles as { curves?: EdgeAngleCurve[] } | null | undefined)?.curves ?? [],
-    retouchAngles: (derived.retouchAngles as { curves?: RetouchAngleCurve[] } | null | undefined)?.curves ?? [],
+    edgeAngles: edges ? ((derived.edgeAngles as { curves?: EdgeAngleCurve[] } | null | undefined)?.curves ?? []) : [],
+    retouchAngles: edges ? ((derived.retouchAngles as { curves?: RetouchAngleCurve[] } | null | undefined)?.curves ?? []) : [],
     retouchIndices: state.specimen.type === 'flake' ? ((derived.retouchIndices as RetouchIndices | null | undefined) ?? null) : null,
-    workingEdges: (derived.workingEdges as WorkingEdgesDerived | null | undefined)?.edges ?? [],
+    workingEdges: edges ? ((derived.workingEdges as WorkingEdgesDerived | null | undefined)?.edges ?? []) : [],
     gm: state.specimen.type === 'flake' ? ((derived.gm as GmDerived | null | undefined) ?? null) : null,
     observers,
   };
@@ -261,11 +265,11 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
     ['planes.csv', (s) => planesCsv(s.state, s.planes, plain)],
     ['regions.csv', (s) => regionsCsv(s.state, s.regions, plain)],
     ['edge_angles.csv', (s) => edgeAnglesCsv(s.state, s.edgeAngles, plain)],
-    ['retouch_angles.csv', (s) => retouchAnglesCsv(s.state, s.retouchAngles, plain), typed],
+    ['retouch_angles.csv', (s) => retouchAnglesCsv(s.state, s.retouchAngles, plain)],
     ['retouch_sections.csv', (s) => retouchSectionsCsv(s.state, s.retouchIndices ?? null, plain)],
     ['retouch_segments.csv', (s) => retouchSegmentsCsv(s.state, s.retouchIndices ?? null, plain)],
     ['invasiveness.csv', (s) => invasivenessCsv(s.state, s.retouchIndices ?? null, plain)],
-    ['edge_sharp.csv', (s) => edgeSharpCsv(s.state, s.edgeAngles, plain), typed],
+    ['edge_sharp.csv', (s) => edgeSharpCsv(s.state, s.edgeAngles, plain)],
     ['working_edges.csv', (s) => workingEdgesCsv(s.state, s.workingEdges ?? [], s.edgeAngles, plain)],
     ['relations.csv', (s) => relationsCsv(s.state, plain), typed],
     ['series.csv', (s) => seriesCsv(s.state, plain), typed],

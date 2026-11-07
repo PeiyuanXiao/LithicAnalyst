@@ -71,13 +71,17 @@ describe('the generic type of specimen', () => {
     expect(planeMethodsOf('flake')).toEqual(['curves', 'region']);
   });
 
-  it('measures edge angles only where the user says', () => {
-    for (const type of ['edge', 'core_edge', 'suture']) expect(measuresEdgeAngle({ attributes: { type } }, 'generic')).toBe(false);
-    expect(measuresEdgeAngle({ edgeAngle: true, attributes: { type: 'suture' } }, 'generic')).toBe(true);
-    // the others as they were
+  it('measures no edge angles, as a core does not: they are a flake\'s, whatever a curve says', () => {
+    for (const specimen of ['generic', 'core'] as const) {
+      for (const type of ['edge', 'core_edge', 'suture']) expect(measuresEdgeAngle({ attributes: { type } }, specimen)).toBe(false);
+      expect(measuresEdgeAngle({ edgeAngle: true, attributes: { type: 'suture' } }, specimen)).toBe(false);
+    }
     expect(measuresEdgeAngle({ attributes: { type: 'edge' } }, 'flake')).toBe(true);
-    expect(measuresEdgeAngle({ attributes: { type: 'core_edge' } }, 'core')).toBe(true);
-    expect(measuresEdgeAngle({ attributes: { type: 'edge' } }, 'core')).toBe(false);
+    // what a core measured shows when it has become a flake
+    expect(measuresEdgeAngle({ attributes: { type: 'core_edge' } }, 'flake')).toBe(true);
+    expect(measuresEdgeAngle({ edgeAngle: true, attributes: { type: 'suture' } }, 'flake')).toBe(true);
+    expect(measuresEdgeAngle({ edgeAngle: false, attributes: { type: 'edge' } }, 'flake')).toBe(false);
+    expect(measuresEdgeAngle({ attributes: { type: 'suture' } }, 'flake')).toBe(false);
   });
 
   it('colours arrows by nothing a generic specimen does not have', () => {

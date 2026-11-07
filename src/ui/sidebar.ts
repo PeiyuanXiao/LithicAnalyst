@@ -50,7 +50,7 @@ import {
 import { curveLength } from '../core/curveGeometry';
 import { measuredLine } from '../compute/measuredLine';
 import { planeMethodsOf } from '../compute/planes';
-import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
+import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, hasEdgeAngles, hasVolumeSplit, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
 import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
@@ -424,6 +424,8 @@ function curvesSection(api: AppApi): Section {
     for (const set of refs.setters) set(c);
     clear(refs.meta);
     const u = st.specimen.unit;
+    // edge angles are a flake's
+    (refs.edge.closest('.checks-row') as HTMLElement).hidden = !hasEdgeAngles(st.specimen.type);
     refs.edge.checked = measuresEdgeAngle(c, st.specimen.type);
     refs.edgeStatus.hidden = !refs.edge.checked || !!u;
     refs.meta.append(...numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), ...textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
@@ -481,9 +483,7 @@ function workingEdgesSection(api: AppApi): Section {
       list.append(li);
       if (e.id === sel) requestAnimationFrame(() => revealInList(list, li));
     }
-    generate.hidden = st.specimen.type !== 'flake';
     generate.disabled = !st.curves.some((c) => measuresEdgeAngle(c, st.specimen.type) && !st.workingEdges.some((e) => e.curveId === c.id));
-    foot.hidden = generate.hidden;
   };
 
   const renderInspector = () => {
@@ -522,7 +522,7 @@ function workingEdgesSection(api: AppApi): Section {
     renderInspector();
   };
   refresh('all');
-  return { el, refresh, visible: () => api.store.state.workingEdges.length > 0 || api.store.state.curves.some((c) => measuresEdgeAngle(c, api.store.state.specimen.type)) };
+  return { el, refresh, visible: () => hasEdgeAngles(api.store.state.specimen.type) && (api.store.state.workingEdges.length > 0 || api.store.state.curves.some((c) => measuresEdgeAngle(c, api.store.state.specimen.type))) };
 }
 
 /** Over a chart along a curve: all of it, or one of its working edges. What to show, not what there is: never in the file. */
@@ -716,27 +716,71 @@ function displaySection(api: AppApi): Section {
 
 // ---------------------------------------------------------------- measure mode
 
+/** A row of a measure with a value: it can show on the model how it was taken (`key`: `group:item`; null: it cannot). */
+function hintRow<T extends HTMLElement[]>(cells: T, key: string | null): T {
+  if (key === null) return cells;
+  for (const c of cells) c.dataset.hint = key;
+  cells[0].tabIndex = 0;
+  return cells;
+}
+
+/** The rows in a box of such rows: the pointer, the keyboard's focus, a click; made anew as often as they like. */
+function watchHints(api: AppApi, box: HTMLElement): void {
+  const keyOf = (e: Event) => (e.target as Element | null)?.closest?.('[data-hint]')?.getAttribute('data-hint') ?? null;
+  box.addEventListener('pointerover', (e) => {
+    // (the gap between two rows is no row left)
+    if (e.target !== box) api.hoverHint(keyOf(e));
+  });
+  box.addEventListener('pointerleave', () => api.hoverHint(null));
+  box.addEventListener('focusin', (e) => {
+    // a click also gives the focus; it only counts from the keyboard
+    if ((e.target as Element).matches(':focus-visible')) api.focusHint(keyOf(e));
+  });
+  box.addEventListener('focusout', () => api.focusHint(null));
+  box.addEventListener('click', (e) => {
+    const key = keyOf(e);
+    if (key) api.pinHint(key);
+  });
+  box.addEventListener('keydown', (e) => {
+    if ((e.key !== 'Enter' && e.key !== ' ') || !keyOf(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).click();
+  });
+}
+
+/** Fill a box of such rows anew: the keyboard's focus stays on its row, and the rows are marked. */
+function rebuildHints(api: AppApi, box: HTMLElement, fill: () => void): void {
+  const focused = box.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.hint : undefined;
+  clear(box);
+  fill();
+  if (focused) box.querySelector<HTMLElement>(`[data-hint="${CSS.escape(focused)}"][tabindex]`)?.focus();
+  api.paintHintRows();
+}
+
 function measureAutoSection(api: AppApi): Section {
   const { el, body } = section('measure-auto', t('sec.measureAuto'));
   const meta = h('dl', { class: 'num-grid measure-auto', id: 'measure-auto' });
   body.append(meta);
-  const row = (id: string, term: string, kind: Quantity, v: number | null) => numRow(term, ...quantity(kind, v, api.store.state.specimen.unit), `auto-${id}`);
+  watchHints(api, meta);
+  const row = (id: string, term: string, kind: Quantity, v: number | null) => hintRow(numRow(term, ...quantity(kind, v, api.store.state.specimen.unit), `auto-${id}`), `auto:${id}`);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'measure', 'specimen'].includes(kind)) return;
-    clear(meta);
-    const m = api.autoMeasurements();
-    if (!m) {
-      if (api.measuringBusy()) meta.append(h('dt', {}, t('measure.busy')));
-      return;
-    }
-    meta.append(
-      ...row('length', t('measure.length'), 'length', m.length),
-      ...row('width', t('measure.width'), 'length', m.width),
-      ...row('thickness', t('measure.thickness'), 'length', m.thickness),
-      ...textValueRow(t('measure.axes'), t(`measure.axes.${m.frame}`), 'auto-frame'),
-      ...row('area', t('measure.area'), 'area', m.surfaceArea),
-      ...(m.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'auto-volume') : row('volume', t('measure.volume'), 'volume', m.volume)),
-    );
+    rebuildHints(api, meta, () => {
+      const m = api.autoMeasurements();
+      if (!m) {
+        if (api.measuringBusy()) meta.append(h('dt', {}, t('measure.busy')));
+        return;
+      }
+      meta.append(
+        ...row('length', t('measure.length'), 'length', m.length),
+        ...row('width', t('measure.width'), 'length', m.width),
+        ...row('thickness', t('measure.thickness'), 'length', m.thickness),
+        ...textValueRow(t('measure.axes'), t(`measure.axes.${m.frame}`), 'auto-frame'),
+        ...row('area', t('measure.area'), 'area', m.surfaceArea),
+        ...(m.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'auto-volume') : row('volume', t('measure.volume'), 'volume', m.volume)),
+      );
+    });
   };
   refresh('all');
   // a flake's are in its own section
@@ -751,21 +795,25 @@ function flakeSection(api: AppApi): Section {
   const { el, body } = section('flake', t('sec.measureAuto'));
   const meta = h('dl', { class: 'num-grid measure-auto', id: 'flake-measures' });
   body.append(meta);
+  watchHints(api, meta);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'measure', 'specimen', 'flake'].includes(kind)) return;
-    clear(meta);
-    const u = api.store.state.specimen.unit;
-    const m = api.flakeMeasures();
-    const empty = api.flakeEmptyReasons();
-    for (const k of FLAKE_MEASURES) {
-      const row = numRow(t(`flake.${k}`), ...quantity(flakeQuantity(k), m?.[k] ?? null, u), `flake-${k}`);
-      const reason = empty?.[k];
-      if (reason) tip(row[1], t(`flake.empty.${reason}`));
-      meta.append(...row);
-    }
-    const a = api.autoMeasurements();
-    meta.append(...numRow(t('measure.area'), ...quantity('area', a?.surfaceArea ?? null, u), 'flake-area'));
-    meta.append(...(a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : numRow(t('measure.volume'), ...quantity('volume', a?.volume ?? null, u), 'flake-volume')));
+    rebuildHints(api, meta, () => {
+      const u = api.store.state.specimen.unit;
+      const m = api.flakeMeasures();
+      const empty = api.flakeEmptyReasons();
+      for (const k of FLAKE_MEASURES) {
+        const value = m?.[k] ?? null;
+        const row = numRow(t(`flake.${k}`), ...quantity(flakeQuantity(k), value, u), `flake-${k}`);
+        const reason = empty?.[k];
+        if (reason) tip(row[1], t(`flake.empty.${reason}`));
+        // nothing to draw for an empty value: it says why, as ever
+        meta.append(...hintRow(row, value === null ? null : `flake:${k}`));
+      }
+      const a = api.autoMeasurements();
+      meta.append(...hintRow(numRow(t('measure.area'), ...quantity('area', a?.surfaceArea ?? null, u), 'flake-area'), a ? 'flake:area' : null));
+      meta.append(...(a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : hintRow(numRow(t('measure.volume'), ...quantity('volume', a?.volume ?? null, u), 'flake-volume'), a ? 'flake:volume' : null)));
+    });
   };
   refresh('all');
   return { el, refresh, visible: () => api.store.state.specimen.type === 'flake' };
@@ -843,6 +891,8 @@ function edgeAngleSection(api: AppApi): Section {
   const colorBy = segmented('edge-color', null, [{ value: 'angle', label: t('edge.color.angle') }, { value: 'sharp', label: t('edge.color.sharp') }], api.edgeColorMode, (v) => api.setEdgeColorMode(v as 'angle' | 'sharp'));
   const sharpSummary = h('dl', { class: 'num-grid', id: 'sharp-summary' });
   body.append(status, list, method.el, seriesBox, edgeView.el, chart.el, rule, colorBy.el, sharpSummary);
+  watchHints(api, list);
+  watchHints(api, sharpSummary);
   /** The lines of the selected curve in the method shown: the distances. */
   const chartSeries = (edge: EdgeAngleResult, m: EdgeAngleMethod, unit: string): ChartSeries[] => {
     const u = quantityUnit('length', unit);
@@ -856,23 +906,23 @@ function edgeAngleSection(api: AppApi): Section {
     if (!['all', 'mesh', 'curves', 'regions', 'selection', 'specimen', 'edge', 'figure'].includes(kind)) return;
     const st = api.store.state;
     status.hidden = !!st.specimen.unit || !measured().length;
-    clear(list);
     const sel = api.selection.id;
     const curves = measured();
     list.hidden = !curves.length;
-    for (const c of curves) {
-      const n = api.edgeAngleResult(c.id)?.stations.length ?? 0;
-      list.append(
-        h(
+    rebuildHints(api, list, () => {
+      for (const c of curves) {
+        const n = api.edgeAngleResult(c.id)?.stations.length ?? 0;
+        const row = h(
           'li',
           { class: 'arrow-row', role: 'option', 'aria-selected': String(c.id === sel), 'data-id': c.id, onclick: () => api.selection.set(c.id) },
           h('span', { class: 'chip chip-line', style: `--chip:${curveColor(c)}` }),
           h('span', { class: 'arrow-id mono' }, c.label),
           h('span', { class: 'arrow-meta' }, fieldText(CURVE_FIELDS[0], c.attributes.type)),
           ...valueCells([n ? fmtCount(n) : MISSING, '']),
-        ),
-      );
-    }
+        );
+        list.append(...hintRow([row], n ? `edge:${c.id}` : null));
+      }
+    });
     const shown = sel && curves.some((c) => c.id === sel) ? api.edgeAngleResult(sel) : null;
     const m = api.edgeMethod;
     method.set(m);
@@ -892,7 +942,7 @@ function edgeAngleSection(api: AppApi): Section {
     seriesBox.hidden = !seriesControl;
     const rl = st.sharpEdge;
     const sharp = sel && shown ? api.sharpOf(sel) : null;
-    const ruleShown = st.specimen.type !== 'generic' && rl.threshold !== null && rl.method === m && (chosen === 'all' || chosen === `d${rl.distance}`);
+    const ruleShown = rl.threshold !== null && rl.method === m && (chosen === 'all' || chosen === `d${rl.distance}`);
     const ruleIndex = EDGE_ANGLE_DISTANCES_MM.indexOf(rl.distance as (typeof EDGE_ANGLE_DISTANCES_MM)[number]);
     const stretches = edgeView.update(shown && sel ? api.workingEdgesOn(sel) : []);
     chart.set(
@@ -909,17 +959,17 @@ function edgeAngleSection(api: AppApi): Section {
           }
         : null,
     );
-    // the rule stands whichever curve is selected: it is the specimen's (no sharp edge on a generic one)
-    const generic = st.specimen.type === 'generic';
-    rule.hidden = !curves.length || generic;
+    // the rule stands whichever curve is selected: it is the specimen's
+    rule.hidden = !curves.length;
     ruleMethod.value = rl.method;
     ruleDistance.value = String(rl.distance);
     if (document.activeElement !== ruleValue) ruleValue.value = rl.threshold === null ? '' : String(rl.threshold);
     colorBy.set(api.edgeColorMode);
-    (colorBy.el as HTMLElement).hidden = !shown || rl.threshold === null || generic;
-    clear(sharpSummary);
+    (colorBy.el as HTMLElement).hidden = !shown || rl.threshold === null;
     sharpSummary.hidden = !sharp;
-    if (sharp) sharpSummary.append(...numRow(t('edge.sharp.length'), ...quantity('length', sharp.length, st.specimen.unit), 'sharp-length'), ...numRow(t('edge.sharp.count'), fmtCount(sharp.segments.length), '', 'sharp-count'));
+    rebuildHints(api, sharpSummary, () => {
+      if (sharp) sharpSummary.append(...hintRow(numRow(t('edge.sharp.length'), ...quantity('length', sharp.length, st.specimen.unit), 'sharp-length'), `sharp:${sel}`), ...hintRow(numRow(t('edge.sharp.count'), fmtCount(sharp.segments.length), '', 'sharp-count'), `sharp:${sel}`));
+    });
   };
   refresh('all');
   return { el, refresh, visible: () => measured().length > 0 };
@@ -2307,21 +2357,23 @@ function noduleSection(api: AppApi): Section {
   const meta = h('dl', { class: 'num-grid' });
   const show = checkbox('nodule-show', t('nodule.show'), api.store.state.nodule.show, (on) => setNoduleShown(api.store, on));
   body.append(regions, meta, show);
+  watchHints(api, meta);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'nodule', 'regions', 'specimen', 'mesh'].includes(kind)) return;
     const st = api.store.state;
     const cortex = st.regions.filter((r) => r.type === 'cortex');
     clear(regions);
     for (const r of cortex) regions.append(checkbox(`nodule-use-${r.label}`, r.label, !st.nodule.exclude.includes(r.id), (on) => setNoduleRegion(api.store, r.id, on)));
-    clear(meta);
     const f = api.noduleFit();
     const u = st.specimen.unit;
-    if (f)
-      meta.append(
-        ...numRow(t('nodule.radius'), ...quantity('length', f.radius, u), 'nodule-radius'),
-        ...numRow(t('nodule.rms'), ...quantity('length', f.rms, u), 'nodule-rms'),
-        ...numRow(t('nodule.points'), fmtCount(f.count), '', 'nodule-points'),
-      );
+    rebuildHints(api, meta, () => {
+      if (f)
+        meta.append(
+          ...hintRow(numRow(t('nodule.radius'), ...quantity('length', f.radius, u), 'nodule-radius'), 'nodule:radius'),
+          ...numRow(t('nodule.rms'), ...quantity('length', f.rms, u), 'nodule-rms'),
+          ...numRow(t('nodule.points'), fmtCount(f.count), '', 'nodule-points'),
+        );
+    });
     (show.querySelector('input') as HTMLInputElement).checked = st.nodule.show;
     (show.querySelector('input') as HTMLInputElement).disabled = !f;
   };
@@ -2342,6 +2394,7 @@ function splitSection(api: AppApi): Section {
   const flip = iconButton(ICONS.swap, t('split.swap'), () => swapSplit(api.store), { id: 'split-swap' });
   const meta = h('dl', { class: 'num-grid' });
   body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), h('div', { class: 'split-source-row' }, select, flip)), meta);
+  watchHints(api, meta);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'split', 'planes', 'curves', 'mesh', 'specimen', 'measure'].includes(kind)) return;
     const st = api.store.state;
@@ -2359,21 +2412,22 @@ function splitSection(api: AppApi): Section {
     for (const [value, label] of options) select.append(h('option', { value }, label));
     select.value = current;
     flip.hidden = !st.split;
-    clear(meta);
     const u = st.specimen.unit;
     const closed = api.meshClosed();
-    if (closed === false) meta.append(...textValueRow(t('measure.volume'), t('measure.notClosed')));
     const v = api.volumeSplit();
-    if (v)
-      meta.append(
-        ...numRow(t('split.upper'), ...quantity('volume', v.upper, u), 'split-upper'),
-        ...numRow(t('split.lower'), ...quantity('volume', v.lower, u), 'split-lower'),
-        ...numRow(t('split.ratio'), fmtQuantity('ratio', v.ratio), '', 'split-ratio'),
-      );
+    rebuildHints(api, meta, () => {
+      if (closed === false) meta.append(...textValueRow(t('measure.volume'), t('measure.notClosed')));
+      if (v)
+        meta.append(
+          ...hintRow(numRow(t('split.upper'), ...quantity('volume', v.upper, u), 'split-upper'), 'split:upper'),
+          ...hintRow(numRow(t('split.lower'), ...quantity('volume', v.lower, u), 'split-lower'), 'split:lower'),
+          ...hintRow(numRow(t('split.ratio'), fmtQuantity('ratio', v.ratio), '', 'split-ratio'), 'split:ratio'),
+        );
+    });
   };
   refresh('all');
-  // a split needs a closed curve or a plane
-  return { el, refresh, visible: () => !!api.store.state.split || api.store.state.curves.some((c) => c.closed) || api.planeResults().some((p) => p.valid) };
+  // a core's, and it needs a closed curve or a plane
+  return { el, refresh, visible: () => hasVolumeSplit(api.store.state.specimen.type) && (!!api.store.state.split || api.store.state.curves.some((c) => c.closed) || api.planeResults().some((p) => p.valid)) };
 }
 
 function sectionsSection(api: AppApi): Section {
