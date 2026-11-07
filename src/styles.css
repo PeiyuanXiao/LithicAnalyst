@@ -4051,6 +4051,78 @@ input[type="checkbox"]:disabled {
   color: var(--ink-2);
 }
 
+.gm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* room for the largest count of a patch */
+.gm-row .gm-number {
+  flex: none;
+  width: 72px;
+}
+
+.gm-pick {
+  flex: 1 1 88px;
+  min-width: 0;
+}
+
+.gm-row-tools {
+  display: inline-flex;
+  flex: none;
+  gap: 1px;
+}
+
+.gm-curve {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.gm-ends {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gm-template {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.gm-template-name {
+  font-size: var(--step--1);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.ws-gm,
+.ws-template {
+  flex: none;
+  font-size: var(--step--1);
+  color: var(--ink-3);
+}
+
+.ws-gm[data-done="true"] {
+  color: var(--accent-text);
+}
+
+.ws-template {
+  padding: 0 4px;
+  border: 1px solid var(--accent-line);
+  border-radius: 4px;
+  color: var(--accent-text);
+}
+
 .gm-missing {
   margin: 0;
   padding-left: 16px;

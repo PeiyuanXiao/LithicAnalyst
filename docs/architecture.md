@@ -473,6 +473,18 @@ Nothing is cut or fitted again for them: `workingEdgeDetails` shares out what th
 
 `state.gm` is a Command; in a folder `App.keepFolderGm` copies it to `LithicAnalyst/gm-config.json`, and each project opened takes the folder's. Points depend on the mesh, so a summary cannot judge them from stored results as it does the sharp edge: `App.gmOfFolder` takes those stored with this configuration, and opens the others' models in turn (as the figures of a folder do); `gmOutputs` writes the complete ones and lists the rest.
 
+**By a template** (`gmOfListsSteps` for a core or a general specimen, the end of `gmSteps` for a flake; both call `templatePointsSteps`):
+
+* `compute/gmTemplate.ts` (pure): `layPatchSteps` lays a region's points; `gmInUse`, `usesTemplate`, `gmConfigSummary` (the configuration without the points, as results and manifests hold it), `gmManifest`, `gmCacheKey`, and the anchors' and regions' hashes.
+* `compute/tps.ts` (pure): `similarityFit`, `tpsFitSteps`, `anchorWarpSteps`. The system is solved directly: `M = −ΠKΠ + cUUᵀ` on the space across the affine part (`Π` the projection across it, `U` its basis), by a Cholesky in blocks of columns with four dot products at a time, which takes half the time of the plain one and keeps 2000 anchors under a second (`scripts/bench.ts`, 11a, 11b). Conjugate gradients were tried: on anchors spread over a surface they took 80 to 200 iterations, slower than this.
+* `compute/triangleBvh.ts` (pure, no three.js): an AABB tree over some of a mesh's triangles, for the nearest point. `GmRegionSource.find(type)` gives a region's triangles and its tree on demand; `App.gmRegions` keeps the trees while the pieces stay the same.
+* `compute/projectRegions.ts` (pure): where a project's regions lie on a mesh, from its curves and seeds alone: `projectLayersSteps` is what `App` does with the view's tree and tools, with `TriangleBvh` in their place; `upperComponentsOf`, `bandGroupsOf` are shared by the two, so that what decides which piece a region is stands in one place. `gmOfProjectSteps` makes a specimen's points from a project and a mesh.
+* The summary: `gmOfFolder` keeps what is stored while `gmCacheKey` is the same (`derived.gm.key`), the rest goes to the batch worker (`MeshJobs.gm`, job `gm`, `MeshMeasurer.gm`). Grid flakes still open their models in turn: their rays need the view's tree.
+* `App.layGmTemplate` checks the anchors (`gmAnchorRows`, no mesh needed) and the regions, lays each patch in slices, and sets `state.gm.template` as one Command. `App.gmTemplateInfo` compares the template's hashes with its annotations, from the open project or the folder's index. The template's anchors are in the configuration, so passing on does not read its project or its model; `App.templateThere` looks only whether its model is listed.
+* `App.gmSeen`: how points came out in this session, for the folder's list, since an unedited project is not saved. Cleared when the configuration changes.
+
+The grid's path through `gmSteps` is as it was: `tests/gmTemplate.test.ts` holds the checksums of its exports as they were before the template.
+
 ## Landmarks
 
 * `ProjectState.landmarks` (export order) and `semilandmarks` (sets: curve, count, end

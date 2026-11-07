@@ -144,9 +144,10 @@ test('a flake\'s points: as configured, in the exports with their sliding defini
   expect(file.derived.gm?.rows.length).toBe(DEFAULT_TOTAL - 20);
   expect(file.derived.gm?.config.edge.points).toBe(30);
 
-  // a core has none of this
+  // a core asks for none of this until its own lists are filled
   await setType(page, 'core');
-  await expect(page.locator('#sec-gm')).toBeHidden();
+  await expect(page.locator('#gm-add-landmark')).toHaveCount(1);
+  await expect(page.locator('#gm-edge-on')).toHaveCount(0);
   await expect.poll(() => gm(page)).toBeNull();
   await displayPanel(page);
   await expect(page.locator('#gm-show')).toBeHidden();

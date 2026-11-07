@@ -6,12 +6,12 @@ import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
 import { intersectPlaneSteps, type PrincipalAxes, type Polyline } from '../compute/meshGeometry';
 import { MEASURED_LINE_PARAMETERS, measuredLine, type MeasuredLine } from '../compute/measuredLine';
-import { assignBands, bandPiecesSteps, mergePieces, retouchSideSteps, type RetouchSide } from '../compute/retouchBand';
+import { bandPiecesSteps, mergePieces, retouchSideSteps, type RetouchSide } from '../compute/retouchBand';
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
-import type { AutoMeasurements, MeshResults } from '../core/derived';
+import { addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import type { AutoMeasurements, GmDerived, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { annotationStatus, type StatusKey } from '../core/annotationStatus';
@@ -47,7 +47,11 @@ import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
 import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_PARAMETERS, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
-import { gmMissingInputs, gmSteps, type GmResult } from '../compute/gm';
+import { gmAnchorRows, gmMissingInputs, gmSteps, type GmMissing, type GmResult } from '../compute/gm';
+import { anchorsHashOf, gmCacheKey, gmConfigSummary, gmInUse, gmManifest, gmStanding, GM_TEMPLATE_PARAMETERS, layPatchSteps, regionsHashOf, sameGmConfig, usesTemplate } from '../compute/gmTemplate';
+import { bandGroupsOf, inLowerLayer, regionSourceOf, upperComponentsOf } from '../compute/projectRegions';
+import { TPS_PARAMETERS } from '../compute/tps';
+import type { TriangleBvh } from '../compute/triangleBvh';
 import { retouchSectionsSteps, sectionAtStation, type RetouchAngleResult, type RetouchPiece, type StationSection } from '../compute/retouchAngle';
 import { drawnOutline, planRegionsSteps, planShape, segmentLinesSteps, type P2, type PlanLoops, type PlanShape, type SegmentLines } from '../compute/retouchPlan';
 import { planDrawing, PRINT_PALETTE, PX_PER_MM, sectionDrawing, sectionModel, svgFile, type Drawing, type SectionModel } from '../render/retouchDrawing';
@@ -65,7 +69,7 @@ import { technicalFrameSteps } from '../compute/technicalFrame';
 import { frameSource } from '../core/derived';
 import { bvhPlaneCandidates, bvhRayCandidates } from '../render/bvhPlane';
 import { ProfilePanel } from './profilePanel';
-import { gmCurvesCsv, gmSurfacesCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
+import { gmCurvesCsv, gmLandmarksCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { GmLayer } from '../render/gmLayer';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
 import { declutterLabels } from '../render/labelLayout';
@@ -74,7 +78,7 @@ import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLa
 import { uuid } from '../core/ids';
 import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
-import { facesOfPiecesSteps, flakeFacePieces, overPiecesSteps, pieceSeedSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
+import { facesOfPiecesSteps, overPiecesSteps, pieceSeedSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
 import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type SplitResult, type VolumeSplit } from '../compute/split';
 import { boxHint, flakeHint, MEASURE_HINT_PARAMETERS, noduleHint, sharpHint, splitHint, stationsHint, wholeModelHint, type MeasureHint } from '../compute/measureHint';
@@ -139,6 +143,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   configuration: false,
   profile: false,
   gmPoints: false,
+  gmSurface: false,
   retouchSection: true,
   retouchPlan: true,
   retouchLines: true,
@@ -521,6 +526,11 @@ export class App implements AppApi {
   /** A flake's points for geometric morphometrics, and what they were made from. */
   private gm: GmResult | null = null;
   private gmDoneKey = '';
+  /** The trees of the regions points are brought onto, while the pieces stay. */
+  private gmTrees = new Map<string, TriangleBvh>();
+  private gmTreesOf = -1;
+  /** A template is being laid. */
+  private gmLaying = false;
   private gmTimer = 0;
   private gmToken = 0;
   private gmLayer: GmLayer | null = null;
@@ -535,6 +545,8 @@ export class App implements AppApi {
   private hintShown: { key: string; hint: MeasureHint } | null = null;
   /** The folder's configuration of those points (null: none yet, or no folder open). */
   private folderGm: GmConfig | null = null;
+  /** How the points of the folder's models came out in this session, by the configuration as it is: not all of them are saved, since nothing was edited. */
+  private gmSeen = new Map<string, { done: boolean; flagged: number }>();
   private edgeLayer: EdgeAngleLayer | null = null;
   private workingEdgeLayer: WorkingEdgeLayer | null = null;
   /** The working edges' measures, while nothing they are made from has changed. */
@@ -1240,7 +1252,7 @@ export class App implements AppApi {
       return;
     }
     // (regions not found yet count as not there)
-    const status = annotationStatus(st, this.regions?.results ?? []);
+    const status = annotationStatus(st, this.regions?.results ?? [], this.gm);
     const key = JSON.stringify([status.items, this.nextCurveType]);
     el.hidden = false;
     if (key === this.statusKey) return;
@@ -1263,7 +1275,7 @@ export class App implements AppApi {
         h('span', { class: 'status-mark', 'aria-hidden': 'true' }, item.done ? '✓' : '○'),
         h('span', {}, t(`status.${item.key}`)),
       );
-      tips.attach(pill, () => ({ label: t(item.notApart ? 'status.why.faces.open' : item.notMeeting ? 'status.why.edge.open' : item.key === 'unit' && !this.isFlake() ? 'status.why.unit.plain' : `status.why.${item.key}`) }), 'above');
+      tips.attach(pill, () => ({ label: item.flagged ? t('gm.flagged', { n: item.flagged }) : t(item.notApart ? 'status.why.faces.open' : item.notMeeting ? 'status.why.edge.open' : item.key === 'unit' && !this.isFlake() ? 'status.why.unit.plain' : `status.why.${item.key}`) }), 'above');
       el.append(pill);
     }
     this.fitStatus();
@@ -1315,6 +1327,7 @@ export class App implements AppApi {
     if (key === 'unit') return this.openUnit();
     if (key === 'axis') return this.setTool('axis');
     if (key === 'scar_arrows') return this.setTool('draw');
+    if (key === 'gm') return this.sidebar.focusSection('gm');
     // the faces and the retouch regions
     this.setTool('region');
     this.sidebar.focusTool('region');
@@ -2543,11 +2556,7 @@ export class App implements AppApi {
 
   /** Each band's pieces (those a region of its own holds stay that region's), by the id of the region following its curve. */
   private bandGroups(st: Readonly<ProjectState>, part: Partition, bands: ReadonlyMap<string, { pieces: number[]; area: number }>): Map<string, number[]> {
-    const taken = new Set(st.regions.filter((r) => this.inLowerLayer(st, r) && !r.curveId).map((r) => this.pieceAt(part, r.seed)));
-    return assignBands(st.regions.flatMap((r) => {
-      const b = r.auto && r.curveId ? bands.get(r.curveId) : undefined;
-      return b ? [{ regionId: r.id, pieces: b.pieces, area: b.area }] : [];
-    }), taken);
+    return bandGroupsOf(st, part, bands, (q, p) => this.pieceAt(q, p));
   }
 
   /** Each retouch band one piece in the lower layer, for what comes after to go by. */
@@ -2618,17 +2627,7 @@ export class App implements AppApi {
 
   /** The piece of each upper region of a project (−1: none, or a lower region): by its seed, or, one that follows other annotations, as they say, unless a region the user typed is there. */
   private upperComponents(st: Readonly<ProjectState>, part: Partition, platformSeed: Vec3 | null): number[] {
-    const out = st.regions.map((r) => (isUpperRegion(r.type, st.specimen.type) && !r.auto ? this.pieceAt(part, r.seed) : -1));
-    if (st.specimen.type !== 'flake') return out;
-    const platform = platformSeed ? this.pieceAt(part, platformSeed) : -1;
-    const hint = st.flake.axis?.matrix ? this.pieceAt(part, st.flake.axis.end) : -1;
-    const faces = flakeFacePieces(part, platform, hint);
-    st.regions.forEach((r, i) => {
-      if (!r.auto) return;
-      const c = r.type === 'platform' ? platform : r.type === 'ventral' ? faces.ventral : r.type === 'dorsal' ? faces.dorsal : -1;
-      if (c >= 0 && !out.includes(c)) out[i] = c;
-    });
-    return out;
+    return upperComponentsOf(st, part, platformSeed, (q, p) => this.pieceAt(q, p));
   }
 
   facesOpen(): boolean {
@@ -2685,7 +2684,7 @@ export class App implements AppApi {
 
   /** Whether a region lies in the lower layer of a project: not the upper layer's, nor on another type of specimen one left over that followed a flake's annotations. */
   private inLowerLayer(st: Readonly<ProjectState>, r: ProjectState['regions'][number]): boolean {
-    return !isUpperRegion(r.type, st.specimen.type) && !(st.specimen.type !== 'flake' && r.auto);
+    return inLowerLayer(st, r);
   }
 
   flakeMeasures(): FlakeMeasures | null {
@@ -2831,16 +2830,22 @@ export class App implements AppApi {
   private syncGmLayer(): void {
     const layer = this.gmLayer, loaded = this.loaded;
     if (!layer) return;
-    const on = this.display.gmPoints && this.isFlake() && this.mode !== 'present' && this.mode !== 'compare' && this.mode !== 'retouch' && !!this.gm && !!loaded;
+    const shown = this.mode !== 'present' && this.mode !== 'compare' && this.mode !== 'retouch' && !!this.gm && !!loaded;
+    // all the semilandmarks (the display panel's, a flake's) or those on the surface (the panel's own)
+    const all = this.display.gmPoints && this.isFlake();
+    const on = shown && (all || this.display.gmSurface);
     layer.group.visible = on;
-    if (on) layer.sync(this.gm!.rows.filter((r) => r.kind !== 'fixed').map((r) => r.point), loaded!.offset);
+    if (on) {
+      const rows = this.gm!.rows.filter((r) => !r.missing && (all ? r.kind !== 'fixed' : r.kind === 'surface'));
+      layer.sync(rows.map((r) => r.point), loaded!.offset, rows.map((r) => !!r.flagged));
+    }
     this.viewer?.requestRender();
   }
 
   private gmKey(): string {
     const st = this.store.state;
     const axis = st.flake.axis;
-    return JSON.stringify([st.gm, axis?.matrix, axis?.start, st.landmarks.map((l) => [l.id, l.code, l.name, l.point]), st.semilandmarks, st.curves.map((c) => [c.id, c.points, c.closed, c.attributes.type]), this.partitionVersion, this.upperComponent]);
+    return JSON.stringify([st.specimen.type, st.gm, axis?.matrix, axis?.start, st.landmarks.map((l) => [l.id, l.code, l.name, l.point]), st.semilandmarks, st.curves.map((c) => [c.id, c.points, c.closed, c.attributes.type]), this.partitionVersion, this.upperComponent, this.seedComponent, this.templateThere()]);
   }
 
   private scheduleGm(): void {
@@ -2853,8 +2858,12 @@ export class App implements AppApi {
     const token = ++this.gmToken;
     const base = this.measureBase, loaded = this.loaded;
     const st = this.store.state;
-    if (!this.isFlake()) {
-      this.gm = null;
+    if (!this.isFlake() && !gmInUse(st.gm, st.specimen.type)) {
+      if (this.gm) {
+        this.gm = null;
+        this.sidebar.refresh('landmarks');
+        this.updateStatus();
+      }
       this.gmDoneKey = '';
       this.syncGmLayer();
       return;
@@ -2862,20 +2871,123 @@ export class App implements AppApi {
     if (!base || !loaded || !this.partition) return;
     const key = this.gmKey();
     if (key === this.gmDoneKey) return;
-    const plat = this.platformPieces();
+    const byTemplate = usesTemplate(st.gm, st.specimen.type);
+    const plat = byTemplate ? null : this.platformPieces();
     const faces = plat ? await runSliced(facesOfPiecesSteps(this.upper!.partition, plat.pieces)) : null;
     if (token !== this.gmToken) return;
     const g = loaded.geometry;
-    const result = await runSliced(gmSteps(st, { positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, platformFaces: faces, candidates: bvhRayCandidates(g), centroid: base.vertices?.mean }));
+    const pos = g.getAttribute('position').array as Float32Array;
+    const idx = g.index!.array as Uint32Array;
+    const result = await runSliced(gmSteps(st, { positions: pos, index: idx, offset: loaded.offset, platformFaces: faces, candidates: bvhRayCandidates(g), centroid: base.vertices?.mean, regions: byTemplate ? this.gmRegions(pos, idx) : null, templateAvailable: this.templateThere() }));
     if (token !== this.gmToken || this.loaded !== loaded) return;
-    this.gm = result;
+    this.gm = byTemplate ? { ...result, key: gmCacheKey(st) } : result;
     this.gmDoneKey = key;
+    if (this.workspace && this.wsIndex >= 0) this.gmSeen.set(this.workspace.meshes[this.wsIndex], gmStanding(this.gm));
     this.syncGmLayer();
     this.sidebar.refresh('landmarks');
+    this.updateStatus();
+    if (this.workspace) this.sidebar.refresh('workspace');
     if (this.unsaved) {
       this.scheduleAutosave();
       this.scheduleFolderSave();
     }
+  }
+
+  /** Where the points by a template go on the open model; a region's tree stays while the pieces do. */
+  private gmRegions(positions: ArrayLike<number>, index: ArrayLike<number>) {
+    if (this.gmTreesOf !== this.partitionVersion) {
+      this.gmTrees = new Map();
+      this.gmTreesOf = this.partitionVersion;
+    }
+    return regionSourceOf(this.store.state, { lower: this.partition!, upper: this.upper?.partition ?? null, lowerComponent: this.seedComponent, upperComponent: this.upperComponent }, positions, index, this.gmTrees);
+  }
+
+  /** The template's model is in the open folder (with no folder there is nothing to look in). */
+  private templateThere(): boolean {
+    const t = this.store.state.gm.template;
+    return !t || !this.workspace || this.workspace.meshes.includes(t.file);
+  }
+
+  /** The template's own annotations, wherever they are to be had: the open model's, or its project in the folder. */
+  private templateState(): Readonly<ProjectState> | null {
+    const st = this.store.state;
+    const t = st.gm.template;
+    if (!t) return null;
+    if (st.mesh?.sha256 === t.sha256) return st;
+    const i = this.workspace?.meshes.indexOf(t.file) ?? -1;
+    return i >= 0 ? (this.modelProject(t.file, i)?.state ?? null) : null;
+  }
+
+  /** How the template stands, for the panel; null without one. */
+  gmTemplateInfo(): { file: string; seed: number; isThis: boolean; changed: boolean; missing: boolean } | null {
+    const st = this.store.state;
+    const t = st.gm.template;
+    if (!t) return null;
+    const own = this.templateState();
+    const anchors = own ? gmAnchorRows({ ...own, gm: st.gm }).rows.map((r) => r.point) : null;
+    return { file: t.file, seed: t.seed, isThis: st.mesh?.sha256 === t.sha256, changed: !!own && !!anchors && (anchorsHashOf(anchors) !== t.anchorsHash || regionsHashOf(own) !== t.regionsHash), missing: !this.templateThere() };
+  }
+
+  /** What the folder holds to choose from in the lists: landmark names, curve and region types. */
+  gmCandidates(): { landmarks: string[]; curves: string[]; regions: string[] } {
+    const states = [this.store.state, ...(this.projectIndex?.all() ?? []).map((p) => p.state)];
+    const of = (list: unknown[]) => [...new Set(list.filter((v): v is string => typeof v === 'string' && v !== ''))];
+    return {
+      landmarks: of(states.flatMap((s) => s.landmarks.filter((l) => !l.code).map((l) => l.name))),
+      curves: of(states.flatMap((s) => s.curves.map((c) => c.attributes.type))),
+      regions: of(states.flatMap((s) => s.regions.map((r) => r.type))),
+    };
+  }
+
+  /**
+   * The open specimen as the template: its points laid on its regions, by a seed (going on from the last when it already is the template, or asked to lay them again).
+   * It has to have all the configuration asks for: otherwise nothing changes, and it says what lacks.
+   */
+  async layGmTemplate(): Promise<void> {
+    const st = this.store.state;
+    const base = this.measureBase, loaded = this.loaded;
+    if (!base || !loaded || !st.mesh || !this.partition || this.gmLaying) return;
+    const anchors = gmAnchorRows(st);
+    const g = loaded.geometry;
+    const pos = g.getAttribute('position').array as Float32Array;
+    const idx = g.index!.array as Uint32Array;
+    const source = this.gmRegions(pos, idx);
+    const lacks: Array<{ code: GmMissing; name: string }> = [...(anchors.details ?? []), ...anchors.missing.filter((m) => !(anchors.details ?? []).some((d) => d.code === m)).map((code) => ({ code, name: '' }))];
+    const found = st.gm.patches.map((p) => {
+      const f = source.find(p.regionType);
+      if ('reason' in f) lacks.push({ code: f.reason, name: p.regionType });
+      return f;
+    });
+    if (lacks.length) {
+      this.feedback.toast(t('gm.template.cannot', { what: lacks.map((d) => t(`gm.missing.${d.code}`, { name: d.name })).join(', ') }), 'warn', 6000);
+      return;
+    }
+    const seed = st.gm.template?.sha256 === st.mesh.sha256 ? st.gm.template.seed + 1 : GM_TEMPLATE_PARAMETERS.SEED_START;
+    this.gmLaying = true;
+    this.sidebar.refresh('landmarks');
+    try {
+      const patches: NonNullable<GmConfig['template']>['patches'] = [];
+      for (const [i, p] of st.gm.patches.entries()) {
+        const f = found[i];
+        if ('reason' in f) return;
+        const laid = await runSliced(layPatchSteps(pos, idx, base.edges, f.faces, p.count, seed + i, loaded.offset));
+        if (this.loaded !== loaded) return;
+        if (!laid) {
+          this.feedback.toast(t('gm.template.tooSmall', { name: p.regionType, n: p.count }), 'warn', 6000);
+          return;
+        }
+        patches.push({ regionType: p.regionType, points: laid.points });
+      }
+      const rows = anchors.rows.map((r) => r.point);
+      setGmConfig(this.store, { template: { file: this.currentFile(), sha256: st.mesh.sha256, seed, patches, anchors: rows, anchorsHash: anchorsHashOf(rows), regionsHash: regionsHashOf(st) } });
+    } finally {
+      this.gmLaying = false;
+      this.sidebar.refresh('landmarks');
+    }
+  }
+
+  gmLayingNow(): boolean {
+    return this.gmLaying;
   }
 
   /** The points of the open model are up to date. */
@@ -2894,6 +3006,7 @@ export class App implements AppApi {
     const config = structuredClone(this.store.state.gm);
     if (JSON.stringify(config) === JSON.stringify(this.folderGm)) return;
     this.folderGm = config;
+    this.gmSeen.clear();
     if (ws.writable) void ws.write(GM_CONFIG_FILE, JSON.stringify(config, null, 2)).catch((e) => this.feedback.toast(t('workspace.saveFailed', { msg: (e as Error).message }), 'error'));
   }
 
@@ -2906,30 +3019,52 @@ export class App implements AppApi {
   }
 
   /**
-   * The flakes of a summary by the folder's configuration. Stored points of another configuration are made anew on their models (these are opened in turn);
-   * a specimen that lacks an annotation needs no model to tell so.
+   * The specimens of a summary by the folder's configuration. By a template: what is stored stands while what it was made from is the same (`gmCacheKey`), the rest is made in the
+   * batch worker. By the grid: stored points of another configuration are made anew on their models (these are opened in turn); a specimen that lacks an annotation needs no model to tell so.
    */
-  private async gmOfFolder(specimens: BatchSpecimen[], config: GmConfig): Promise<void> {
+  private async gmOfFolder(specimens: BatchSpecimen[], config: GmConfig, measurer: MeshMeasurer): Promise<void> {
     const ws = this.workspace!;
     const start = this.wsIndex;
-    const wanted = JSON.stringify(config);
+    const summary = gmConfigSummary(config);
+    const gridOf = (c: Pick<GmConfig, 'fixed' | 'edge' | 'platformOutline' | 'ventral' | 'dorsal' | 'platform'>) => JSON.stringify([c.fixed, c.edge, c.platformOutline, c.ventral, c.dorsal, c.platform]);
+    const wanted = gridOf(config);
+    const there = !config.template || ws.meshes.includes(config.template.file);
     let opened = false;
     for (const s of specimens) {
-      if (s.state.specimen.type !== 'flake') continue;
+      const type = s.state.specimen.type;
+      if (usesTemplate(config, type)) {
+        s.state = { ...s.state, gm: config };
+        if (!gmInUse(config, type)) {
+          s.gm = null;
+          continue;
+        }
+        const key = gmCacheKey(s.state);
+        if (s.gm?.key === key) continue;
+        const i = ws.meshes.indexOf(s.file);
+        if (i < 0) continue;
+        if (this.gm?.key === key && this.wsIndex === i) {
+          s.gm = { config: summary, ...this.gm };
+          continue;
+        }
+        const made = await measurer.gm(await ws.read(s.file), s.state, there);
+        s.gm = { config: summary, ...made, key };
+        this.gmSeen.set(s.file, gmStanding(made));
+        continue;
+      }
       s.state = { ...s.state, gm: config };
       const lacks = gmMissingInputs(s.state);
       if (lacks.length) {
-        s.gm = { config, complete: false, missing: lacks, rows: [], curves: [], surfaces: [] };
+        s.gm = { config: summary, complete: false, missing: lacks, rows: [], curves: [], surfaces: [] };
         continue;
       }
-      if (s.gm && JSON.stringify(s.gm.config) === wanted) continue;
+      if (s.gm && gridOf(s.gm.config) === wanted) continue;
       const i = ws.meshes.indexOf(s.file);
       if (i < 0) continue;
       opened = true;
       await this.openWorkspaceMesh(i, true);
       await this.settled();
       await this.gmSettled();
-      if (this.gm && this.wsIndex === i) s.gm = { config, ...this.gm };
+      if (this.gm && this.wsIndex === i) s.gm = { config: summary, ...this.gm };
     }
     if (opened && start >= 0) await this.openWorkspaceMesh(start, true);
   }
@@ -4061,7 +4196,7 @@ export class App implements AppApi {
 
   // ------------------------------------------------------------ workspace
 
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; undownloaded: number } | null {
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null {
     const ws = this.workspace;
     if (!ws) return null;
     const models = ws.meshes.map((p, i) => this.modelProject(p, i));
@@ -4069,7 +4204,21 @@ export class App implements AppApi {
       if (!m) return null;
       const { done, total } = annotationStatus(m.state, m.regions);
       return { done, total };
-    }), undownloaded: this.undownloadedCount() };
+    }), gm: ws.meshes.map((p, i) => this.modelGm(p, i)), template: this.store.state.gm.template?.file ?? this.folderGm?.template?.file ?? null, undownloaded: this.undownloadedCount() };
+  }
+
+  /** How a model's points stand, as far as they are known, when points have been asked for (null: they have not, or there is no project). */
+  private modelGm(path: string, i: number): { done: boolean; flagged: number } | null {
+    const m = this.modelProject(path, i);
+    const config = this.folderGm ?? this.store.state.gm;
+    if (!m || !gmInUse(config, m.state.specimen.type)) return null;
+    if (i === this.wsIndex && this.hasMesh()) return gmStanding(this.gm);
+    const seen = this.gmSeen.get(path);
+    if (seen) return seen;
+    const index = this.projectIndex;
+    const stored = (index?.get(projectPathFor(path)) ?? index?.get(legacyProjectPathFor(path)))?.derived.gm as GmDerived | null | undefined;
+    // points made by another configuration say nothing of this one
+    return gmStanding(stored && sameGmConfig(stored.config, config) ? stored : null);
   }
 
   /** The open model's project, or what its project file holds, with the regions found on the mesh, as far as they are known (null: no project, or none read yet). */
@@ -4121,6 +4270,7 @@ export class App implements AppApi {
     this.projectIndex = new ProjectIndex(() => ws.projects, async (p) => (await ws.read(p)).text());
     this.sessionProjects.clear();
     this.undownloaded.clear();
+    this.gmSeen.clear();
     this.folderSharp = await this.readFolderSharp(ws);
     this.folderGm = await this.readFolderGm(ws);
     this.sidebar.refresh('workspace');
@@ -4314,6 +4464,13 @@ export class App implements AppApi {
     return { base, put, finish };
   }
 
+  /** How the open specimen's points are made; none asked for is no template used. */
+  private gmManifestOfOpen(): ReturnType<typeof gmManifest> {
+    const config = this.folderGm ?? this.store.state.gm;
+    const type = this.store.state.specimen.type;
+    return gmManifest(config, gmInUse(config, type) && usesTemplate(config, type));
+  }
+
   private manifestBase(scope: Manifest['scope'], kind: Manifest['kind'], options: Record<string, unknown>): Omit<Manifest, 'files' | 'specimens' | 'failures'> {
     return {
       app: { name: 'LithicAnalyst', version: __APP_VERSION__ },
@@ -4322,7 +4479,8 @@ export class App implements AppApi {
       folder: this.workspace?.name ?? null,
       kind,
       options,
-      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, measuredLine: MEASURED_LINE_PARAMETERS, retouchIndex: RETOUCH_INDEX_PARAMETERS, workingEdge: WORKING_EDGE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: this.folderGm ?? this.store.state.gm },
+      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, measuredLine: MEASURED_LINE_PARAMETERS, retouchIndex: RETOUCH_INDEX_PARAMETERS, workingEdge: WORKING_EDGE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: gmConfigSummary(this.folderGm ?? this.store.state.gm), gmTemplate: GM_TEMPLATE_PARAMETERS, tps: TPS_PARAMETERS },
+      gm: this.gmManifestOfOpen(),
       duplicateNames: this.wsDuplicates,
     };
   }
@@ -4376,11 +4534,12 @@ export class App implements AppApi {
       const judged = sharp ? specimens.map((s) => ({ ...s, state: { ...s.state, sharpEdge: sharp } })) : specimens;
       for (const f of batchOutputs(judged, { excelBom: bom })) await sink.put(f.suffix, f.text);
       // the same points on every flake
-      await this.gmOfFolder(judged, this.folderGm ?? this.store.state.gm);
+      await this.gmOfFolder(judged, this.folderGm ?? this.store.state.gm, measurer);
       const gm = gmOutputs(judged, { excelBom: bom });
       for (const f of gm.files) await sink.put(f.suffix, f.text);
       if (failures.length) await sink.put('failures.csv', failuresCsv(failures, bom));
-      const where = await sink.finish({ ...this.manifestBase('folder', 'tables', { excelBom: bom, worker: measurer.inWorker }), specimens: listed, failures, gmSkipped: gm.skipped });
+      const config = this.folderGm ?? this.store.state.gm;
+      const where = await sink.finish({ ...this.manifestBase('folder', 'tables', { excelBom: bom, worker: measurer.inWorker }), specimens: listed, failures, gmSkipped: gm.skipped, gmIncomplete: gm.incomplete, gm: gmManifest(config, judged.some((s) => s.gm?.method === 'template')) });
       this.batchToast(specimens.length, failures, where);
     } catch (e) {
       this.feedback.toast((e as Error).message, 'error');
@@ -4567,15 +4726,27 @@ export class App implements AppApi {
         csv('landmarks-fcsv', t('export.landmarksFcsv'), 'landmarks.fcsv', lm.rows.length > 0, () => landmarksFcsv(lm)),
         csv('landmarks-csv', t('export.landmarksCsv'), 'landmarks.csv', lm.rows.length > 0, () => landmarksCsv(st, lm, opts)),
         csv('sliders', t('export.sliders'), 'sliders.csv', lm.sliders.length > 0, () => slidersCsv(lm)),
-        // a flake's points for geometric morphometrics: only when it has them all
-        ...(this.isFlake()
-          ? [
-              csv('gm-tps', t('export.gmTps'), 'gm_landmarks.tps', !!this.gm?.complete, () => landmarksTps(st, this.gm!)),
-              csv('gm-fcsv', t('export.gmFcsv'), 'gm_landmarks.fcsv', !!this.gm?.complete, () => landmarksFcsv(this.gm!)),
-              csv('gm-csv', t('export.gmCsv'), 'gm_landmarks.csv', !!this.gm?.complete, () => landmarksCsv(st, this.gm!, opts)),
-              csv('gm-curves', t('export.gmCurves'), 'gm_curves.csv', !!this.gm?.complete && this.gm.curves.length > 0, () => gmCurvesCsv(this.gm!)),
-              csv('gm-surfaces', t('export.gmSurfaces'), 'gm_surfaces.csv', !!this.gm?.complete && this.gm.surfaces.length > 0, () => gmSurfacesCsv(this.gm!)),
-            ]
+        // the points for geometric morphometrics: by the grid only when it has them all; by a template what it lacks is written as NA
+        ...(this.isFlake() || gmInUse(st.gm, st.specimen.type)
+          ? (() => {
+              const has = !!this.gm && (this.gm.method === 'template' ? this.gm.rows.some((r) => !r.missing) : this.gm.complete);
+              return [
+                csv('gm-tps', t('export.gmTps'), 'gm_landmarks.tps', has, () => landmarksTps(st, this.gm!)),
+                csv('gm-fcsv', t('export.gmFcsv'), 'gm_landmarks.fcsv', has, () => landmarksFcsv(this.gm!)),
+                csv('gm-csv', t('export.gmCsv'), 'gm_landmarks.csv', has, () => gmLandmarksCsv(st, this.gm!, opts)),
+                csv('gm-curves', t('export.gmCurves'), 'gm_curves.csv', has && this.gm!.curves.length > 0, () => gmCurvesCsv(this.gm!)),
+                csv('gm-surfaces', t('export.gmSurfaces'), 'gm_surfaces.csv', has && this.gm!.surfaces.length > 0, () => gmSurfacesCsv(this.gm!)),
+                // (by the grid the files stay those it always had)
+                ...(usesTemplate(st.gm, st.specimen.type)
+                  ? [
+                      csv('gm-smvector', t('export.gmSmvector'), 'gm_smvector.csv', has && this.gm!.curves.length > 0, () => gmSmvectorCsv(this.gm!)),
+                      csv('gm-outlines', t('export.gmOutlines'), 'gm_outlines.csv', has && this.gm!.curves.length > 0, () => gmOutlinesCsv(this.gm!)),
+                      csv('gm-surp', t('export.gmSurp'), 'gm_surp.csv', has && this.gm!.surfaces.length > 0, () => gmSurpCsv(this.gm!)),
+                      csv('gm-models', t('export.gmModels'), 'gm_models.csv', has, () => gmModelsCsv([{ id: st.specimen.id, file: this.currentFile() }])),
+                    ]
+                  : []),
+              ];
+            })()
           : []),
       ];
     }
@@ -6544,8 +6715,12 @@ export class App implements AppApi {
         const g = this.gm;
         if (!g) return '';
         const st = this.store.state;
-        return kind === 'tps' ? landmarksTps(st, g) : kind === 'csv' ? landmarksCsv(st, g, { excelBom: false }) : kind === 'curves' ? gmCurvesCsv(g) : gmSurfacesCsv(g);
+        return kind === 'tps' ? landmarksTps(st, g) : kind === 'csv' ? gmLandmarksCsv(st, g, { excelBom: false }) : kind === 'curves' ? gmCurvesCsv(g) : gmSurfacesCsv(g);
       },
+      gmTemplate: () => this.store.state.gm.template,
+      gmTemplateInfo: () => this.gmTemplateInfo(),
+      layGmTemplate: () => this.layGmTemplate(),
+      gmDrawn: () => this.gmLayer?.counts() ?? null,
       retouchAngles: (curveId: string) => this.retouchAngleResult(curveId),
       sharpEdge: (curveId: string) => this.sharpOf(curveId),
       exportRetouchAnglesCsvText: () => retouchAnglesCsv(this.store.state, this.retouchAngleCurves(), { excelBom: false }),

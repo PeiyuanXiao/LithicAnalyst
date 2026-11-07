@@ -49,6 +49,11 @@ export interface LithicApi {
   endpointPreview(): Vec3 | null;
   gm(): import('../src/compute/gm').GmResult | null;
   exportGmText(kind: 'tps' | 'csv' | 'curves' | 'surfaces'): string;
+  gmTemplate(): import('../src/core/types').GmTemplate | null;
+  gmTemplateInfo(): { file: string; seed: number; isThis: boolean; changed: boolean; missing: boolean } | null;
+  layGmTemplate(): Promise<void>;
+  /** The points on the view. */
+  gmDrawn(): { shown: boolean; points: number; flagged: number } | null;
   retouchAngles(curveId: string): import('../src/compute/retouchAngle').RetouchAngleResult | null;
   sharpEdge(curveId: string): import('../src/compute/sharpEdge').SharpResult | null;
   exportRetouchAnglesCsvText(): string;
@@ -110,7 +115,7 @@ export interface LithicApi {
   module(): 'core' | 'flake' | 'generic' | null;
   openFolderHandle(handle: never): Promise<void>;
   specimenIds(): Record<string, string>;
-  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<'core' | 'flake' | 'generic' | null>; completion: Array<{ done: number; total: number } | null>; undownloaded: number } | null;
+  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<'core' | 'flake' | 'generic' | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null;
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;

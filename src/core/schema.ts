@@ -6,7 +6,8 @@ import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, 
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
 import { clampFitLength } from '../compute/retouchIndex';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
+import { GM_TEMPLATE_PARAMETERS } from '../compute/gmTemplate';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, GM_CONFIG_VERSION, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type GmCurveListItem, type GmTemplate, type GmTemplatePoint, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -305,7 +306,29 @@ export function parseSharpEdge(raw: unknown): SharpEdgeRule {
 /** The most points asked of one curve or side of a grid. */
 const GM_MAX_POINTS = 500;
 
-/** Which points a flake has (of a project file, or of a folder's file); what is not understood takes its default. */
+const parseVec = (v: unknown): Vec3 | null => (Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x)) ? [v[0], v[1], v[2]] : null);
+
+/** The points laid on a template; null when something in them is not as it should be (they would not go with the anchors). */
+function parseGmTemplate(raw: unknown): GmTemplate | null {
+  const r = raw as Record<string, unknown> | null | undefined;
+  if (!r || typeof r !== 'object' || !Array.isArray(r.patches) || !Array.isArray(r.anchors)) return null;
+  const anchors = r.anchors.map(parseVec);
+  if (anchors.some((a) => !a)) return null;
+  const patches: GmTemplate['patches'] = [];
+  for (const p of r.patches as Array<Record<string, unknown>>) {
+    if (typeof p?.regionType !== 'string' || !Array.isArray(p.points)) return null;
+    const points: GmTemplatePoint[] = [];
+    for (const q of p.points as Array<Record<string, unknown>>) {
+      const point = parseVec(q?.point), bary = parseVec(q?.bary);
+      if (!point || !bary || !Number.isInteger(q.face)) return null;
+      points.push({ face: q.face as number, bary, point });
+    }
+    patches.push({ regionType: p.regionType, points });
+  }
+  return { file: str(r.file), sha256: str(r.sha256), seed: Number.isInteger(r.seed) ? (r.seed as number) : 1, patches, anchors: anchors as Vec3[], anchorsHash: str(r.anchorsHash), regionsHash: str(r.regionsHash) };
+}
+
+/** Which points a specimen has (of a project file, or of a folder's file); what is not understood takes its default. A file from before the lists has none of them, and goes by the grid. */
 export function parseGmConfig(raw: unknown): GmConfig {
   const d = defaultGmConfig();
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, Record<string, unknown> | undefined>;
@@ -313,13 +336,26 @@ export function parseGmConfig(raw: unknown): GmConfig {
   const on = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
   const curve = (key: 'edge' | 'platformOutline') => ({ on: on(r[key]?.on, d[key].on), points: whole(r[key]?.points, 2, d[key].points) });
   const grid = (key: 'ventral' | 'dorsal' | 'platform') => ({ on: on(r[key]?.on, d[key].on), rows: whole(r[key]?.rows, 1, d[key].rows), cols: whole(r[key]?.cols, 1, d[key].cols) });
+  const list = (key: string): Array<Record<string, unknown>> => {
+    const v = (raw as Record<string, unknown> | null | undefined)?.[key];
+    return Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : [];
+  };
   return {
+    version: GM_CONFIG_VERSION,
     fixed: { pop: on(r.fixed?.pop, true), platform_left: on(r.fixed?.platform_left, true), platform_right: on(r.fixed?.platform_right, true) },
     edge: curve('edge'),
     platformOutline: curve('platformOutline'),
     ventral: grid('ventral'),
     dorsal: grid('dorsal'),
     platform: grid('platform'),
+    surfaceMethod: (raw as Record<string, unknown> | null | undefined)?.surfaceMethod === 'template' ? 'template' : 'grid',
+    landmarks: list('landmarks').map((x) => ({ name: str(x.name) })),
+    curves: list('curves').map((x): GmCurveListItem => (x.closed === true ? { curveType: str(x.curveType), count: whole(x.count, 3, 20), closed: true, start: str(x.start), via: str(x.via) } : { curveType: str(x.curveType), count: whole(x.count, 2, 20), start: str(x.start), end: str(x.end) })),
+    patches: list('patches').map((x) => {
+      const n = x.count as number;
+      return { regionType: str(x.regionType), count: Number.isInteger(n) && n >= GM_TEMPLATE_PARAMETERS.PATCH_MIN && n <= GM_TEMPLATE_PARAMETERS.PATCH_MAX ? n : GM_TEMPLATE_PARAMETERS.PATCH_DEFAULT };
+    }),
+    template: parseGmTemplate((raw as Record<string, unknown> | null | undefined)?.template),
   };
 }
 

@@ -25,7 +25,10 @@ import { regionPathSteps } from '../src/compute/regionPath';
 import { technicalFrameSteps } from '../src/compute/technicalFrame';
 import { frameAxes } from '../src/core/frame';
 import { bvhPlaneCandidates, bvhRayCandidates } from '../src/render/bvhPlane';
-import { polylineEdgesSteps, regionsSteps } from '../src/compute/regions';
+import { layPatchSteps } from '../src/compute/gmTemplate';
+import { facesOfPiecesSteps, polylineEdgesSteps, regionsSteps } from '../src/compute/regions';
+import { anchorWarpSteps } from '../src/compute/tps';
+import { triangleBvhSteps } from '../src/compute/triangleBvh';
 import { splitByLoopSteps } from '../src/compute/split';
 import { runSync, type Steps } from '../src/compute/steps';
 import { emptyProject } from '../src/core/store';
@@ -307,6 +310,27 @@ async function benchGenerated(triangles: number): Promise<void> {
   const moved = once('10k a station\'s section, cut when asked for (BVH)', () => sectionAtStation({ positions: pos, index: idx, offset: o, points: rim, closed: true, unit: 'mm', meanEdge: base.meanEdge, candidates, pieceOfFace: banded.region, pieces: bandPieces }, 20));
   if (moved) once('10l that section drawn', () => svgFile(sectionDrawing(sectionModel(moved, null, { dorsal: 0, extents: [moved.ways[0].length, moved.ways[1].length], depths: [0, 0] }), { palette: PRINT_PALETTE, whole: true, minWidth: 5, unit: 'mm', width: 420, height: 300 }), 'x'));
   console.log(`${indices.indices.stations.length} retouched stations (${sectionPoints} section points kept), ERP ${indices.indices.erp?.toFixed(3)}, GIUR ${indices.indices.giur?.toFixed(3)}, invasiveness ${indices.indices.invasiveness}, empty: ${JSON.stringify(indices.reasons)}`);
+
+  // ⑪ surface semilandmarks by a template. The fit through the anchors has to take under a second up to 2000 of them, spread over the surface or (harder to solve) along curves
+  const bent = (p: Vec3): Vec3 => [1.05 * p[0] + 0.01 * p[1] * Math.sin(p[2] / 20), p[1] + 0.02 * p[0], 0.95 * p[2] + 2 * Math.sin(p[0] / 30)];
+  const atVertex = (v: number): Vec3 => [pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]];
+  const spread = (n: number): Vec3[] => Array.from({ length: n }, (_, k) => atVertex(Math.floor((k * (pos.length / 3)) / n)));
+  const alongRings = (n: number): Vec3[] => Array.from({ length: n }, (_, k) => atVertex(mesh.vertex(Math.floor(mesh.lat * (0.25 + 0.25 * (k % 2))), Math.floor((k * mesh.lon) / n))));
+  for (const n of [500, 1000, 2000]) {
+    const a = spread(n);
+    steps(`11a the fit through ${n} anchors, spread over the surface`, anchorWarpSteps(a, a.map(bent)));
+  }
+  const ringed = alongRings(2000);
+  const warp = steps('11b the fit through 2000 anchors, along two rings', anchorWarpSteps(ringed, ringed.map(bent)));
+  const patchFaces = runSync(facesOfPiecesSteps(rimPart, new Set([rimPart.region[0]])));
+  const laidPatch = steps(`11c 2000 points laid on a region of ${patchFaces.length} triangles`, layPatchSteps(pos, idx, base.edges, patchFaces, 2000, 1, o));
+  const regionTree = steps('11d the region\'s tree of triangles', triangleBvhSteps(pos, idx, patchFaces));
+  if (warp && laidPatch) {
+    once('11e those points carried and put on the region', () => laidPatch.points.map((q) => {
+      const c = warp([q.point[0] - o[0], q.point[1] - o[1], q.point[2] - o[2]]);
+      return regionTree.closest(c);
+    }));
+  }
   console.log('');
   report();
 }

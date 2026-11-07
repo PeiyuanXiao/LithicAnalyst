@@ -57,7 +57,8 @@ import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retou
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
 import { edgeAxis, rangeOf, type EdgeRetouchKey } from '../compute/workingEdge';
 import { FLAKE_MEASURES } from '../compute/flake';
-import { gmCounts, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
+import { gmCounts, gmListTotal, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
+import { FLAKE_TEMPLATE_PATCHES, gmConfigSummary, GM_TEMPLATE_PARAMETERS, usesTemplate } from '../compute/gmTemplate';
 import { landmarkName, platformSides, shownLandmarks } from '../compute/landmarks';
 import type { ConfigurationResult, FlakingSurface } from '../compute/configuration';
 import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type Quantity } from '../core/format';
@@ -2259,11 +2260,12 @@ function landmarksSection(api: AppApi): Section {
   return { el, refresh };
 }
 
-/** Which points a flake has for geometric morphometrics: what each item asks for, the total, and what the open specimen lacks. */
+/** Which points a specimen has for geometric morphometrics: what each item asks for, the total, and what the open specimen lacks. A flake by its items, a core or a generic specimen by lists of their own; surfaces by the grid or the template. */
 function gmSection(api: AppApi): Section {
   const total = h('span', { class: 'badge mono', id: 'gm-total-badge' }, '0');
   const { el, body } = section('gm', t('sec.gm'), total);
   const incomplete = h('span', { class: 'pill pill-warn', id: 'gm-incomplete', hidden: true }, t('gm.incomplete'));
+  const toCheck = h('span', { class: 'pill pill-warn', id: 'gm-flagged', hidden: true });
   const missing = h('ul', { class: 'gm-missing', id: 'gm-missing' });
   const numberBox = (id: string, value: number, least: number, set: (n: number) => void) => {
     const input = h('input', { id, class: 'ctl-text mono gm-number', type: 'number', min: least, max: 500, step: 1 }) as HTMLInputElement;
@@ -2277,11 +2279,97 @@ function gmSection(api: AppApi): Section {
   };
   const counts = h('dl', { class: 'num-grid', id: 'gm-summary' });
   const items = h('div', { class: 'gm-items' });
-  body.append(incomplete, missing, items, counts);
+  const lists = h('div', { class: 'gm-items' });
+  const methodBox = h('div', {});
+  const templateBox = h('div', { class: 'gm-template' });
+  const show = checkbox('gm-show-surface', t('gm.showSurface'), api.display.gmSurface, (on) => api.setDisplay((d) => (d.gmSurface = on), 'gm'));
+  body.append(incomplete, toCheck, missing, methodBox, items, lists, templateBox, show, counts);
   let builtFor = '';
+  const set = (change: Partial<GmConfig>) => setGmConfig(api.store, change);
+
+  /** A choice among what the folder holds, and what the row has now, even if nothing holds it any more. */
+  const pick = (id: string, label: string, values: readonly string[], value: string, text: (v: string) => string, onChange: (v: string) => void) => {
+    const options = [...new Set(['', ...values, value])];
+    const select = h('select', { id, class: 'ctl-select gm-pick', 'aria-label': label }, ...options.map((v) => h('option', { value: v }, v ? text(v) : t('gm.none')))) as HTMLSelectElement;
+    select.value = value;
+    select.addEventListener('change', () => onChange(select.value));
+    return select;
+  };
+  /** Up, down and away: the order of a list is the order of the export. */
+  const rowTools = <T,>(id: string, list: readonly T[], i: number, change: (next: T[]) => void) => {
+    const moved = (to: number) => {
+      const next = [...list];
+      const [x] = next.splice(i, 1);
+      next.splice(to, 0, x);
+      change(next);
+    };
+    return h(
+      'span',
+      { class: 'gm-row-tools' },
+      iconButton(ICONS.up, t('gm.up'), () => moved(i - 1), { id: `${id}-up`, disabled: i === 0 }),
+      iconButton(ICONS.down, t('gm.down'), () => moved(i + 1), { id: `${id}-down`, disabled: i === list.length - 1 }),
+      iconButton(ICONS.close, t('gm.remove'), () => change(list.filter((_, k) => k !== i)), { id: `${id}-remove` }),
+    );
+  };
+  const curveLabel = (v: string) => fieldText(CURVE_FIELDS[0], v);
+  const regionLabel = (v: string) => fieldText(REGION_FIELDS[0], v);
+  const buildPatches = (c: GmConfig, regions: readonly string[]) => {
+    lists.append(h('span', { class: 'ctl-label sub-label' }, t('gm.patches')));
+    c.patches.forEach((p, i) => {
+      const update = (change: Partial<GmConfig['patches'][number]>) => set({ patches: c.patches.map((x, k) => (k === i ? { ...x, ...change } : x)) });
+      const box = h('input', { id: `gm-patch-${i}-count`, class: 'ctl-text mono gm-number', type: 'number', min: GM_TEMPLATE_PARAMETERS.PATCH_MIN, max: GM_TEMPLATE_PARAMETERS.PATCH_MAX, step: 1, 'aria-label': t('gm.points') }) as HTMLInputElement;
+      box.value = String(p.count);
+      box.addEventListener('change', () => {
+        const n = Number(box.value);
+        if (Number.isInteger(n) && n >= GM_TEMPLATE_PARAMETERS.PATCH_MIN && n <= GM_TEMPLATE_PARAMETERS.PATCH_MAX) update({ count: n });
+        else box.value = String(p.count);
+      });
+      lists.append(h('div', { class: 'gm-row', id: `gm-patch-${i}` }, pick(`gm-patch-${i}-type`, t('gm.patches'), regions, p.regionType, regionLabel, (v) => update({ regionType: v })), box, rowTools(`gm-patch-${i}`, c.patches, i, (next) => set({ patches: next }))));
+    });
+    lists.append(plusButton(t('gm.add'), () => set({ patches: [...c.patches, { regionType: regions.find((v) => !c.patches.some((p) => p.regionType === v)) ?? '', count: GM_TEMPLATE_PARAMETERS.PATCH_DEFAULT }] }), 'gm-add-patch'));
+  };
+  const buildLists = (c: GmConfig, found: ReturnType<AppApi['gmCandidates']>) => {
+    lists.append(h('span', { class: 'ctl-label sub-label' }, t('gm.lists')));
+    c.landmarks.forEach((l, i) => {
+      lists.append(h('div', { class: 'gm-row', id: `gm-landmark-${i}` }, pick(`gm-landmark-${i}-name`, t('gm.lists'), found.landmarks, l.name, (v) => v, (v) => set({ landmarks: c.landmarks.map((x, k) => (k === i ? { name: v } : x)) })), rowTools(`gm-landmark-${i}`, c.landmarks, i, (next) => set({ landmarks: next }))));
+    });
+    lists.append(plusButton(t('gm.add'), () => set({ landmarks: [...c.landmarks, { name: found.landmarks.find((v) => !c.landmarks.some((l) => l.name === v)) ?? '' }] }), 'gm-add-landmark'));
+    lists.append(h('span', { class: 'ctl-label sub-label' }, t('gm.curves')));
+    c.curves.forEach((q, i) => {
+      const update = (next: GmConfig['curves'][number]) => set({ curves: c.curves.map((x, k) => (k === i ? next : x)) });
+      const box = numberBox(`gm-curve-${i}-count`, q.count, q.closed ? 3 : 2, (count) => update({ ...q, count }));
+      const closed = checkbox(`gm-curve-${i}-closed`, t('gm.closedCurve'), !!q.closed, (on) => update(on ? { curveType: q.curveType, count: Math.max(3, q.count), closed: true, start: q.start, via: q.closed ? q.via : q.end } : { curveType: q.curveType, count: q.count, start: q.start, end: q.closed ? q.via : q.end }));
+      const start = pick(`gm-curve-${i}-start`, t('gm.start'), found.landmarks, q.start, (v) => v, (v) => update({ ...q, start: v }));
+      const other = q.closed
+        ? pick(`gm-curve-${i}-via`, t('gm.via'), found.landmarks, q.via, (v) => v, (v) => update({ ...q, via: v }))
+        : pick(`gm-curve-${i}-end`, t('gm.end'), found.landmarks, q.end, (v) => v, (v) => update({ ...q, end: v }));
+      lists.append(
+        h(
+          'div',
+          { class: 'gm-curve', id: `gm-curve-${i}` },
+          h('div', { class: 'gm-row' }, pick(`gm-curve-${i}-type`, t('gm.curves'), found.curves, q.curveType, curveLabel, (v) => update({ ...q, curveType: v })), box, rowTools(`gm-curve-${i}`, c.curves, i, (next) => set({ curves: next }))),
+          h('div', { class: 'gm-row' }, closed, h('span', { class: 'gm-ends' }, h('span', { class: 'ctl-label' }, t('gm.start')), start, h('span', { class: 'ctl-label' }, t(q.closed ? 'gm.via' : 'gm.end')), other)),
+        ),
+      );
+    });
+    lists.append(plusButton(t('gm.add'), () => set({ curves: [...c.curves, { curveType: found.curves.find((v) => !c.curves.some((q) => q.curveType === v)) ?? '', count: 20, start: found.landmarks[0] ?? '', end: found.landmarks[1] ?? '' }] }), 'gm-add-curve'));
+    buildPatches(c, found.regions);
+  };
   const build = (c: GmConfig) => {
     clear(items);
-    const set = (change: Partial<GmConfig>) => setGmConfig(api.store, change);
+    clear(lists);
+    clear(methodBox);
+    const type = api.store.state.specimen.type;
+    const found = api.gmCandidates();
+    if (type !== 'flake') {
+      buildLists(c, found);
+      return;
+    }
+    const byTemplate = c.surfaceMethod === 'template';
+    methodBox.append(segmented('gm-method', t('gm.method'), [{ value: 'grid', label: t('gm.method.grid') }, { value: 'template', label: t('gm.method.template') }], c.surfaceMethod, (v) => {
+      const method = v as GmConfig['surfaceMethod'];
+      set(method === 'template' && !c.patches.length ? { surfaceMethod: method, patches: FLAKE_TEMPLATE_PATCHES() } : { surfaceMethod: method });
+    }).el);
     const count = (id: string, n: number) => h('span', { class: 'mono gm-count', id: `gm-count-${id}` }, fmtCount(n));
     const n = gmCounts(c);
     const fixed = (key: GmAnchor, label: string) => checkbox(`gm-fixed-${key}`, label, c.fixed[key], (on) => set({ fixed: { ...c.fixed, [key]: on } }));
@@ -2317,18 +2405,25 @@ function gmSection(api: AppApi): Section {
       h('span', { class: 'ctl-label sub-label' }, t('gm.curves')),
       curve('edge', t('gm.edge')),
       curve('platformOutline', t('gm.platformOutline')),
-      h('span', { class: 'ctl-label sub-label' }, `${t('gm.surfaces')} (${t('gm.rows')} × ${t('gm.cols')})`),
-      grid('ventral'),
-      grid('dorsal'),
-      grid('platform'),
+      ...(byTemplate
+        ? []
+        : [
+            h('span', { class: 'ctl-label sub-label' }, `${t('gm.surfaces')} (${t('gm.rows')} × ${t('gm.cols')})`),
+            grid('ventral'),
+            grid('dorsal'),
+            grid('platform'),
+          ]),
     );
+    if (byTemplate) buildPatches(c, [...new Set(['ventral', 'dorsal', 'platform', ...found.regions])]);
   };
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'landmarks', 'curves', 'regions', 'mesh', 'specimen', 'flake'].includes(kind)) return;
     const st = api.store.state;
     const c = st.gm;
-    // (built anew only when the configuration changes: a box being typed in stays)
-    const key = JSON.stringify(c);
+    const flake = st.specimen.type === 'flake';
+    const byTemplate = usesTemplate(c, st.specimen.type);
+    // (built anew only when the configuration or what it can choose from changes: a box being typed in stays)
+    const key = JSON.stringify([st.specimen.type, gmConfigSummary(c), flake && !byTemplate ? null : api.gmCandidates()]);
     if (key !== builtFor) {
       builtFor = key;
       build(c);
@@ -2336,19 +2431,46 @@ function gmSection(api: AppApi): Section {
     const r = api.gmResult();
     // the user's own landmarks and sets go along
     const own = st.landmarks.filter((l) => !l.code).length + api.landmarkTable().rows.filter((x) => x.kind === 'curve').length;
-    const n = r?.complete ? r.rows.length : gmTotal(c, st.landmarks.every((l) => l.code !== 'platform_end'), own);
+    const n = r && (r.complete || r.method === 'template') ? r.rows.length : flake ? gmTotal(c, st.landmarks.every((l) => l.code !== 'platform_end'), own) : gmListTotal(c);
     total.textContent = String(n);
     clear(counts);
     counts.append(...numRow(t('gm.total'), fmtCount(n), '', 'gm-total'));
     tip(counts, t('gm.totalWhy'));
+    // what lacks: by name, where it goes with a thing of the specimen's
+    const named = r?.details ?? [];
     const lacks = r ? r.missing : gmMissingInputs(st);
+    const notes = [...named.map((d) => ({ code: d.code as string, text: t(`gm.missing.${d.code}`, { name: d.name }) })), ...lacks.filter((m) => !named.some((d) => d.code === m)).map((m) => ({ code: m as string, text: t(`gm.missing.${m}`, { name: '' }) }))];
     incomplete.hidden = lacks.length === 0;
     clear(missing);
     missing.hidden = lacks.length === 0;
-    for (const m of lacks) missing.append(h('li', { 'data-code': m }, t(`gm.missing.${m}`)));
+    for (const m of notes) missing.append(h('li', { 'data-code': m.code }, m.text));
+    const flagged = r?.flagged?.length ?? 0;
+    toCheck.hidden = !flagged;
+    toCheck.textContent = flagged ? t('gm.flagged', { n: flagged }) : '';
+    // the template: where it stands, and laying it
+    clear(templateBox);
+    templateBox.hidden = !byTemplate;
+    (show as HTMLElement).hidden = !byTemplate;
+    (show.querySelector('input') as HTMLInputElement).checked = api.display.gmSurface;
+    if (byTemplate) {
+      const info = api.gmTemplateInfo();
+      if (info) templateBox.append(h('div', { class: 'mono gm-template-name', id: 'gm-template-name' }, t('gm.template.of', { file: info.file, seed: info.seed })));
+      if (info?.changed) templateBox.append(h('span', { class: 'pill pill-warn', id: 'gm-template-changed' }, t('gm.template.changed')));
+      const busy = api.gmLayingNow() || !api.hasMesh() || !c.patches.length;
+      templateBox.append(
+        h(
+          'div',
+          { class: 'btn-row' },
+          info?.isThis
+            ? h('button', { type: 'button', class: 'btn btn-sm', id: 'gm-template-relay', disabled: busy, onclick: () => void api.layGmTemplate() }, t('gm.template.relay'))
+            : h('button', { type: 'button', class: 'btn btn-sm', id: 'gm-template-set', disabled: busy, onclick: () => void api.layGmTemplate() }, t('gm.template.set')),
+        ),
+      );
+    }
   };
   refresh('all');
-  return { el, refresh, visible: () => api.store.state.specimen.type === 'flake' };
+  // a core or a generic specimen has it too: its lists start empty
+  return { el, refresh, visible: () => true };
 }
 
 function noduleSection(api: AppApi): Section {
@@ -2524,6 +2646,8 @@ function workspaceSection(api: AppApi): Section {
           h('span', { class: 'ws-path mono' }, ws.meshes[i]),
           ws.types[i] ? h('span', { class: 'ws-type', 'data-type': ws.types[i] }, t(`specimen.type.${ws.types[i]}`)) : null,
           ws.completion[i] ? h('span', { class: 'ws-done mono', 'data-done': String(ws.completion[i]!.done === ws.completion[i]!.total) }, `${ws.completion[i]!.done}/${ws.completion[i]!.total}`) : null,
+          ws.gm[i] ? h('span', { class: 'ws-gm mono', 'data-done': String(ws.gm[i]!.done), title: ws.gm[i]!.flagged ? t('gm.flagged', { n: ws.gm[i]!.flagged }) : undefined }, `GM ${ws.gm[i]!.done ? '✓' : '○'}`) : null,
+          ws.template === ws.meshes[i] ? h('span', { class: 'ws-template' }, t('workspace.template')) : null,
         ),
       );
     }
@@ -2795,6 +2919,8 @@ export interface Sidebar {
   openCustomType: () => void;
   /** A tool was chosen: open its section and fold the others but the folder's (choosing Select changes nothing). */
   focusTool: (tool: string) => void;
+  /** Open a section and fold the others but the folder's. */
+  focusSection: (id: string) => void;
 }
 
 /** The section each tool works in: switching to the tool opens it and folds the others. */
@@ -2901,6 +3027,10 @@ export function buildSidebar(api: AppApi): Sidebar {
       const target = TOOL_SECTIONS[tool];
       if (!target) return;
       for (const d of shown()) if (d.id !== 'sec-workspace') setOpen(d, d.id === `sec-${target}`);
+    },
+    focusSection: (id) => {
+      for (const d of shown()) if (d.id !== 'sec-workspace') setOpen(d, d.id === `sec-${id}`);
+      shown().find((d) => d.id === `sec-${id}`)?.scrollIntoView({ block: 'start' });
     },
   };
 }

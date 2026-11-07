@@ -104,11 +104,11 @@ test('works in a window 400 px wide', async ({ page }) => {
   expect(await fits()).toBe(true);
 });
 
-test('the annotate sidebar: arrows, relations and sequences, curves, regions, landmarks', async ({ page }) => {
+test('the annotate sidebar: arrows, relations and sequences, curves, regions, landmarks, the GM configuration', async ({ page }) => {
   await openApp(page);
   await loadMesh(page, roofPly());
   const order = await page.evaluate(() => [...document.querySelectorAll('#sidebar > details')].map((d) => ({ id: d.id, shown: !(d as HTMLElement).hidden })));
-  const annotate = ['sec-arrows', 'sec-relations', 'sec-curves', 'sec-regions', 'sec-landmarks'];
+  const annotate = ['sec-arrows', 'sec-relations', 'sec-curves', 'sec-regions', 'sec-landmarks', 'sec-gm'];
   expect(order.map((s) => s.id).filter((id) => annotate.includes(id))).toEqual(annotate);
   expect(order.filter((s) => s.shown && s.id !== 'sec-workspace').map((s) => s.id)).toEqual(annotate);
   // the configuration is no longer a sidebar section

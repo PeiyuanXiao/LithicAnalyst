@@ -34,7 +34,7 @@ test('a generic specimen has none of the tools, panels and sections of a core or
     await page.keyboard.press(key);
     await expect(page.locator('#mode-select')).toHaveAttribute('aria-checked', 'true');
   }
-  for (const id of ['axis', 'relations', 'gm']) await expect(page.locator(`#sec-${id}`)).toBeHidden();
+  for (const id of ['axis', 'relations']) await expect(page.locator(`#sec-${id}`)).toBeHidden();
   await displayPanel(page);
   for (const id of ['config-show', 'harris-show', 'profile-show', 'gm-show']) await expect(page.locator(`#${id}`)).toBeHidden();
   const colours = await page.locator('#arrow-color option').evaluateAll((els) => els.filter((e) => !(e as HTMLOptionElement).hidden).map((e) => (e as HTMLOptionElement).value));

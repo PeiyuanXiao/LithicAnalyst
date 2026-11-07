@@ -41,6 +41,8 @@ export interface DisplaySettings {
   profile: boolean;
   /** Show a flake's semilandmarks for geometric morphometrics. */
   gmPoints: boolean;
+  /** Show the surface semilandmarks of the open specimen. */
+  gmSurface: boolean;
   /** The retouch mode's section and plan panels, the segments' lines and the original edge on the model. */
   retouchSection: boolean;
   retouchPlan: boolean;
@@ -147,7 +149,7 @@ export interface AppApi {
    * The open folder: its models (paths), which one is open (−1: none of them), which have a
    * project and of which type (null: no project, or not read yet), and (read-only folder) how many edited models were not downloaded.
    */
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<import('../core/fields').SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; undownloaded: number } | null;
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<import('../core/fields').SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null;
   openWorkspaceMesh(i: number): Promise<void>;
   stepWorkspace(step: number): void;
   /** Open the next model without a project. */
@@ -206,6 +208,14 @@ export interface AppApi {
   readonly edgeMethod: import('../compute/edgeAngle').EdgeAngleMethod;
   flakeEmptyReasons(): Partial<Record<FlakeMeasure, FlakeEmptyReason>> | null;
   gmResult(): GmResult | null;
+  /** How the template stands (null: there is none). */
+  gmTemplateInfo(): { file: string; seed: number; isThis: boolean; changed: boolean; missing: boolean } | null;
+  /** What the folder holds to choose from in the lists of the configuration. */
+  gmCandidates(): { landmarks: string[]; curves: string[]; regions: string[] };
+  /** The open specimen as the template, its points laid (again, by another seed, when it is). */
+  layGmTemplate(): Promise<void>;
+  /** A template is being laid. */
+  gmLayingNow(): boolean;
   retouchAngleResult(curveId: string): RetouchAngleResult | null;
   sharpOf(curveId: string): SharpResult | null;
   suggestSharpEdge(): Promise<void>;

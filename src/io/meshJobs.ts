@@ -1,10 +1,12 @@
 import { sha256Hex } from '../compute/hash';
 import type { ConfigBox } from '../compute/configuration';
+import type { GmResult } from '../compute/gm';
 import { frameMeasuresSteps, surfaceMeasuresSteps } from '../compute/measure';
 import type { PrincipalAxes } from '../compute/meshGeometry';
+import { gmOfProjectSteps } from '../compute/projectRegions';
 import type { Steps } from '../compute/steps';
 import type { AutoMeasurements } from '../core/derived';
-import type { SpecimenFrame, Vec3 } from '../core/types';
+import type { ProjectState, SpecimenFrame, Vec3 } from '../core/types';
 import { centredMesh, parseMeshBuffer } from './readMesh';
 
 /** What a batch export needs from a model: its size, shape and box along each frame asked for, and the vertices' principal axes. */
@@ -61,6 +63,12 @@ export class MeshJobs {
   drop(id: number): void {
     this.files.delete(id);
   }
+
+  /** A specimen's points by the template, on its model: the model is read for this, and let go. */
+  async gm(file: File, state: ProjectState, templateAvailable: boolean): Promise<GmResult> {
+    const mesh = centredMesh(parseMeshBuffer(file.name, file.size, await file.arrayBuffer(), ''));
+    return this.run(gmOfProjectSteps(state, { positions: mesh.positions, index: mesh.index, offset: mesh.offset }, templateAvailable));
+  }
 }
 
 /** Messages to the batch worker, and its answers (by `seq`). */
@@ -68,6 +76,7 @@ export type JobRequest =
   | { seq: number; type: 'ping' }
   | { seq: number; type: 'hash'; id: number; file: File }
   | { seq: number; type: 'measure'; id: number; frames: Array<SpecimenFrame | null> }
-  | { seq: number; type: 'drop'; id: number };
+  | { seq: number; type: 'drop'; id: number }
+  | { seq: number; type: 'gm'; file: File; state: ProjectState; templateAvailable: boolean };
 
 export type JobReply = { seq: number; ok: true; value: unknown } | { seq: number; ok: false; error: string };

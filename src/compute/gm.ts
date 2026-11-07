@@ -2,14 +2,18 @@ import { PLATFORM_OUTLINE } from '../core/fields';
 import { frameAxes, type FrameAxes } from '../core/frame';
 import type { Curve, GmConfig, ProjectState, Vec3 } from '../core/types';
 import { resampleEven } from './flake';
+import { GM_TEMPLATE_PARAMETERS } from './gmTemplate';
 import { arcLengths, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkRow } from './landmarks';
 import { regionPlaneSteps } from './planes';
 import { runSync, type Steps } from './steps';
+import { anchorWarpSteps } from './tps';
+import type { TriangleBvh } from './triangleBvh';
 
 /**
- * The points of a flake for geometric morphometrics, by a configuration shared by every specimen: fixed landmarks,
+ * The points of a specimen for geometric morphometrics, by a configuration shared by every specimen. A flake: fixed landmarks,
  * curve semilandmarks along the edge and the platform outline, surface semilandmarks in grids over the ventral and
- * dorsal faces and the platform. They follow from the annotations; none of them can be moved on its own. Sliding happens in R.
+ * dorsal faces and the platform, or by a template. A core or a generic specimen: the lists of the configuration, and the template.
+ * They follow from the annotations; none of them can be moved on its own. Sliding happens in R.
  */
 
 /** The landmarks of a flake's own, which curves begin and end on. */
@@ -17,7 +21,7 @@ export const GM_ANCHORS = ['pop', 'platform_left', 'platform_right'] as const;
 export type GmAnchor = (typeof GM_ANCHORS)[number];
 
 /** Why a specimen cannot have all its points. These codes are written to the manifest; keep them. */
-export const GM_MISSING = ['technical_axis', 'platform_ends', 'edge', 'platform_outline', 'platform_region', 'ventral_miss', 'dorsal_miss', 'platform_miss', 'point_count'] as const;
+export const GM_MISSING = ['technical_axis', 'platform_ends', 'edge', 'platform_outline', 'platform_region', 'ventral_miss', 'dorsal_miss', 'platform_miss', 'point_count', 'landmark_missing', 'landmark_ambiguous', 'curve_missing', 'curve_ambiguous', 'curve_ends', 'region_missing', 'region_ambiguous', 'no_template', 'template_missing', 'template_stale', 'too_few_anchors', 'no_fit'] as const;
 export type GmMissing = (typeof GM_MISSING)[number];
 
 /** The three stretches of the platform outline, in their order. */
@@ -27,13 +31,26 @@ export const GM_OUTLINE_SETS = ['platform_left_pop', 'platform_pop_right', 'plat
 export type GmRow = LandmarkRow;
 
 export interface GmResult {
+  /** How the surface semilandmarks were made (`template`: rows may be missing, and the rows say more). Absent in results from before there was a choice: the grid. */
+  method?: 'grid' | 'template';
   complete: boolean;
   missing: GmMissing[];
+  /** What lacks, by name, for the codes that go with a thing of the specimen's. */
+  details?: Array<{ code: GmMissing; name: string }>;
   rows: GmRow[];
   /** One row per sliding curve semilandmark, by point number: before, slide, after. */
   curves: Array<[number, number, number]>;
   /** The surface semilandmarks, by point number. */
   surfaces: number[];
+  /** Surface semilandmarks the check put on the list, by point number. */
+  flagged?: number[];
+  /** What it was made from (`gmCacheKey`): while that is the same, what is stored can stand for it. */
+  key?: string;
+}
+
+/** Where the points by a template go on a specimen: the one region of a type. */
+export interface GmRegionSource {
+  find(type: string): { reason: 'region_missing' | 'region_ambiguous' } | { faces: ArrayLike<number>; area: number; bvh: () => Steps<TriangleBvh> };
 }
 
 /** The points each item of a configuration asks for. A curve's count holds both its ends. */
@@ -58,7 +75,22 @@ export function gmTotal(c: GmConfig, pointPlatform = false, own = 0): number {
   if (c.edge.on) for (const a of pointPlatform ? (['pop'] as const) : (['platform_left', 'platform_right'] as const)) ends.add(a);
   if (c.platformOutline.on) for (const a of GM_ANCHORS) ends.add(a);
   const between = (c.edge.on ? c.edge.points - 2 : 0) + (c.platformOutline.on ? 3 * (c.platformOutline.points - 2) : 0);
-  return ends.size + between + n.ventral + n.dorsal + n.platform + own;
+  const surfaces = c.surfaceMethod === 'template' ? patchPoints(c) : n.ventral + n.dorsal + n.platform;
+  return ends.size + between + surfaces + own;
+}
+
+const patchPoints = (c: GmConfig): number => c.patches.reduce((s, p) => s + p.count, 0);
+
+/** How many points a core or a generic specimen has by the lists. A curve's ends are single points, shared as above; a loop's two ends are one. */
+export function gmListTotal(c: GmConfig): number {
+  const ends = new Set(c.landmarks.map((l) => l.name));
+  let between = 0;
+  for (const q of c.curves) {
+    ends.add(q.start);
+    if (!q.closed) ends.add(q.end);
+    between += q.count - 2;
+  }
+  return ends.size + between + patchPoints(c);
 }
 
 /** The triangles a line may cross (the app's come from the BVH); all of them when there is none. */
@@ -74,12 +106,18 @@ export interface GmMesh {
   candidates?: RayCandidates | null;
   /** The middle of the flake, relative to `offset` (the vertices' mean when not given). */
   centroid?: Vec3;
+  /** Where the points by a template go (none: no region can be found). */
+  regions?: GmRegionSource | null;
+  /** The template's model is in the folder (false: nothing is passed on from it). */
+  templateAvailable?: boolean;
 }
 
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const along = (o: Vec3, d: Vec3, t: number): Vec3 => [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
+/** Where a point stands that is not there. */
+const NOWHERE = (): Vec3 => [NaN, NaN, NaN];
 
 /** The stretch of a polyline from arc length `from` to `to`, going forward; on a closed one it may go past the start. */
 function arcSlice(points: readonly Vec3[], closed: boolean, cum: readonly number[], from: number, to: number): Vec3[] {
@@ -191,27 +229,212 @@ function crossings(line: ReadonlyArray<[number, number]>, closed: boolean, at: n
   return out;
 }
 
-type GmState = Pick<ProjectState, 'gm' | 'landmarks' | 'semilandmarks' | 'curves' | 'flake' | 'specimen'>;
+type GmState = Pick<ProjectState, 'gm' | 'landmarks' | 'semilandmarks' | 'curves' | 'flake' | 'specimen'> & Partial<Pick<ProjectState, 'mesh'>>;
 
-/** What of a specimen's annotations a configuration needs and it has not; the rest can only be told on the mesh. */
-export function gmMissingInputs(state: Pick<GmState, 'gm' | 'landmarks' | 'curves' | 'flake'>): GmMissing[] {
+/** What of a specimen's annotations a configuration needs and it has not; the rest can only be told on the mesh. A core or a generic specimen: of the lists. */
+export function gmMissingInputs(state: Pick<GmState, 'gm' | 'landmarks' | 'curves' | 'flake'> & Partial<Pick<GmState, 'specimen'>>): GmMissing[] {
   const c = state.gm;
   const out = new Set<GmMissing>();
-  const wants = GM_ANCHORS.some((a) => c.fixed[a]) || c.edge.on || c.platformOutline.on || c.ventral.on || c.dorsal.on || c.platform.on;
+  if (state.specimen && state.specimen.type !== 'flake') {
+    const own = state.landmarks.filter((l) => !l.code);
+    const count = (name: string) => own.filter((l) => l.name === name).length;
+    for (const l of c.landmarks) if (count(l.name) !== 1) out.add(count(l.name) ? 'landmark_ambiguous' : 'landmark_missing');
+    for (const q of c.curves) {
+      const n = state.curves.filter((x) => x.attributes.type === q.curveType && (!q.closed || x.closed)).length;
+      if (n !== 1) out.add(n ? 'curve_ambiguous' : 'curve_missing');
+      for (const name of q.closed ? [q.start, q.via] : [q.start, q.end]) if (count(name) !== 1) out.add(name ? (count(name) ? 'landmark_ambiguous' : 'landmark_missing') : 'curve_ends');
+    }
+    return GM_MISSING.filter((m) => out.has(m));
+  }
+  const byTemplate = c.surfaceMethod === 'template';
+  const wants = GM_ANCHORS.some((a) => c.fixed[a]) || c.edge.on || c.platformOutline.on || (!byTemplate && (c.ventral.on || c.dorsal.on || c.platform.on));
   if (wants && !state.flake.axis?.matrix) out.add('technical_axis');
   const ends = state.landmarks.filter((l) => l.code === 'platform_end').length;
-  const grid = c.ventral.on || c.dorsal.on;
-  const needEnds = c.fixed.platform_left || c.fixed.platform_right || c.platformOutline.on || c.platform.on;
+  const grid = !byTemplate && (c.ventral.on || c.dorsal.on);
+  const platform = !byTemplate && c.platform.on;
+  const needEnds = c.fixed.platform_left || c.fixed.platform_right || c.platformOutline.on || platform;
   if ((needEnds && ends !== 2) || ((c.edge.on || grid) && ends === 1)) out.add('platform_ends');
   if ((c.edge.on || grid) && !state.curves.some((x) => x.attributes.type === 'edge')) out.add('edge');
   const outlined = state.curves.some((x) => x.attributes.type === PLATFORM_OUTLINE && x.closed);
-  if ((c.platformOutline.on || c.platform.on || (grid && ends > 0)) && !outlined) out.add('platform_outline');
+  if ((c.platformOutline.on || platform || (grid && ends > 0)) && !outlined) out.add('platform_outline');
   return GM_MISSING.filter((m) => out.has(m));
+}
+
+/** What the rows being made need to go on with the points of the template. */
+interface RowSink {
+  rows: GmRow[];
+  surfaces: number[];
+  missing: Set<GmMissing>;
+  details: Array<{ code: GmMissing; name: string }>;
+}
+
+/**
+ * The points of the patches, by the template: on the template its points as laid, on another specimen carried by the anchors (the rows already written) and brought onto
+ * the region of the patch's type. What cannot be had stays in the rows as missing, so every specimen has the same rows. A point is flagged that moved far onto the surface or came too near another.
+ */
+function* templatePointsSteps(state: GmState, mesh: GmMesh, sink: RowSink): Steps<number[]> {
+  const c = state.gm;
+  const t = c.template;
+  const { rows, surfaces, missing, details } = sink;
+  const flagged: number[] = [];
+  const add = (name: string, k: number, p: Vec3 | null, flag = false) => {
+    rows.push({ index: rows.length + 1, name, kind: 'surface', setId: name, point: p ? [p[0], p[1], p[2]] : NOWHERE(), ...(p ? {} : { missing: true }), setIndex: k + 1, ...(flag ? { flagged: true } : {}) });
+    surfaces.push(rows.length);
+    if (flag) flagged.push(rows.length);
+  };
+  const blank = (name: string, count: number) => {
+    for (let k = 0; k < count; k++) add(name, k, null);
+  };
+  if (!c.patches.length) return flagged;
+  const fails = (code: GmMissing) => {
+    missing.add(code);
+    for (const p of c.patches) blank(p.regionType, p.count);
+    return flagged;
+  };
+  if (!t) return fails('no_template');
+  const isTemplate = state.mesh?.sha256 === t.sha256;
+  if (!isTemplate && mesh.templateAvailable === false) return fails('template_missing');
+  const stale = c.patches.length !== t.patches.length || c.patches.some((p, i) => p.regionType !== t.patches[i].regionType || p.count !== t.patches[i].points.length);
+  if (stale) return fails('template_stale');
+  if (isTemplate) {
+    c.patches.forEach((p, i) => t.patches[i].points.forEach((q, k) => add(p.regionType, k, q.point)));
+    return flagged;
+  }
+  const own = rows.filter((r) => r.kind !== 'surface');
+  if (own.length !== t.anchors.length) return fails('template_stale');
+  const pairs = own.flatMap((r, i) => (r.missing ? [] : [i]));
+  if (pairs.length < GM_TEMPLATE_PARAMETERS.MIN_ANCHORS) return fails('too_few_anchors');
+  const warp = yield* anchorWarpSteps(pairs.map((i) => t.anchors[i]), pairs.map((i) => own[i].point));
+  if (!warp) return fails('no_fit');
+  const o: Vec3 = mesh.offset ?? [0, 0, 0];
+  for (const [i, p] of c.patches.entries()) {
+    const found = mesh.regions ? mesh.regions.find(p.regionType) : ({ reason: 'region_missing' } as const);
+    if ('reason' in found) {
+      missing.add(found.reason);
+      details.push({ code: found.reason, name: p.regionType });
+      blank(p.regionType, p.count);
+      continue;
+    }
+    const bvh = yield* found.bvh();
+    const spacing = Math.sqrt(found.area / p.count);
+    const moves = new Float64Array(p.count);
+    const placed: Vec3[] = [];
+    for (let k = 0; k < p.count; k++) {
+      if (k % 64 === 0) yield;
+      const q = warp(t.patches[i].points[k].point);
+      const hit = bvh.closest([q[0] - o[0], q[1] - o[1], q[2] - o[2]]);
+      if (!hit) {
+        placed.push(NOWHERE());
+        moves[k] = Infinity;
+        continue;
+      }
+      moves[k] = hit.distance;
+      placed.push([hit.point[0] + o[0], hit.point[1] + o[1], hit.point[2] + o[2]]);
+    }
+    const near = (GM_TEMPLATE_PARAMETERS.CROWD_SHARE * spacing) ** 2;
+    for (let k = 0; k < p.count; k++) {
+      if (k % 64 === 0) yield;
+      let crowded = false;
+      const a = placed[k];
+      for (let j = 0; j < p.count && !crowded; j++) {
+        if (j === k) continue;
+        const b = placed[j];
+        crowded = (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2 < near;
+      }
+      add(p.regionType, k, Number.isNaN(a[0]) ? null : a, crowded || moves[k] > GM_TEMPLATE_PARAMETERS.MOVE_LIMIT_SHARE * spacing);
+    }
+  }
+  return flagged;
+}
+
+/** The numbers within each curve; what a template's rows say of them. */
+function numberWithinSets(rows: GmRow[]): void {
+  const seen = new Map<string, number>();
+  for (const r of rows) {
+    if (r.kind !== 'curve') continue;
+    const set = r.setId || r.name;
+    const n = (seen.get(set) ?? 0) + 1;
+    seen.set(set, n);
+    r.name = set;
+    r.setIndex = n;
+  }
+}
+
+/** The points of a core or a generic specimen: the lists of the configuration, in their order, and the template's. */
+function* gmOfListsSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
+  const c = state.gm;
+  const rows: GmRow[] = [];
+  const curves: GmResult['curves'] = [];
+  const surfaces: number[] = [];
+  const missing = new Set<GmMissing>();
+  const details: Array<{ code: GmMissing; name: string }> = [];
+  const note = (code: GmMissing, name: string) => {
+    missing.add(code);
+    if (!details.some((d) => d.code === code && d.name === name)) details.push({ code, name });
+  };
+  const add = (name: string, kind: GmRow['kind'], setId: string, point: Vec3 | null): number => {
+    rows.push({ index: rows.length + 1, name, kind, setId, point: point ?? NOWHERE(), ...(point ? {} : { missing: true }) });
+    return rows.length;
+  };
+  const own = state.landmarks.filter((l) => !l.code);
+  /** A landmark by its name: the one of that name, or nothing, and why. */
+  const landmark = (name: string): Vec3 | null => {
+    const found = own.filter((l) => l.name === name);
+    if (found.length === 1) return found[0].point;
+    note(found.length ? 'landmark_ambiguous' : 'landmark_missing', name);
+    return null;
+  };
+  // a landmark is a single point, whatever is ending on it
+  const numbered = new Map<string, number>();
+  for (const l of c.landmarks) if (!numbered.has(l.name)) numbered.set(l.name, add(l.name, 'fixed', '', landmark(l.name)));
+  const endAt = (name: string, set: string, p: Vec3 | null): number => {
+    let i = numbered.get(name);
+    if (i === undefined) {
+      i = add(set, 'curve', set, p);
+      numbered.set(name, i);
+    }
+    return i;
+  };
+  for (const q of c.curves) {
+    yield;
+    const found = state.curves.filter((x) => x.attributes.type === q.curveType && (!q.closed || x.closed) && x.points.length > 1);
+    if (found.length !== 1) note(found.length ? 'curve_ambiguous' : 'curve_missing', q.curveType);
+    if (!q.start || !(q.closed ? q.via : q.end)) note('curve_ends', q.curveType);
+    const start = q.start ? landmark(q.start) : null;
+    const other = q.closed ? (q.via ? landmark(q.via) : null) : q.end ? landmark(q.end) : null;
+    const curve = found.length === 1 ? found[0] : null;
+    const pts = curve && start && other ? resampleEven(curveStretch(curve, start, other, !!q.closed), q.count) : null;
+    const first = endAt(q.start, q.curveType, start);
+    const between = Array.from({ length: q.count - 2 }, (_, k) => add(q.curveType, 'curve', q.curveType, pts ? pts[k + 1] : null));
+    const last = q.closed ? first : endAt(q.end, q.curveType, other);
+    const chain = [first, ...between, last];
+    for (let k = 1; k + 1 < chain.length; k++) curves.push([chain[k - 1], chain[k], chain[k + 1]]);
+  }
+  numberWithinSets(rows);
+  const flagged = yield* templatePointsSteps(state, mesh, { rows, surfaces, missing, details });
+  const list = GM_MISSING.filter((m) => missing.has(m));
+  return { method: 'template', complete: list.length === 0, missing: list, details, rows, curves, surfaces, flagged };
+}
+
+/** The stretch of a curve between two landmarks, ending on them. A loop (`round`): from the first, the way that reaches the second sooner, back to the first. On a closed curve taken as an open one: the shorter way. */
+function curveStretch(curve: Pick<Curve, 'points' | 'closed'>, a: Vec3, b: Vec3, round: boolean): Vec3[] {
+  const pts = curve.points;
+  const cum = arcLengths(pts, curve.closed);
+  const L = cum[cum.length - 1];
+  const s = nearestArc(pts, curve.closed, cum, a), e = nearestArc(pts, curve.closed, cum, b);
+  if (round) {
+    const loop = arcSlice(pts, true, cum, s, s);
+    return [a, ...(((e - s + L) % L) <= ((s - e + L) % L) ? loop : loop.reverse()), a];
+  }
+  if (!curve.closed) return [a, ...(s <= e ? arcSlice(pts, false, cum, s, e) : arcSlice(pts, false, cum, e, s).reverse()), b];
+  return [a, ...(((e - s + L) % L) <= ((s - e + L) % L) ? arcSlice(pts, true, cum, s, e) : arcSlice(pts, true, cum, e, s).reverse()), b];
 }
 
 /** The points of a flake (in slices). */
 export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
+  if (state.specimen.type !== 'flake') return yield* gmOfListsSteps(state, mesh);
   const c = state.gm;
+  const byTemplate = c.surfaceMethod === 'template';
   const o: Vec3 = mesh.offset ?? [0, 0, 0];
   const missing = new Set<GmMissing>(gmMissingInputs(state));
   const rows: GmRow[] = [];
@@ -232,7 +455,8 @@ export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
   const anchorAt = (a: GmAnchor, setId: string): number => {
     let i = numbered.get(a);
     if (i === undefined) {
-      i = add(a, 'curve', setId, anchors[a]!);
+      i = add(a, 'curve', setId, anchors[a] ?? NOWHERE());
+      if (!anchors[a]) rows[i - 1].missing = true;
       numbered.set(a, i);
     }
     return i;
@@ -241,6 +465,11 @@ export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
   // fixed landmarks: the flake's own, then the user's
   for (const a of GM_ANCHORS) {
     if (c.fixed[a] && anchors[a]) numbered.set(a, add(a, 'fixed', '', anchors[a]!));
+    // (by a template every specimen has the same rows, and what is not there says so)
+    else if (c.fixed[a] && byTemplate) {
+      numbered.set(a, add(a, 'fixed', '', NOWHERE()));
+      rows[rows.length - 1].missing = true;
+    }
   }
   const table = landmarkTable(state);
   const listed = shownLandmarks(state);
@@ -265,11 +494,28 @@ export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
   const hasEnds = !!left && !!right;
   const line = f && pop && edge && edge.points.length > 1 && (hasEnds || ends === 0) ? edgeLine(edge, f, pop, left, right) : null;
   const stretches = pop && hasEnds && outline && outline.points.length > 2 ? outlineStretches(outline, left!, pop, right!) : null;
+  /** By a template a curve that is not there still has its rows. */
+  const blankCurve = (count: number, setId: string, start: GmAnchor, end: GmAnchor) => {
+    const first = anchorAt(start, setId);
+    const between = Array.from({ length: count - 2 }, (_, k) => {
+      const i = add(`${setId}_${k + 2}`, 'curve', setId, NOWHERE());
+      rows[i - 1].missing = true;
+      return i;
+    });
+    const last = anchorAt(end, setId);
+    const chain = [first, ...between, last];
+    for (let k = 1; k + 1 < chain.length; k++) curves.push([chain[k - 1], chain[k], chain[k + 1]]);
+  };
   if (c.edge.on && line) writeCurve(line, c.edge.points, 'edge', hasEnds ? 'platform_left' : 'pop', hasEnds ? 'platform_right' : 'pop');
+  else if (c.edge.on && byTemplate) blankCurve(c.edge.points, 'edge', 'platform_left', 'platform_right');
   if (c.platformOutline.on && stretches) {
     writeCurve(stretches[0], c.platformOutline.points, GM_OUTLINE_SETS[0], 'platform_left', 'pop');
     writeCurve(stretches[1], c.platformOutline.points, GM_OUTLINE_SETS[1], 'pop', 'platform_right');
     writeCurve(stretches[2], c.platformOutline.points, GM_OUTLINE_SETS[2], 'platform_right', 'platform_left');
+  } else if (c.platformOutline.on && byTemplate) {
+    blankCurve(c.platformOutline.points, GM_OUTLINE_SETS[0], 'platform_left', 'pop');
+    blankCurve(c.platformOutline.points, GM_OUTLINE_SETS[1], 'pop', 'platform_right');
+    blankCurve(c.platformOutline.points, GM_OUTLINE_SETS[2], 'platform_right', 'platform_left');
   }
   // the user's own sets; their ends may be landmarks of the flake's own
   table.rows.forEach((r, i) => {
@@ -283,6 +529,14 @@ export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
     return anchorAt(name, '');
   };
   for (const [a, b, d] of table.sliders) curves.push([renumber(a), renumber(b), renumber(d)]);
+
+  if (byTemplate) {
+    numberWithinSets(rows);
+    const details: NonNullable<GmResult['details']> = [];
+    const flagged = yield* templatePointsSteps(state, mesh, { rows, surfaces, missing, details });
+    const list = GM_MISSING.filter((m) => missing.has(m));
+    return { method: 'template', complete: list.length === 0, missing: list, details, rows, curves, surfaces, flagged };
+  }
 
   // surface semilandmarks: the faces, by lines along the frame's Z over the outline in its XY plane
   const grid = c.ventral.on || c.dorsal.on;
@@ -380,7 +634,7 @@ export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
     }
   }
   const list = GM_MISSING.filter((m) => missing.has(m));
-  return { complete: list.length === 0, missing: list, rows, curves, surfaces };
+  return { method: 'grid', complete: list.length === 0, missing: list, rows, curves, surfaces };
 }
 
 function meanVertex(p: ArrayLike<number>): Vec3 {
@@ -391,3 +645,6 @@ function meanVertex(p: ArrayLike<number>): Vec3 {
 }
 
 export const gmPoints = (state: GmState, mesh: GmMesh): GmResult => runSync(gmSteps(state, mesh));
+
+/** The rows that are not on a surface, and what lacks of them: the anchors of the points by a template. They need no mesh, only the annotations. */
+export const gmAnchorRows = (state: GmState): GmResult => gmPoints({ ...state, gm: { ...state.gm, surfaceMethod: 'template', patches: [] } }, { positions: [], index: [], platformFaces: null });

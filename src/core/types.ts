@@ -396,8 +396,55 @@ export interface GmGridItem {
   cols: number;
 }
 
-/** Which points a flake has for geometric morphometrics. In a folder, the folder's own: every model has the same. */
+/** The version of the configuration's own layout, kept in it. */
+export const GM_CONFIG_VERSION = 2;
+
+/** A fixed landmark of a list: by its name on each specimen. */
+export interface GmLandmarkItem {
+  name: string;
+}
+
+/**
+ * Curve semilandmarks of a list: the one curve of this type, `count` points at equal arc length, both ends among them. Open: between the points nearest
+ * the landmarks `start` and `end`. Closed: from the point nearest `start`, the way that reaches `via` first, once round (`count` holds the start twice, as a single point).
+ */
+export type GmCurveListItem = { curveType: string; count: number; start: string; end: string; closed?: false } | { curveType: string; count: number; closed: true; start: string; via: string };
+
+/** Surface semilandmarks of a list: `count` points on the one region of this type. */
+export interface GmPatchItem {
+  regionType: string;
+  count: number;
+}
+
+/** A point laid on the template: its triangle (in the app's order of the model) and place in it, and where that is. */
+export interface GmTemplatePoint {
+  face: number;
+  bary: [number, number, number];
+  point: Vec3;
+}
+
+/** The points laid on the template, per patch, and what they were laid from; what they are passed on with. */
+export interface GmTemplate {
+  /** Its model: the path in the folder, else the file's name. */
+  file: string;
+  /** The model's checksum, which tells the template when it is open. */
+  sha256: string;
+  seed: number;
+  /** In the order of the patches. */
+  patches: Array<{ regionType: string; points: GmTemplatePoint[] }>;
+  /** The anchors the points go with, in the order of the configuration. */
+  anchors: Vec3[];
+  /** Of the template's own annotations when it was laid: a change shows against these. */
+  anchorsHash: string;
+  regionsHash: string;
+}
+
+/**
+ * Which points a specimen has for geometric morphometrics. In a folder, the folder's own: every model has the same. A flake goes by its items, a core or a generic
+ * specimen by the lists; a flake's surfaces by the grid or, as they do, by the patches and the template.
+ */
 export interface GmConfig {
+  version: number;
   fixed: { pop: boolean; platform_left: boolean; platform_right: boolean };
   edge: GmCurveItem;
   /** Each of its three stretches. */
@@ -405,15 +452,26 @@ export interface GmConfig {
   ventral: GmGridItem;
   dorsal: GmGridItem;
   platform: GmGridItem;
+  surfaceMethod: 'grid' | 'template';
+  landmarks: GmLandmarkItem[];
+  curves: GmCurveListItem[];
+  patches: GmPatchItem[];
+  template: GmTemplate | null;
 }
 
 export const defaultGmConfig = (): GmConfig => ({
+  version: GM_CONFIG_VERSION,
   fixed: { pop: true, platform_left: true, platform_right: true },
   edge: { on: true, points: 50 },
   platformOutline: { on: true, points: 10 },
   ventral: { on: true, rows: 15, cols: 10 },
   dorsal: { on: true, rows: 15, cols: 10 },
   platform: { on: true, rows: 4, cols: 8 },
+  surfaceMethod: 'grid',
+  landmarks: [],
+  curves: [],
+  patches: [],
+  template: null,
 });
 
 export interface ProjectState {

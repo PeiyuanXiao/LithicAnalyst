@@ -1,5 +1,6 @@
+import type { GmResult } from '../compute/gm';
 import { runSliced } from '../compute/steps';
-import type { SpecimenFrame } from '../core/types';
+import type { ProjectState, SpecimenFrame } from '../core/types';
 import { MeshJobs, type JobReply, type JobRequest, type MeshMeasures } from './meshJobs';
 
 /** A request without its sequence number (for each kind of request). */
@@ -11,13 +12,15 @@ export interface MeshMeasurer {
   hash(id: number, file: File): Promise<string>;
   measure(id: number, frames: Array<SpecimenFrame | null>): Promise<MeshMeasures>;
   drop(id: number): void;
+  /** A specimen's points by the template, on its model. */
+  gm(file: File, state: ProjectState, templateAvailable: boolean): Promise<GmResult>;
   dispose(): void;
 }
 
 /** On the page, in slices between frames (where no worker can be made). */
 function pageMeasurer(): MeshMeasurer {
   const jobs = new MeshJobs((steps) => runSliced(steps));
-  return { inWorker: false, hash: (id, f) => jobs.hash(id, f), measure: (id, fr) => jobs.measure(id, fr), drop: (id) => jobs.drop(id), dispose: () => {} };
+  return { inWorker: false, hash: (id, f) => jobs.hash(id, f), measure: (id, fr) => jobs.measure(id, fr), drop: (id) => jobs.drop(id), gm: (f, st, there) => jobs.gm(f, st, there), dispose: () => {} };
 }
 
 /**
@@ -62,6 +65,7 @@ export async function createMeasurer(make: (() => Worker) | null, timeoutMs = 40
     hash: (id, file) => ask<string>({ type: 'hash', id, file }),
     measure: (id, frames) => ask<MeshMeasures>({ type: 'measure', id, frames }),
     drop: (id) => void ask({ type: 'drop', id }).catch(() => {}),
+    gm: (file, state, templateAvailable) => ask<GmResult>({ type: 'gm', file, state, templateAvailable }),
     dispose: () => {
       fail(new Error('Cancelled.'));
       worker.terminate();

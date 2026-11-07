@@ -16,6 +16,7 @@ scope.onmessage = async (e) => {
     if (m.type === 'hash') value = await jobs.hash(m.id, m.file);
     else if (m.type === 'measure') value = await jobs.measure(m.id, m.frames);
     else if (m.type === 'drop') jobs.drop(m.id);
+    else if (m.type === 'gm') value = await jobs.gm(m.file, m.state, m.templateAvailable);
     scope.postMessage({ seq: m.seq, ok: true, value });
   } catch (err) {
     scope.postMessage({ seq: m.seq, ok: false, error: err instanceof Error ? err.message : String(err) });

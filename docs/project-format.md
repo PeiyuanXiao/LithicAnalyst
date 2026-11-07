@@ -41,7 +41,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
 | `flake` | `{ axis, otherFrame, retouch }` | a flake's own data, see "Flakes" and "Retouch indices"; files without it: none |
-| `gm` | object | which points a flake has for geometric morphometrics, see "Geometric morphometrics"; files without it: the default |
+| `gm` | object | which points a specimen has for geometric morphometrics, see "Geometric morphometrics"; files without it: the default |
 | `sharpEdge` | `{ method, distance, threshold }` | what counts as a sharp edge, see "Sharp edge"; files without it: three points at 2 mm, no threshold |
 | `workingEdges` | array | stretches of the curves measured for edge angles, measured on their own, see "Working edges"; files without it: none |
 | `derived` | object | latest computed results, see below |
@@ -172,7 +172,7 @@ fitted planes, fitted spheres, volumes ….
 * `retouchIndices`: a flake's retouch indices, see "Retouch indices" (absent for a core, or before they are computed).
 * `measuredLines` (absent when there are none): the edges not measured along all of their curve, see "The line measured" under "Edge angles": `{ parameters: { EDGE_RIM_REACH_MM, EDGE_RIM_MIN_MM }, curves: [{ curveId, start, end }] }`.
 * `sharpEdge`: their sharp stretches, see "Sharp edge" (null without a threshold, or without edge angles).
-* `gm`: a flake's points for geometric morphometrics, see "Geometric morphometrics" (null for a core, or before they are computed).
+* `gm`: a specimen's points for geometric morphometrics, see "Geometric morphometrics" (null before they are computed, and for a core or a general specimen whose lists are empty).
 
 ## Volumetric configuration
 
@@ -488,19 +488,47 @@ stretches shorter than `SHARP_MIN_RUN_MM` (3) dropped; the ends of an open curve
 
 ```json
 "gm": {
+  "version": 2,
   "fixed": { "pop": true, "platform_left": true, "platform_right": true },
   "edge": { "on": true, "points": 50 },
   "platformOutline": { "on": true, "points": 10 },
   "ventral": { "on": true, "rows": 15, "cols": 10 },
   "dorsal": { "on": true, "rows": 15, "cols": 10 },
-  "platform": { "on": true, "rows": 4, "cols": 8 }
+  "platform": { "on": true, "rows": 4, "cols": 8 },
+  "surfaceMethod": "grid",
+  "landmarks": [{ "name": "tip" }, { "name": "base" }],
+  "curves": [
+    { "curveType": "midline", "count": 20, "start": "tip", "end": "base" },
+    { "curveType": "rim", "count": 30, "closed": true, "start": "tip", "via": "base" }
+  ],
+  "patches": [{ "regionType": "cortex", "count": 100 }],
+  "template": {
+    "file": "site1/A.ply",
+    "sha256": "…",
+    "seed": 1,
+    "patches": [{ "regionType": "cortex", "points": [{ "face": 12, "bary": [0.2, 0.3, 0.5], "point": [1, 2, 3] }] }],
+    "anchors": [[1, 2, 3]],
+    "anchorsHash": "…",
+    "regionsHash": "…"
+  }
 }
 ```
 
-Flakes only. `points`: of a curve (`platformOutline`: of each of its three parts), both its ends among them, at least 2; `rows`, `cols`: at least 1; at most 500. In a folder the
-configuration is the folder's: `LithicAnalyst/gm-config.json` holds it, and it stands in for the value in each project.
+In a folder the configuration is the folder's: `LithicAnalyst/gm-config.json` holds it, and it stands in for the value in each project. Files without `version` (written before these lists) read as `grid` with empty lists and no template.
+
+* A flake: `fixed` to `platform`. `points`: of a curve (`platformOutline`: of each of its three parts), both its ends among them, at least 2; `rows`, `cols`: at least 1; at most 500.
+  `surfaceMethod`: `grid` (the rows and columns below) or `template` (`patches`, in place of the grids).
+* A core or a general specimen: the three lists, whose order is the order of the export. No names are preset, and with the lists empty it has no points.
+  * `landmarks`: matched by name to the specimen's landmarks.
+  * `curves`: of `curveType`, `count` points equally spaced by arc length, both ends among them. Open: the stretch between the points nearest the landmarks `start` and `end`. `closed`: from the point nearest `start`, the way that reaches `via` sooner, once round; its end is its start. An end that is a listed landmark is that one point; any other is written once, where it is first needed.
+  * `patches`: by the template. `count`: 10 to 2000.
+* `template`: the specimen the points were laid on, by the model's path and checksum, and the `seed` they were laid by. `patches`: per item of `patches`, in order, each point's triangle and barycentric coordinates and its place in original coordinates (`point`; `face` is the triangle's number in the app's mesh, whose order may not be the file's). `anchors`: its fixed and curve points in order. The two hashes: of those anchors, and of the annotations the regions come from.
+
+A landmark, curve or region type that a specimen lacks, or has more than one of, makes the specimen incomplete, with its reason.
 
 The points, in their order. None can be moved on its own; a change of the configuration changes no annotation.
+
+**A flake by the grid:**
 
 1. **Fixed**: `pop`, `platform_left`, `platform_right` (as asked for), then the user's own landmarks.
 2. **Curves**, equally spaced, both ends among them. A curve's end is a single point: the fixed landmark, or, when that is left out, a point (kind `curve`) written where it is first needed.
@@ -511,9 +539,16 @@ The points, in their order. None can be moved on its own; a change of the config
    * `ventral`, `dorsal`: in the technical frame. The polygon of the edge and the inner rim (a point platform: the edge alone) in the XY plane. Row i of R at Y = Ymin + i/(R+1) × (Ymax − Ymin); between the row's leftmost and rightmost crossings of the polygon, column j of C at i/(C+1). A line along Z there: the lowest crossing of the mesh for the ventral face, the highest for the dorsal.
    * `platform`: the plane fitted to the platform region's vertices, weighted by area, its normal n away from the flake's middle; u the direction from the left end to the right in it, v = n × u from the inner rim to the outer. Column j of C at j/(C+1) between the two ends' u; row i of R at i/(R+1) from the inner rim to the outer along v; down n onto the region's triangles.
 
-**Derived** (`derived.gm`): `config`, `complete`, `missing` (codes, below), `rows` (`{ index, name, kind, setId, point }`, original coordinates; `kind`: `fixed`, `curve` or `surface`), `curves` (`[before, slide, after]` by point number from 1), `surfaces` (point numbers).
+**By a template** (a core, a general specimen, a flake by `template`): the fixed and curve points as above, or as the lists say, then the patches. A flake's anchors are its fixed landmarks and the curve points of the edge and the outline.
 
-`missing`: `technical_axis`, `platform_ends`, `edge`, `platform_outline` (a closed one), `platform_region`, `ventral_miss`, `dorsal_miss`, `platform_miss` (a point finds no triangle). A specimen lacking any of them has no GM exports; in a summary it is listed instead, with `point_count` for one whose number of points differs from the others' (the user's own landmarks).
+* **Laying**, on the template, region by region: `20 × count` candidates drawn by area with the seed (mulberry32; the n-th patch by `seed + n`), those nearer the region's boundary than `0.5 × s` left out (`s = sqrt(area / count)`), then farthest-point sampling (Euclidean), the first the first candidate left. The order taken is the points' order. Laying again goes on to the next seed. Parameters: `GM_TEMPLATE_PARAMETERS`.
+* **Passing on**, to any other specimen: with at least 4 anchors, a similarity (Kabsch and one scale, never a mirror image) takes the template's anchors and points onto the specimen's; a thin-plate spline fits what is left at the anchors (the displacements; kernel `U(r) = r`; the affine part the least-norm solution by the pseudo-inverse, relative cutoff `1e-8`, so anchors in a plane leave what lies across it to the similarity); then each point goes to the nearest place on the triangles of its region. Pairs repeating an anchor count once. Parameters: `TPS_PARAMETERS`.
+* **The check**: a point is flagged when it moved further than `0.5 × s` onto the region, or lies nearer another of its patch than `0.25 × s` (`s` by the region on this specimen). It is neither moved nor left out.
+* The template's own points are those laid. Every specimen has the same rows; what it lacks has `missing: true` and no coordinates (`null` in the file, `NA` in the exports).
+
+**Derived** (`derived.gm`): `config` (as above, of `template` only `file`, `sha256`, `seed`, the two hashes and `points`, how many), `complete`, `missing` (codes, below), `rows` (`{ index, name, kind, setId, point }`, original coordinates; `kind`: `fixed`, `curve` or `surface`), `curves` (`[before, slide, after]` by point number from 1), `surfaces` (point numbers). A result saved before the lists has in `config` the grid's fields alone. By a template also: `method: "template"`, `details` (`{ code, name }`: which landmark, curve or region a code is about), `flagged` (point numbers), `key` (a hash of what the points are made from: the template's points and anchors, the specimen's anchors, regions and mesh, the configuration's version; while it is the same a summary uses them), and in `rows` `setIndex` (the number within its curve), `flagged` and `missing`. By the grid `method: "grid"`.
+
+`missing`: `technical_axis`, `platform_ends`, `edge`, `platform_outline` (a closed one), `platform_region`, `ventral_miss`, `dorsal_miss`, `platform_miss` (a point finds no triangle), `point_count`; `landmark_missing`, `landmark_ambiguous`, `curve_missing`, `curve_ambiguous`, `curve_ends` (a row without its ends), `region_missing`, `region_ambiguous`, `no_template`, `template_missing` (its model is not in the folder: nothing is passed on), `template_stale` (the lists no longer match what was laid), `too_few_anchors`, `no_fit`. By the grid a specimen lacking any of them has no GM exports; in a summary it is listed instead, with `point_count` for one whose number of points differs from the others' (the user's own landmarks). By a template it is exported with `NA` where it lacks, and listed in the manifest's `gmIncomplete`; only a specimen with no point at all is left out.
 
 ## Surface region
 
@@ -835,14 +870,24 @@ Retouch layers (`<specimen>_retouch_angles.csv`, long format: one row per statio
 specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg,working_edge
 ```
 
-Geometric morphometrics (flakes with all their points; see "Geometric morphometrics"): the coordinates as the landmarks' (`<specimen>_gm_landmarks.tps`, `.fcsv`, `.csv`; `kind` also `surface`, `set_id` the curve or grid), and for geomorph's sliding:
+Geometric morphometrics (see "Geometric morphometrics"): the coordinates as the landmarks' (`<specimen>_gm_landmarks.tps`, `.fcsv`, `.csv`; `kind` also `surface`, `set_id` the curve or grid), and for geomorph's sliding:
 
 ```
 before,slide,after      <specimen>_gm_curves.csv (by point number from 1; the ends of a curve do not slide)
 index                   <specimen>_gm_surfaces.csv
 ```
 
-The summary of a folder has one `gm_landmarks.csv` and `gm_landmarks.tps` of its complete flakes, and one definition of each.
+By a template the table has two more columns, what is missing is `NA` in all three coordinate files, and there is what Morpho's `slider3d` takes:
+
+```
+specimen_id,index,name,kind,set_id,x,y,z,set_index,flagged     <specimen>_gm_landmarks.csv (name: the landmark, curve type or region type; index: the point's number in the specimen; set_index: within its curve or patch; flagged: 0 or 1)
+index                   <specimen>_gm_smvector.csv (SMvector: the points that slide along a curve)
+outline,index           <specimen>_gm_outlines.csv (outlines: each curve's points in order, ends included)
+index                   <specimen>_gm_surp.csv (surp: the same as gm_surfaces.csv)
+specimen_id,model       <specimen>_gm_models.csv (the path of each specimen's model, within the folder, for sur.path)
+```
+
+By the grid the files and their bytes are as they always were. The summary of a folder has one `gm_landmarks.csv` and `gm_landmarks.tps` of its specimens (all by the same way of making the points, and with as many), and one definition of each.
 
 Working edges (`<specimen>_working_edges.csv`, one row per working edge of each curve measured, and one per such curve without any, `working_edge` empty; see "Working edges"; lengths in the coordinate unit, the volume in unit³, ratios as 0 to 1; those from `retouched_length` on empty for a core or a general specimen; in a folder's summary `sharp_length` is by the folder's rule):
 
@@ -922,7 +967,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
   …models (in subfolders too; folders starting with "." are left out)
   LithicAnalyst/
     sharp-edge.json                               what counts as a sharp edge in this folder
-    gm-config.json                                which points its flakes have for geometric morphometrics
+    gm-config.json                                which points its specimens have for geometric morphometrics, and the template's
     projects/<model path>.lithicanalyst.json     e.g. projects/site1/EXP03.ply.lithicanalyst.json
     exports/<YYYY-MM-DD_HHMMSS>/                  one new folder per export, never overwritten
       manifest.json, failures.csv (only when something failed)
@@ -944,7 +989,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
 * A read-only folder (a directory upload) gets the same layout in one ZIP to unpack into it: the
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app`, `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration), `gmSkipped` (`file`, `id`, `missing`: flakes left out of the coordinates of a summary), `specimens` (`id`, `file` = model path, `sha256`, `project`
+  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 

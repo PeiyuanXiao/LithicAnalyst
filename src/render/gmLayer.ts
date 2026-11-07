@@ -7,9 +7,13 @@ import type { Viewer } from './viewer';
 const FILL = new THREE.Color('#f1f0ea');
 const RING = new THREE.Color('#34342f');
 
+/** The ring round a point the check flagged, and how much larger it makes the dot. */
+const FLAG = new THREE.Color('#e8a33a');
+const FLAG_SCALE = 1.7;
+
 /**
- * A flake's semilandmarks: small dots of the semilandmarks' size (`dotDiameterPx`, worked out per point in the shader). They lie on the surface and can be
- * hidden by it; moved a little toward the camera, further than the curves are, so that neither the triangle they lie on nor a curve covers them.
+ * A specimen's semilandmarks: small dots of the semilandmarks' size (`dotDiameterPx`, worked out per point in the shader). They lie on the surface and can be
+ * hidden by it; moved a little toward the camera, further than the curves are, so that neither the triangle they lie on nor a curve covers them. A flagged one has an amber ring.
  */
 export class GmLayer {
   readonly group = new THREE.Group();
@@ -23,8 +27,10 @@ export class GmLayer {
     maxPx: { value: dotLimitsPx('semi')[1] },
     /** Device pixels per CSS pixel. */
     ratio: { value: 1 },
+    flagScale: { value: FLAG_SCALE },
     fill: { value: FILL },
     ring: { value: RING },
+    flag: { value: FLAG },
   };
 
   constructor(private readonly viewer: Viewer) {
@@ -37,20 +43,30 @@ export class GmLayer {
         uniform float minPx;
         uniform float maxPx;
         uniform float ratio;
+        uniform float flagScale;
+        attribute float flagged;
+        varying float vFlagged;
         void main() {
           vec4 at = modelViewMatrix * vec4(position, 1.0);
           float px = clamp(diameter * pxPerWorld / -at.z, minPx, maxPx);
           at.xyz *= 0.995;
           gl_Position = projectionMatrix * at;
-          gl_PointSize = px * ratio;
+          gl_PointSize = px * ratio * (flagged > 0.5 ? flagScale : 1.0);
+          vFlagged = flagged;
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 fill;
         uniform vec3 ring;
+        uniform vec3 flag;
+        uniform float flagScale;
+        varying float vFlagged;
         void main() {
           float r = length(gl_PointCoord * 2.0 - 1.0);
           if (r > 1.0) discard;
-          gl_FragColor = vec4(r > 0.62 ? ring : fill, 1.0);
+          // a flagged dot is the plain one with the ring around it
+          float k = vFlagged > 0.5 ? flagScale : 1.0;
+          vec3 c = vFlagged > 0.5 && r * k > 1.0 ? flag : (r * k > 0.62 ? ring : fill);
+          gl_FragColor = vec4(c, 1.0);
           #include <colorspace_fragment>
         }`,
     });
@@ -72,8 +88,8 @@ export class GmLayer {
     this.uniforms.ratio.value = v.renderer.getPixelRatio();
   }
 
-  /** `origin` is subtracted for float precision on the GPU. */
-  sync(points: readonly Vec3[], origin: Vec3): void {
+  /** `origin` is subtracted for float precision on the GPU; `flagged`: which of the points have the ring. */
+  sync(points: readonly Vec3[], origin: Vec3, flagged: readonly boolean[] = []): void {
     this.fit();
     this.group.position.set(origin[0], origin[1], origin[2]);
     const flat = new Float32Array(points.length * 3);
@@ -81,7 +97,14 @@ export class GmLayer {
     this.points.geometry.dispose();
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+    g.setAttribute('flagged', new THREE.BufferAttribute(Float32Array.from(points, (_, i) => (flagged[i] ? 1 : 0)), 1));
     this.points.geometry = g;
     this.viewer.requestRender();
+  }
+
+  /** What is on the view (for the tests). */
+  counts(): { shown: boolean; points: number; flagged: number } {
+    const flags = this.points.geometry.getAttribute('flagged');
+    return { shown: this.group.visible, points: flags?.count ?? 0, flagged: flags ? (Array.from(flags.array as Float32Array).filter((v) => v > 0.5).length) : 0 };
   }
 }

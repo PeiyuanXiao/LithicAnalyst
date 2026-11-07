@@ -2203,11 +2203,13 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 
 ---
 
-## 阶段 24　模板法表面半地标 ⏳
+## 阶段 24　模板法表面半地标 ✅ 2026-11-06
 
 **背景**：石制品的地标分析基本都是同一类型内部的比较，所以照主流做法：用户在一件模板上铺点，软件自动传到同一文件夹的其他标本上。只分析某一部分（比如手斧的 tip）时，用户用现有的曲线和区域工具自己围出这块区域、给这个区域配一个表面片即可，不另做专门的功能。石片保留阶段 18 的技术坐标网格作为默认，同时也可以改用模板法。
 
-### 24.1 GM 配置扩展到石核和通用 ⏳
+### 24.1 GM 配置扩展到石核和通用 ✅ 2026-11-06
+
+> 完成：`GmConfig` 加 `version`（`GM_CONFIG_VERSION = 2`）、`surfaceMethod`、`landmarks`、`curves`、`patches`、`template`；`gmOfListsSteps`（`compute/gm.ts`）按三张表生成；旧文件读成 `grid`、空表。面板的 `#sec-gm` 在三种类型上都显示。同一类型不止一条或一块时给 `curve_ambiguous`、`region_ambiguous`，`details` 带名称。
 
 **现在的问题**：只有石片有 GM 配置（阶段 18，预设了打击点、边缘等），石核和通用没有。
 
@@ -2221,7 +2223,9 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 
 **边界情况**：一件标本上同一曲线类型有不止一条，或同一区域类型有不止一块：这一项不能确定，标本 GM 记为未完成，悬停说明原因。用户可以用自定义类型来区分。配置里的地标、曲线或区域在某件标本上缺了：这件标本 GM 未完成，列出缺了什么。
 
-### 24.2 模板与自动铺点 ⏳
+### 24.2 模板与自动铺点 ✅ 2026-11-06
+
+> 完成：`compute/gmTemplate.ts` 的 `layPatchSteps`（mulberry32、面积加权、留距、最远点采样）；`App.layGmTemplate`；`gm-template-set`、`gm-template-relay`、`gm-template-changed`。第 n 个表面片用 `seed + n`。
 
 - **指定模板**：GM 面板里「设为模板」把当前标本设为模板，文件夹列表里这件标本带「模板」标记。设模板时，这件标本必须满足配置里的所有地标、曲线和区域，否则不能设，并说明缺了什么。
 - **铺点**：在模板上，每个表面片在对应区域里自动均匀铺 `count` 个点。
@@ -2234,7 +2238,9 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 
 **默认值**：`count` 默认 100，范围 10–2000；候选倍数 20；边界留距 `0.5 × s`；`seed` 初始为 1。
 
-### 24.3 传递到其他标本 ⏳
+### 24.3 传递到其他标本 ✅ 2026-11-06
+
+> 完成：`compute/tps.ts`、`compute/triangleBvh.ts`、`compute/projectRegions.ts`，`templatePointsSteps`。求解用整块直接法：分块 Cholesky（`FACTOR_BLOCK`），2000 个锚点约 0.77 秒，见 `scripts/bench.ts` 的 11a、11b；试过共轭梯度，在铺满表面的锚点上更慢，没有留下。汇总导出在 Worker 里算（`MeshJobs.gm`），缓存键 `gmCacheKey` 存在 `derived.gm.key`。
 
 对每件非模板标本：
 
@@ -2250,11 +2256,15 @@ modeCompare:  <circle cx="7.5" cy="10" r="5"/><circle cx="12.5" cy="10" r="5"/><
 
 **边界情况**：本件缺对应区域：这一片记为空，标本标为未完成。模板文件丢失或打不开：所有传递停用，GM 面板说明原因。模板本身的表面点就是铺出来的点，不经过变形。
 
-### 24.4 显示 ⏳
+### 24.4 显示 ✅ 2026-11-06
+
+> 完成：`gm-show-surface`、`render/gmLayer.ts` 的琥珀色圆环、状态胶囊 `status-gm`（可选项，不计入分母）、文件夹列表的 `.ws-gm`、`.ws-template`。
 
 GM 面板加一个开关「显示表面半地标」，打开时在当前标本上画出它的表面点（大小按 23.3 的半地标规则），被标记的点外加琥珀色圆环。左下角的标注状态加一项「GM」（只在文件夹配置不为空时出现）；文件夹列表也显示 GM 完成度。
 
-### 24.5 石片：网格和模板两种方式 ⏳
+### 24.5 石片：网格和模板两种方式 ✅ 2026-11-06
+
+> 完成：`gm-method-grid`、`gm-method-template`；切到模板时表面片为空才预填。`grid` 的回归测试在 `tests/gmTemplate.test.ts`，存的是改动前代码导出的 SHA-256。
 
 - 文件夹 GM 配置加 `surfaceMethod: 'grid' | 'template'`，默认 `grid`。
   - **网格**：阶段 18 现有的技术坐标网格，完全不变。
@@ -2263,7 +2273,9 @@ GM 面板加一个开关「显示表面半地标」，打开时在当前标本�
 
 **边界情况**：`grid` 方式下，导出文件必须和阶段 18 的逐字节一致（回归测试）。
 
-### 24.6 导出 ⏳
+### 24.6 导出 ✅ 2026-11-06
+
+> 完成：`gmLandmarksCsv`、`gmSmvectorCsv`、`gmOutlinesCsv`、`gmSurpCsv`、`gmModelsCsv`；manifest 的 `gm`、`gmIncomplete`。为保证 `grid` 逐字节一致：新列和 Morpho 文件只在模板法出现；已有的 `index` 仍是全局序号，新增 `set_index` 放在这条曲线或这个表面片里的序号。
 
 - 沿用阶段 18 的 GM 导出文件，新列加在最后（已有对应列就沿用）：`kind`：`fixed` / `curve` / `surface`；`name`：地标名、曲线类型或区域类型；`index`：在这条曲线或这个表面片里的序号；`flagged`：0 / 1，表示是否被质量检查标记。
 - 缺失的点写 NA（R 里可以用 `geomorph::estimate.missing` 处理）。
@@ -2271,7 +2283,9 @@ GM 面板加一个开关「显示表面半地标」，打开时在当前标本�
 - **manifest.json** 记录：模板标本、种子、配置版本、`surfaceMethod`。
 - **只分析某一部分**：在 R 里按 `name` 取子集。软件不另出子集文件。
 
-### 24.7 测试（阶段 24） ⏳
+### 24.7 测试（阶段 24） ✅ 2026-11-06
+
+> 完成：`tests/tps.test.ts`、`tests/gmTemplate.test.ts`，`e2e/gmTemplate.spec.ts`，截图在 `test-results/24/`。仿射副本的精确测试只用固定地标做锚点：曲线半地标在每件标本上各自按弧长等距，拉伸后不是仿射像；带曲线的情形另有一条测试（点接近，无标记）。`e2e/generic.spec.ts`、`e2e/gm.spec.ts`、`e2e/modes.spec.ts` 按 24.1 改为石核、通用有这个区块。
 
 **单元测试**：
 

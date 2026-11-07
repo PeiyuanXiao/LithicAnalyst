@@ -113,6 +113,12 @@ export interface LandmarkRow {
   /** Label of the semilandmark set ('' for fixed landmarks). */
   setId: string;
   point: Vec3;
+  /** Points by a template: there is no such point on this specimen (`point` means nothing then; it is written as NA). */
+  missing?: boolean;
+  /** Points by a template: its number within its curve or patch of surface. */
+  setIndex?: number;
+  /** Points by a template: the check put it on the list. */
+  flagged?: boolean;
 }
 
 export interface SemilandmarkResult {

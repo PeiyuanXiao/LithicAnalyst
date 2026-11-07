@@ -48,6 +48,9 @@ export const SHARP_EDGE_FILE = `${APP_DIR}/sharp-edge.json`;
 /** Which points the flakes of this folder have for geometric morphometrics: every one the same. */
 export const GM_CONFIG_FILE = `${APP_DIR}/gm-config.json`;
 
+/** The folder's own settings: neither model nor project, but they are read when it is opened. */
+const isFolderSettings = (path: string): boolean => path === SHARP_EDGE_FILE || path === GM_CONFIG_FILE;
+
 /** Where a model's project file goes: `site1/EXP03.ply` → `LithicAnalyst/projects/site1/EXP03.ply.lithicanalyst.json`. */
 export const projectPathFor = (meshPath: string): string => `${APP_DIR}/projects/${meshPath}.lithicanalyst.json`;
 
@@ -107,7 +110,7 @@ export async function workspaceFromHandle(root: DirectoryHandle): Promise<Worksp
         await walk(h, sub);
       } else {
         const path = [...parts, h.name].join('/');
-        if (classify(path)) files.set(path, h);
+        if (classify(path) || isFolderSettings(path)) files.set(path, h);
       }
     }
   };
@@ -176,7 +179,7 @@ export async function workspaceFromHandle(root: DirectoryHandle): Promise<Worksp
 export function workspaceFromFiles(list: readonly File[]): Workspace | null {
   if (!list.length) return null;
   const rel = (f: File) => (f.webkitRelativePath || f.name).split('/').slice(f.webkitRelativePath ? 1 : 0).join('/');
-  const files = new Map(list.map((f) => [rel(f), f] as const).filter(([p]) => classify(p)));
+  const files = new Map(list.map((f) => [rel(f), f] as const).filter(([p]) => classify(p) || isFolderSettings(p)));
   const { meshes, projects } = listing(files.keys());
   return {
     name: (list[0].webkitRelativePath || '').split('/')[0] || 'folder',

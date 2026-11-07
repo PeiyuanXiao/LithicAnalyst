@@ -9,12 +9,13 @@ import type { FlakeMeasures } from '../compute/flake';
 import type { RetouchIndices } from '../compute/retouchIndex';
 import type { WorkingEdgesDerived, WorkingEdgeRow } from '../compute/workingEdge';
 import { gmMissingInputs, type GmMissing } from '../compute/gm';
+import type { gmManifest } from '../compute/gmTemplate';
 import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, GmDerived, RetouchAngleCurve } from '../core/derived';
 import { hasEdgeAngles, hasVolumeSplit } from '../core/fields';
 import { measurementValue } from '../core/measurements';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
 import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, workingEdgesCsv, type CsvOptions } from './csv';
-import { gmCurvesCsv, gmSurfacesCsv, landmarksCsv, landmarksTps } from './landmarks';
+import { gmCurvesCsv, gmLandmarksCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
 export interface BatchSpecimen {
@@ -41,7 +42,7 @@ export interface BatchSpecimen {
   retouchIndices?: RetouchIndices | null;
   /** The working edges' rows, from the project file's derived results. */
   workingEdges?: readonly WorkingEdgeRow[];
-  /** A flake's points for geometric morphometrics, from the project file's derived results; those of another configuration are made anew before the tables. */
+  /** The points for geometric morphometrics, from the project file's derived results; those of another configuration are made anew before the tables. */
   gm: GmDerived | null;
   /** Each observer's values (annotator → measure → value), from every project file of the model, for the ICC. */
   observers: Map<string, Record<string, number>>;
@@ -151,7 +152,7 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     retouchAngles: edges ? ((derived.retouchAngles as { curves?: RetouchAngleCurve[] } | null | undefined)?.curves ?? []) : [],
     retouchIndices: state.specimen.type === 'flake' ? ((derived.retouchIndices as RetouchIndices | null | undefined) ?? null) : null,
     workingEdges: edges ? ((derived.workingEdges as WorkingEdgesDerived | null | undefined)?.edges ?? []) : [],
-    gm: state.specimen.type === 'flake' ? ((derived.gm as GmDerived | null | undefined) ?? null) : null,
+    gm: (derived.gm as GmDerived | null | undefined) ?? null,
     observers,
   };
 }
@@ -182,12 +183,16 @@ export interface Manifest {
   /** Models sharing a file name, whose IDs were made from their paths. */
   duplicateNames: Array<{ name: string; files: string[] }>;
   failures: BatchFailure[];
-  /** Flakes left out of the coordinates of geometric morphometrics, and why. */
+  /** Specimens left out of the coordinates of geometric morphometrics, and why. */
   gmSkipped?: GmSkipped[];
+  /** Specimens in them with some points written as NA, and why. */
+  gmIncomplete?: GmSkipped[];
+  /** How the surface semilandmarks were made: by the grid or a template, which, by which seed, and the configuration's version. */
+  gm?: ReturnType<typeof gmManifest>;
   files: string[];
 }
 
-/** A flake left out of the coordinates of geometric morphometrics: what it lacks (codes). */
+/** A specimen left out of the coordinates of geometric morphometrics, or in them with what it lacks as NA: what it lacks (codes). */
 export interface GmSkipped {
   file: string;
   id: string;
@@ -195,29 +200,47 @@ export interface GmSkipped {
 }
 
 /**
- * The points of the flakes of a batch: the coordinates of the complete ones and, once, their sliding definition. All must have
- * the same points, or their numbers would mean different points; those with another number (the user's own landmarks) are skipped too.
+ * The points of the specimens of a batch: the coordinates and, once, their sliding definition. All must have the same points, or their numbers would mean different
+ * points; those with another number (the user's own landmarks) are skipped. By the grid only complete specimens are written, the rest listed; by a template every specimen
+ * has the same rows, and what one lacks is written as NA and listed apart, unless it has nothing at all to give.
  */
-export function gmOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions): { files: Array<{ suffix: string; text: string }>; skipped: GmSkipped[] } {
+export function gmOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions): { files: Array<{ suffix: string; text: string }>; skipped: GmSkipped[]; incomplete: GmSkipped[] } {
   const plain = { excelBom: false };
   const skipped: GmSkipped[] = [];
+  const incomplete: GmSkipped[] = [];
   const kept: Array<BatchSpecimen & { gm: GmDerived }> = [];
   for (const s of specimens) {
+    const skip = (list: GmSkipped[], missing: GmMissing[]) => list.push({ file: s.file, id: s.state.specimen.id, missing });
+    // one table: as many points in each, and by one way of making them (their columns differ)
+    const unlike = (g: GmDerived) => kept.length > 0 && (kept[0].gm.rows.length !== g.rows.length || (kept[0].gm.method === 'template') !== (g.method === 'template'));
+    if (s.gm?.method === 'template') {
+      if (s.gm.rows.every((r) => r.missing)) skip(skipped, s.gm.missing);
+      else if (unlike(s.gm)) skip(skipped, ['point_count']);
+      else {
+        kept.push(s as BatchSpecimen & { gm: GmDerived });
+        if (!s.gm.complete) skip(incomplete, s.gm.missing);
+      }
+      continue;
+    }
     if (s.state.specimen.type !== 'flake') continue;
-    const skip = (missing: GmMissing[]) => skipped.push({ file: s.file, id: s.state.specimen.id, missing });
-    if (!s.gm?.complete) skip(s.gm?.missing ?? gmMissingInputs(s.state));
-    else if (kept.length && kept[0].gm.rows.length !== s.gm.rows.length) skip(['point_count']);
+    if (!s.gm?.complete) skip(skipped, s.gm?.missing ?? gmMissingInputs(s.state));
+    else if (unlike(s.gm)) skip(skipped, ['point_count']);
     else kept.push(s as BatchSpecimen & { gm: GmDerived });
   }
-  if (!kept.length) return { files: [], skipped };
+  if (!kept.length) return { files: [], skipped, incomplete };
   const first = kept[0].gm;
   const files = [
-    { suffix: 'gm_landmarks.csv', text: mergeCsv(kept.map((s) => landmarksCsv(s.state, s.gm, plain)), opts.excelBom) },
+    { suffix: 'gm_landmarks.csv', text: mergeCsv(kept.map((s) => gmLandmarksCsv(s.state, s.gm, plain)), opts.excelBom) },
     { suffix: 'gm_landmarks.tps', text: kept.map((s) => landmarksTps(s.state, s.gm)).join('') },
   ];
+  // by the grid the files stay those it always had; by a template Morpho's definitions as well
+  const morpho = first.method === 'template';
   if (first.curves.length) files.push({ suffix: 'gm_curves.csv', text: gmCurvesCsv(first) });
+  if (first.curves.length && morpho) files.push({ suffix: 'gm_smvector.csv', text: gmSmvectorCsv(first) }, { suffix: 'gm_outlines.csv', text: gmOutlinesCsv(first) });
   if (first.surfaces.length) files.push({ suffix: 'gm_surfaces.csv', text: gmSurfacesCsv(first) });
-  return { files, skipped };
+  if (first.surfaces.length && morpho) files.push({ suffix: 'gm_surp.csv', text: gmSurpCsv(first) });
+  if (morpho) files.push({ suffix: 'gm_models.csv', text: gmModelsCsv(kept.map((s) => ({ id: s.state.specimen.id, file: s.file }))) });
+  return { files, skipped, incomplete };
 }
 
 export const manifestJson = (m: Manifest): string => JSON.stringify(m, null, 2) + '\n';

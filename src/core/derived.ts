@@ -3,6 +3,7 @@ import type { ConfigBox } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { EDGE_ANGLE_PARAMETERS, type EdgeAngleResult } from '../compute/edgeAngle';
 import type { GmResult } from '../compute/gm';
+import { gmConfigSummary, gmInUse } from '../compute/gmTemplate';
 import type { RetouchAngleResult } from '../compute/retouchAngle';
 import type { RetouchIndices } from '../compute/retouchIndex';
 import { SHARP_EDGE_PARAMETERS, sharpOfCurve, type SharpSegment } from '../compute/sharpEdge';
@@ -16,7 +17,7 @@ import { relationResults, type RelationResults } from '../compute/relations';
 import type { SphereFit } from '../compute/sphere';
 import type { VolumeSplit } from '../compute/split';
 import { measurementUnit, measurementValue } from './measurements';
-import type { GmConfig, MeasureType, ProjectState, SharpEdgeRule, Vec3 } from './types';
+import type { MeasureType, ProjectState, SharpEdgeRule, Vec3 } from './types';
 
 /** Size and shape of the whole model, measured automatically when it is opened. */
 export interface AutoMeasurements {
@@ -51,7 +52,7 @@ export interface FlakeDerived {
 
 /** One curve's edge angles. */
 export type RetouchAngleCurve = RetouchAngleResult & { curveId: string };
-export type GmDerived = GmResult & { config: GmConfig };
+export type GmDerived = GmResult & { config: ReturnType<typeof gmConfigSummary> };
 export type EdgeAngleCurve = EdgeAngleResult & { curveId: string };
 
 /**
@@ -178,7 +179,7 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     retouchAngles: mesh?.retouchAngles?.length ? { curves: [...mesh.retouchAngles] } : null,
     ...(state.specimen.type === 'flake' && mesh?.retouchIndices ? { retouchIndices: mesh.retouchIndices } : {}),
     sharpEdge: sharpDerived(state, mesh?.edgeAngles ?? []),
-    gm: state.specimen.type === 'flake' && mesh?.gm ? { config: structuredClone(state.gm), ...mesh.gm } : null,
+    gm: mesh?.gm && (state.specimen.type === 'flake' || gmInUse(state.gm, state.specimen.type)) ? { config: structuredClone(gmConfigSummary(state.gm)), ...mesh.gm } : null,
     ...(mesh?.workingEdges?.length ? { workingEdges: { parameters: WORKING_EDGE_PARAMETERS, edges: [...mesh.workingEdges] } } : {}),
     ...measuredLines(state),
   };
