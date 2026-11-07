@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { fieldByKey, type SpecimenType } from '../core/fields';
 import { hasVector, type ProjectState, type Scar, type ScarVector, type Vec3 } from '../core/types';
+import { EASE, VIEW_MOTION } from './easing';
 import { sequenceColors, UNASSIGNED_COLOR } from './sequenceColor';
 import type { Viewer } from './viewer';
 
@@ -96,6 +97,10 @@ class ArrowVisual {
   shownStart = new THREE.Vector3();
   shownEnd = new THREE.Vector3();
   radius = 1;
+  /** The share of its length drawn, from the tail, as it grows in (1: all of it). */
+  grow = 1;
+  /** What it was last drawn with, to draw it again as it grows. */
+  private lastArgs: Parameters<ArrowVisual['update']> | null = null;
 
   constructor(withLabel: boolean, onLabelClick?: () => void) {
     this.parts = [new THREE.Mesh(CYL), new THREE.Mesh(CONE), new THREE.Mesh(SPHERE)];
@@ -130,15 +135,17 @@ class ArrowVisual {
     dim = false,
     hovered = false,
   ): void {
+    this.lastArgs = [start, end, startNormal, radius, color, ghostOn, labelText, selected, dim, hovered];
     this.shownStart.copy(start);
     this.shownEnd.copy(end);
     this.radius = radius;
     const dir = end.clone().sub(start);
-    const L = dir.length();
-    this.root.visible = L > 0;
-    if (L === 0) return;
+    const full = dir.length();
+    this.root.visible = full > 0;
+    if (full === 0) return;
+    const L = full * Math.max(1e-4, Math.min(1, this.grow));
     this.root.position.copy(start);
-    this.root.quaternion.setFromUnitVectors(UP, dir.divideScalar(L));
+    this.root.quaternion.setFromUnitVectors(UP, dir.divideScalar(full));
     const headLen = Math.min(0.42 * L, 8.5 * radius);
     const headR = 2.6 * radius;
     const set = (meshes: THREE.Mesh[]) => {
@@ -167,6 +174,11 @@ class ArrowVisual {
         this.label.position.copy(anchor).sub(this.root.position).applyQuaternion(this.root.quaternion.clone().invert());
       }
     }
+  }
+
+  /** Drawn again as last time, at its present `grow`. */
+  redraw(): void {
+    if (this.lastArgs) this.update(...this.lastArgs);
   }
 
   setLabelOccluded(occluded: boolean): void {
@@ -270,6 +282,21 @@ export class ArrowLayer {
 
   get radius(): number {
     return this.viewer.diagonal * 0.0028;
+  }
+
+  /** How much of an arrow is drawn (it grows in after being drawn); null: no such arrow. */
+  grownShare(id: string): number | null {
+    return this.visuals.get(id)?.grow ?? null;
+  }
+
+  /** An arrow the user just drew grows from its tail along its direction (not one loaded, undone or imported). */
+  grow(id: string): void {
+    const v = this.visuals.get(id);
+    if (!v) return;
+    this.viewer.tween(VIEW_MOTION.ARROW_GROW_MS, (k) => {
+      v.grow = k >= 1 ? 1 : EASE(k);
+      v.redraw();
+    });
   }
 
   private liftDistance(display: ArrowDisplay): number {

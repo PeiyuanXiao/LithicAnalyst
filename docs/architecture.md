@@ -120,8 +120,10 @@ keeps the selection and the undo history.
   folder's (`TOOL_SECTIONS`; these changes are not remembered, only the user's own); selecting an
   object opens its section and scrolls its inspector to the top (lists scroll only themselves;
   the narrow layout, where the whole work area scrolls, is left alone). Sections that cannot be
-  used are hidden (`Section.visible`); without a model the sidebar is empty but for the folder's
-  list while a folder is open. The data exports
+  used are hidden (`Section.visible`); without a model each section the mode would show is a grey
+  title that does not open (`.panel-ghost`, by `Section.ofType` with `AppApi.moduleType()` where the
+  type decides, else by `visible` on the empty project), and the folder's list while a folder is
+  open. The data exports
   of a mode are one dialog (`App.openExport`, files from `App.exportables`; several files go
   into a stored ZIP, `io/zip.ts`).
 * **Top bar**: the specimen button (ID and unit; its panel holds ID, unit, annotator, notes and
@@ -171,7 +173,12 @@ Nothing else needs to know the type: flake-only code already stops at `isFlake`.
   `artifact.html` by `scripts/make-artifact.mjs`) sets it before the first frame. The WebGL canvas
   is cleared transparent: the view's background is the container's CSS gradient
   (`--viewport-bg-top` → `--viewport-bg-bottom`), so it follows the theme without touching the
-  renderer. Figures render into their own transparent targets and are unaffected.
+  renderer. Figures render into their own transparent targets and are unaffected. Both theme
+  buttons call `toggleThemeFrom(button)`: in a view transition, `setTheme` in its update (the app's
+  listener draws a frame at once, `Viewer.renderNow`), then a `clip-path` circle on
+  `::view-transition-new(root)` from the button's middle to the farthest corner (`THEME_SWITCH`);
+  `::view-transition` lets the pointer through, a second press skips the first. Without view
+  transitions, or with reduced motion, `setTheme` at once. No element has a `view-transition-name`.
 * **Icons**: `icon()` draws the 24-unit path icons of the top bar and sidebar; `icon20(markup)`
   draws the 20-unit icons of the view toolbar, the mode switch and the shell from SVG markup
   (`ICONS20` in `ui/dom.ts`; elements may carry their own fill or stroke width).
@@ -188,8 +195,41 @@ Nothing else needs to know the type: flake-only code already stops at `isFlake`.
   kind (`quantityUnit`). Lists and tables put the unit in a column of its own (`.num-list` rows
   share their columns through CSS subgrid; `numRow` / `coordRow` in `ui/controls.ts` build
   `.num-grid` / `.coord-grid` rows). Exports keep their own formats.
-* **Motion**: popovers, menus, dialogs and tooltips fade in by CSS; `prefers-reduced-motion`
-  turns every animation and transition off (also the camera transitions below).
+* **Motion**: see "Look and motion" below; `prefers-reduced-motion` turns every animation and
+  transition off (also the camera transitions and the view's tweens below).
+
+## Look and motion
+
+The rules are in CLAUDE.md (外观, 动效). How they are kept:
+
+* **Colours and corners** (`styles.css`): flat fills; `--radius` (4px: cards, buttons) and `--radius-lg`
+  (6px: large panels, dialogs), capsules 999px. The sidebar is cards (`--card`) on a ground of its own
+  (`--sidebar-bg`); lists in a card have no frame, their rows a soft line between them. Every panel over
+  the view is one card (`--surface-pop`, a `--line` border, `--shadow`). Solid amber is the mode's
+  block and a panel's one main action; what is selected is `--accent-soft` with an `--accent-line`;
+  check boxes and slider thumbs are ink. `--ease` is the one easing.
+* **Unsaved changes** (`core/commands.ts`): each state the history can return to has a number
+  (`stateId`; a merge makes a new one), `markSaved(id)` records the one saved and `dirty` compares; so
+  undoing back to what was saved is clean again. `clear` (a model or project opened) is clean. The app
+  marks the state captured before a save once the save has gone through (Save, the folder's copy) and
+  shows a dot on Save (`data-dirty`). `lastStep` says whether the last change was a command, an undo or
+  redo, or a fresh start: only the first makes things flash (`App.userChanged`).
+* **CSS motion**: cards open by `::details-content` with `interpolate-size` (`folding` keeps their
+  content cut while they move); the mode's block (`.mode-thumb`, placed by `buildModeSwitch`, at once
+  when it first shows or changes size); popovers, float panels and the display panel come in by
+  `@starting-style` and leave by a `display` transition with `allow-discrete`; panels and dialogs
+  grow from what opened them (`ui/motion.ts`: `growFrom`, `growWhenShown` sets the transform-origin
+  from the focused button); the sidebar's cards come in on a change of mode (`Sidebar.enter`); a
+  dialog answers at once and only fades. A status pill made done by the user ticks itself
+  (`statusDone`); a measure's value changed by the user flashes (`valueFlash`, only while its list is
+  in sight). Toasts stand over the coordinate reading of the view (`Feedback.anchor`); the busy
+  overlay turns the logo (`fx-*` parts on a 1.5 s round of their own) only after `BUSY_LOGO_AFTER_MS`.
+* **The view's tweens** (`render/viewer.ts`, `render/easing.ts`): `Viewer.tween(ms, step)` draws a
+  frame every frame only while one runs, then rendering is on demand again; a press on the view and a
+  figure (`makeFigure`) finish them (`finishTweens`), reduced motion gives the end at once. Only what
+  the user does by hand starts one: a landmark placed (`LandmarkLayer.pop`, `EASE_POP`), an arrow
+  drawn (`ArrowLayer.grow`, from its tail), a measure's drawing coming into view (`HintLayer.show`
+  with `fadeIn`). Loading, undo, redo, generated and imported annotations draw at once.
 
 ## Camera transitions
 
@@ -223,7 +263,7 @@ A row of a measure in the measure mode shows on the model how it was taken. What
 * `compute/measureHint.ts` (pure) turns those into a `MeasureHint`: lines, dots, arcs and pieces of surface, each `current` (the measure of the row) or `other` (the rest of the drawing). An arc carries its vertex and its two directions, so the tests can read the angle back. An empty value gives null. `MEASURE_HINT_PARAMETERS` holds the delay and the shares that size arcs and such.
 * `render/hintLayer.ts` draws one in the overlay (so figures leave it out): `Line2` lines of a constant width on the screen, point sprites, CSS labels that let the pointer through, all without a depth test and over everything else. Pieces of surface share the mesh's vertex buffer; the platform shows through the model, a whole model or a split's two sides are tinted where they are seen (seen through, they would only add up to a blur).
 * `App`: `hoverHint` (after `HOVER_MS`), `focusHint` (the keyboard's, `:focus-visible`), `pinHint`; the first of hover, focus and pinned is drawn (`syncHint`, from `hintOf`, which goes by the key `group:item` the row has in `data-hint`). `refreshHint` runs when what it draws from changes; `clearHints` on another mode, specimen or type. `hintMuted` keeps a row just let go from coming straight back under the pointer. A curve's row of edge angles has no pin: a click selects the curve, as ever.
-* `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks).
+* `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks). The automatic measures are in groups (`measureGroup`; a flake's: technical axis, morphology, platform, whole; a core's and a generic specimen's: dimensions, whole); platform width and depth and the EPA are small tables (`measureTable`), each cell a measure of its own with its key and its focus. The export order is the order on screen.
 
 ## Specimen frame
 

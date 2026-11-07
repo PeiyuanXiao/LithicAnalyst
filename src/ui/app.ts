@@ -110,11 +110,11 @@ import { floatingPanel } from './floatingPanel';
 import { Popovers, onViewport } from './popover';
 import { clear, h, icon, icon20, ICONS, ICONS20 } from './dom';
 import { Feedback } from './feedback';
-import { BRAND, brandEl } from './brand';
+import { BRAND, brandEl, svgFrom } from './brand';
 import { getLang, htmlLang, langInfo, LANGS, onLangChange, setLang, t } from './i18n';
 import { buildSidebar, type RefreshKind, type Sidebar } from './sidebar';
-import { buildStartPage, type StartPage } from './startPage';
-import { getTheme, onThemeChange, toggleTheme } from './theme';
+import { buildStartPage, RINGS, type StartPage } from './startPage';
+import { getTheme, onThemeChange, toggleThemeFrom } from './theme';
 import { tip, tips } from './tooltip';
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -122,6 +122,8 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => set
 /** How near a curve the cursor must be for the working edge tool to take it. */
 /** Below this width of the view the status pills are one pill with the count. */
 const STATUS_COLLAPSE_PX = 720;
+/** A status pill's mark: a ring (not done) and a tick (done), drawn from the left when the user's change makes it done. */
+const STATUS_MARK = '<svg class="status-mark" viewBox="0 0 12 12" aria-hidden="true"><circle class="status-ring" cx="6" cy="6" r="4.3"></circle><path class="status-tick" pathLength="1" d="M2.2 6.4 4.9 9 9.8 3.4"></path></svg>';
 /** The status pills whose click asks for a curve of a type. */
 const STATUS_CURVE_TYPES: Partial<Record<StatusKey, string>> = { edge: 'edge', platform_outline: PLATFORM_OUTLINE, core_edge: 'core_edge', retouch: 'retouch' };
 const EDGE_PICK_PX = 12;
@@ -406,12 +408,16 @@ export class App implements AppApi {
   private readonly startEl: HTMLElement;
   /** The ways to open something, in the middle of the empty view. */
   private readonly emptyEl: HTMLElement;
+  /** The module whose drawing the empty view shows. */
+  private emptyType: SpecimenType | null = null;
   private mainEl!: HTMLElement;
   /** A module has been chosen: the workspace shows, with or without a model. */
   private entered = false;
   private startOnScreen = false;
   private readonly statusEl: HTMLElement;
   private statusKey = '';
+  /** Which pills were done when they were last drawn (a pill that becomes done by the user's change ticks itself). */
+  private statusDone = new Map<string, boolean>();
   /** A narrow view's pills are open because the pointer is over them. */
   private statusHovered = false;
   /** The type asked for the next curve drawn (a click on a status pill): view state, gone once a curve is drawn or the tool changes. */
@@ -588,7 +594,9 @@ export class App implements AppApi {
     this.projectInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true, id: 'file-project' }) as HTMLInputElement;
     this.compareInput = h('input', { type: 'file', accept: '.json,application/json', multiple: true, hidden: true, id: 'file-compare' }) as HTMLInputElement;
     this.folderInput = h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, id: 'file-folder' }) as HTMLInputElement;
-    this.feedback = new Feedback(this.appEl);
+    this.feedback = new Feedback(this.appEl, brandEl(BRAND.logo, 'busy-logo'));
+    // toasts stand at the lower right of the view, over the start page at the window's
+    this.feedback.anchor = () => (this.startShown() ? null : this.viewportEl);
     this.sidebar = buildSidebar(this);
   }
 
@@ -760,7 +768,10 @@ export class App implements AppApi {
     this.setTool(this.mode === 'retouch' ? 'station' : 'select');
 
     this.store.subscribe((c) => this.onStoreChange(c));
-    this.store.history.onChange(() => this.updateUndoButtons());
+    this.store.history.onChange(() => {
+      this.updateUndoButtons();
+      this.paintSaveButton();
+    });
     this.selection.onChange((id) => {
       // the relation's bar goes once something else is selected
       if (this.relationChip && id !== this.relationChip.id) this.relationChip.close();
@@ -780,6 +791,8 @@ export class App implements AppApi {
       this.viewCube?.repaint();
       this.sketch?.repaint();
       this.refreshHint();
+      // the view in the new colours at once (the theme's circle takes its picture now)
+      this.viewer?.renderNow();
     });
 
     this.wireFiles();
@@ -815,6 +828,7 @@ export class App implements AppApi {
     tips.attach(this.redoBtn, () => ({ label: history('header.redo', this.store.history.redoLabelKey), key: 'Ctrl+Shift+Z' }));
     this.saveBtn = btn('btn-save-project', ICONS.save, t('header.save'), () => this.saveProject());
     tip(this.saveBtn, t('header.saveProject'), 'Ctrl+S');
+    this.paintSaveButton();
     // opening things: one menu
     const menu = h('div', { class: 'popover menu', id: 'file-menu', role: 'menu', hidden: true });
     this.fileBtn = h(
@@ -854,7 +868,7 @@ export class App implements AppApi {
       );
     }
     // light / dark shell: the icon shows what a click switches to
-    this.themeBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-theme', onclick: () => toggleTheme() }) as HTMLButtonElement;
+    this.themeBtn = h('button', { type: 'button', class: 'icon-btn', id: 'btn-theme', onclick: () => toggleThemeFrom(this.themeBtn) }) as HTMLButtonElement;
     tips.attach(this.themeBtn, () => ({ label: t(getTheme() === 'dark' ? 'theme.light' : 'theme.dark') }));
     this.paintThemeButton();
     const help = h('button', { type: 'button', class: 'icon-btn', id: 'btn-help', 'aria-label': t('header.help'), onclick: () => this.showHelp() }, icon(ICONS.help));
@@ -887,6 +901,12 @@ export class App implements AppApi {
     );
   }
 
+  /** Save is a plain button; a dot on it while there are changes not saved (a project file or the folder's copy). */
+  private paintSaveButton(): void {
+    if (!this.saveBtn) return;
+    this.saveBtn.dataset.dirty = String(this.hasMesh() && this.store.history.dirty);
+  }
+
   private paintThemeButton(): void {
     const b = this.themeBtn;
     if (!b) return;
@@ -896,7 +916,10 @@ export class App implements AppApi {
     b.setAttribute('aria-label', t(dark ? 'theme.light' : 'theme.dark'));
   }
 
-  /** The work modes: icon and name (the name drops in narrow windows), M cycles through them. */
+  /**
+   * The work modes: icon and name (the name drops in narrow windows), M cycles through them. One amber block
+   * slides under the chosen one; it is placed without sliding when the switch first shows or changes size.
+   */
   private buildModeSwitch(): ToolRow {
     const buttons = APP_MODES.map((m) => {
       const name = t(`appMode.${m}`);
@@ -909,8 +932,36 @@ export class App implements AppApi {
       tip(b, name, 'M');
       return b;
     });
-    const el = h('div', { class: 'mode-switch', role: 'radiogroup', 'aria-label': t('appMode.label') }, ...buttons);
-    return { el, set: (v) => buttons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === v))) };
+    const thumb = h('span', { class: 'mode-thumb', 'aria-hidden': 'true' });
+    const el = h('div', { class: 'mode-switch', role: 'radiogroup', 'aria-label': t('appMode.label') }, thumb, ...buttons);
+    let placed = '';
+    const place = (slide: boolean) => {
+      const b = buttons.find((x) => x.getAttribute('aria-checked') === 'true' && !x.hidden);
+      const w = b?.offsetWidth ?? 0;
+      if (!b || !w) {
+        el.classList.remove('has-thumb');
+        placed = '';
+        return;
+      }
+      const at = `${b.offsetLeft}:${w}`;
+      if (at === placed && el.classList.contains('has-thumb')) return;
+      thumb.classList.toggle('is-placing', !slide || !placed);
+      placed = at;
+      thumb.style.width = `${w}px`;
+      thumb.style.transform = `translateX(${b.offsetLeft}px)`;
+      el.classList.add('has-thumb');
+      // (the next change slides again)
+      if (thumb.classList.contains('is-placing')) requestAnimationFrame(() => requestAnimationFrame(() => thumb.classList.remove('is-placing')));
+    };
+    // shown, a narrower window (the names go), another language: placed where it is, at once
+    new ResizeObserver(() => (el.isConnected ? place(false) : undefined)).observe(el);
+    return {
+      el,
+      set: (v) => {
+        buttons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === v)));
+        place(true);
+      },
+    };
   }
 
   /** The specimen in the top bar: one button (name and unit) opening a panel with all its details. */
@@ -1199,10 +1250,21 @@ export class App implements AppApi {
     return SPECIMEN_TYPES.find((x) => x === pref) ?? fallback;
   }
 
-  /** The empty view: open a model (or a folder, or a project); dropping a file works too. */
+  /**
+   * The empty view: open a model (or a folder, or a project); dropping a file works too. Behind it, still, the start
+   * page's grid and rings; above the buttons, the module's drawing.
+   */
   private buildEmptyView(): void {
+    const type = this.newSpecimenType();
+    this.emptyType = type;
     clear(this.emptyEl);
+    const drawing = brandEl(BRAND.icons[type], 'vp-empty-icon');
+    drawing.id = 'empty-icon';
+    drawing.dataset.type = type;
+    drawing.setAttribute('aria-hidden', 'true');
     this.emptyEl.append(
+      h('div', { class: 'vp-empty-bg', 'aria-hidden': 'true' }, h('div', { class: 'start-grid' }), h('div', { class: 'start-rings' }, svgFrom(RINGS))),
+      drawing,
       h('button', { type: 'button', class: 'btn btn-primary btn-lg', id: 'empty-open', onclick: () => this.meshInput.click() }, icon(ICONS.open), t('header.openMesh')),
       h(
         'div',
@@ -1218,7 +1280,19 @@ export class App implements AppApi {
   private enterModule(type: SpecimenType): void {
     writePref('specimenType', type);
     this.entered = true;
+    // the empty view shows that module's drawing
+    if (type !== this.emptyType) this.buildEmptyView();
     this.updateMeshDependentUi();
+  }
+
+  /** What the open model is, or, with none, what the next one will be (the module chosen). */
+  moduleType(): SpecimenType {
+    return this.hasMesh() ? this.store.state.specimen.type : this.newSpecimenType();
+  }
+
+  /** The last change was the user's own (not a model or project opened, nor undo or redo): what changed by it may flash. */
+  userChanged(): boolean {
+    return this.store.history.lastStep === 'execute';
   }
 
   /** The start page until a module is chosen; a model dropped on it, or a folder open, leave it too. */
@@ -1259,6 +1333,10 @@ export class App implements AppApi {
     const counted = this.statusKey.length > 0;
     this.statusKey = key;
     const armed = this.nextCurveType;
+    // what the user's own change just made done ticks itself (not on opening a model, undo or redo)
+    const was = this.statusDone;
+    this.statusDone = new Map(status.items.map((i) => [i.key, i.done]));
+    const ticks = counted && this.userChanged() ? new Set(status.items.filter((i) => i.done && was.get(i.key) === false).map((i) => i.key)) : new Set<string>();
     clear(el);
     const toggle = h('button', { type: 'button', class: 'status-pill status-count mono', id: 'status-count', 'aria-expanded': String(el.classList.contains('is-open')), onclick: () => this.toggleStatus() }, `${status.done}/${status.total}`);
     el.append(toggle);
@@ -1267,12 +1345,13 @@ export class App implements AppApi {
         'button',
         {
           type: 'button',
-          class: `status-pill${item.optional ? ' is-optional' : ''}${armed && armed === STATUS_CURVE_TYPES[item.key] ? ' is-armed' : ''}`,
+          class: `status-pill${item.optional ? ' is-optional' : ''}${armed && armed === STATUS_CURVE_TYPES[item.key] ? ' is-armed' : ''}${ticks.has(item.key) ? ' is-ticking' : ''}`,
           id: `status-${item.key}`,
           'data-done': String(item.done),
           onclick: () => this.goToStatus(item.key),
         },
-        h('span', { class: 'status-mark', 'aria-hidden': 'true' }, item.done ? '✓' : '○'),
+        // (the drawing shows it; the sign stays in the text)
+        h('span', { class: 'status-mark-box', 'aria-hidden': 'true' }, svgFrom(STATUS_MARK), h('span', { class: 'status-glyph' }, item.done ? '✓' : '○')),
         h('span', {}, t(`status.${item.key}`)),
       );
       tips.attach(pill, () => ({ label: item.flagged ? t('gm.flagged', { n: item.flagged }) : t(item.notApart ? 'status.why.faces.open' : item.notMeeting ? 'status.why.edge.open' : item.key === 'unit' && !this.isFlake() ? 'status.why.unit.plain' : `status.why.${item.key}`) }), 'above');
@@ -1373,11 +1452,9 @@ export class App implements AppApi {
     if (this.appModeSeg) this.appModeSeg.el.hidden = !has;
     this.toolbarEl.hidden = !has;
     this.saveBtn.disabled = !has;
+    this.paintSaveButton();
     // (the empty view closes too, back to the choice of module)
     if (this.closeItem) this.closeItem.disabled = !has && !!this.workspace;
-    // File stays quiet (without a model the main button is the view's "Open model"); with one, Save is the main button
-    this.saveBtn.classList.toggle('btn-primary', has);
-    this.saveBtn.classList.toggle('btn-quiet', !has);
     if (this.displayCtl) this.displayCtl.hidden = !has;
     this.updateSpecimenBar();
     this.sidebar.refresh('mesh');
@@ -1594,11 +1671,13 @@ export class App implements AppApi {
     const layer = this.hintLayer, loaded = this.loaded;
     const key = this.hintHover ?? this.hintFocus ?? this.hintPinned;
     const hint = key && layer && loaded ? this.hintOf(key) : null;
+    // another measure comes into view and fades in; the same one drawn again (its inputs or the theme changed) is there at once
+    const fadeIn = !!hint && this.hintShown?.key !== key;
     this.hintShown = key && hint ? { key, hint } : null;
     if (hint) {
       const css = getComputedStyle(document.documentElement);
       const colour = (name: string) => css.getPropertyValue(name).trim();
-      layer!.show(hint, { current: colour('--accent'), other: colour('--hint-other'), otherHalo: colour('--hint-other-halo') }, loaded!.offset, loaded!.geometry.getAttribute('position') as THREE.BufferAttribute, loaded!.geometry.index!);
+      layer!.show(hint, { current: colour('--accent'), other: colour('--hint-other'), otherHalo: colour('--hint-other-halo') }, loaded!.offset, loaded!.geometry.getAttribute('position') as THREE.BufferAttribute, loaded!.geometry.index!, fadeIn);
     } else layer?.clear();
     this.paintHintRows();
   }
@@ -1993,6 +2072,7 @@ export class App implements AppApi {
     this.updateRetouch();
     this.syncGmLayer();
     this.sidebar.refresh('mode');
+    this.sidebar.enter();
   }
 
   /** On through the modes shown. */
@@ -2274,6 +2354,8 @@ export class App implements AppApi {
     const ctx = this.figureContext();
     const frame = this.figureFrame();
     if (!ctx || !frame) return null;
+    // what is coming into view is drawn as it will be
+    this.viewer?.finishTweens();
     const st = this.store.state;
     const visiblePlanes = st.planes.filter((p) => p.visible);
     const settings = only ? { ...this.figure, views: [] } : this.figure;
@@ -4354,8 +4436,11 @@ export class App implements AppApi {
     if (!ws?.writable || this.wsIndex < 0 || st.mesh?.fileName !== baseName(ws.meshes[this.wsIndex])) return;
     const path = projectPathFor(ws.meshes[this.wsIndex]);
     const file = serializeProject(st, __APP_VERSION__, this.meshResults());
+    const savedAt = this.store.history.stateId;
     try {
       await ws.write(path, JSON.stringify(file, null, 2));
+      // the folder's copy is the project file: saved (unless another model opened meanwhile)
+      if (this.store.state.mesh?.sha256 === st.mesh?.sha256) this.store.history.markSaved(savedAt);
       this.projectIndex?.add(path, structuredClone(file));
       this.sidebar.refresh('workspace');
     } catch (e) {
@@ -5222,6 +5307,8 @@ export class App implements AppApi {
   private placeLandmark(p: Vec3): void {
     const lm = addLandmark(this.store, p, this.nextName() ?? undefined);
     this.selection.set(lm.id);
+    // placed by hand: it pops in
+    this.landmarkLayer?.pop(lm.id);
   }
 
   private nextName(): string | null {
@@ -5821,8 +5908,11 @@ export class App implements AppApi {
     // agreement analysis tells observers apart by their name
     if (!this.store.state.specimen.annotator.trim()) this.feedback.toast(t('toast.noAnnotator'), 'info', 5000);
     const file = serializeProject(this.store.state, __APP_VERSION__, this.meshResults());
+    // (what was saved is the state as it is now: edits made while the file is written stay unsaved)
+    const savedAt = this.store.history.stateId;
     void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json').then((outcome) => {
       if (outcome !== 'saved') return;
+      this.store.history.markSaved(savedAt);
       // a read-only folder: this model's edits are downloaded now
       this.keepSessionProject();
       this.undownloaded.delete(this.currentFile());
@@ -6632,7 +6722,8 @@ export class App implements AppApi {
       ...group(t('appMode.present'), [['X', 'help.k.section']]),
     );
     const body = h('div', { class: 'help-cols', id: 'help-cols' }, left, right);
-    void this.feedback.choose(t('help.title'), body, [{ id: 'close', label: t('dlg.close'), kind: 'primary' }], { wide: true });
+    void this.feedback.choose(t('help.title'), body, [{ id: 'close', label: t('dlg.close'), kind: 'plain' }], { wide: true });
+
   }
 
   /** Small hook for automated tests and power users (window.lithicanalyst). */
@@ -6836,6 +6927,12 @@ export class App implements AppApi {
       nextCurveType: () => this.nextCurveType,
       /** A landmark's diameter on the screen as drawn, in CSS pixels. */
       landmarkDiameter: (id: string) => this.landmarkLayer?.screenDiameter(id) ?? null,
+      /** How much of an arrow is drawn as it grows in (1: all of it); whether anything in the view is still coming in. */
+      arrowGrown: (id: string) => this.arrows?.grownShare(id) ?? null,
+      tweening: () => this.viewer?.tweening ?? false,
+      unsaved: () => this.store.history.dirty,
+      /** The busy overlay over the view, as loading shows it (null: gone). */
+      busy: (text: string | null) => this.feedback.busy(text, this.viewportEl),
       /** Points of the measurement being taken (null when no measuring tool is active). */
       measureDraft: (): Vec3[] | null => {
         const tool = this.tools?.activeTool;

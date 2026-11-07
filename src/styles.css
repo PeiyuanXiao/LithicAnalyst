@@ -41,6 +41,17 @@
   --cfg-flaking: #6e927a;
   --cfg-platform: #d4b679;
   --cfg-none: #c4c0b4;
+  /* the sidebar's ground and its cards (flat; a step apart) */
+  --sidebar-bg: #e2dccb;
+  --card: #ece6d8;
+  /* the start page's grid and rings, behind the empty view */
+  --empty-grid: rgba(80, 96, 108, 0.11);
+  --empty-ring: rgba(31, 29, 25, 0.08);
+  --empty-ring-2: rgba(31, 29, 25, 0.15);
+  /* the tick of a check box, in the colour of the surface, on the ink it is filled with */
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 5 8.6 9.6 3.6' fill='none' stroke='%23ece6d8' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* the interface's one easing */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   color-scheme: light;
 
   --font-ui: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
@@ -51,8 +62,9 @@
   --step-0: 13.5px;
   --step-1: 15px;
   --step-2: 18px;
-  --radius: 6px;
-  --radius-lg: 9px;
+  /* cards and buttons; large panels and dialogs (capsules are 999px) */
+  --radius: 4px;
+  --radius-lg: 6px;
   --sidebar-w: 368px;
   /* where the logo's point cloud ends */
   --la-cloud: currentColor;
@@ -98,6 +110,12 @@
   --cfg-platform: #e2c486;
   --cfg-none: #8f948f;
   --la-cloud: #f2a33a;
+  --sidebar-bg: #141615;
+  --card: #232625;
+  --empty-grid: rgba(230, 226, 214, 0.05);
+  --empty-ring: rgba(230, 226, 214, 0.06);
+  --empty-ring-2: rgba(230, 226, 214, 0.12);
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 5 8.6 9.6 3.6' fill='none' stroke='%231f2120' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   color-scheme: dark;
 }
 
@@ -145,7 +163,7 @@ kbd {
   padding: 0 5px;
   border: 1px solid var(--line);
   border-bottom-width: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--surface-2);
   color: var(--ink);
   white-space: nowrap;
@@ -310,15 +328,27 @@ kbd {
   min-width: 220px;
   padding: 10px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--surface-pop);
   color: var(--ink);
   box-shadow: var(--shadow);
-  animation: pop-in 140ms ease-out;
+  transition: opacity 120ms var(--ease), transform 120ms var(--ease), display 120ms allow-discrete;
 }
 
+/* going, it fades where it is, and takes no press meanwhile */
 .popover[hidden] {
   display: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms var(--ease), display 120ms allow-discrete;
+}
+
+/* a menu comes in from 4px above; a panel (the display settings) grows from its button */
+@starting-style {
+  .popover:not([hidden]) {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 .spec-panel {
@@ -354,7 +384,7 @@ kbd {
   gap: 10px;
   padding: 7px 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--ink);
   font: inherit;
@@ -423,15 +453,38 @@ kbd {
 
 /* work modes: the most prominent control of the top bar */
 .mode-switch {
+  position: relative;
   justify-self: center;
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--well);
 }
 
+/* one amber block, moved under the chosen mode (ui/app.ts, buildModeSwitch); until it is placed, that button is amber itself */
+.mode-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  width: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  pointer-events: none;
+  transition: transform 300ms var(--ease), width 300ms var(--ease);
+}
+
+.mode-thumb.is-placing {
+  transition: none;
+}
+
+.mode-switch:not(.has-thumb) .mode-thumb {
+  display: none;
+}
+
 .mode-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -447,6 +500,7 @@ kbd {
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  transition: color 300ms var(--ease);
 }
 
 .mode-btn .icon20 {
@@ -461,6 +515,10 @@ kbd {
 .mode-btn[aria-checked="true"] {
   background: var(--accent);
   color: var(--accent-ink);
+}
+
+.mode-switch.has-thumb .mode-btn[aria-checked="true"] {
+  background: transparent;
 }
 
 /* tooltips (ui/tooltip.ts): label and key */
@@ -538,6 +596,23 @@ kbd {
 .btn-quiet:hover {
   background: color-mix(in srgb, var(--ink) 7%, transparent);
   border-color: transparent;
+}
+
+/* Save, while there are changes not saved */
+#btn-save-project {
+  position: relative;
+}
+
+#btn-save-project[data-dirty="true"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* a quiet way to undo a setting: danger-coloured text, no frame */
@@ -686,7 +761,8 @@ kbd {
   position: absolute;
   width: 18px;
   height: 18px;
-  border: 0 solid var(--accent-line);
+  border: 0 solid var(--viewport-ink-2);
+  opacity: 0.5;
   pointer-events: none;
   z-index: 1;
 }
@@ -696,7 +772,7 @@ kbd {
   left: 8px;
   border-top-width: 2px;
   border-left-width: 2px;
-  border-top-left-radius: 6px;
+  border-top-left-radius: var(--radius-lg);
 }
 
 .vp-corner-tr {
@@ -704,7 +780,7 @@ kbd {
   right: 8px;
   border-top-width: 2px;
   border-right-width: 2px;
-  border-top-right-radius: 6px;
+  border-top-right-radius: var(--radius-lg);
 }
 
 .vp-corner-bl {
@@ -712,7 +788,7 @@ kbd {
   left: 8px;
   border-bottom-width: 2px;
   border-left-width: 2px;
-  border-bottom-left-radius: 6px;
+  border-bottom-left-radius: var(--radius-lg);
 }
 
 .vp-corner-br {
@@ -720,7 +796,7 @@ kbd {
   right: 8px;
   border-bottom-width: 2px;
   border-right-width: 2px;
-  border-bottom-right-radius: 6px;
+  border-bottom-right-radius: var(--radius-lg);
 }
 
 /* panels over the view sit above the 3D labels */
@@ -739,9 +815,9 @@ kbd {
   align-items: center;
   gap: 4px;
   padding: 4px;
-  background: var(--overlay);
+  background: var(--surface-pop);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
   z-index: 3;
 }
@@ -772,7 +848,7 @@ kbd {
 }
 
 .tool-btn:hover:not([aria-checked="true"]) {
-  background: var(--surface-pop);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
 }
 
 .tool-name {
@@ -792,7 +868,7 @@ kbd {
   padding: 0 16px 0 9px;
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px var(--accent-line);
-  color: var(--accent-text);
+  color: var(--ink);
 }
 
 .tool-btn[aria-checked="true"] .tool-name {
@@ -800,7 +876,7 @@ kbd {
 }
 
 .tool-btn[aria-checked="true"] .tool-key {
-  color: var(--accent-text);
+  color: var(--ink-2);
 }
 
 .tb-sep {
@@ -817,8 +893,9 @@ kbd {
   bottom: 10px;
   padding: 4px 9px;
   border-radius: var(--radius);
-  background: var(--overlay);
+  background: var(--surface-pop);
   border: 1px solid var(--line);
+  box-shadow: var(--shadow);
   font-size: var(--step--1);
   color: var(--ink-2);
   white-space: nowrap;
@@ -864,9 +941,9 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 9px;
-  border-radius: var(--radius);
-  background: var(--overlay);
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-pop);
   border: 1px solid var(--line);
   font-size: var(--step--1);
   color: var(--ink-2);
@@ -893,9 +970,84 @@ kbd {
   color: var(--ink);
 }
 
+.status-mark-box {
+  position: relative;
+  display: inline-flex;
+}
+
+/* the sign in the text, for copying and reading; the drawing beside it is what shows */
+.status-glyph {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .status-mark {
-  font-size: 11px;
-  line-height: 1;
+  display: block;
+  width: 11px;
+  height: 11px;
+  flex: none;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.status-pill[data-done="true"] .status-ring,
+.status-pill[data-done="false"] .status-tick {
+  opacity: 0;
+}
+
+.status-pill[data-done="true"] .status-tick {
+  stroke-width: 1.8;
+}
+
+/* just done by the user: the ring goes, the tick is drawn from the left, the pill flashes */
+.status-pill.is-ticking {
+  animation: flash 900ms var(--ease);
+}
+
+.status-pill.is-ticking .status-ring {
+  animation: fade-out 200ms var(--ease);
+}
+
+.status-pill.is-ticking .status-tick {
+  stroke-dasharray: 1;
+  animation: tick 350ms var(--ease) 80ms backwards;
+}
+
+@keyframes tick {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* a value or a pill the user just changed: pale amber that ebbs away */
+@keyframes flash {
+  from {
+    background-color: var(--accent-soft);
+  }
+}
+
+.is-flash {
+  animation: flash 900ms var(--ease);
 }
 
 .status-count {
@@ -934,6 +1086,45 @@ kbd {
 
 .vp-empty .btn-primary {
   border-color: var(--accent-line);
+}
+
+/* the start page's grid and rings, at half their strength and still */
+.vp-empty-bg {
+  --grid: var(--empty-grid);
+  --ring: var(--empty-ring);
+  --ring-2: var(--empty-ring-2);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.vp-empty-bg .start-grid {
+  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, #000 0%, transparent 100%);
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, #000 0%, transparent 100%);
+}
+
+.vp-empty-bg .start-rings {
+  top: 50%;
+}
+
+/* the module's drawing as its card shows it before the pointer comes (what comes in on hover left out) */
+.vp-empty-icon {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 6px;
+  color: var(--viewport-ink-2);
+  opacity: 0.5;
+}
+
+.vp-empty-icon :is(.ring, .ndl, .wire, .lmk) {
+  display: none;
+}
+
+.vp-empty > :not(.vp-empty-bg) {
+  position: relative;
 }
 
 .vp-empty-row {
@@ -1592,7 +1783,7 @@ kbd {
   display: grid;
   place-items: center;
   border: 2px dashed var(--accent-line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
   z-index: 6;
   pointer-events: none;
@@ -1610,7 +1801,7 @@ kbd {
   flex-wrap: wrap;
   gap: 2px;
   padding: 3px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--well);
 }
 
@@ -1635,7 +1826,7 @@ kbd {
 
 .seg-btn[aria-checked="true"] {
   background: var(--accent-soft);
-  color: var(--accent-text);
+  color: var(--ink);
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
@@ -1684,8 +1875,9 @@ kbd {
   cursor: pointer;
   font: 600 11px/1.25 var(--font-data);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   border: 1.5px solid var(--chip, var(--mark));
+
   background: color-mix(in srgb, var(--surface) 90%, transparent);
   color: var(--ink);
   white-space: nowrap;
@@ -1726,32 +1918,68 @@ kbd {
 
 /* ------------------------------------------------------------ sidebar */
 
+/* flat cards on a ground a step darker (lighter in the dark theme) */
 .sidebar {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
-  background: var(--surface);
+  background: var(--sidebar-bg);
   border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  padding: 8px;
 }
 
 .sidebar > .panel {
   flex: none;
 }
 
+/* the cards come in from the right when the mode changes */
+.sidebar.is-entering > .panel {
+  animation: side-in 220ms var(--ease) backwards;
+}
+
+@keyframes side-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
 .panel {
-  border-bottom: 1px solid var(--line);
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  /* (its height follows its content as it opens and closes) */
+  interpolate-size: allow-keywords;
+}
+
+/* opening and closing: the height eases; a browser without ::details-content opens at once */
+.panel::details-content {
+  block-size: 0;
+  overflow: clip;
+  transition: block-size 200ms var(--ease), content-visibility 200ms var(--ease) allow-discrete;
+}
+
+.panel[open]::details-content {
+  block-size: auto;
+}
+
+/* open and still: what reaches out of the card (a menu, a focus ring) is not cut */
+.panel[open]:not(.is-folding)::details-content {
+  overflow: visible;
 }
 
 .panel-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-block: 12px;
-  padding-left: 16px;
-  padding-right: var(--gutter-r);
+  padding: 10px 12px;
+  border-radius: var(--radius);
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -1783,16 +2011,34 @@ kbd {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--ink-2);
+  color: var(--ink);
+}
+
+/* nothing in it yet */
+.panel.is-empty > .panel-head .panel-title {
+  color: var(--ink-3);
 }
 
 .panel-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-block: 0 16px;
-  padding-left: 16px;
-  padding-right: var(--gutter-r);
+  padding: 0 12px 12px;
+  min-width: 0;
+}
+
+/* no model yet: the sections the mode will have, as titles that do not open */
+.panel-ghost .panel-head {
+  cursor: default;
+}
+
+.panel-ghost .panel-head::before {
+  border-color: var(--line-strong);
+  opacity: 0.6;
+}
+
+.panel-ghost .panel-title {
+  color: var(--ink-3);
 }
 
 .badge {
@@ -1800,7 +2046,7 @@ kbd {
   min-width: 22px;
   padding: 0 7px;
   border-radius: 999px;
-  background: var(--surface-2);
+  background: var(--surface-pop);
   border: 1px solid var(--line);
   font-size: 11px;
   text-align: center;
@@ -1881,10 +2127,11 @@ kbd {
 
 .ctl-range::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 2px;
+  border-radius: 999px;
   background: var(--line-strong);
 }
 
+/* the thumb in ink, as a check box that is on (solid amber is for the mode and a panel's main action) */
 .ctl-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -1892,13 +2139,14 @@ kbd {
   height: 14px;
   margin-top: -5px;
   border-radius: 50%;
-  border: 1px solid var(--accent-line);
-  background: var(--accent);
+  border: 2px solid var(--surface-pop);
+  background: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
 }
 
 .ctl-range::-moz-range-track {
   height: 4px;
-  border-radius: 2px;
+  border-radius: 999px;
   background: var(--line-strong);
 }
 
@@ -1906,8 +2154,9 @@ kbd {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  border: 1px solid var(--accent-line);
-  background: var(--accent);
+  border: 2px solid var(--surface-pop);
+  background: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
 }
 
 .ctl-range:disabled {
@@ -1936,7 +2185,7 @@ textarea.ctl-text {
   font-family: var(--font-data);
 }
 
-/* check boxes: the control boundary, amber when on */
+/* check boxes: the control boundary, filled with ink when on (the other way round in the dark theme) */
 input[type="checkbox"] {
   -webkit-appearance: none;
   appearance: none;
@@ -1945,15 +2194,15 @@ input[type="checkbox"] {
   margin: 0;
   flex: none;
   border: 1px solid var(--line-strong);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--surface-pop) center / 11px 11px no-repeat;
   cursor: pointer;
 }
 
 input[type="checkbox"]:checked {
-  border-color: var(--accent-line);
-  background-color: var(--accent);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 5 8.6 9.6 3.6' fill='none' stroke='%231a1408' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  border-color: var(--ink);
+  background-color: var(--ink);
+  background-image: var(--check-mark);
 }
 
 input[type="checkbox"]:disabled {
@@ -1988,7 +2237,7 @@ input[type="checkbox"]:disabled {
   padding: 12px;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
-  background: var(--surface-2);
+  background: transparent;
 }
 
 .rule {
@@ -2004,7 +2253,7 @@ input[type="checkbox"]:disabled {
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--surface-2);
 }
 
@@ -2018,7 +2267,7 @@ input[type="checkbox"]:disabled {
 .legend-ramp {
   width: 64px;
   height: 8px;
-  border-radius: 4px;
+  border-radius: 999px;
   flex: none;
   background: linear-gradient(90deg, #315485, #7899b8, #dbd9d1, #dea86b, #a85c21);
 }
@@ -2088,17 +2337,93 @@ input[type="checkbox"]:disabled {
 }
 
 /* a measure that shows on the model how it was taken: on the pointer or the focus, and fixed by a click */
-.num-grid [data-hint] {
+.num-grid [data-hint],
+.measure-table [data-hint] {
   cursor: pointer;
 }
 
-.num-grid [data-hint].is-hinted {
+.num-grid [data-hint].is-hinted,
+.measure-table [data-hint].is-hinted {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-.num-grid [data-hint].is-pinned {
+.num-grid [data-hint].is-pinned,
+.measure-table [data-hint].is-pinned {
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+/* the automatic measures: in groups, each under a small title */
+.measure-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.measure-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.measure-group-title,
+.measure-table th {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+
+/* a value with nothing in it: the whole row, or the cell, recedes; "—" stays */
+.num-grid .is-missing,
+.measure-table .is-missing {
+  color: var(--ink-3);
+}
+
+/* two or three related measures as a small table: the unit in the head, right-aligned numbers */
+.measure-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+
+.measure-table th {
+  padding: 0 0 2px 8px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.measure-table th:first-child {
+  padding-left: 0;
+  text-align: left;
+}
+
+.measure-table td {
+  padding: 1.5px 0 1.5px 8px;
+}
+
+/* the row's name, as a label of the lists above */
+.measure-table th.measure-row-head {
+  padding: 1.5px 8px 1.5px 0;
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  text-align: left;
+  white-space: normal;
+  color: var(--ink-2);
+}
+
+.measure-table td.num {
+  width: 1%;
+}
+
+.measure-table .measure-unit {
+  text-transform: none;
+  letter-spacing: 0.02em;
 }
 
 [data-hint]:focus-visible {
@@ -2115,11 +2440,16 @@ input[type="checkbox"]:disabled {
   font: 600 11px/1.25 var(--font-data);
   font-variant-numeric: tabular-nums;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius);
+
   white-space: nowrap;
   background: var(--overlay);
   border: 1px solid var(--line);
   color: var(--ink-2);
+}
+
+.hint-label.is-fading-in {
+  animation: fade-in 150ms var(--ease);
 }
 
 .hint-label-current {
@@ -2166,7 +2496,7 @@ input[type="checkbox"]:disabled {
   flex-direction: column;
   gap: 2px;
   padding: 3px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--well);
 }
 
@@ -2212,15 +2542,14 @@ input[type="checkbox"]:disabled {
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-/* lists of items */
+/* lists of items: no frame of their own in the card, rows apart by a soft line (the rows reach into the card's margin) */
 .arrow-list {
   list-style: none;
-  margin: 0;
+  margin: 0 -8px;
   padding: 0;
   max-height: 248px;
   overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-block: 1px solid var(--line-soft);
 }
 
 .arrow-row {
@@ -2228,7 +2557,7 @@ input[type="checkbox"]:disabled {
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   cursor: pointer;
   border-bottom: 1px solid var(--line-soft);
   font-size: var(--step--1);
@@ -2306,14 +2635,16 @@ input[type="checkbox"]:disabled {
   color: var(--accent-text);
 }
 
+/* selected: pale amber with an amber line, as everything selected */
 .arrow-row[aria-selected="true"] {
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .chip {
   width: 10px;
   height: 10px;
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: var(--chip);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
@@ -2321,7 +2652,7 @@ input[type="checkbox"]:disabled {
 .chip-line {
   width: 12px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: 999px;
 }
 
 .arrow-id {
@@ -2353,7 +2684,7 @@ input[type="checkbox"]:disabled {
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--surface-2);
 }
 
@@ -2402,31 +2733,32 @@ input[type="checkbox"]:disabled {
 
 /* ------------------------------------------------------------ feedback */
 
+/* at the lower right of the view, 8px above the coordinate reading (placed by ui/feedback.ts); over the start page, of the window */
 .toast-host {
   position: fixed;
-  left: 50%;
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: calc(44px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   z-index: 50;
   pointer-events: none;
   width: max-content;
-  max-width: calc(100% - 32px);
+  max-width: min(420px, calc(100% - 24px));
 }
 
 .toast {
-  padding: 8px 14px;
-  border-radius: 8px;
-  background: var(--ink);
-  color: var(--surface);
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-pop);
+  color: var(--ink);
   font-size: var(--step--1);
   box-shadow: var(--shadow);
   opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 0.2s, transform 0.2s;
+  transform: translateY(12px);
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease);
   max-width: 100%;
 }
 
@@ -2435,14 +2767,19 @@ input[type="checkbox"]:disabled {
   transform: none;
 }
 
+.toast.is-out {
+  opacity: 0;
+  transform: none;
+  transition: opacity 150ms var(--ease);
+}
+
+/* a bar of colour on the left says how it is meant */
 .toast-warn {
-  background: var(--warn);
-  color: var(--surface-pop);
+  border-left: 3px solid var(--warn);
 }
 
 .toast-error {
-  background: var(--danger);
-  color: var(--surface-pop);
+  border-left: 3px solid var(--danger);
 }
 
 .busy {
@@ -2458,13 +2795,168 @@ input[type="checkbox"]:disabled {
   color: var(--viewport-ink);
 }
 
-.busy-spinner {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: 3px solid var(--line);
-  border-top-color: var(--accent);
-  animation: spin 0.8s linear infinite;
+/*
+ * Loading: the logo puts itself together over and over (the cone's three pieces close, the grid comes row by row, then the
+ * point cloud), 1.5 s a round; only once loading has taken 300 ms (`is-long`), so a quick one shows no flash of it.
+ * Each part's delay (its place in the round) overrides the entrance delays the drawing carries.
+ */
+.busy-logo {
+  width: 88px;
+  height: 88px;
+  color: var(--viewport-ink);
+  visibility: hidden;
+}
+
+.busy.is-long .busy-logo {
+  visibility: visible;
+}
+
+/* (with reduced motion the drawing stands still, whole) */
+@media (prefers-reduced-motion: no-preference) {
+  .busy.is-long .busy-logo :is(.fx-c, .fx-l, .fx-r, .fx-m, .fx-p) {
+    animation: var(--la-loop) 1.5s var(--ease) var(--la-at) infinite backwards !important;
+  }
+}
+
+.busy-logo .fx-c {
+  --la-loop: la-loop-c;
+  --la-at: 0s;
+}
+
+.busy-logo .fx-l,
+.busy-logo .fx-r {
+  --la-at: 0.08s;
+}
+
+.busy-logo .fx-l {
+  --la-loop: la-loop-l;
+}
+
+.busy-logo .fx-r {
+  --la-loop: la-loop-r;
+}
+
+.busy-logo .fx-m {
+  --la-loop: la-loop-m;
+}
+
+.busy-logo .fx-p {
+  --la-loop: la-loop-p;
+}
+
+.busy-logo g.fx-m:nth-of-type(1) {
+  --la-at: 0.2s;
+}
+
+.busy-logo g.fx-m:nth-of-type(2) {
+  --la-at: 0.26s;
+}
+
+.busy-logo g.fx-m:nth-of-type(3) {
+  --la-at: 0.32s;
+}
+
+.busy-logo g.fx-m:nth-of-type(4) {
+  --la-at: 0.38s;
+}
+
+.busy-logo g.fx-m:nth-of-type(5) {
+  --la-at: 0.44s;
+}
+
+.busy-logo path.fx-p:nth-of-type(4) {
+  --la-at: 0.5s;
+}
+
+.busy-logo path.fx-p:nth-of-type(5) {
+  --la-at: 0.56s;
+}
+
+.busy-logo path.fx-p:nth-of-type(6) {
+  --la-at: 0.62s;
+}
+
+/* each part: in during the first fifth of the round, there until the end of its stay, out, gone until its next turn */
+@keyframes la-loop-c {
+  0% {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  20%,
+  62% {
+    opacity: 1;
+    transform: none;
+  }
+  76%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes la-loop-l {
+  0% {
+    opacity: 0;
+    transform: translate(-10px, -5px);
+  }
+  20%,
+  62% {
+    opacity: 1;
+    transform: none;
+  }
+  76%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes la-loop-r {
+  0% {
+    opacity: 0;
+    transform: translate(10px, -5px);
+  }
+  20%,
+  62% {
+    opacity: 1;
+    transform: none;
+  }
+  76%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes la-loop-m {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  14%,
+  62% {
+    opacity: 1;
+    transform: none;
+  }
+  76%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes la-loop-p {
+  0% {
+    opacity: 0;
+  }
+  16%,
+  62% {
+    opacity: 1;
+  }
+  76%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes spin {
@@ -2473,7 +2965,7 @@ input[type="checkbox"]:disabled {
   }
 }
 
-/* panels, menus, dialogs and tooltips come in softly */
+/* tooltips and the relation chip come in softly */
 @keyframes pop-in {
   from {
     opacity: 0;
@@ -2482,6 +2974,14 @@ input[type="checkbox"]:disabled {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* panels and dialogs grow from what opened them (transform-origin, set by script) */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
   }
 }
 
@@ -2502,7 +3002,7 @@ input[type="checkbox"]:disabled {
   padding: 16px;
   background: var(--scrim);
   z-index: 60;
-  animation: fade-in 140ms ease-out;
+  animation: fade-in 200ms var(--ease);
 }
 
 .modal {
@@ -2515,7 +3015,14 @@ input[type="checkbox"]:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  animation: pop-in 140ms ease-out;
+  animation: panel-in 200ms var(--ease);
+}
+
+/* going: it fades out and takes nothing (the answer is already in) */
+.modal-backdrop.is-closing {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease);
 }
 
 .modal-wide {
@@ -2692,14 +3199,8 @@ input[type="checkbox"]:disabled {
     overflow: visible;
     border-left: 0;
     border-top: 1px solid var(--line);
-  }
-  .panel-head {
-    padding-left: var(--gutter-l);
-    padding-right: var(--gutter-r);
-  }
-  .panel-body {
-    padding-left: var(--gutter-l);
-    padding-right: var(--gutter-r);
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
   }
 }
 
@@ -2751,7 +3252,7 @@ input[type="checkbox"]:disabled {
   }
 }
 
-/* no motion: nothing fades, slides or spins */
+/* no motion: nothing fades, slides or spins; everything is at once where it ends */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -2759,6 +3260,24 @@ input[type="checkbox"]:disabled {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* (apart: a browser that does not know one of these pseudo-elements drops only its own rule) */
+@media (prefers-reduced-motion: reduce) {
+  .panel::details-content {
+    transition: none !important;
+  }
+}
+
+/* the theme's circle (ui/theme.ts) is the script's own animation: no default cross-fade, and the page stays live under it */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition {
+  pointer-events: none;
 }
 
 /* ------------------------------------------------------------ relations and sequences */
@@ -2779,8 +3298,7 @@ input[type="checkbox"]:disabled {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--danger-line);
-  border-radius: var(--radius-lg);
+  border-left: 2px solid var(--danger-line);
   max-height: 180px;
   overflow-y: auto;
 }
@@ -2802,6 +3320,7 @@ input[type="checkbox"]:disabled {
 
 .problem-item.is-focused {
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
   color: var(--accent-text);
 }
 
@@ -2841,10 +3360,23 @@ input[type="checkbox"]:disabled {
   border-radius: var(--radius-lg);
   background: var(--surface-pop);
   box-shadow: var(--shadow);
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease), display 200ms allow-discrete;
 }
 
+/* going: it fades where it is, and takes no press meanwhile */
 .float-panel[hidden] {
   display: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms var(--ease), display 120ms allow-discrete;
+}
+
+/* coming: it grows from what opened it (transform-origin, ui/motion.ts) */
+@starting-style {
+  .float-panel:not([hidden]) {
+    opacity: 0;
+    transform: scale(0.96);
+  }
 }
 
 .float-panel.is-collapsed {
@@ -2973,8 +3505,8 @@ input[type="checkbox"]:disabled {
 }
 
 .agree-wrap {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  margin-inline: -8px;
+  border-block: 1px solid var(--line-soft);
 }
 
 .agree-wrap:empty {
@@ -3068,8 +3600,8 @@ input[type="checkbox"]:disabled {
 .ws-list {
   position: relative;
   overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  margin-inline: -8px;
+  border-block: 1px solid var(--line-soft);
 }
 
 .ws-list.is-busy {
@@ -3089,7 +3621,7 @@ input[type="checkbox"]:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--line-soft);
   font-size: var(--step--1);
   cursor: pointer;
@@ -3101,6 +3633,7 @@ input[type="checkbox"]:disabled {
 
 .ws-row[aria-selected="true"] {
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
   color: var(--accent-text);
   font-weight: 600;
 }
@@ -3175,15 +3708,16 @@ input[type="checkbox"]:disabled {
 .vp-btn {
   min-height: 40px;
   border-color: var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--overlay);
+  border-radius: var(--radius);
+  background: var(--surface-pop);
   box-shadow: var(--shadow);
 }
 
 .vp-btn:hover {
-  background: var(--surface-pop);
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface-pop));
 }
 
+/* a large panel: it grows from its button (top right) rather than coming down like a menu */
 .display-panel {
   left: auto;
   right: 0;
@@ -3191,6 +3725,16 @@ input[type="checkbox"]:disabled {
   max-height: min(70vh, 640px);
   overflow-y: auto;
   padding: 14px;
+  border-radius: var(--radius-lg);
+  transform-origin: top right;
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease), display 200ms allow-discrete;
+}
+
+@starting-style {
+  .display-panel:not([hidden]) {
+    opacity: 0;
+    transform: scale(0.96);
+  }
 }
 
 /* rows of the same rank: a label (as wide as the longest, in this language) and its control */
@@ -3246,7 +3790,7 @@ input[type="checkbox"]:disabled {
 
 .sidebar-resizer:hover,
 .sidebar-resizer.is-dragging {
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--line-strong) 35%, var(--sidebar-bg));
 }
 
 /* ------------------------------------------------------------ specimen orientation */
@@ -3310,12 +3854,13 @@ input[type="checkbox"]:disabled {
 
 /* ------------------------------------------------------------ export */
 
+/* on the sidebar's ground, under the cards (it reaches the sidebar's edges, over its padding) */
 .sidebar-foot {
   position: sticky;
-  bottom: 0;
-  margin-top: auto;
-  padding: 10px var(--gutter-r) 12px 16px;
-  background: var(--surface);
+  bottom: -8px;
+  margin: auto -8px -8px;
+  padding: 8px 8px 10px;
+  background: var(--sidebar-bg);
   border-top: 1px solid var(--line);
 }
 
@@ -3359,7 +3904,7 @@ input[type="checkbox"]:disabled {
   gap: 2px;
   padding: 4px 4px 4px 10px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--surface-pop);
   box-shadow: var(--shadow);
   white-space: nowrap;
@@ -3374,7 +3919,7 @@ input[type="checkbox"]:disabled {
 
 .relation-chip .btn[aria-pressed="true"] {
   background: var(--accent-soft);
-  color: var(--accent-text);
+  color: var(--ink);
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
@@ -3399,9 +3944,9 @@ input[type="checkbox"]:disabled {
   align-items: center;
   gap: 4px;
   padding: 4px;
-  background: var(--overlay);
+  background: var(--surface-pop);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
   z-index: 3;
 }
@@ -3424,17 +3969,17 @@ input[type="checkbox"]:disabled {
 }
 
 .seq-chip:hover:not([aria-checked="true"]) {
-  background: var(--surface-pop);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
 }
 
 .seq-chip[aria-checked="true"] {
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px var(--accent-line);
-  color: var(--accent-text);
+  color: var(--ink);
 }
 
 .seq-chip[aria-checked="true"] .tool-key {
-  color: var(--accent-text);
+  color: var(--ink-2);
 }
 
 .seq-chip-label {
@@ -3446,7 +3991,7 @@ input[type="checkbox"]:disabled {
   min-width: 20px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--surface-2);
+  background: var(--surface-pop);
   border: 1px solid var(--line);
   color: var(--ink);
   font-size: 11px;
@@ -3517,6 +4062,13 @@ input[type="checkbox"]:disabled {
   color: var(--accent-text);
 }
 
+.agree-table tr.is-focused,
+.retouch-table tbody tr.is-selected {
+  outline: 1px solid var(--accent-line);
+  outline-offset: -1px;
+}
+
+
 /* a label with no free place left (see render/labelLayout.ts) */
 .arrow-label.is-culled {
   visibility: hidden;
@@ -3584,11 +4136,11 @@ input[type="checkbox"]:disabled {
   right: max(12px, env(safe-area-inset-right, 0px));
   width: 96px;
   height: 96px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
 }
 
 .view-cube-board {
-  background: var(--overlay);
+  background: var(--surface-pop);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   pointer-events: none;
@@ -3973,7 +4525,7 @@ input[type="checkbox"]:disabled {
   display: inline-block;
   width: 14px;
   height: 2px;
-  border-radius: 1px;
+  border-radius: 999px;
 }
 
 .edge-chart-plot {
@@ -4119,7 +4671,7 @@ input[type="checkbox"]:disabled {
 .ws-template {
   padding: 0 4px;
   border: 1px solid var(--accent-line);
-  border-radius: 4px;
+  border-radius: var(--radius);
   color: var(--accent-text);
 }
 
@@ -4151,7 +4703,7 @@ input[type="checkbox"]:disabled {
   display: inline-block;
   width: 14px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: 999px;
 }
 
 .edge-chart-cross {
@@ -4176,8 +4728,9 @@ input[type="checkbox"]:disabled {
   gap: 6px;
   padding: 4px 8px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--surface-pop);
+  box-shadow: var(--shadow);
   font-size: 11px;
   color: var(--ink);
 }
@@ -4186,7 +4739,7 @@ input[type="checkbox"]:disabled {
   display: inline-block;
   width: 72px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: 999px;
 }
 
 .edge-legend-value {
@@ -4385,7 +4938,7 @@ input[type="checkbox"]:disabled {
   height: 24px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: none;
   color: var(--ink-2);
   font-family: var(--font-data);

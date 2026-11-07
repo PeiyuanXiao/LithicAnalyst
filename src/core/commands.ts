@@ -18,20 +18,35 @@ export interface Command {
 
 const MERGE_WINDOW_MS = 1500;
 
+/** How the state last changed: a new command, a step back or forward, or a fresh start (a model or project opened). */
+export type HistoryStep = 'execute' | 'undo' | 'redo' | 'clear';
+
 export class CommandHistory {
   private undoStack: Command[] = [];
   private redoStack: Command[] = [];
   private listeners = new Set<() => void>();
   readonly limit = 1000;
+  /**
+   * Each state the history can return to has a number: the state after each command on the stacks (a merge makes a new one),
+   * and `baseId` before the first. `savedId` is the state last saved, so stepping back to it is clean again.
+   */
+  private ids = new WeakMap<Command, number>();
+  private nextId = 1;
+  private baseId = 0;
+  private savedId = 0;
+  private step: HistoryStep = 'clear';
 
   constructor(private readonly store: ProjectStore) {}
 
   execute(cmd: Command): void {
+    this.step = 'execute';
     cmd.apply(this.store);
     const last = this.undoStack[this.undoStack.length - 1];
-    if (!(last && last.merge && last.merge(cmd))) {
+    if (last && last.merge && last.merge(cmd)) this.ids.set(last, this.nextId++);
+    else {
       this.undoStack.push(cmd);
-      if (this.undoStack.length > this.limit) this.undoStack.shift();
+      this.ids.set(cmd, this.nextId++);
+      if (this.undoStack.length > this.limit) this.baseId = this.ids.get(this.undoStack.shift()!) ?? this.nextId++;
     }
     this.redoStack = [];
     this.emit();
@@ -40,6 +55,7 @@ export class CommandHistory {
   undo(): Command | null {
     const cmd = this.undoStack.pop();
     if (!cmd) return null;
+    this.step = 'undo';
     cmd.revert(this.store);
     this.redoStack.push(cmd);
     this.emit();
@@ -49,10 +65,34 @@ export class CommandHistory {
   redo(): Command | null {
     const cmd = this.redoStack.pop();
     if (!cmd) return null;
+    this.step = 'redo';
     cmd.apply(this.store);
     this.undoStack.push(cmd);
     this.emit();
     return cmd;
+  }
+
+  /** The state as it is now, to hand to `markSaved` once a save of it has gone through. */
+  get stateId(): number {
+    const top = this.undoStack[this.undoStack.length - 1];
+    return top ? this.ids.get(top)! : this.baseId;
+  }
+
+  /** The state `id` (by default the present one) was saved. */
+  markSaved(id = this.stateId): void {
+    if (id === this.savedId) return;
+    this.savedId = id;
+    this.emit();
+  }
+
+  /** Changes since the last save (or since the model or project was opened). */
+  get dirty(): boolean {
+    return this.stateId !== this.savedId;
+  }
+
+  /** How the state last changed (set before the change is applied, so listeners of the store can read it). */
+  get lastStep(): HistoryStep {
+    return this.step;
   }
 
   get canUndo(): boolean {
@@ -68,9 +108,12 @@ export class CommandHistory {
     return this.redoStack[this.redoStack.length - 1]?.labelKey ?? null;
   }
 
+  /** A fresh start: nothing to undo, and nothing unsaved. */
   clear(): void {
     this.undoStack = [];
     this.redoStack = [];
+    this.baseId = this.savedId = this.nextId++;
+    this.step = 'clear';
     this.emit();
   }
 

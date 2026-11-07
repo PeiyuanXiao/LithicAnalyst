@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { SemilandmarkResult } from '../compute/landmarks';
 import type { Landmark, Vec3 } from '../core/types';
+import { EASE_POP, VIEW_MOTION } from './easing';
 import { dotDiameterPx, type DotKind } from './landmarkSize';
 import type { Viewer } from './viewer';
 
@@ -45,6 +46,8 @@ class Dot {
   private readonly at = new THREE.Vector3();
   private kind: DotKind = 'fixed';
   private emphasis = 1;
+  /** Its size as it pops in (1: as drawn). */
+  grow = 1;
 
   constructor() {
     this.ghost.renderOrder = 900;
@@ -69,7 +72,8 @@ class Dot {
     };
     const toward = viewer.camera.position.clone().sub(this.at).normalize();
     this.root.position.copy(this.at).addScaledVector(toward, radiusAt(this.at));
-    this.root.scale.setScalar(radiusAt(this.root.position));
+    // (three.js leaves a zero scale out of its matrices' inverse: a trace of size instead)
+    this.root.scale.setScalar(radiusAt(this.root.position) * Math.max(1e-4, this.grow));
   }
 }
 
@@ -211,6 +215,16 @@ export class LandmarkLayer {
       const q = new THREE.Vector3(...v.point);
       v.label.element.classList.toggle('is-occluded', this.viewer.isOccluded(q, this.hiddenBeyond(q)));
     }
+  }
+
+  /** A landmark the user just placed grows from nothing to its size (not one loaded, undone or made by the app). */
+  pop(id: string): void {
+    const dot = this.fixed.get(id)?.dot;
+    if (!dot) return;
+    this.viewer.tween(VIEW_MOTION.LANDMARK_POP_MS, (k) => {
+      dot.grow = k >= 1 ? 1 : EASE_POP(k);
+      dot.fit(this.viewer);
+    });
   }
 
   /** A landmark's diameter on the screen as drawn, in CSS pixels. */

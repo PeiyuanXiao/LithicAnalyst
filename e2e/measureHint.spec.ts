@@ -45,7 +45,7 @@ test('hovering technical length: the axis, the box and three lines; gone when th
   });
   expect(atOnce).toBeNull();
   await expect.poll(() => shown(page)).toBe('flake:tech_length');
-  await page.locator('#flake-tech_length').evaluate((el) => el.closest('dl')!.dispatchEvent(new PointerEvent('pointerleave')));
+  await page.locator('#flake-tech_length').evaluate((el) => el.closest('.measure-auto')!.dispatchEvent(new PointerEvent('pointerleave')));
   await expect.poll(() => shown(page)).toBeNull();
 
   await hover(page, 'flake-tech_length');

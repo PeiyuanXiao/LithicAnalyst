@@ -1,6 +1,7 @@
 import { readPref, writePref } from '../io/autosave';
 import { h, icon, ICONS } from './dom';
 import { t } from './i18n';
+import { growWhenShown } from './motion';
 
 /** Where a floating panel is, how big, and whether it is folded (a UI preference, never in the project file). */
 interface PanelGeometry {
@@ -54,6 +55,8 @@ export function floatingPanel(o: FloatingPanelOptions): FloatingPanel {
   );
   const grip = o.resizable ? h('div', { class: 'float-grip', 'aria-hidden': 'true' }) : null;
   const el = h('div', { class: `viewport-ui float-panel ${o.id}-panel`, id: `${o.id}-panel`, hidden: true }, head, body, grip);
+  // it grows from the button that opened it
+  growWhenShown(el);
   const area = o.area;
   const apply = () => {
     const W = area.clientWidth, H = area.clientHeight;

@@ -56,7 +56,7 @@ import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMethod, type
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
 import { edgeAxis, rangeOf, type EdgeRetouchKey } from '../compute/workingEdge';
-import { FLAKE_MEASURES } from '../compute/flake';
+import { EPA_DISTANCES_MM, type FlakeMeasure } from '../compute/flake';
 import { gmCounts, gmListTotal, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
 import { FLAKE_TEMPLATE_PATCHES, gmConfigSummary, GM_TEMPLATE_PARAMETERS, usesTemplate } from '../compute/gmTemplate';
 import { landmarkName, platformSides, shownLandmarks } from '../compute/landmarks';
@@ -85,7 +85,9 @@ import { clear, h, icon, ICONS, revealInList } from './dom';
 import { EdgeAngleChart, type ChartSeries } from './edgeAngleChart';
 import { t, tl } from './i18n';
 import { lightBall } from './lightBall';
+import { reducedMotion } from './motion';
 import { tip, tips } from './tooltip';
+
 
 /** The trash can, in the danger colour. */
 const deleteButton = (id: string, onClick: () => void) => iconButton(ICONS.trash, t('arrows.delete'), onClick, { id, danger: true });
@@ -97,6 +99,8 @@ interface Section {
   refresh: (kind: RefreshKind) => void;
   /** Shown only while this holds (besides the work mode). */
   visible?: () => boolean;
+  /** Shown on a specimen of this type, whatever it holds: also what the empty sidebar shows of it before a model is open. */
+  ofType?: (type: SpecimenType) => boolean;
 }
 
 /** A quantity as a number and its unit, for the separate columns of lists and tables. */
@@ -114,6 +118,16 @@ const valueCells = ([value, unit]: [string, string]) => [h('span', { class: 'arr
 /** A point's coordinates, each with the decimals of a coordinate. */
 const coords = (p: Vec3): string[] => [p[0], p[1], p[2]].map((x) => fmtQuantity('coord', x));
 
+/** How long a card takes to open or close (the style sheet's `::details-content` transition). */
+const FOLD_MS = 200;
+
+/** While a card opens or closes its content is cut at its edge; open and still, what reaches out of it shows. */
+function folding(el: HTMLDetailsElement): void {
+  el.classList.add('is-folding');
+  clearTimeout(Number(el.dataset.foldTimer ?? 0));
+  el.dataset.foldTimer = String(window.setTimeout(() => el.classList.remove('is-folding'), FOLD_MS + 40));
+}
+
 function section(id: string, title: string, badge?: HTMLElement): { el: HTMLDetailsElement; body: HTMLElement } {
   const el = h('details', { class: 'panel', id: `sec-${id}` }) as HTMLDetailsElement;
   el.open = readPref(`sec:${id}`, true);
@@ -123,9 +137,17 @@ function section(id: string, title: string, badge?: HTMLElement): { el: HTMLDeta
     else writePref(`sec:${id}`, el.open);
   });
   const summary = h('summary', { class: 'panel-head' }, h('h2', { class: 'panel-title' }, title), badge ?? null);
+  // (a press on the title opens or closes it: from before the change)
+  summary.addEventListener('click', () => folding(el));
   const body = h('div', { class: 'panel-body' });
   el.append(summary, body);
   return { el, body };
+}
+
+/** A section's count; with nothing in it, its title recedes. */
+function setCount(badge: HTMLElement, n: number): void {
+  badge.textContent = String(n);
+  badge.closest('.panel')?.classList.toggle('is-empty', n === 0);
 }
 
 const metaRow = (term: string, value: Node | string, title?: string) => [h('dt', {}, term), h('dd', { title }, value)];
@@ -184,7 +206,7 @@ function arrowsSection(api: AppApi): Section {
     const st = api.store.state;
     const generic = st.specimen.type === 'generic';
     title.textContent = t(generic ? 'sec.arrows.generic' : 'sec.arrows');
-    badge.textContent = String(st.scars.length);
+    setCount(badge, st.scars.length);
     list.hidden = st.scars.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -325,7 +347,7 @@ function curvesSection(api: AppApi): Section {
 
   const renderList = () => {
     const st = api.store.state;
-    badge.textContent = String(st.curves.length);
+    setCount(badge, st.curves.length);
     list.hidden = st.curves.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -465,7 +487,7 @@ function workingEdgesSection(api: AppApi): Section {
 
   const renderList = () => {
     const st = api.store.state;
-    badge.textContent = String(st.workingEdges.length);
+    setCount(badge, st.workingEdges.length);
     list.hidden = !st.workingEdges.length;
     clear(list);
     const sel = api.selection.id;
@@ -759,65 +781,168 @@ function rebuildHints(api: AppApi, box: HTMLElement, fill: () => void): void {
   api.paintHintRows();
 }
 
+/** A row of measures' list: its three cells (receding when the value is missing); the drawing of how it was taken only with a value. */
+function measureRow(term: string, kind: Quantity, v: number | null, unit: string, id: string, hint: string, reason?: string): HTMLElement[] {
+  const cells = numRow(term, ...quantity(kind, v, unit), id);
+  if (v === null) for (const c of cells) c.classList.add('is-missing');
+  // nothing to draw for an empty value: it says why, as ever
+  if (reason) tip(cells[1], reason);
+  return hintRow(cells, v === null ? null : hint);
+}
+
+/** A group of measures under its small title. */
+const measureGroup = (title: string, ...parts: HTMLElement[]): HTMLElement => h('section', { class: 'measure-group' }, h('h3', { class: 'measure-group-title' }, title), ...parts);
+
+const measureList = (...rows: HTMLElement[][]): HTMLElement => h('dl', { class: 'num-grid' }, ...rows.flat());
+
+interface MeasureCell {
+  /** The id of its value (`flake-<measure>`), the key of how it was taken (`group:item`), its value, its name and why it is empty. */
+  id: string;
+  hint: string;
+  value: number | null;
+  label: string;
+  reason?: string;
+}
+
+/**
+ * Measures that differ two ways, as a small table: a row for each, a column for each way, the unit in its corner (no
+ * cell repeats it). Each cell is a measure of its own: the pointer on it or the focus shows how it was taken, a click fixes that.
+ */
+function measureTable(id: string, kind: Quantity, unit: string, columns: string[], rows: Array<{ head: string; cells: MeasureCell[] }>): HTMLTableElement {
+  const cell = (c: MeasureCell) => {
+    const td = h('td', { class: `num${c.value === null ? ' is-missing' : ''}`, id: c.id, 'aria-label': c.label }, fmtQuantity(kind, c.value));
+    if (c.value !== null) {
+      td.dataset.hint = c.hint;
+      td.tabIndex = 0;
+    }
+    if (c.reason) tip(td, c.reason);
+    return td;
+  };
+  return h(
+    'table',
+    { class: 'measure-table', id },
+    h('thead', {}, h('tr', {}, h('th', { scope: 'col', class: 'measure-unit' }, quantityUnit(kind, unit)), ...columns.map((c) => h('th', { scope: 'col' }, c)))),
+    h('tbody', {}, ...rows.map((r) => h('tr', {}, h('th', { scope: 'row', class: 'measure-row-head' }, r.head), ...r.cells.map(cell)))),
+  );
+}
+
+/**
+ * The values a list of measures shows, by the id of their cells: when the user's own change alters one, its row (or cell)
+ * flashes pale amber. Opening a model, another specimen, undo and redo change them without it.
+ */
+function valueFlash(api: AppApi, box: HTMLElement): () => void {
+  let last = new Map<string, string>();
+  return () => {
+    const now = new Map<string, string>();
+    for (const c of box.querySelectorAll<HTMLElement>('dd.num[id], dd.text[id], td.num[id]')) now.set(c.id, c.textContent ?? '');
+    // (a list out of sight does not flash: shown later, it would flash for what is long done)
+    if (last.size && api.userChanged() && box.getClientRects().length > 0)
+      for (const [id, v] of now) {
+        if (!last.has(id) || last.get(id) === v) continue;
+        const c = box.querySelector<HTMLElement>(`#${CSS.escape(id)}`)!;
+        const row = c.tagName === 'TD' ? [c] : [c.previousElementSibling, c, box.querySelector(`#${CSS.escape(`${id}-unit`)}`)];
+        for (const x of row)
+          if (x instanceof HTMLElement) {
+            x.classList.add('is-flash');
+            x.addEventListener('animationend', () => x.classList.remove('is-flash'), { once: true });
+          }
+      }
+    last = now;
+  };
+}
+
 function measureAutoSection(api: AppApi): Section {
   const { el, body } = section('measure-auto', t('sec.measureAuto'));
-  const meta = h('dl', { class: 'num-grid measure-auto', id: 'measure-auto' });
-  body.append(meta);
-  watchHints(api, meta);
-  const row = (id: string, term: string, kind: Quantity, v: number | null) => hintRow(numRow(term, ...quantity(kind, v, api.store.state.specimen.unit), `auto-${id}`), `auto:${id}`);
+  const box = h('div', { class: 'measure-groups measure-auto', id: 'measure-auto' });
+  body.append(box);
+  watchHints(api, box);
+  const flash = valueFlash(api, box);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'measure', 'specimen'].includes(kind)) return;
-    rebuildHints(api, meta, () => {
+    rebuildHints(api, box, () => {
       const m = api.autoMeasurements();
       if (!m) {
-        if (api.measuringBusy()) meta.append(h('dt', {}, t('measure.busy')));
+        if (api.measuringBusy()) box.append(h('p', { class: 'hint' }, t('measure.busy')));
         return;
       }
-      meta.append(
-        ...row('length', t('measure.length'), 'length', m.length),
-        ...row('width', t('measure.width'), 'length', m.width),
-        ...row('thickness', t('measure.thickness'), 'length', m.thickness),
-        ...textValueRow(t('measure.axes'), t(`measure.axes.${m.frame}`), 'auto-frame'),
-        ...row('area', t('measure.area'), 'area', m.surfaceArea),
-        ...(m.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'auto-volume') : row('volume', t('measure.volume'), 'volume', m.volume)),
+      const u = api.store.state.specimen.unit;
+      const row = (id: string, term: string, kind: Quantity, v: number | null) => measureRow(term, kind, v, u, `auto-${id}`, `auto:${id}`);
+      box.append(
+        measureGroup(
+          t('measure.group.size'),
+          measureList(row('length', t('measure.length'), 'length', m.length), row('width', t('measure.width'), 'length', m.width), row('thickness', t('measure.thickness'), 'length', m.thickness), textValueRow(t('measure.axes'), t(`measure.axes.${m.frame}`), 'auto-frame')),
+        ),
+        measureGroup(
+          t('measure.group.whole'),
+          measureList(row('area', t('measure.area'), 'area', m.surfaceArea), m.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'auto-volume') : row('volume', t('measure.volume'), 'volume', m.volume)),
+        ),
       );
     });
+    flash();
   };
   refresh('all');
   // a flake's are in its own section
-  return { el, refresh, visible: () => api.store.state.specimen.type !== 'flake' };
+  const ofType = (type: SpecimenType) => type !== 'flake';
+  return { el, refresh, visible: () => ofType(api.store.state.specimen.type), ofType };
 }
 
 /** The kind of quantity of each of a flake's measurements. */
 const flakeQuantity = (k: string): Quantity => (k === 'platform_area' ? 'area' : k.startsWith('epa') || k === 'ipa' || k.endsWith('_deg') ? 'angle' : 'length');
 
-/** A flake's measurements (measure mode). */
+/** A flake's measurements (measure mode), in the order they are exported: technical axis, morphology, platform (two small tables), the whole. */
 function flakeSection(api: AppApi): Section {
   const { el, body } = section('flake', t('sec.measureAuto'));
-  const meta = h('dl', { class: 'num-grid measure-auto', id: 'flake-measures' });
-  body.append(meta);
-  watchHints(api, meta);
+  const box = h('div', { class: 'measure-groups measure-auto', id: 'flake-measures' });
+  body.append(box);
+  watchHints(api, box);
+  const flash = valueFlash(api, box);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'measure', 'specimen', 'flake'].includes(kind)) return;
-    rebuildHints(api, meta, () => {
+    rebuildHints(api, box, () => {
       const u = api.store.state.specimen.unit;
       const m = api.flakeMeasures();
       const empty = api.flakeEmptyReasons();
-      for (const k of FLAKE_MEASURES) {
-        const value = m?.[k] ?? null;
-        const row = numRow(t(`flake.${k}`), ...quantity(flakeQuantity(k), value, u), `flake-${k}`);
-        const reason = empty?.[k];
-        if (reason) tip(row[1], t(`flake.empty.${reason}`));
-        // nothing to draw for an empty value: it says why, as ever
-        meta.append(...hintRow(row, value === null ? null : `flake:${k}`));
-      }
+      const value = (k: FlakeMeasure) => m?.[k] ?? null;
+      const reason = (k: FlakeMeasure) => (empty?.[k] ? t(`flake.empty.${empty[k]}`) : undefined);
+      const row = (k: FlakeMeasure) => measureRow(t(`flake.${k}`), flakeQuantity(k), value(k), u, `flake-${k}`, `flake:${k}`, reason(k));
+      const cell = (k: FlakeMeasure): MeasureCell => ({ id: `flake-${k}`, hint: `flake:${k}`, value: value(k), label: t(`flake.${k}`), reason: reason(k) });
       const a = api.autoMeasurements();
-      meta.append(...hintRow(numRow(t('measure.area'), ...quantity('area', a?.surfaceArea ?? null, u), 'flake-area'), a ? 'flake:area' : null));
-      meta.append(...(a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : hintRow(numRow(t('measure.volume'), ...quantity('volume', a?.volume ?? null, u), 'flake-volume'), a ? 'flake:volume' : null)));
+      box.append(
+        measureGroup(t('measure.group.axis'), measureList(row('tech_length'), row('tech_width'), row('tech_thickness'))),
+        measureGroup(t('measure.group.morph'), measureList(row('morph_length'), row('morph_width'), row('morph_thickness'), row('morph_tech_angle_deg'))),
+        measureGroup(
+          t('measure.group.platform'),
+          measureTable('flake-platform-table', 'length', u, [t('flake.table.chord'), t('flake.table.path')], [
+            { head: t('flake.table.width'), cells: [cell('platform_width_chord'), cell('platform_width_path')] },
+            { head: t('flake.table.depth'), cells: [cell('platform_depth_chord'), cell('platform_depth_path')] },
+          ]),
+          measureList(row('platform_area')),
+          measureTable(
+            'flake-epa-table',
+            'angle',
+            u,
+            EPA_DISTANCES_MM.map((d) => `${d} mm`),
+            [
+              { head: `EPA ${t('edge.method.three_points')}`, cells: [cell('epa_3pt_1mm'), cell('epa_3pt_2mm'), cell('epa_3pt_3mm')] },
+              { head: `EPA ${t('edge.method.two_lines')}`, cells: [cell('epa_2ln_1mm'), cell('epa_2ln_2mm'), cell('epa_2ln_3mm')] },
+            ],
+          ),
+          measureList(row('ipa')),
+        ),
+        measureGroup(
+          t('measure.group.whole'),
+          measureList(
+            measureRow(t('measure.area'), 'area', a?.surfaceArea ?? null, u, 'flake-area', 'flake:area'),
+            a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : measureRow(t('measure.volume'), 'volume', a?.volume ?? null, u, 'flake-volume', 'flake:volume'),
+          ),
+        ),
+      );
     });
+    flash();
   };
   refresh('all');
-  return { el, refresh, visible: () => api.store.state.specimen.type === 'flake' };
+  const ofType = (type: SpecimenType) => type === 'flake';
+  return { el, refresh, visible: () => ofType(api.store.state.specimen.type), ofType };
 }
 
 /** A flake's technical axis (annotate mode): its ends, why it gives no frame, delete. */
@@ -844,7 +969,8 @@ function axisSection(api: AppApi): Section {
     );
   };
   refresh('all');
-  return { el, refresh, visible: () => api.store.state.specimen.type === 'flake' };
+  const ofType = (type: SpecimenType) => type === 'flake';
+  return { el, refresh, visible: () => ofType(api.store.state.specimen.type), ofType };
 }
 
 /** The curves measured for edge angles (measure mode): a click selects one and shows its angles along it. */
@@ -1295,7 +1421,7 @@ function measureManualSection(api: AppApi): Section {
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'measurements', 'selection', 'specimen'].includes(kind)) return;
     const st = api.store.state;
-    badge.textContent = String(st.measurements.length);
+    setCount(badge, st.measurements.length);
     list.hidden = st.measurements.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -1372,7 +1498,7 @@ function planesSection(api: AppApi): Section {
     if (!['all', 'planes', 'selection', 'mesh', 'arrows', 'curves', 'regions', 'specimen'].includes(kind)) return;
     const st = api.store.state;
     const results = api.planeResults();
-    badge.textContent = String(st.planes.length);
+    setCount(badge, st.planes.length);
     add.disabled = !api.hasMesh();
     list.hidden = st.planes.length === 0;
     clear(list);
@@ -1549,8 +1675,8 @@ function figureSection(api: AppApi): Section {
   // scale and resolution each on a line of its own, the choices of equal width
   for (const s of [scale, dpi]) s.el.querySelector('.seg')?.classList.add('seg-equal');
   const sizeEl = h('dl', { class: 'meta' });
-  const png = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-png', onclick: () => api.exportFigure('png') }, 'PNG') as HTMLButtonElement;
-  const svg = h('button', { type: 'button', class: 'btn btn-primary', id: 'fig-svg', onclick: () => api.exportFigure('svg') }, 'SVG') as HTMLButtonElement;
+  const png = h('button', { type: 'button', class: 'btn', id: 'fig-png', onclick: () => api.exportFigure('png') }, 'PNG') as HTMLButtonElement;
+  const svg = h('button', { type: 'button', class: 'btn', id: 'fig-svg', onclick: () => api.exportFigure('svg') }, 'SVG') as HTMLButtonElement;
   // with a folder open: one figure per model instead
   const all = checkbox('fig-folder', t('figure.folder'), api.figureFolder, (on) => (api.figureFolder = on));
   body.append(views, light.el, overlays, scale.el, dpi.el, sizeEl, h('div', { class: 'btn-row' }, png, svg, all));
@@ -1602,7 +1728,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     const shownRegions = st.specimen.type === 'flake' ? st.regions : st.regions.filter((x) => !x.auto);
     const generic = st.specimen.type === 'generic';
     const upperRegion = (x: { type: string }) => isUpperRegion(x.type, st.specimen.type);
-    badge.textContent = String(shownRegions.length);
+    setCount(badge, shownRegions.length);
     list.hidden = shownRegions.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -2016,7 +2142,7 @@ function relationsSection(api: AppApi): Section {
     if (!['all', 'relations', 'sequences', 'arrows', 'selection', 'display', 'mesh'].includes(kind)) return;
     const st = api.store.state;
     const sel = api.selection.id;
-    badge.textContent = String(st.relations.length);
+    setCount(badge, st.relations.length);
     // nothing to check or draw before something is recorded
     checksRow.hidden = !st.relations.length && !st.sequences.length;
     // checks
@@ -2075,7 +2201,8 @@ function relationsSection(api: AppApi): Section {
   };
   refresh('all');
   // the scars' relations and sequences: not on a generic specimen
-  return { el, refresh, visible: () => api.store.state.specimen.type !== 'generic' };
+  const ofType = (type: SpecimenType) => type !== 'generic';
+  return { el, refresh, visible: () => ofType(api.store.state.specimen.type), ofType };
 }
 
 function landmarksSection(api: AppApi): Section {
@@ -2114,7 +2241,7 @@ function landmarksSection(api: AppApi): Section {
     const sel = api.selection.id;
     const table = api.landmarkTable();
     const fixed = shownLandmarks(st);
-    badge.textContent = String(fixed.length);
+    setCount(badge, fixed.length);
     const sides = platformSides(st.flake.axis?.matrix, fixed);
     /** What the list calls a landmark: those of the flake's own by what they are. */
     const nameOf = (l: (typeof fixed)[number]) => (l.code === 'pop' ? t('landmark.pop') : l.code !== 'platform_end' ? l.name : landmarkName(l, sides) === 'platform_left' ? t('landmark.platformLeft') : landmarkName(l, sides) === 'platform_right' ? t('landmark.platformRight') : t('landmark.platformEnd'));
@@ -2432,7 +2559,7 @@ function gmSection(api: AppApi): Section {
     // the user's own landmarks and sets go along
     const own = st.landmarks.filter((l) => !l.code).length + api.landmarkTable().rows.filter((x) => x.kind === 'curve').length;
     const n = r && (r.complete || r.method === 'template') ? r.rows.length : flake ? gmTotal(c, st.landmarks.every((l) => l.code !== 'platform_end'), own) : gmListTotal(c);
-    total.textContent = String(n);
+    setCount(total, n);
     clear(counts);
     counts.append(...numRow(t('gm.total'), fmtCount(n), '', 'gm-total'));
     tip(counts, t('gm.totalWhy'));
@@ -2561,7 +2688,7 @@ function sectionsSection(api: AppApi): Section {
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'sections', 'selection', 'mesh'].includes(kind)) return;
     const st = api.store.state;
-    badge.textContent = String(st.sections.length);
+    setCount(badge, st.sections.length);
     list.hidden = st.sections.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -2910,6 +3037,8 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
 export interface Sidebar {
   el: HTMLElement;
   refresh: (kind: RefreshKind) => void;
+  /** The mode changed: its cards come in from the right. */
+  enter: () => void;
   /** The display settings, for the panel over the view. */
   displayEl: HTMLElement;
   /** The volumetric configuration, for its panel over the view, and its title bar's pill. */
@@ -2961,24 +3090,37 @@ function selectionTarget(api: AppApi): [string, string] | null {
 
 export function buildSidebar(api: AppApi): Sidebar {
   const el = h('aside', { class: 'sidebar', id: 'sidebar' });
-  const sections = SECTIONS.map(([make, modes]) => ({ ...make(api), modes }));
-  el.append(...sections.map((s) => s.el));
+  const sections = SECTIONS.map(([make, modes]) => {
+    const s = make(api);
+    // before a model is open: the section's title alone, grey, as a card that does not open
+    const title = s.el.querySelector('.panel-title')?.textContent ?? '';
+    const ghost = h('div', { class: 'panel panel-ghost', id: `ghost-${s.el.id.replace(/^sec-/, '')}`, 'aria-disabled': 'true', hidden: true }, h('div', { class: 'panel-head' }, h('h2', { class: 'panel-title' }, title)));
+    return { ...s, modes, ghost };
+  });
+  for (const s of sections) el.append(s.el, s.ghost);
   const display = displaySection(api);
   const config = configurationPanel(api);
   const exportBtn = h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'btn-export', onclick: () => api.openExport() }, icon(ICONS.download), t('export.button'));
   const foot = h('div', { class: 'sidebar-foot' }, exportBtn);
   el.append(foot);
-  // before a model is open the sidebar is empty (the view offers the ways to open one)
+  // before a model is open the sidebar has the mode's sections as grey titles (the view offers the ways to open one)
   const showMode = () => {
     const has = api.hasMesh();
-    // the folder's list stays while a folder is open, also when none of its models opened
-    for (const s of sections) s.el.hidden = (!has && s.el.id !== 'sec-workspace') || !s.modes.includes(api.mode) || (!!s.visible && !s.visible());
+    for (const s of sections) {
+      const inMode = s.modes.includes(api.mode);
+      // the folder's list stays while a folder is open, also when none of its models opened
+      const real = s.el.id === 'sec-workspace' || has;
+      s.el.hidden = !real || !inMode || (!!s.visible && !s.visible());
+      // what a new specimen of the module chosen would show: by its type, or (by what it holds) on an empty project
+      s.ghost.hidden = real || !inMode || !(s.ofType ? s.ofType(api.moduleType()) : !s.visible || s.visible());
+    }
     // data exports of the mode (figures and sections export from their own sections)
     foot.hidden = !has || api.mode === 'present';
   };
   const setOpen = (d: HTMLDetailsElement, open: boolean) => {
     if (d.open === open) return;
     d.dataset.auto = String(open);
+    folding(d);
     d.open = open;
   };
   const shown = () => sections.filter((s) => !s.el.hidden && s.el instanceof HTMLDetailsElement).map((s) => s.el as HTMLDetailsElement);
@@ -3003,6 +3145,15 @@ export function buildSidebar(api: AppApi): Sidebar {
   showMode();
   return {
     el,
+    enter: () => {
+      if (reducedMotion()) return;
+      el.classList.remove('is-entering');
+      // (once more from the start)
+      void el.offsetWidth;
+      el.classList.add('is-entering');
+      clearTimeout(Number(el.dataset.enterTimer ?? 0));
+      el.dataset.enterTimer = String(window.setTimeout(() => el.classList.remove('is-entering'), 300));
+    },
     refresh: (kind) => {
       showMode();
       if (kind === 'mode') {

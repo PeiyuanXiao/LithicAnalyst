@@ -27,6 +27,13 @@ interface CameraPose {
   orientation: THREE.Quaternion;
 }
 
+/** A short animation of something drawn: `step` gets the share of its time gone by (0 to 1). */
+interface Tween {
+  start: number;
+  ms: number;
+  step: (k: number) => void;
+}
+
 /**
  * Scene, camera, renderer and navigation. Knows nothing about scars or the
  * project; layers and tools sit on top of it.
@@ -57,6 +64,8 @@ export class Viewer {
   private rafId = 0;
   /** A camera move in progress: from where, to where, since when. */
   private transition: { start: number; from: CameraPose; to: CameraPose & { position: THREE.Vector3; up: THREE.Vector3 } } | null = null;
+  /** Animations of what is drawn; frames are drawn every frame only while one runs. */
+  private tweens = new Set<Tween>();
 
   constructor(readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
@@ -86,11 +95,13 @@ export class Viewer {
 
     this.renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
     container.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
-    // a press on the view takes the camera over from a transition
+    // a press on the view takes the camera over from a transition, and what was coming in is there at once
     container.addEventListener(
       'pointerdown',
       (e) => {
-        if (!(e.target as Element | null)?.closest?.('.viewport-ui')) this.stopTransition();
+        if ((e.target as Element | null)?.closest?.('.viewport-ui')) return;
+        this.stopTransition();
+        this.finishTweens();
       },
       { capture: true },
     );
@@ -102,16 +113,57 @@ export class Viewer {
     const loop = (now: number) => {
       this.rafId = requestAnimationFrame(loop);
       if (this.transition) this.stepTransition(now);
+      if (this.tweens.size) this.stepTweens(now);
       this.controls.update();
       for (const fn of this.frameListeners) fn();
-      if (this.dirty) {
-        this.dirty = false;
-        this.renderer.render(this.scene, this.camera);
-        this.labelRenderer.render(this.scene, this.camera);
-        for (const fn of this.renderListeners) fn();
-      }
+      if (this.dirty) this.renderNow();
     };
     loop(performance.now());
+  }
+
+  /** Draw a frame now (the theme changed: the new colours are on screen before the next frame). */
+  renderNow(): void {
+    this.dirty = false;
+    this.renderer.render(this.scene, this.camera);
+    this.labelRenderer.render(this.scene, this.camera);
+    for (const fn of this.renderListeners) fn();
+  }
+
+  /**
+   * Animate something drawn for `ms`: `step` gets 0 to 1 each frame, and 1 at the end (also when a press on the view or
+   * `finishTweens` ends it early). With reduced motion it gets 1 at once. Frames are drawn each frame only meanwhile.
+   */
+  tween(ms: number, step: (k: number) => void): void {
+    if (reducedMotion() || ms <= 0) {
+      step(1);
+      this.requestRender();
+      return;
+    }
+    this.tweens.add({ start: performance.now(), ms, step });
+    step(0);
+    this.requestRender();
+  }
+
+  /** Every animation at its end (a press on the view, a figure about to be drawn). */
+  finishTweens(): void {
+    if (!this.tweens.size) return;
+    const all = [...this.tweens];
+    this.tweens.clear();
+    for (const tw of all) tw.step(1);
+    this.requestRender();
+  }
+
+  get tweening(): boolean {
+    return this.tweens.size > 0;
+  }
+
+  private stepTweens(now: number): void {
+    for (const tw of [...this.tweens]) {
+      const k = Math.min(1, Math.max(0, (now - tw.start) / tw.ms));
+      if (k >= 1) this.tweens.delete(tw);
+      tw.step(k);
+    }
+    this.dirty = true;
   }
 
   dispose(): void {

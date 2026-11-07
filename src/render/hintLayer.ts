@@ -7,6 +7,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { HintArc, HintDots, HintFaces, HintLine, HintRole, MeasureHint } from '../compute/measureHint';
 import type { Vec3 } from '../core/types';
+import { EASE, VIEW_MOTION } from './easing';
 import type { Viewer } from './viewer';
 
 /** Widths and sizes in CSS pixels, the same at any zoom. */
@@ -36,7 +37,7 @@ export interface HintColors {
 
 function dotsMaterial(color: string, ring: string, size: number): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    uniforms: { color: { value: new THREE.Color(color) }, ring: { value: new THREE.Color(ring) }, size: { value: size } },
+    uniforms: { color: { value: new THREE.Color(color) }, ring: { value: new THREE.Color(ring) }, size: { value: size }, fade: { value: 1 } },
     transparent: true,
     depthTest: false,
     depthWrite: false,
@@ -49,10 +50,11 @@ function dotsMaterial(color: string, ring: string, size: number): THREE.ShaderMa
     fragmentShader: /* glsl */ `
       uniform vec3 color;
       uniform vec3 ring;
+      uniform float fade;
       void main() {
         float r = length(gl_PointCoord * 2.0 - 1.0);
         if (r > 1.0) discard;
-        gl_FragColor = vec4(r > 0.7 ? ring : color, 1.0);
+        gl_FragColor = vec4(r > 0.7 ? ring : color, fade);
         #include <colorspace_fragment>
       }`,
   });
@@ -69,15 +71,23 @@ export class HintLayer {
   /** Materials and geometries made for the hint shown. */
   private owned: Array<{ dispose: () => void }> = [];
   private counted = { lines: 0, dots: 0, arcs: 0, faces: 0, labels: 0 };
+  /** Each material's opacity as a share of its own (it fades in). */
+  private fades: Array<(f: number) => void> = [];
+  /** Counts the hints shown: a fade belongs to the one it began with. */
+  private shown = 0;
 
   constructor(private readonly viewer: Viewer) {
     this.group.name = 'measure-hint';
     viewer.overlay.add(this.group);
   }
 
-  /** `origin`: where the mesh's coordinates start; subtracted for float precision on the GPU. `position`, `index`: the mesh's, shared. */
-  show(hint: MeasureHint, colors: HintColors, origin: Vec3, position: THREE.BufferAttribute, index: THREE.BufferAttribute): void {
+  /**
+   * `origin`: where the mesh's coordinates start; subtracted for float precision on the GPU. `position`, `index`: the mesh's, shared.
+   * `fadeIn`: it comes into view (another measure than the one drawn), and fades in; drawn again for the same one, it is there at once.
+   */
+  show(hint: MeasureHint, colors: HintColors, origin: Vec3, position: THREE.BufferAttribute, index: THREE.BufferAttribute, fadeIn = false): void {
     this.clear();
+    const mine = ++this.shown;
     this.group.position.set(origin[0], origin[1], origin[2]);
     for (const prim of hint) {
       if (prim.kind === 'line') this.line(prim, colors, origin);
@@ -85,7 +95,22 @@ export class HintLayer {
       else if (prim.kind === 'dots') this.dots(prim, colors, origin);
       else this.faces(prim, colors, position, index);
     }
+    if (fadeIn) {
+      for (const l of this.labels) l.element.classList.add('is-fading-in');
+      const fades = this.fades;
+      this.viewer.tween(VIEW_MOTION.HINT_FADE_MS, (k) => {
+        // (one cleared or replaced meanwhile: its materials are gone)
+        if (mine !== this.shown) return;
+        const f = k >= 1 ? 1 : EASE(k);
+        for (const fn of fades) fn(f);
+      });
+    }
     this.viewer.requestRender();
+  }
+
+  /** A material that fades in with the rest: its opacity as a share of `base`. */
+  private fading(m: THREE.Material, base: number): void {
+    this.fades.push((f) => (m.opacity = base * f));
   }
 
   private local(points: readonly Vec3[], origin: Vec3): number[] {
@@ -97,6 +122,7 @@ export class HintLayer {
   private lineMaterial(color: string, width: number, opacity = 1): LineMaterial {
     const m = new LineMaterial({ color: new THREE.Color(color), linewidth: width, transparent: true, opacity, depthTest: false, depthWrite: false });
     this.owned.push(m);
+    this.fading(m, opacity);
     return m;
   }
 
@@ -146,6 +172,7 @@ export class HintLayer {
     const current = prim.role === 'current';
     const material = dotsMaterial(current ? colors.current : colors.other, current ? HALO : colors.otherHalo, DOT_PX[prim.role] * this.viewer.renderer.getPixelRatio());
     this.owned.push(g, material);
+    this.fades.push((f) => (material.uniforms.fade.value = f));
     const points = new THREE.Points(g, material);
     points.frustumCulled = false;
     points.renderOrder = ORDER.dots;
@@ -180,6 +207,7 @@ export class HintLayer {
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
     });
+    this.fading(material, FACE_OPACITY[prim.tint]);
     // (the mesh's buffers stay: only what was made here goes)
     this.owned.push(material, { dispose: () => (g.setIndex(null), g.deleteAttribute('position'), g.dispose()) });
     const mesh = new THREE.Mesh(g, material);
@@ -203,7 +231,9 @@ export class HintLayer {
   }
 
   clear(): void {
+    this.fades = [];
     if (!this.things.length && !this.labels.length) return;
+    this.shown++;
     for (const t of this.things) this.group.remove(t);
     for (const l of this.labels) {
       l.element.remove();

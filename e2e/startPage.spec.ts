@@ -344,8 +344,9 @@ test('with reduced motion all is where it ends from the first frame', async ({ p
       const look = () => {
         if (!document.querySelector('#start-page')) return requestAnimationFrame(look);
         resolve({
-          opacity: [...document.querySelectorAll('.st-in, .st-fade, .st-bgin, .st-wipe, .fx-c, .fx-l, .fx-r, .fx-m, .fx-p')].map((el) => getComputedStyle(el).opacity),
-          transform: [...document.querySelectorAll('.st-in, .st-grow, .fx-c, .fx-l, .fx-r, .fx-m')].map((el) => getComputedStyle(el).transform),
+          // (the start page's own: the loading overlay has a logo of its own, looked at in look.spec.ts)
+          opacity: [...document.querySelectorAll('#start-page :is(.st-in, .st-fade, .st-bgin, .st-wipe, .fx-c, .fx-l, .fx-r, .fx-m, .fx-p)')].map((el) => getComputedStyle(el).opacity),
+          transform: [...document.querySelectorAll('#start-page :is(.st-in, .st-grow, .fx-c, .fx-l, .fx-r, .fx-m)')].map((el) => getComputedStyle(el).transform),
           animations: document.getAnimations().length,
         });
       };

@@ -3,10 +3,10 @@ import { BRAND, brandEl, brandInner, brandPrefix, svgFrom } from './brand';
 import { h } from './dom';
 import { getLang, LANGS, setLang, t, type Lang } from './i18n';
 import { STRINGS } from './strings';
-import { getTheme, toggleTheme } from './theme';
+import { getTheme, toggleThemeFrom } from './theme';
 
-/** The rings behind the logo. */
-const RINGS = `<svg viewBox="0 0 1500 1500"><g fill="none">
+/** The rings behind the logo (also, still and fainter, behind the empty view). */
+export const RINGS =`<svg viewBox="0 0 1500 1500"><g fill="none">
 <circle cx="750" cy="750" r="190" stroke="var(--ring-2)" stroke-width="1"></circle>
 <circle class="st-spin" cx="750" cy="750" r="236" stroke="var(--ring-2)" stroke-width="6" stroke-dasharray="1.5 14"></circle>
 <circle cx="750" cy="750" r="300" stroke="var(--ring)" stroke-width="1"></circle>
@@ -45,7 +45,7 @@ export interface StartPage {
 export function buildStartPage(onEnter: (type: SpecimenType) => void): StartPage {
   const nextLang = (): (typeof LANGS)[number] => LANGS[(LANGS.findIndex((l) => l.code === getLang()) + 1) % LANGS.length];
   const langBtn = h('button', { type: 'button', class: 'start-ctl', id: 'start-lang', onclick: () => setLang(nextLang().code as Lang) });
-  const themeBtn = h('button', { type: 'button', class: 'start-ctl', id: 'start-theme', onclick: () => toggleTheme() });
+  const themeBtn = h('button', { type: 'button', class: 'start-ctl', id: 'start-theme', onclick: () => toggleThemeFrom(themeBtn) });
 
   const cards = SPECIMEN_TYPES.map((type, i) => {
     const name = h('span', { class: 'start-card-name' });

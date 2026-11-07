@@ -73,6 +73,10 @@ export interface AppApi {
   readonly mode: AppMode;
   setDisplay(change: (d: DisplaySettings) => void, aspect: DisplayAspect): void;
   hasMesh(): boolean;
+  /** The open model's type, or with none the module chosen (what the next model will be). */
+  moduleType(): import('../core/fields').SpecimenType;
+  /** The last change was the user's own (not a model or project opened, undo or redo): what it changed may flash. */
+  userChanged(): boolean;
   hasScanColors(): boolean;
   curvatureBusy(): boolean;
   focusArrow(id: string): void;

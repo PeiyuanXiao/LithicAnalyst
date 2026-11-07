@@ -69,6 +69,10 @@ export interface LithicApi {
   nextCurveType(): string | null;
   placePlatformEnd(point: Vec3): void;
   landmarkDiameter(id: string): number | null;
+  arrowGrown(id: string): number | null;
+  tweening(): boolean;
+  unsaved(): boolean;
+  busy(text: string | null): void;
   selectForTest(id: string | null): void;
   exportCurvesCsvText(): string;
   curveDraft(): Vec3[] | null;
