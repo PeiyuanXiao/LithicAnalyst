@@ -3,7 +3,7 @@
  * the year, the version and the address of the repository. No DOM; the about page and the tests use it.
  */
 
-/** "Peiyuan Xiao" → "Xiao, P."; "Jean-Paul Anne Martin" → "Martin, J.-P. A."; a one-word name stays as it is. */
+/** "Peiyuan Xiao" → "Xiao, P."; "P. Y. Xiao" → "Xiao, P. Y."; "Jean-Paul Anne Martin" → "Martin, J.-P. A."; a one-word name stays as it is. */
 export function apaName(full: string): string {
   const parts = full.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) return parts[0] ?? '';
@@ -20,6 +20,38 @@ export function apaAuthors(names: readonly string[]): string {
   const list = names.map(apaName).filter(Boolean);
   if (list.length <= 1) return list[0] ?? '';
   return `${list.slice(0, -1).join(', ')}, & ${list[list.length - 1]}`;
+}
+
+/**
+ * The authors of the `preferred-citation` in CITATION.cff, each as "given family" ("P. Y. Xiao"): the
+ * names as the program is to be cited, which may give initials apart from the display name ("Peiyuan
+ * Xiao"). GitHub's "Cite this repository" reads the same entry. Empty when there is none. Only the
+ * two keys are read, line by line; no YAML parser.
+ */
+export function cffCitationAuthors(cff: string): string[] {
+  const lines = cff.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^preferred-citation:\s*$/.test(line));
+  if (start < 0) return [];
+  const unquote = (value: string) => value.trim().replace(/^(["'])(.*)\1$/, '$2');
+  const authors: Array<{ family?: string; given?: string }> = [];
+  let indent = -1;
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) break;
+    const m = /^(\s*)(-\s*)?([\w-]+):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const [, space, dash, key, value] = m;
+    if (indent < 0) {
+      if (key === 'authors' && !dash) indent = space.length;
+      continue;
+    }
+    if (!dash && space.length <= indent) break;
+    if (dash) authors.push({});
+    const author = authors[authors.length - 1];
+    if (!author) continue;
+    if (key === 'family-names') author.family = unquote(value);
+    if (key === 'given-names') author.given = unquote(value);
+  }
+  return authors.filter((a) => a.family).map((a) => [a.given, a.family].filter(Boolean).join(' '));
 }
 
 export interface CitationSource {

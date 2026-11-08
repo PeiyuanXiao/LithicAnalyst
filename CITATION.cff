@@ -11,6 +11,7 @@ authors:
   - family-names: Xiao
     given-names: Peiyuan
     email: pyxiao.sci@gmail.com
+    orcid: "https://orcid.org/0009-0000-9733-5875"
 version: 0.1.0
 license: MIT
 repository-code: "https://github.com/PeiyuanXiao/LithicAnalyst"
@@ -21,3 +22,13 @@ keywords:
   - 3D models
   - geometric morphometrics
   - inter-observer agreement
+# How to cite it: the names as they appear in a reference (also what the app's About page shows).
+preferred-citation:
+  type: software
+  title: LithicAnalyst
+  authors:
+    - family-names: Xiao
+      given-names: "P. Y."
+      orcid: "https://orcid.org/0009-0000-9733-5875"
+  version: 0.1.0
+  url: "https://github.com/PeiyuanXiao/LithicAnalyst"

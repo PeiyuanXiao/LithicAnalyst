@@ -2460,8 +2460,8 @@ GM 面板加一个开关「显示表面半地标」，打开时在当前标本�
 - **「?」对话框**改名「帮助」，分两页：「关于」（默认）和「快捷键」。「关于」：小标志、名称和版本、版权行；作者、源代码（GitHub 链接）、建议与问题（GitHub Issues · 邮箱）、引用（APA，标题斜体，「复制」按钮复制纯文本；没有剪贴板时选中文字）、许可证（链接到仓库的 LICENSE）、第三方组件（three.js、three-mesh-bvh：MIT；IBM Plex：SIL OFL 1.1）。只有标签和链接，没有说明文字。顶栏按钮打开上次看的一页；? 键直接打开快捷键。
 - **起始页**：版本号下方右对齐一行「© 2026 Peiyuan Xiao · MIT License」，不占版面（绝对定位），起始页的布局和参考截图不变。
 - **文件本身**：构建出的 HTML 第二行是注释 `<!-- LithicAnalyst <版本> · © <版权> · MIT License · <仓库地址> -->`，`<head>` 里有 `<meta name="author">`；`dist/artifact.html` 同样保留。导出的 `manifest.json` 的 `app` 增加 `author`、`license`、`repository`、`citation`。
-- **引用**：APA 第 7 版软件格式 `Xiao, P. (<年>). LithicAnalyst (Version <版本>) [Computer software]. GitHub. <仓库地址>`，年份取构建的年份。以后有了预印本或软件 DOI，改 `CITATION.cff` 的 `preferred-citation` 和 `src/core/citation.ts`。
-- **仓库**：`CITATION.cff`；`.github/ISSUE_TEMPLATE/` 下功能建议、问题报告两个模板和 `config.yml`（邮件联系）。README 重写为英文简版（按导师给的结构：徽章、简介、引用（APA、文中写法、BibTeX、方法出处）、下载与使用、反馈、许可），原来的中文功能说明删去（数据列见 `docs/project-format.md`，旧文在 git 历史里）。`CLAUDE.md` 改为只留在本地（`.gitignore`）。
+- **引用**：APA 第 7 版软件格式 `Xiao, P. Y. (<年>). LithicAnalyst (Version <版本>) [Computer software]. GitHub. <仓库地址>`，年份取构建的年份。署名按作者习惯写作 Xiao, P. Y.（2026-11-08 定），取自 `CITATION.cff` 的 `preferred-citation`（GitHub 的「Cite this repository」也读它）；显示的姓名仍是 Peiyuan Xiao。以后有了预印本或软件 DOI，改 `CITATION.cff` 的 `preferred-citation` 和 `src/core/citation.ts`。
+- **仓库**：`CITATION.cff`；`.github/ISSUE_TEMPLATE/` 下功能建议、问题报告两个模板和 `config.yml`（邮件联系）。README 重写为英文简版，按作者自己 R 包 README 的风格：右上角 logo（应用图标）、徽章（项目状态、版本、DOI（待 Zenodo）、许可、浏览器、测试、下载量、ORCID）、简介、安装（在线 / 单文件 / 源码）、快速上手（含读导出的 R 代码）、功能表（注明方法出处）、参考文献、引用（APA、BibTeX）、反馈、许可；原来的中文功能说明删去（数据列见 `docs/project-format.md`，旧文在 git 历史里）。`CLAUDE.md` 改为只留在本地（`.gitignore`）。
 
 > 完成：`src/core/citation.ts`（`apaName`、`apaAuthors`、`apaCitationParts`、`apaCitation`）、`src/ui/about.ts`（`aboutPanel`、`creditLine`、`appInfo`）；`vite.config.ts` 的 `credit()` 插件；`tests/citation.test.ts`；`e2e/about.spec.ts`（起始页的版权行在版本号和卡片之间、关于页的链接和引用、复制引用、记住上次的一页、? 键打开快捷键、中文标题、构建出的文件开头的注释和 author）。`e2e/shell.spec.ts`、`e2e/look.spec.ts` 打开帮助后先切到快捷键。
 

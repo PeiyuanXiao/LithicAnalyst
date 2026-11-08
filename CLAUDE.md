@@ -27,7 +27,7 @@
    - `npm test`、`npm run build` 通过；
    - 新的几何或统计代码有已知答案的单元测试；测试模型用程序生成（细分球、立方体等），不提交大型扫描；
    - 界面改动在浏览器里实际操作过（见「浏览器验证」）；
-   - 文档同步：格式变化 → `docs/project-format.md`；结构变化 → `docs/architecture.md`；用户可见的变化 → `CHANGELOG.md` 的 Unreleased（英文）。`README.md` 是英文简版（简介、引用、下载、反馈、许可），不写功能细节；只在这几项变了时才改；
+   - 文档同步：格式变化 → `docs/project-format.md`；结构变化 → `docs/architecture.md`；用户可见的变化 → `CHANGELOG.md` 的 Unreleased（英文）。`README.md` 是英文简版，按作者自己的 README 风格（logo、徽章、安装、快速上手、功能表、参考文献、引用、许可）；功能只在「Feature Reference」的表里各占一行：加、删功能或改了方法出处时改那一行（和 References），不写操作细节；
    - 在 `docs/roadmap.md` 把该项标为 ✅，写上日期和一句说明。
 5. **不提交、不推送、不建分支。** 改完就停，由用户检查后手动提交。代码和注释用英文。不改 `package.json` 的 version，也不打 tag。交付说明最后按功能分组列出改动的文件，每组配一条英文祈使句提交信息，方便用户分批提交。
 6. **交付说明**（最后的回复）用中文：做了什么、怎么试、待确认事项。
