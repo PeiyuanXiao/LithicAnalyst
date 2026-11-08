@@ -93,6 +93,7 @@ test('shows the shortcuts in two columns without scrolling at 1440 × 900', asyn
   await page.setViewportSize({ width: 1440, height: 900 });
   await openApp(page);
   await page.locator('#btn-help').click();
+  await page.locator('#help-tab-shortcuts').click();
   await expect(page.getByRole('dialog')).toContainText('Switch mode');
   const layout = await page.evaluate(() => {
     const body = document.querySelector('.modal-body') as HTMLElement;

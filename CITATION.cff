@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use LithicAnalyst in your work, please cite the version you used as below."
+type: software
+title: LithicAnalyst
+abstract: >-
+  Open-source 3D annotation and measurement of lithic artefacts, in one HTML file that runs
+  offline in the browser: flake scar directions, curves, surface regions, relations and
+  sequences, landmarks and semilandmarks, measurements, figures and inter-observer comparison,
+  with exports for R.
+authors:
+  - family-names: Xiao
+    given-names: Peiyuan
+    email: pyxiao.sci@gmail.com
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/PeiyuanXiao/LithicAnalyst"
+keywords:
+  - archaeology
+  - lithic analysis
+  - stone tools
+  - 3D models
+  - geometric morphometrics
+  - inter-observer agreement

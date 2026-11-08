@@ -4,7 +4,7 @@ LithicAnalyst is a static web application (TypeScript + three.js) that builds in
 self-contained HTML file. All processing happens in the browser; nothing is uploaded.
 
 ```
-ui/       header, toolbar, sidebar, dialogs, shortcuts, two languages    (depends on everything below)
+ui/       header, toolbar, sidebar, dialogs, help (about, shortcuts), languages (depends on everything below)
 tools/    interaction tools: select, draw arrow, draw curve, relation, sequence … (one module each); surface snapping
 render/   three.js viewer, raking light, mesh shading, arrow and curve layers
 core/     data model, fields, commands + undo history, project format   (no DOM, no three.js)
@@ -131,7 +131,7 @@ keeps the selection and the undo history.
   into a stored ZIP, `io/zip.ts`).
 * **Top bar**: the specimen button (ID and unit; its panel holds ID, unit, annotator, notes and
   the model file); the mode switch in the middle; the File menu, Save, undo and redo, the
-  language menu (`LANGS` in `ui/i18n.ts`), the theme switch and the shortcuts. Where its words do not
+  language menu (`LANGS` in `ui/i18n.ts`), the theme switch and Help (see About and credit). Where its words do not
   fit (a language with longer ones, a long specimen name), `fitTopbar` takes the narrow window's steps
   in turn, measured afresh whenever a part of the bar changes size: `.is-tight` (the modes' icons
   only), then `.is-tighter` (the header buttons' icons only). A change of language also redraws the
@@ -207,7 +207,13 @@ Nothing else needs to know the type: flake-only code already stops at `isFlake`.
 
 ## Look and motion
 
-The rules are in CLAUDE.md (外观, 动效). How they are kept:
+The rules: flat fills, no gradients (but the 3D view's vertical one); corners of 4 px for cards and
+buttons and 6 px for large panels and dialogs, capsules fully round; solid amber only for the current
+mode and each panel's one main action, a selection pale amber with an amber outline. Interface
+animations take 120–200 ms, overlays and panels at most 300 ms, all with `cubic-bezier(.2,.7,.2,1)`;
+motion never blocks input or delays an action, and stops while the view is dragged; nothing loops in
+the workspace but loading, and the 3D view asks for frames only while a tween runs; with
+`prefers-reduced-motion: reduce` everything is shown as it ends. How they are kept:
 
 * **Colours and corners** (`styles.css`): flat fills; `--radius` (4px: cards, buttons) and `--radius-lg`
   (6px: large panels, dialogs), capsules 999px. The sidebar is cards (`--card`) on a ground of its own
@@ -712,6 +718,16 @@ a new language without its name stops it with nothing written. `check` lists pla
 empty texts, keys the code asks for and the table lacks, keys no code names (whole, by a template
 prefix, or by a prefix passed as a literal), and one English text said two ways in Chinese and back.
 
+## About and credit
+
+Who made the program, where to ask, how to cite it and its licence are written in one place: `package.json` (`author` with `name`, `email` and `url`; `repository`; `bugs`; `homepage`) and the copyright line of `LICENSE`. `vite.config.ts` reads them into `__APP_ABOUT__` (`author`, `email`, `repository` without `git+` and `.git`, `license`, `copyright`, and `year`, the build's year), declared in `src/env.d.ts`. From there:
+
+* **Help.** The "?" button (`App.showHelp`) opens one dialog with a segmented control (`#help-tab-about`, `#help-tab-shortcuts`) over two pages: `aboutPanel()` in `ui/about.ts` (`#help-about`) and the shortcut columns (`#help-cols`). The page last looked at is `App.helpTab` (view state, about at first); the ? key opens the shortcuts. The about page is labels and links only: author, source, requests and issues (`ISSUES_URL`, mailto), the reference with a copy button (plain text through the clipboard; without one the reference is selected), the licence (`LICENSE_URL`) and the third-party libraries (`THIRD_PARTY`). Links open in a new tab.
+* **The reference.** `core/citation.ts` writes it in APA 7 for software from the authors, the year, the version and the address (`apaCitationParts` gives the title apart, for italics). A DOI or a preprint later goes there and into `CITATION.cff`.
+* **The start page.** `#start-credit` (`creditLine()`) sits under the version, right-aligned and out of the flow (`.start-title` is its containing block), so the page's layout is unchanged.
+* **The file.** The `credit()` plugin in `vite.config.ts` puts a comment on the line after the doctype (`<!-- LithicAnalyst <version> · © <copyright> · MIT License · <repository> -->`) and an author meta in the head; `scripts/make-artifact.mjs` keeps both in `dist/artifact.html`.
+* **Exports.** `manifest.json`'s `app` is `appInfo()`: name, version, author, licence, repository and this version's reference.
+
 ## Hosting
 
 The wordmark and the cards' ghost words are outlines of IBM Plex Sans Condensed (SIL OFL 1.1), made once from the official release (`scripts/gen-wordmark.py`, no font file in the repository). The IBM Plex fonts (SIL OFL 1.1) come from `@fontsource`: `src/fonts.css` declares only the Latin
@@ -724,6 +740,23 @@ skeleton, for hosts that wrap pages themselves). In the claude.ai artifact viewe
 downloads are blocked, so `io/saveFile.ts` uses the viewer's `downloads` capability there
 and falls back to a copy dialog.
 
+`npm run pages` makes the built page an app that can be installed from a web site, in
+`dist/pages/` (`scripts/pages.ts`, with `scripts/webApp.ts`): the page with four tags more in its
+head, right after the theme script (the manifest; a `theme-color` meta that a small script keeps to
+the shell's `data-theme`, so the window's title bar follows the appearance; the touch icon; the
+service worker's registration), `manifest.webmanifest` (`id`, `start_url` and `scope` all `./`, so
+the site can live in any folder), `sw.js` and `icons/`. The worker keeps every file from the first
+visit on and answers from what it keeps while fetching the file again behind it (past the HTTP
+cache): the app opens offline, and a new build is there at the next launch, never in the middle of
+a session. Its first line carries the version and a hash of the site, so each build is installed
+anew. The page must be kept; any other file the site lacks is skipped. `dist/index.html` is not
+touched, so the file opened from the disk still asks nothing of the network. The icons in
+`src/assets/brand/app-icon/` are made from `logo-small.svg` by `scripts/app-icons.mjs` (Playwright's
+Chromium); run it again when the logo changes. `.github/workflows/pages.yml` (Release) runs on a
+published release: it attaches `dist/index.html` to the release as `LithicAnalyst-<version>.html` and
+publishes `dist/pages` to GitHub Pages, so the site is always a released version (it can also be run
+by hand). Pushes to `main` only run the tests (`ci.yml`).
+
 ## Tests
 
 * `tests/` (vitest, `npm test`): `core/`, `compute/` and `io/` in Node, checked against known answers.
@@ -734,3 +767,5 @@ and falls back to a copy dialog.
   Software rendering spreads each browser over all the cores, so more workers only compete:
   `playwright.config.ts` fixes 2 locally and 1 on CI (the measurements are in a comment there). Tests
   wait for a state (`expect.poll`, an element appearing), never a fixed time.
+  `e2e/webApp.spec.ts` packs `dist/index.html` as `npm run pages` does and serves it over http
+  (`serveDir`), the one test that does not open the file.

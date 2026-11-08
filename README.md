@@ -1,439 +1,71 @@
-# LithicAnalyst
+[![Release](https://img.shields.io/github/v/release/PeiyuanXiao/LithicAnalyst)](https://github.com/PeiyuanXiao/LithicAnalyst/releases)
+[![Last commit](https://img.shields.io/github/last-commit/PeiyuanXiao/LithicAnalyst)](https://github.com/PeiyuanXiao/LithicAnalyst/commits/main)
+[![Tests](https://github.com/PeiyuanXiao/LithicAnalyst/actions/workflows/ci.yml/badge.svg)](https://github.com/PeiyuanXiao/LithicAnalyst/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<!-- After the first release is archived on Zenodo:
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+-->
+<!-- [![ORCID](https://img.shields.io/badge/ORCID-0000--0000--0000--0000-green.svg)](https://orcid.org/0000-0000-0000-0000) -->
 
-开源石器三维分析交互平台：在三维模型上标注**片疤方向**、**曲线**（片疤轮廓、石核边缘等）、表面区域、打破关系与剥片序列、地标，做测量和出图，比较不同标注者，并可批量处理整个文件夹；导出坐标与测量数据。
+# LithicAnalyst: 3D annotation and measurement of stone artefacts
+
+LithicAnalyst records and measures 3D models of stone artefacts in the web browser. It is a single HTML file that works offline, and models and data never leave your computer.
 
 ![LithicAnalyst](docs/screenshot.png)
 
-- 纯网页应用：打开 `dist/index.html` 即可使用，可离线；数据只在本机浏览器中处理。
-- 导入 PLY / STL / OBJ，坐标保持文件原样。PLY 里坐标完全相同的顶点会合并（有些软件导出时每个三角面各有 3 个独立顶点），这样曲线吸附、曲率和区域划分才正常；模型指纹仍按原文件计算。
-- 「文件」菜单的「关闭」关闭当前模型（及打开的文件夹），回到起始页；还没有模型时直接回到起始页；只在改动可能丢失时（只读文件夹里还有改动没下载，或浏览器自动保存失败）先确认。
-- 画箭头：按下–拖动–松开，或单击起点、再单击终点；自动编号、自动保存、可撤销、可拖动端点修改。
-- 每条箭头记录完整性（6 类，数字键 1–6）、尾端形态（羽状 / 阶梯状 / 铰链状 / 过击 / 缺失，Shift+1–5；未填表示还没判断，与「缺失」分开记）、方向可信度和备注。完整性为尾端缺失的三种时，尾端形态自动为「缺失」并锁定；改回尾端完整时恢复为未填。
-- 画曲线：单击放点，点会吸附到附近的棱脊（凸）或凹谷（凹），点与点之间的线沿该特征自动走；也可关闭吸附。双击、Enter 或 Esc 完成，单击第一个点闭合；选择模式下可拖动点修改。
-- 每条曲线记录类型和备注。类型按数字键：1 片疤轮廓、2 石核边缘、3 石皮、4 节理面、5 修理，6 自定义（输入自己的文字，回车确认、Esc 取消，会提示本件和文件夹里已读到的项目用过的自定义类型）；新画的曲线类型未填，列表中显示「—」。旧文件里的刃缘、棱脊、其他照样读取、显示和导出，只是不再出现在选项里。曲线端点可吸附到已有曲线上（T 形交接），几条曲线能围成封闭区域。只画了一段石核边缘时可以「补全一圈」，见「石核体积构型」一节。
-- 表面区域（R）：曲线把表面分成若干块，曲线一变就重算；点击一块定类型（1 片疤、2 石皮、3 节理面、4 破损、5 剥片面、6 台面、7 修理、8 自定义；上层的剥片面、台面见下面「区域分两层」），以点击处为种子保存，重算后由包含种子的那块继承；片疤区域自动关联起点落在其中的箭头，否则新建一个无方向的片疤；两个种子落进同一块时提示冲突。计算各区域面积、各类型总面积和石皮比。
-- 石皮拟合球（测量模式）：对选定的石皮区域（默认全部）的顶点做球面最小二乘拟合（代数解作初值，再几何迭代精化），给出半径、球心、残差 RMS，可显示线框球。
-- 上下体积切分（石核，测量模式，仅封闭模型）：按一条闭合曲线（如石核边缘，类型为石核边缘的闭合曲线排在候选最前）或一个拟合平面把模型分成两部分，分别给出体积；上侧 = 法向所指的一侧，「上下对调」互换（测量导出和双锥都跟着变）。
-- 打破关系（标注模式，B）：先点 A、再点 B（箭头或区域），立即记为「A 打破 B」（A 晚于 B），点击顺序就是语序；两个片疤已有关系时按新的顺序改写。第二次点击旁出现一个小条，可反转（2）、改为「无法判断」（3）或删除（Delete），按 1 恢复「A 打破 B」；小条不挡操作，下一次在视图里按下鼠标、换工具、按 Esc 或选别的对象时自动消失。没有记录就是「还没判断」，「无法判断」只在主动选择时写入。工具激活时，区域相邻（共享边界）而还没判断的片疤，其边界画成白色虚线，侧栏显示「未判断的相邻片疤：N 对」，「下一对」把视角转到这段边界。
-- 剥片序列（标注模式，Q）：工具栏下方出现序列条（Q1、Q2……，色块和成员数），数字键 1–9 选当前序列，N 或「＋」新建；点片疤（箭头或区域）把它归入当前序列，再点一次移出。工具激活期间箭头按序列着色，未归入序列的片疤半透明。新建的序列默认「序列内排先后」（侧栏可取消）。序列的先后、有序序列内部的先后都由打破关系（含经由其他片疤推出的）自动排出，推不出的保持点击或手动排的顺序；侧栏的上移 / 下移违反已有关系时不可用，并提示原因（如「S3 打破 S2」）；成员之间的实线表示有关系支撑，虚线表示只是手动排的。
-- 实时检查打破关系成环、与序列先后矛盾、与序列内部先后矛盾、片疤未归入序列，以计数显示，点开列出明细并在三维中高亮涉及的片疤。Harris 矩阵面板（晚的在上，只画直接关系，成环的边标红，按序列框起，没有打破关系的片疤单列一侧）随标注实时更新，在「显示」面板里打开，使用打破关系或剥片序列工具时自动显示；点击节点选中片疤，可拖动、调整大小和折叠，颜色跟随浅色 / 深色外观；可导出 SVG（固定的印刷配色，不受外观影响）。「按剥片序列」配色：箭头和片疤区域按序列着色，序列内由浅到深表示先后。
-- 石核体积构型（标注模式，在「显示」里打开）：方盒和双锥两种模型，示意图、视角方块，见下面「石核体积构型」一节。
-- 标本类型（石核 / 石片 / 通用，起始页或标本信息里选）：切换只换界面，另一类型的数据留在项目文件里，切回来就恢复；新标本用起始页上次选的类型。文件夹列表显示类型和标注完成度，可按类型筛选。石片的工具和测量见下面「石片」一节，通用类型见「通用类型」一节。
-- 地标（标注模式，K）：在表面上点选固定地标（按吸附设置落在按下处最近的棱脊 / 凹谷上，不沿棱滑开，按住 Shift 不吸附），用地标工具或选择工具拖动移动、自由命名；列表顺序即导出顺序，可拖动行或用上移 / 下移调整。圆点半径是模型对角线的 0.5%，屏幕上的直径限制在 6–16 px（半地标是固定地标的 2/3，4–11 px），缩得再小也看得见，放大后不会盖住台面，也不会被所在的表面挡住一半；高分屏上大小相同。可「沿用上一件的点名」：之后点选时依次套用，可跳过。曲线半地标：选一条曲线和点数 N，可指定起止固定地标，沿曲线等弧长取点，曲线或地标一变就更新。导出 TPS（LM3）、3D Slicer `.fcsv`、长格式 CSV 和滑动定义 CSV（geomorph `curves` 格式），四者点序一致；滑动在 R 中完成。出图可叠加地标，地标直径在纸面上是 1.2 mm。
-- 观察者间一致性（比较模式）：载入同一模型（SHA-256 一致）的其他项目文件，与当前项目一起比较，各标注者用不同颜色叠加显示。箭头和曲线按距离做最优配对（匈牙利算法，配对距离上限可调），平面按方法、地标按名称、半地标按组和序号、区域按三角面比较；给出方向夹角、起止点距离、未配对数、曲线平均对称距离和 Hausdorff 距离、平面法向夹角和中心距离、区域 IoU / Dice、片疤属性 / 区域类型 / 打破关系的一致率和 Cohen's κ（三人及以上另给 Fleiss' κ）、地标距离和测量差值。侧栏结果按对象分组，点击箭头、曲线、地标或半地标的指标行，在三维中高亮差异最大的一对。导出长格式明细表和汇总表。
-- 文件夹与批量处理：「打开文件夹」读取一个文件夹中的模型（包括子文件夹，跳过 `LithicAnalyst/` 和以「.」开头的文件夹）。文件夹面板列出全部模型（可按名字筛选，圆点表示是否已有项目文件），可上一件 / 下一件（PageUp / PageDown）、下一件未开始（Shift+PageDown）。文件名相同的模型（在不同子文件夹或扩展名不同）用相对路径作标本编号。
-- Chrome / Edge 中软件的文件都放在文件夹里的 `LithicAnalyst/` 子文件夹：项目文件自动保存在 `LithicAnalyst/projects/<模型相对路径>.lithicanalyst.json`（文件名带扩展名，`EXP03.ply` 和 `EXP03.stl` 各有自己的项目文件）；每次导出写进一个新的 `LithicAnalyst/exports/<日期_时间>/`，出图写进 `LithicAnalyst/figures/<日期_时间>/<子文件夹>/`，从不覆盖，附 `manifest.json`（来源、选项、标本清单、失败清单）。旧版本放在模型旁边的 `<模型名>.lithicanalyst.json` 仍会读取（模型指纹一致时），但不再写入，也不会删除或修改；新位置有了项目文件后，可以手动删掉这些旧文件。
-- 其他浏览器（Firefox / Safari）只能读：本次会话编辑过的项目都暂存在内存里，换标本不会丢；文件夹面板的「下载全部项目文件（zip）」一次下载，解压到文件夹即可；还有改动没下载时，关闭页面会先确认。导出打包成一个 zip，里面是同样的 `LithicAnalyst/…` 结构。
-- 「导出」对话框在打开文件夹后可选范围：「当前标本」或「整个文件夹」（汇总导出：全部模型的各类 CSV 各合并成一份，另有合并的 TPS，一件模型有多位标注者的项目文件时另给各测量值的 ICC(2,1)）。展示模式「出图」勾选「整个文件夹」后，PNG / SVG 为每件标本出图。读不了或算不了的模型跳过并列入 `failures.csv`，结束时提示「完成 N 件，失败 M 件」。汇总导出在后台线程计算（切换窗口也不停），项目文件里保存的计算结果可用时不再读模型；批量出图需要页面在前台，切到后台时自动暂停。进度显示件数和剩余时间，可以取消。
-- 界面分「标注 / 测量 / 修理 / 展示 / 比较」五种模式，每种只显示自己的工具和侧栏；修理模式只在石片时出现。
-- 测量模式：打开模型即自动算长、宽、厚（标本坐标系或面积加权主轴）、表面积、体积（仅封闭模型），分「尺寸 / 整体」两组显示（石片分「技术轴 / 形态 / 台面 / 整体」，台面宽深和 EPA 各是一张小表，悬停或聚焦单元格即画出它的测法）；手动测量两点直线距离、沿表面距离、三点角度（编号 M1、M2……，可撤销，存入项目文件）。
-- 拟合平面（测量模式）：全部顶点（Lin et al. 2024）、片疤方向（Xiao et al. 2026）、片疤起点（可按完整性筛选）、曲线；输入一变就重算；显示半透明圆盘、与模型的交线和法向，可翻转、沿法向观察、逐个显示 / 隐藏。
-- 标本定向（展示模式）：以当前视角或某个平面的法向为正视方向，可用箭头定纵轴（起点在下）、左右转 90° 和微调；只记录变换矩阵，模型和标注坐标不变；设定后长宽厚按标本坐标系计算。
-- 出图（展示模式）：正视、后视、左视、右视、俯视、仰视任选，按欧洲惯例（ISO 第一角投影）排版、同比例对齐；掠射光来自左上方，高度可调；叠加片疤箭头、曲线、平面交线、比例尺（逐项开关）。PNG 透明背景，按实物比例（1:2 / 1:1 / 2:1）和 300 / 600 / 1200 dpi 输出；SVG 以 mm 为单位，明暗为内嵌位图，箭头、曲线、交线、比例尺和外轮廓为矢量，被遮挡的部分不画。坐标单位未注明时没有比例尺，也不按实物比例。
-- 截面（展示模式，X）：在屏幕上拖一条直线穿过模型，切面由这条线和视线方向确定；三维中可只保留一侧，剖面平涂或斜线填充；截面图单独导出 SVG / PNG，也可加进图版（放在视图右侧）。只用于展示，不输出测量值。
-- 视口右上角「显示」面板：着色（普通 / 扫描色 / 曲率）；光照（在光照球上单击或拖动，球上的点就是光的来向，中心是正面光，边缘是掠射光，双击恢复默认；也可以按住 L 在视图里移动，规则相同）；箭头配色；体积构型和 Harris 矩阵面板的开关；编号、显示被遮挡部分、表面区域配色。
-- 浅色 / 深色两种外观：顶栏的月亮 / 太阳按钮切换（新外观从按钮处以圆形扩开），选择记在浏览器里；第一次打开时跟随系统设置。三维视图背景是上暗下亮的中性灰，跟随外观；导出的图不受影响（PNG 仍为透明背景）。
-- 顶栏：左上角是标志和字标（只作标识，窄窗口只留标志）；标本按钮（标本编号和单位；点开可改编号、单位、标注者、备注，查看模型文件和面片数）、「文件」菜单（打开模型 / 项目 / 文件夹）、「保存」，模式切换在中间；工具和模式按钮用图标，悬停显示名称和快捷键。有还没保存的改动时，「保存」右上角亮一个琥珀色小圆点；保存（或在文件夹里自动写入项目文件）后消失，撤销回到保存时的状态也消失。没有模型时视图中央是当前模块的图标和打开模型、打开文件夹、打开项目，侧栏显示这个模式会有的区块（灰色标题，不能展开）。侧栏是一张张卡片，随工具和所选对象展开对应分区，宽度可拖动调整。载入提示显示在视图右下角、坐标读数上方。
-- 动效：切换模式时琥珀色底块滑到新模式，侧栏卡片淡入；面板和对话框从打开它的按钮处展开；标注状态变成 ✓ 时打一个勾；改动造成测量值变化时，该值闪一下浅琥珀；新放的地标弹出；加载较久时显示标志的循环动画。撤销 / 重做、载入、批量生成时不播放，拖动视图时立即结束；系统设置了减少动态效果时全部不播放。
-- 导出：每个模式的数据文件从侧栏底部的「导出」对话框勾选导出，多个文件打包成一个 zip；另可保存项目文件（JSON，格式见 `docs/project-format.md`；旧版本的项目文件可直接打开，保存时转为新格式）。界面默认英文，顶栏的语言菜单可切换为中文、意大利语、法语（选择会记住；起始页的语言按钮依次切换）；其他语言可以通过文字表加入（见 `docs/developing.md`「界面文字与翻译」），没译的文字显示英文；顶栏放不下时，模式按钮先只留图标，再收起「文件」「保存」的文字；字体打包在 HTML 内，离线可用。
+- **Annotate**: flake scar directions, curves that follow ridges and valleys, surface regions (scars, cortex, retouch …), which scar cuts which, removal sequences with a live Harris matrix, and landmarks.
+- **Measure**: dimensions, surface area and volume; for flakes, the technological axis, platform width, depth and angles, edge angles along an edge, and retouch indices (ERP, GIUR, invasiveness, curvature); for cores, the volumetric configuration.
+- **Morphometrics**: fixed landmarks with curve and surface semilandmarks, exported with their sliding definitions for geomorph and Morpho.
+- **Figures**: standard orthographic views with a scale bar, as PNG or SVG.
+- **Compare and batch**: agreement between observers, and whole folders of models in one go.
+- Cores, flakes, or a general type with nothing preset. The interface is in English, Chinese, Italian and French.
 
-## 起始页 / Start page
+### Citation
 
-软件打开时先显示起始页：标志、版本号和三张卡片（石核、石片、通用），右上角是语言和外观。这里没有顶栏，也没有打开文件的按钮。
+If you use LithicAnalyst in your research, please cite the version you used:
 
-- 点一张卡片进入这个模块，选择会记住，新打开的模型就是这个类型。再次显示时，上次选的卡片先获得焦点；Tab 切换，Enter 或空格进入。
-- 进入后视图中央是打开模型、打开文件夹、打开项目；也可以直接把模型拖进来，拖到起始页上同样可以。
-- 项目文件里存的类型优先：打开项目文件，或打开的文件夹里已有项目文件的那些件，类型都按文件来，不看卡片。每件标本以后仍可在标本信息里改类型。
-- 「文件 → 关闭」回到起始页。入场动画只在软件打开后第一次显示时播放；系统设置了减少动态效果时不播放。
+> Xiao, P. (2026). *LithicAnalyst* (Version 0.1.0) [Computer software]. GitHub. https://github.com/PeiyuanXiao/LithicAnalyst
 
-## 标注状态 / Annotation status
+and refer to it in your text, for example:
 
-视图左下角一排小胶囊，所有模式都显示：✓ 已有，○ 还没有。
+> "Scar directions were recorded and edge angles measured with LithicAnalyst (Version 0.1.0; Xiao, 2026)."
 
-| 类型 | 项 |
-|---|---|
-| 石片 | 单位、技术轴、石片边缘、台面轮廓、背腹面、修理区域（可选，不计入完成度） |
-| 石核 | 单位、片疤箭头、石核边缘 |
-| 通用 | 单位 |
+The About page in the app (the **?** button) gives the reference for the version you have, with a button to copy it. **Cite this repository** on this page gives it in APA and BibTeX. A BibTeX entry:
 
-- 悬停说明缺了会影响什么。
-- 点击切到标注模式和对应的工具：单位打开标本面板，石片边缘、台面轮廓、石核边缘、修理区域切到曲线工具，下一条曲线画完自动是这个类型（之后仍可用数字键改；换工具就取消），背腹面切到区域工具并展开「表面区域」。
-- 有闭合的台面轮廓时，边缘两端都接到轮廓上才算完成；没接到时胶囊显示 ○，悬停说明原因，点击选中这条边缘。
-- 视图窄于 720 px 时收成一个胶囊（如 4/5），悬停或点击时展开。
-- 文件夹列表每个文件旁显示同样的完成度，由已保存的项目文件算出，不需要打开模型。
-
-## 通用类型 / General specimens
-
-不预设任何石器类型，适合想完全自定义的情况，以及骨骼、陶器等非石器的几何形态测量。
-
-- **有**：固定地标、曲线半地标；GM 配置（自己列，见「几何形态测量」）；箭头（只有标签）；曲线、区域；距离、沿表面距离、角度；截面；拟合平面（全部顶点、曲线、表面区域）；定向、出图；自动测量（尺寸、表面积、体积）；比较模式、文件夹批量处理。
-- **没有**：片疤属性；打破关系、剥片序列、Harris 矩阵及其工具；体积构型、双锥；石皮拟合球；石片的全部内容（技术轴、台面、剖面面板）；修理模式；测刃角、刃缘、锋利刃缘；体积切分和上下体积。
-- **类型只用自由文字**：曲线、区域的类型只有「自定义」，数字键 1 打开输入框，候选值是本文件夹里用过的。新区域的类型先记为 `region`。
-- **区域只有一层**：所有曲线都参与切分。
-- **切换类型**：数据都保留，只是隐藏；已有的预设类型照样显示标签，但不在选项里。石核和通用共用一个标本坐标系，石片有自己的。
-- **导出**：不出 `flakes.csv`、`configuration.csv`、`flaking_surfaces.csv`、`relations.csv`、`series.csv`、`edge_angles.csv`、`edge_sharp.csv`、`retouch_angles.csv`、`working_edges.csv` 等专用文件；`scar_vectors.csv` 的列不变，片疤属性各列为空；`measurements.csv` 的列不变，上下体积各列为空。
-
-## 区域分两层 / Two layers of regions
-
-区域可以叠加：上层是标本的部位，下层是部位上的片疤、石皮等。
-
-- **上层**只由边界曲线切分：石核是石核边缘（可画多条，围出多个剥片面），石片是边缘和台面轮廓。石核可选剥片面、台面（键 5、6），石片可选台面、腹面、背面（键 5、6、7）。
-- **下层**由所有曲线切分，类型是片疤、石皮、节理面、破损、修理和自定义（修理：石核键 7，石片键 8；自定义：石核键 8，石片键 9，永远是最后一个选项）。每个下层区域一定完整落在一个上层区域里，`regions.csv` 的 `parent_region` 记下它在哪里。跨过边界的片疤被切成两块，各算在自己的部位里，可在区域信息的「所属片疤」把两块归给同一个片疤。
-- 比值在统计软件里算，比如每个剥片面的片疤面积：
-
-```r
-regions |>
-  filter(type == "scar") |>
-  group_by(specimen_id, parent_region) |>
-  summarise(scar_area = sum(area), n_scars = n())
+```bibtex
+@software{Xiao_LithicAnalyst_2026,
+  author  = {Xiao, Peiyuan},
+  title   = {{LithicAnalyst}},
+  year    = {2026},
+  version = {0.1.0},
+  url     = {https://github.com/PeiyuanXiao/LithicAnalyst}
+}
 ```
 
-## 刃角 / Edge angles
+Several measurements follow published methods: edge angles after Schunk et al. (2023), ERP after Morales et al. (2015), GIUR after Kuhn (1990), invasiveness after Clarkson (2002), edge curvature after Hiscock and Attenbrow (2003), and the volumetric configuration after the Logical Analytical System (Carbonell et al., 1999; Lombao et al., 2023). When you report those measures, please cite these papers too. Each method and its source are described in [docs/project-format.md](docs/project-format.md).
 
-依照 Schunk 等 2023（3D-EdgeAngle）。刃角只对石片；石核和通用类型没有这项功能，旧文件里的数据原样保留，把类型改成石片后照常显示。曲线信息区的「测刃角」决定哪些曲线要测，边缘默认打开（石核改成石片时，原来的石核边缘也算）。沿曲线每 1 mm 一站，每站作垂直于曲线的截面，从边缘沿截面走 2、5、10 mm 取点，分别用三点法和两线法求角度，全部导出（`edge_angles.csv`，长格式）。毫米按坐标单位换算，单位未注明时不测。测量模式的「刃角」区块列出这些曲线；选中一条时，曲线按角度着色（三点法或两线法，5 mm），并显示角度沿曲线变化的折线图。
+### Getting started
 
-图上方可以选择只显示某一条线（2 / 5 / 10 mm），曲线也按它着色。修理层的角度图在修理模式里。
+- **Download** `LithicAnalyst-<version>.html` from the [latest release](https://github.com/PeiyuanXiao/LithicAnalyst/releases/latest) and open it in Chrome or Edge. There is nothing to install.
+- **Online**: <https://peiyuanxiao.github.io/LithicAnalyst/>. In Chrome or Edge it can be installed as an app, with the install button in the address bar, and it then works offline too.
+- Open a model (PLY, STL or OBJ), a folder of models, or a project file. In Chrome and Edge, projects and exports are saved in a `LithicAnalyst` folder next to the models. Firefox and Safari can read a folder but not write to it, so the project files are downloaded as a zip instead.
+- Exports are CSV files, plus TPS and 3D Slicer `.fcsv` for landmarks, ready for R. The project file and every exported column are described in [docs/project-format.md](docs/project-format.md).
+- Press **?** in the app for the keyboard shortcuts.
 
-## 修理层 / Retouch layers
+To build it from source (Node.js 20 or later):
 
-圈出一条刃缘的修理区域，再分层：
-
-1. 用曲线工具画每一层的外缘，类型选「修理」（石核键 5，石片键 6）。曲线端点要搭到刃缘上，差一点也会自动接上。
-2. 石片上，开放的修理曲线两端都接到边缘后，它和边缘之间自动成为修理区域，默认修理层 1，曲线一变就跟着变；片疤轮廓穿过这一带，它仍是一个区域。取的是曲线两侧较小的一侧，不对时点区域信息里的「另一侧」。石核，以及闭合的修理曲线，用区域工具点每一层，类型选「修理」（石核键 7，石片键 8）。
-3. 用区域工具点选区域，在区域信息里选修理层（Shift+1–5）。1 是离刃口最近的一层。自动的区域改了类型或删掉后就不再自动出现；把曲线的类型改掉再改回「修理」可以恢复。
-4. 到修理模式的「修理层角度」看每一层的角度（石片；石核的修理层角度只有导出）。
-
-每一站从刃口沿截面走过这些修理区域，每层算三个角，都导出到 `retouch_angles.csv`（长格式）：
-
-- **累计角**（三点法、两线法）：从刃口到这一层外缘，整体有多陡。
-- **层面角**（`layer_face`）：这一层本身的直线与另一面的夹角。想比较每层是否不同，主要看这个。
-
-`distance` 是这一站刃口到该层外缘沿表面的距离，也就是修理深度。各层面积见 `regions.csv` 的 `retouch_layer`。
-
-## 修理指数 / Retouch indices
-
-石片标好修理层（见上）、边缘和背面、腹面后，软件直接算出下面几项，不用再标别的。背面、腹面来自上层区域：有技术轴时自动分出，也可以手动指定。没标修理区域的石片按未修理算，各项记 0。
-
-- **ERP 和剥离体积**（Eren 等 2005；三维做法依照 Morales 等 2015）：每一站在截面上把修理外侧的两段表面各拟合一条直线，延长相交，就是复原的原始刃缘；两线和截面之间是缺失面积。剥离体积 = Σ 站距 × 缺失面积，ERP = 剥离体积 ÷（剥离体积 + 模型体积）。两线平行或张开的站用前后的站插值（`filled`）；超过 25% 的站要插值时不给结果。
-- **GIUR**（Kuhn 1990）：用只有一面修理的站，背面、腹面都算；同一站两面都有修理时不参与。都从腹面（修理之外）的拟合线量：t 是修理内端处的厚度，T 是背面到这条线的最大距离，取各站 t/T 的平均。
-- **侵入度**（Clarkson 2002）：每面 8 段，共 16 段；每段按修理最大侵入程度记 0 / 0.5 / 1，总和 ÷ 16。另给连续版本（各段侵入程度之和 ÷ 16）。两端段取到端缘和到侧缘的较小值，所以 p = 0.5 的分界在每一面上是一条闭合线。
-- **修理周长占比**：已修理刃缘 ÷ 刃缘总长（合计、背面、腹面），只用类型为「边缘」的曲线。
-- **刃缘弯曲度**（R6/R3，Hiscock & Attenbrow 2003、2005）：最长一段修理刃缘的弦高 ÷ 弦长，凸为正、凹为负。凹缺单独标成一块修理区域时，它的直径和深度在 `retouch_segments.csv` 里。
-
-分段和平面投影用的坐标系：有技术轴时用技术轴，否则用最大长轴；拟合长度 w 默认 5 mm（1–20 mm），每件标本可改。结果写进 `flakes.csv` 的后 15 列、`retouch_sections.csv`、`retouch_segments.csv`、`invasiveness.csv` 和项目文件的 `derived.retouchIndices`；定义和列见 `docs/project-format.md`。
-
-## 修理模式 / Retouch mode
-
-石片标好修理层、边缘和背腹面后，到「修理」模式（M 键或顶栏）看结果。标注工具都留在标注模式。
-
-- **当前站**：进入时自动停在缺失面积最大的站。点刃缘附近、按住沿刃缘拖、← / →（Shift 一次 10 站）、拖截面预览的滑动条、点修理层角度图、点俯视预览的轮廓、点修理段列表的一行都能移动它，模型上的截面线和标记、两个预览、图上的竖线一起走。多条刃缘在截面预览的下拉里切换。
-- **截面预览**：朝向固定（腹面线水平在下，刃缘在左，背面朝上）。画出修理段（按层着色）、拟合段、原始表面线、缺失面积、A、A₀、R、C、t、T，下面是这一站的读数；「—」上悬停看为什么是空的，插值站标「插值」。「整个截面」显示整条截面。
-- **俯视预览**：分段坐标系的平面，近端朝下，X 向右，腹面不镜像。画轮廓、16 段的分界、这一面的修理区域、当前站和最长修理段的 R3、R6。坐标系可选自动 / 技术轴 / 最大长轴，最大长轴可以近远端对调。
-- **修理指数**：五个指数的数值和 16 格图（按得分或按 p 着色），点一格，俯视预览切到那一面并高亮该段。
-- **参数**：拟合长度 w。拖滑块时截面和指数实时预览，松手才写入；「默认」回到 5 mm；下面的小曲线是剥离体积随 w（2–10 mm）的变化，方便判断取多少合适。
-- **修理区域**：每个修理区域一行，点一行移到该段中点并选中它。
-- **修理层角度**：层序列、三点法 / 两线法 / 层面角，选了某一层时截面上叠加这一层的取点。
-- **导出图**：两个预览的 SVG、PNG 是出版版（浅色、白底、带比例尺）。有单位时按「展示」模式出图设置的比例和 DPI 定尺寸；单位未注明时按面板尺寸，不画比例尺。文件名：`<标本>_retouch_section_<曲线>_<位置 mm>`、`<标本>_retouch_plan_<dorsal|ventral>`。
-- 「显示」面板可以关掉截面预览、俯视预览、分段线和复原边缘。
-
-## 刃缘 / Working edges
-
-石片的一条曲线上可以划出几段刃缘，分别测刃角、锋利长度和修理指数（双刃刮削器、汇聚刃），不用把曲线拆开：石片的「边缘」仍是一整条轮廓，GM 和背腹面划分不受影响。石核和通用类型没有这项功能。
-
-- **划分**：标注模式的「刃缘」工具（W）。在测刃角的曲线上点两下定起点和终点，编号 E1、E2……；点在已有刃缘的端点附近时，两条共用这个点。闭合曲线从起点沿曲线方向走到终点，「另一段」换到另一边。可以用「按修理段生成」先得到一个起点，再调整。
-- **调整**：选择工具下拖端点，不能越过相邻刃缘的端点，也不能短于 2 mm；同一条曲线上的刃缘不能重叠。删掉曲线，刃缘一起删掉；曲线不再测刃角时，刃缘保留但不参与计算。
-- **没有划分的曲线**整条算一条隐含刃缘，导出时 `working_edge` 为空，靠 `curve_id` 区分。划了刃缘的曲线，刃缘之外的站只计入整件。
-- **怎么分**：每站代表前后各半个站距的一段；站的权重按落在刃缘里的比例分给各刃缘，所以各刃缘的剥离体积加起来等于整条曲线的。
-- **图**：测量模式的刃角图、修理模式的修理层角度图在横轴上标出各刃缘，上方可以只看其中一条。
-- **修理模式**：截面预览的位置旁显示当前站所在的刃缘；「修理指数」下面有一张每条刃缘一行的小表，点一行移到它缺失面积最大的站，并在俯视预览上画出这条刃缘和它自己的 R3、R6，再点一次取消。
-- **导出**：`working_edges.csv` 每条刃缘一行（长度、锋利长度；石片另有修理长度、修理周长占比、剥离体积、ERP、插值站占比、GIUR、弯曲度）。ERP 是这条刃缘的贡献（RE_k ÷（整件 RE + V）），各刃缘相加等于整件；侵入度只按整件算。`edge_angles.csv`、`retouch_angles.csv`、`retouch_sections.csv`、`retouch_segments.csv`、`edge_sharp.csv` 末尾都有 `working_edge` 列；一段锋利段跨过刃缘边界时切成两行，`segment` 相同。
-
-```r
-working_edges |>
-  filter(working_edge != "") |>
-  group_by(specimen_id) |>
-  mutate(share = removed_volume / sum(removed_volume))
+```sh
+npm ci
+npm run build    # writes dist/index.html
+npm test
 ```
 
-## 锋利边缘 / Sharp edge
+### Contributing and getting help
 
-先标完整条边缘，再用角度判定哪些部分算锋利。选一条序列（默认三点法 2 mm）和一个阈值：输入数值、拖动图上的阈值线，或按「自动」让软件建议一个值。阈值没有默认值，由你决定。不超过阈值的连续部分就是锋利段，长度和段数显示在图下方，导出到 `edge_sharp.csv`：
+Questions, problems and feature requests are welcome as [GitHub issues](https://github.com/PeiyuanXiao/LithicAnalyst/issues/new/choose), or by e-mail to pyxiao.sci@gmail.com. To contribute code, see [CONTRIBUTING.md](CONTRIBUTING.md). What has changed between versions is in [CHANGELOG.md](CHANGELOG.md).
 
-```r
-edge_sharp |>
-  group_by(specimen_id) |>
-  summarise(sharp_length = sum(length), n_segments = n())
-```
+<!-- AI assistance statement: to be written by the author. -->
 
-- 文件夹里所有标本共用一个阈值（存在 `LithicAnalyst/sharp-edge.json`），否则锋利长度不可比；「自动」也用全部标本的角度。分不出明显的两组时不给值。
-- `edge_angles.csv` 有每一站的角度，在 R 里可以换阈值做敏感性检验。
-- 这个角度不等于刃尖的真实锐度；拐角处截面是斜切的，角度偏低，可能被算成锋利段。
+### License
 
-## 几何形态测量 / Geometric morphometrics
-
-标注模式有「GM 配置」区块：选择要哪些点，每件标本按同一配置自动生成，不能单独拖动，导出后可直接进 geomorph 或 Morpho。石片默认用技术坐标网格，也可以改用模板；石核和通用用模板。
-
-**石片：网格**
-
-| 项目 | 默认 | 需要 |
-|---|---|---|
-| 固定地标：打击点、台面左端、台面右端 | 全选 | 技术轴、台面端点 |
-| 曲线半地标：边缘 | 50 点 | 边缘曲线 |
-| 曲线半地标：台面轮廓（左端→打击点、打击点→右端、右端→左端） | 各 10 点 | 闭合的台面轮廓、台面端点 |
-| 表面半地标：腹面、背面 | 15 行 × 10 列 | 技术轴、边缘曲线；有台面端点时还要台面轮廓 |
-| 表面半地标：台面 | 4 行 × 8 列 | 台面区域、台面轮廓、台面端点 |
-
-- 曲线的点数包括两端。两端和固定地标是同一个点，只写一次，所以默认共 407 个点，不是 415 个。
-- 没有台面端点（点台面）时，把台面端点、台面轮廓和台面都关掉，边缘从打击点出发再回到打击点。
-- 缺标注或有点落不到网格上时，这件标本算不完整：区块里写明缺什么，不能导出。文件夹汇总时列进 manifest 的 `gmSkipped`。
-- 文件夹里所有石片共用一份配置（`LithicAnalyst/gm-config.json`）。改了配置，打开的标本立即重算，汇总时其余标本在各自的模型上重算。
-- 「显示」面板的「GM 半地标」可以开关这些点。
-
-**模板法**：石核和通用，以及切换到「模板」的石片。
-
-- **配置**：石核和通用自己列三张表，顺序就是导出顺序：固定地标（按地标名）、曲线半地标（曲线类型、点数、起止地标；闭合曲线是起点和途经点）、表面片（区域类型、点数，10–2000，默认 100）。候选取自文件夹里已有的名称和类型。石片沿用打击点、台面端点和边缘、台面轮廓，表面片预填腹面 150、背面 150、台面 32，也可以再加。
-- **同一曲线类型或区域类型有不止一个时不能确定**，这件标本记为未完成并说明原因；要区分时用自定义类型。只分析某一部分（比如手斧的尖部）时，用曲线和区域围出来，给它配一个表面片，导出后在 R 里按 `name` 取子集。
-- **设为模板**：当前标本要有配置里的全部地标、曲线和区域，否则不能设，并说明缺什么。每个表面片在对应区域里均匀铺点（面积加权取候选，去掉离边界太近的，再最远点采样），种子固定，「重新铺」换下一个种子。模板的区域或锚点改了会提示建议重新铺，不会自动重铺。
-- **传到其他标本**：锚点是固定地标加曲线半地标，至少 4 个。先做相似变换，再用薄板样条拟合锚点上的位移（`U(r) = r`），最后投影到这件标本同类型的区域上。锚点全在一个平面上时，垂直方向保持相似变换的结果，不会被压扁。
-- **检查**：投影移动超过 0.5 s，或与最近的点距离小于 0.25 s（`s = √(区域面积 / 点数)`）的点被标记：三维里加琥珀色圆环，面板写「n 个点需检查」，状态胶囊保持 ○。软件不删点，也不自动修正。
-- **缺东西时**：这件标本该写的行照写，缺的点是 `NA`（R 里可以用 `geomorph::estimate.missing`），并列进 manifest 的 `gmIncomplete`。模板模型不在文件夹里时停止传递，面板说明原因。
-- **显示**：GM 区块的「显示表面半地标」。配置不为空时，左下角状态多一个「GM」胶囊，文件夹列表也显示 GM 完成度。打开标本时计算，汇总导出时在后台计算。
-
-```r
-library(geomorph)
-A <- readland.tps("gm_landmarks.tps", specID = "ID")
-curves <- as.matrix(read.csv("gm_curves.csv"))
-surfaces <- read.csv("gm_surfaces.csv")$index
-fit <- gpagen(A, curves = curves, surfaces = surfaces)
-
-# Morpho（模板法另外导出）
-library(Morpho)
-SMvector <- read.csv("gm_smvector.csv")$index
-o <- read.csv("gm_outlines.csv")
-outlines <- split(o$index, o$outline)
-surp <- read.csv("gm_surp.csv")$index
-models <- read.csv("gm_models.csv")$model
-```
-
-## 石核体积构型 / Volumetric configuration
-
-借用逻辑分析体系（LAS；Carbonell 等 1999、Lombao 等 2023）的思路，记录石核的基础体积构型。自动结果只作参考，不设门槛（一个片疤就足以成为剥片面），全部可以手动修正，修正可撤销。只用带箭头的片疤。
-
-**开始**
-
-1. 标注模式下画片疤箭头（A）。
-2. 右上角「显示」里勾选「体积构型」。视图右下角出现悬浮面板（拖标题栏移动、可折叠，位置自动记住；窗口矮时示意图自动压缩，结果和卡片完整显示），右上角出现随视角转动的视角方块。
-3. 面板顶部选模型：**方盒**（默认）或**双锥**。
-
-**方盒模型**：适合从台面向一个或几个面剥片的石核。
-
-- 按模型的外包盒定向：设定了标本坐标系时用它，否则按主轴（面板标题栏标「主轴 / PCA」）。片疤归到它所在的面（按两端法向去掉沿箭头方向的分量后判断，打击点在台面边缘时不会被拉到台面上），箭头反方向所对的相邻面为台面（与起点位置无关）。
-- 面的角色：剥片面、台面、两者、未利用。从同一台面环绕剥片的相邻面合并为一个剥片面（F1、F2……）。
-- 结果七项：面性、剥片面、剥片面关系、台面关系、极性、剥片面类型（宽 / 窄）、剥片轴（长 / 短）。
-- 修正：点示意图或视角方块上的一个面，视角转到这个面，其他面的箭头暂时变淡（Esc 恢复），面板下方展开面卡片，可改角色、宽窄、长短轴和相邻面是否相连；总体极性在结果里直接选。把台面上修理疤所在的面改成「台面」后，这些疤不再产生台面。改变标本定向时，按面保存的修正自动清除并提示一次。
-
-**双锥模型**：适合勒瓦娄哇、盘状、预制、向心这类「两个面绕一个交界面」的石核。只提供概念构型辅助判断：不区分盘状和勒瓦娄哇，不判断极性（一律视为向心），不表达台面。需要封闭模型和一条闭合曲线（通常是石核边缘）。
-
-- 点「双锥」即可，不用先去测量模式：只有一条闭合曲线（或只有一条类型为石核边缘的闭合曲线）时一步完成，同时把上下体积切分设为这条曲线；有多条时面板里出现「交界曲线」下拉框，选一条后切换。一次撤销全部恢复；原来按平面切分的会被替换，并提示一次。没有闭合曲线时「双锥」不可用。
-- 两个圆锥共用一个圆底：底面积等于曲线围成的面积，锥高按上下体积算（同底等体积的圆锥）。片疤按箭头**终点**归入上锥或下锥。新设切分曲线时，片疤多的一侧为上（两侧一样多时取当前视线方向）；可用「交界曲线」旁的「上下对调」按钮互换，上下体积和测量导出跟着变。
-- 结果两项：面性、剥片面。点示意图或视角双锥上的锥，主视图沿交界面法向从这一侧看，锥卡片可改角色（剥片面 / 未剥片）。修正跟着物理上的那个面，上下对调后不变。
-- 双锥模式下「边缘曲线」下拉框一直在，可以直接换曲线。切回方盒时切分保持不变。网格不封闭或切分无效时，面板只显示原因。
-- 示意图拖动转动，任何角度都完整显示并居中，放不下时自动缩小；双击回到默认视角，在方块和双锥之间切换时也回到默认视角。
-
-**不闭合的石核边缘：补全一圈**
-
-只画了一段边缘（至少 3 个锚点，绕模型中心至少 90°）时，曲线检查器里点「补全一圈」：沿曲线所在平面的法向看模型轮廓，自动吸附到棱脊上连成闭合曲线，一次撤销恢复。自动锚点约每 12° 一个，轮廓变化大的地方更密。补出的那段用虚线显示；拖动过的自动锚点改为用户锚点，全部改过后曲线恢复为普通曲线。曲线太短太直、找不到边缘或连不成一圈（如网格有破洞）时，曲线保持原样并提示原因。
-
-**导出**：`configuration.csv`（每件一行，`model` 为 `box` 或 `bicone`）、`flaking_surfaces.csv`（每个剥片面或剥片锥一行）；`scar_vectors.csv` 多两列（台面、所属剥片面）。整个文件夹导出时合并。双锥时关系、极性、台面留空。项目文件保存修正和最近一次的结果，定义和代码见 `docs/project-format.md`。
-
-
-## 石片 / Flakes
-
-**边缘要不要闭合。** 不必闭合，关键是边缘和台面轮廓合起来要把背面和腹面完全隔开：
-
-- 有台面轮廓：画开放的边缘，两端接到台面轮廓上（差一点会自动接上）。
-- 没有台面轮廓（点台面、台面缺失）：边缘要闭合。
-- 没隔开时，「背腹面」胶囊显示 ○，悬停说明原因。
-- 边缘也可以画成闭合的并沿着台面走，但沿台面轮廓的部分（1 mm 以内、连续 2 mm 以上）不算边缘：刃角、锋利边缘、刃缘和修理指数都只沿其余部分算，结果和开放画法一样。曲线信息里的「测量长度」就是这段的长度。
-
-标本类型设为石片后：
-
-- **曲线类型**：1 片疤轮廓、2 边缘、3 石皮、4 节理面、5 台面轮廓、6 修理、7 自定义。台面轮廓要闭合（可用「补全一圈」），每件一条，新的替换旧的。它把表面分成两块，面积较小的一块自动成为台面区域，轮廓一改就跟着改；手动改过类型的以手动为准。
-- **区域类型**：1 片疤、2 石皮、3 节理面、4 破损、5 台面、6 腹面、7 背面、8 修理、9 自定义。有了边缘曲线和技术轴，腹面（技术轴所在的一块）和背面也自动标出；边缘没有闭合时提示。
-- **技术轴**（T）：在腹面上从打击点向远端拖一个箭头，起点落在按下处最近的棱上，不沿棱滑开（Shift 不吸附）；再拖一次就替换，选择工具下可拖动端点（拖起点时同样吸附）、可删除。由它得到技术坐标系：原点是打击点，+Z 指向背面，+Y 指向远端，+X = Y × Z（背面朝向观察者、台面朝下时观察者的右手边）；法向取箭头两侧一条带内的三角面（面积加权、去掉偏离 60° 以上的）。只记录为矩阵，写进 `specimen.frame`（来源 `technical_axis`），顶栏小签显示「技术轴」；箭头太短或三角面太少时不建坐标系，小签提示。出图的前视图、后视图、仰视图由此是背面、腹面、台面。起点就是地标「打击点」`pop`，跟着箭头走、不能单独移动或删除。
-- **台面端点**：不用单独标。边缘和台面轮廓的交点自动就是台面端点，曲线一变就跟着变；按技术坐标系的 X 分左右，导出名 `platform_left`、`platform_right`。要调整时用选择工具（或地标工具）拖动，它沿台面轮廓走，放下后就留在那里，不再跟随曲线；地标信息里的按钮让它恢复自动位置。旧文件里手动放的端点保持原样。没有边缘时没有端点，PW 为空。
-- **摆放**（F，全视图旁的按钮）：背面朝向你、台面朝下，只移动相机。
-- **标签**：画箭头、曲线、技术轴、地标、测量、截面、区域时，标签不接点击，点到标签上就是点在模型上；选择、关系、序列工具下点标签照旧选中。
-- **「自动测量」区块**（测量模式，导出 `flakes.csv`；为空的量显示「—」，鼠标停在上面显示原因）：技术长宽厚；形态长宽厚（不依赖定向）；形态长与技术轴的夹角；台面宽、台面深（直线和限于台面区域的沿表面路径）；台面面积；EPA（三点法、两线法，各 1、2、3 mm）；IPA。纵切面是技术坐标系 X = 0 与网格的交线；其上落在台面区域内、离打击点最近的一段的远端是外缘点 E，这一段拟合台面线；EPA 从 E 沿纵切面往背面一侧取点，IPA 用腹面 25%–75% 长度那段的拟合线（避开打击泡和远端弯曲）。毫米距离按坐标单位换算，单位未注明时 EPA 不测。方法和参数存在项目文件里（`derived.flake`），定义见 `docs/project-format.md`。比值、指数交给统计软件。
-- **看测法**（测量模式，石片、石核、通用都有）：鼠标在自动测量的一行上停 150 ms，或用键盘让这一行获得焦点，三维视图里就画出这个量是怎么测的：技术长宽厚是技术轴、外包盒、三条尺寸线和取到极值的顶点；形态长宽厚是最远两点和垂直方向的两条尺寸线；夹角是两条轴和夹角弧；PW、PD 是直线和沿表面的路径；台面面积高亮台面；EPA、IPA 是纵切面截线、取点、拟合线或短弦和角度弧；表面积、体积高亮整个模型；石核和通用的长宽厚是按标本定向的外包盒；石核的上下体积是切分面或切分曲线，上下两部分两种浅色。当前这一项用琥珀色，同组的其他项用灰色，尺寸线中点标数值。点一下这一行固定，再点一下或按 Esc 取消；刃角列表的行只悬停（点击仍是选中曲线）。值为空时不画，只显示原因。画的就是测量函数返回的几何，不移动相机。
-- **剖面面板**（「显示」里开关，第一次建立技术轴时自动打开）：左边纵剖面（台面朝下），右边横截面（背面朝上），同一比例，附比例尺；滑动条、点击或拖动纵剖面上的细线改变横截面位置，旁边显示该处的宽和厚，模型上显示这一圈轮廓；纵剖面上叠加 P、E、台面线、EPA 取点、腹面范围及拟合线。
-- **拟合平面**：按曲线、按表面区域（区域内顶点按面积加权）。
-- **`scar_vectors.csv`** 的 `tech_angle_deg`：片疤方向投到技术坐标系 XY 平面，+Y 为 0°，从背面看逆时针为正。
-
-## 完整性分类 / Completeness codes
-
-| 键 | 界面 | CSV 代码 |
-|---|---|---|
-| 1 | 可见打击点+尾端完整 | `point_complete` |
-| 2 | 可见负向打击泡+尾端完整 | `bulb_complete` |
-| 3 | 打击点缺失+尾端完整 | `proximal_missing` |
-| 4 | 可见打击点+尾端缺失 | `point_truncated` |
-| 5 | 可见负向打击泡+尾端缺失 | `bulb_truncated` |
-| 6 | 两端缺失 | `both_missing` |
-
-## 尾端形态 / Termination
-
-| 键 | 界面 | CSV 代码 |
-|---|---|---|
-| Shift+1 | 羽状 | `feather` |
-| Shift+2 | 阶梯状 | `step` |
-| Shift+3 | 铰链状 | `hinge` |
-| Shift+4 | 过击 | `overshot` |
-| Shift+5 | 缺失（看过，尾端不存在） | `na` |
-| — | 未填（还没判断） | 空 |
-
-## 快捷键 / Shortcuts
-
-M 切换模式（标注 / 测量 / 展示 / 比较）· T 技术轴（石片）· F 按技术轴摆放（石片）· A 画箭头 · P 画曲线 · W 刃缘（石片）· R 表面区域 · B 打破关系（之后 1 / 2 / 3 / Delete：A 打破 B / 反转 / 无法判断 / 删除）· Q 剥片序列（1–9 选当前序列，N 新建）· K 地标 · D / G / N 测距离 / 沿表面 / 角度 · X 画截面 · V 选择 · S 吸附：凸 / 凹 / 关 · 按住 Shift 放点时不吸附 · Enter 完成曲线 · Backspace 删除上一个点（曲线、测量）·
-1–9 完整性 / 曲线类型 / 区域类型（通用类型：1 自定义类型）· Shift+1–5 尾端形态 / 修理层 · ← / → 上一站 / 下一站，Shift 一次 10 站 · Delete 删除 · [ ] 上一条 / 下一条 · Ctrl+Z / Ctrl+Shift+Z 撤销 / 重做 ·
-Ctrl+S 保存项目 · PageUp / PageDown 文件夹中的上一件 / 下一件 · Shift+PageDown 下一件未开始 · H 全视图 · C 光标处设为旋转中心 · 按住 L 调整光照 · 按住空格用左键旋转 · Esc 取消 / 完成曲线
-
-## 数据 / Data
-
-CSV（每条箭头一行，坐标为模型文件原始坐标；`termination` 未填时为空；`platform_face` 为体积构型中该片疤的台面（面代码），`flaking_surface` 为所属剥片面（如 `F1`），所在面不是剥片面时为空）：
-
-```
-specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg
-```
-
-区域 CSV 的 `parent_region`：下层区域所在的上层区域，`retouch_layer`：修理层；刃角 CSV（每站、每个距离、每种测法一行）；修理层角度 CSV（每站、每层、每种测法一行）；锋利刃缘 CSV（每个锋利段一行）：
-
-```
-specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer
-specimen_id,curve_id,curve_type,station,position,distance,method,angle_deg
-specimen_id,curve_id,station,position,retouch_region,retouch_layer,distance,method,angle_deg
-specimen_id,curve_id,method,distance,threshold_deg,segment,start_position,end_position,length
-```
-
-修理站 CSV（每个有修理的站一行）、修理区域 CSV（`retouch_segments.csv`，每个修理区域一行）、侵入度 CSV（每件 16 行）：
-
-```
-specimen_id,curve_id,station,position,segment,x,y,depth_dorsal,depth_ventral,removed_area,filled,original_angle_deg,recession,retouch_height,thickness,giur
-specimen_id,curve_id,retouch_region,retouch_layer,face,start_position,end_position,length,chord,depth
-specimen_id,face,segment,penetration,score
-```
-
-GM 坐标（`gm_landmarks.csv`，`kind` 为 `fixed`、`curve` 或 `surface`）和滑动定义（`gm_curves.csv`、`gm_surfaces.csv`，点序号从 1 开始）：
-
-```
-specimen_id,index,name,kind,set_id,x,y,z
-before,slide,after
-index
-```
-
-模板法的 `gm_landmarks.csv` 最后多两列（`set_index`：在这条曲线或这个表面片里的序号；`flagged`：0 / 1），并另有 Morpho 用的 `gm_smvector.csv`、`gm_outlines.csv`、`gm_surp.csv` 和模型路径 `gm_models.csv`：
-
-```
-specimen_id,index,name,kind,set_id,x,y,z,set_index,flagged
-index
-outline,index
-index
-specimen_id,model
-```
-
-石片 CSV（每件石片一行，没有值时为空；长度为模型单位）：
-
-```
-specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth
-```
-
-体积构型 CSV（每件一行；`model` 为 `box` 方盒或 `bicone` 双锥；代码见 `docs/project-format.md`，没有值时为空）和剥片面 CSV（每个剥片面一行；`faces`、`platforms` 为用 `;` 连接的面代码 `front` / `back` / `left` / `right` / `top` / `bottom`；`also_platform` 为 `true` 表示它的某个面被其他剥片面的片疤用作台面）：
-
-```
-specimen_id,model,frame,facial_character,flaking_surface_relation,platform_relation,polarity
-specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis
-```
-
-曲线 CSV（每个点一行，按曲线上的顺序；`arc_length` 为沿曲线到该点的距离，`anchor` 标出手动放的点；`type` 为类型代码 `scar_boundary` / `core_edge` / `cortex` / `joint`，旧文件的 `edge` / `ridge` / `other` 原样写出，自定义类型写用户输入的文字，未填为空）：
-
-```
-specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note,unit
-```
-
-测量 CSV（每件一行；体积相关的值在模型不封闭时留空）：
-
-```
-specimen_id,unit,frame,length,width,thickness,surface_area,volume,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio,file
-```
-
-只用导出数字就能算的形状指标交给统计软件，例如在 R 里：
-
-```r
-surface_to_volume_ratio <- surface_area / volume^(2/3)
-wadell_sphericity <- pi^(1/3) * (6 * volume)^(2/3) / surface_area
-```
-
-手动测量 CSV（每条一行；用不到的点留空，角度单位为 `deg`）：
-
-```
-specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p3_z
-```
-
-拟合平面 CSV（每个平面一行；m00 … m33 为行主序 4×4 矩阵，把原始坐标变换到平面坐标系；无效平面的数值留空）：
-
-```
-specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_z,m00,m01,…,m33
-```
-
-表面区域 CSV（每个区域一行；scar_id 为所属片疤编号，面积单位为坐标单位²）：
-
-```
-specimen_id,region_id,type,scar_id,area,unit
-```
-
-打破关系 CSV（每条关系一行；片疤用编号；relation 为 `a_cuts_b`（scar_a 晚于 scar_b）或 `indeterminate`（无法判断））：
-
-```
-specimen_id,scar_a,scar_b,relation
-```
-
-剥片序列 CSV（序列中的每个片疤一行；series_order 从最早的序列起为 1；order_in_series 从最早的片疤起为 1，序列内未排先后时留空）：
-
-```
-specimen_id,series_id,series_order,scar_id,order_in_series
-```
-
-地标（四个文件点序相同：先固定地标（列表顺序），再按组列出各组半地标，序号从 1 起）：
-
-- `<标本>_landmarks.tps`：`LM3=点数`，每点一行 `x y z`，末行 `ID=标本编号`；
-- `<标本>_landmarks.fcsv`：3D Slicer 标记点文件（LPS，坐标同模型文件）；
-- `<标本>_landmarks.csv`：
-
-```
-specimen_id,index,name,kind,set_id,x,y,z
-```
-
-- `<标本>_sliders.csv`：滑动定义（geomorph `curves` 格式，用上面的序号）：
-
-```
-before,slider,after
-```
-
-一致性明细 CSV（比较模式；每个数值一行，三人及以上时 Fleiss' κ 的 annotator_a 为 `all`）和汇总 CSV：
-
-```
-specimen_id,item_type,item_key,annotator_a,annotator_b,metric,value
-specimen_id,item_type,metric,annotator_a,annotator_b,n,mean,sd,min,max
-```
-
-汇总导出写进 `LithicAnalyst/exports/<日期_时间>/`：`measurements.csv`（每件一行）以及其他各类合并后的 CSV、`landmarks.tps`、`manifest.json`，有失败时另有 `failures.csv`（`file,reason`），有多位标注者时另有 `icc.csv`：
-
-```
-measure,n_specimens,n_raters,icc
-```
-
-测量 CSV 另有 `area_scar,area_cortex,area_joint,area_damage,cortex_ratio`（表面区域）、`nodule_radius,nodule_fit_rms`（石皮拟合球）和 `volume_upper,volume_lower,volume_ratio`（上下体积切分，只有石核有值，石片和通用这几列留空），最后一列 `file` 为模型文件（文件夹中为相对路径）。汇总导出的 `configuration.csv` 和 `flaking_surfaces.csv` 只含有体积构型的模型，最后也有一列 `file`。`configuration.csv` 的第二列 `model` 为 `box` 或 `bicone`；双锥时剥片面关系、台面关系、总体极性留空，`flaking_surfaces.csv` 每个剥片锥一行（`faces` 为 `upper` / `lower`），`scar_vectors.csv` 的 `platform_face` 留空。
-
-## License
-
-MIT
+MIT © 2026 Peiyuan Xiao, see [LICENSE](LICENSE). Please keep the copyright and licence notice when you modify or redistribute it. Bundled with the app: three.js and three-mesh-bvh (MIT), and the IBM Plex fonts (SIL Open Font License 1.1).

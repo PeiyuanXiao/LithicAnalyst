@@ -371,7 +371,8 @@ test('with reduced motion all is where it ends from the first frame', async ({ p
   });
   await page.goto(APP_URL);
   const first = await page.evaluate(() => (window as unknown as { firstFrame: Promise<{ opacity: string[]; transform: string[]; animations: number }> }).firstFrame);
-  expect(first.opacity).toHaveLength(18);
+  // (19 with the credit line under the version)
+  expect(first.opacity).toHaveLength(19);
   expect(new Set(first.opacity)).toEqual(new Set(['1']));
   expect(new Set(first.transform)).toEqual(new Set(['none']));
   expect(first.animations).toBe(0);

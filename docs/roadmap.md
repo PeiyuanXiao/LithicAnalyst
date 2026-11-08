@@ -2439,6 +2439,32 @@ GM 面板加一个开关「显示表面半地标」，打开时在当前标本�
 
 > 完成：导入用户修订的 `i18n/texts.xlsx`：英文 158 条、中文 148 条改动，新增意大利语、法语各 854 条（全部译完）。`LANGS` 为英、中、意、法；起始页语言按钮依次切换四种语言。顶栏放不下时 `fitTopbar` 先收起模式名称、再收起顶栏按钮文字（英文在 1280 px 下有技术轴标签时也会触发）；切换语言后三维视图里的标签（技术轴、台面端点、测量示意）立即换成新语言。体积构型面板宽 320 → 360 px（标题和「主轴」胶囊在法语下要 345 px）。端到端测试里断言旧文字的地方已更新。
 
+## 阶段 26　安装为网页应用 ✅ 2026-11-07
+
+用户确定（2026-11-07）。放在网站上的 LithicAnalyst 可以像普通软件一样安装：开始菜单、桌面、任务栏上有图标和名字，在独立窗口里打开，断网可用。本地单文件版不变。网址、是否另做首页，等发布时再定。
+
+- **打包**：`npm run pages`（先 `npm run build`）把 `dist/index.html` 包装成 `dist/pages/`：页面（在主题脚本之后加应用清单、标题栏颜色、触屏图标和注册离线缓存的脚本，其余一字不改）、`manifest.webmanifest`、`sw.js`、`icons/`。清单的 `id`、`start_url`、`scope` 都是 `./`，网站放在哪个文件夹都行。`dist/index.html` 本身不改，原则 18 对本地文件照旧成立。
+- **试用**：`npm run pages -- --serve` 在 `http://localhost:4173/` 提供（`--port <n>` 换端口），用 Chrome 或 Edge 打开，点地址栏右侧的安装按钮。
+- **离线与更新**：第一次访问就把整站存进本机；之后先用存下的，同时在后台取新的（绕过 HTTP 缓存），新版本在下次启动时生效，不在使用中途替换。`sw.js` 第一行带版本号和整站的哈希，每次构建浏览器都会重新安装它。页面必须存下；网站缺图标之类的文件时只跳过那个文件。
+- **标题栏颜色**跟随软件的深浅色，取顶栏的 `--surface-head`：浅色 `#efeadf`，深色 `#151716`。
+- **图标**：`scripts/app-icons.mjs` 用 `logo-small.svg` 原样的几何，墨色图形放在米色圆角底板（`#f0ebe0`）上，下面是起始页的四色条；生成 `src/assets/brand/app-icon/` 里的两张 SVG（圆角版、可裁切的满版）和 192、512、512 可裁切、180 触屏四张 PNG。logo 改了再运行一次（需要 Playwright 的 Chromium）。
+- **发布**（2026-11-08 接入）：`.github/workflows/pages.yml` 改为在 GitHub 上发布 Release 时运行：`npm run pages`，把单文件以 `LithicAnalyst-<版本>.html` 附到这次发布，并把 `dist/pages` 发布到 GitHub Pages；推送到 `main` 不再更新在线版。步骤见 `docs/developing.md`「发布新版本」。
+
+> 完成：`scripts/webApp.ts`（`webManifest`、`serviceWorker`、`withWebApp`、`packWebApp`、`serveDir`）、`scripts/pages.ts`、`scripts/app-icons.mjs`、`src/assets/brand/app-icon/`；`tests/webApp.test.ts`；`e2e/webApp.spec.ts`（在本机用 http 提供：可安装、清单里的图标都在、访问过一次后断网能打开、新版本下次启动生效、标题栏颜色跟随外观、单文件不含清单和离线缓存）。
+
+## 阶段 27　署名、引用与许可 ✅ 2026-11-08
+
+用户确定（2026-11-08，导师建议）：广泛分享之前，程序和仓库里都要明显写出作者、仓库地址（欢迎在那里提功能建议）或邮箱、APA 格式的引用，以及 MIT 许可证。作者署名 Peiyuan Xiao（单独作者，不写单位），公开邮箱 pyxiao.sci@gmail.com。
+
+- **单一来源**：作者、邮箱、主页、仓库地址写在 `package.json`（`author`、`repository`、`bugs`、`homepage`），版权行取自 `LICENSE`（`Copyright (c) 2026 Peiyuan Xiao`）；`vite.config.ts` 读出后定义为 `__APP_ABOUT__`，界面、导出和构建出的文件都从这里取。
+- **「?」对话框**改名「帮助」，分两页：「关于」（默认）和「快捷键」。「关于」：小标志、名称和版本、版权行；作者、源代码（GitHub 链接）、建议与问题（GitHub Issues · 邮箱）、引用（APA，标题斜体，「复制」按钮复制纯文本；没有剪贴板时选中文字）、许可证（链接到仓库的 LICENSE）、第三方组件（three.js、three-mesh-bvh：MIT；IBM Plex：SIL OFL 1.1）。只有标签和链接，没有说明文字。顶栏按钮打开上次看的一页；? 键直接打开快捷键。
+- **起始页**：版本号下方右对齐一行「© 2026 Peiyuan Xiao · MIT License」，不占版面（绝对定位），起始页的布局和参考截图不变。
+- **文件本身**：构建出的 HTML 第二行是注释 `<!-- LithicAnalyst <版本> · © <版权> · MIT License · <仓库地址> -->`，`<head>` 里有 `<meta name="author">`；`dist/artifact.html` 同样保留。导出的 `manifest.json` 的 `app` 增加 `author`、`license`、`repository`、`citation`。
+- **引用**：APA 第 7 版软件格式 `Xiao, P. (<年>). LithicAnalyst (Version <版本>) [Computer software]. GitHub. <仓库地址>`，年份取构建的年份。以后有了预印本或软件 DOI，改 `CITATION.cff` 的 `preferred-citation` 和 `src/core/citation.ts`。
+- **仓库**：`CITATION.cff`；`.github/ISSUE_TEMPLATE/` 下功能建议、问题报告两个模板和 `config.yml`（邮件联系）。README 重写为英文简版（按导师给的结构：徽章、简介、引用（APA、文中写法、BibTeX、方法出处）、下载与使用、反馈、许可），原来的中文功能说明删去（数据列见 `docs/project-format.md`，旧文在 git 历史里）。`CLAUDE.md` 改为只留在本地（`.gitignore`）。
+
+> 完成：`src/core/citation.ts`（`apaName`、`apaAuthors`、`apaCitationParts`、`apaCitation`）、`src/ui/about.ts`（`aboutPanel`、`creditLine`、`appInfo`）；`vite.config.ts` 的 `credit()` 插件；`tests/citation.test.ts`；`e2e/about.spec.ts`（起始页的版权行在版本号和卡片之间、关于页的链接和引用、复制引用、记住上次的一页、? 键打开快捷键、中文标题、构建出的文件开头的注释和 author）。`e2e/shell.spec.ts`、`e2e/look.spec.ts` 打开帮助后先切到快捷键。
+
 ## 以后再议
 
 - 自动补洞后再算体积

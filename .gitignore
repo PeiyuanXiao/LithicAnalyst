@@ -17,3 +17,6 @@ playwright-report/
 
 # Interface text table (npm run i18n -- export)
 i18n/
+
+# The coding assistant's working instructions: kept on the author's computer
+CLAUDE.md

@@ -1,4 +1,5 @@
 import { SPECIMEN_TYPES, type SpecimenType } from '../core/fields';
+import { creditLine } from './about';
 import { BRAND, brandEl, brandInner, brandPrefix, svgFrom } from './brand';
 import { h } from './dom';
 import { getLang, LANGS, setLang, t, textIn, type Lang } from './i18n';
@@ -83,6 +84,7 @@ export function buildStartPage(onEnter: (type: SpecimenType) => void): StartPage
           { class: 'start-title' },
           h('div', { class: 'start-wm' }, wordmark),
           h('div', { class: 'start-meta' }, stripe('start-bar', [1, 1.1, 1.2, 1.3]), h('span', { class: 'start-version st-fade', id: 'start-version', style: 'animation-delay: 1.35s' }, `v${__APP_VERSION__}`)),
+          h('div', { class: 'start-credit st-fade', id: 'start-credit', style: 'animation-delay: 1.35s' }, creditLine()),
         ),
       ),
       h('div', { class: 'start-cards' }, ...cards.map((c) => c.wrap)),

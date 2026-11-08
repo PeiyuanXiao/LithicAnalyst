@@ -427,6 +427,10 @@ test('an empty value says why: an open mesh has no ERP', async ({ page }) => {
   expect((await retouch(page))!.removed_volume).toBeGreaterThan(0);
   const cell = page.locator('#retouch-erp');
   await expect(cell).toHaveText('—');
+  // the row is out of view in the sidebar: scroll to it and let the scroll event go by first. hover() alone
+  // scrolls and moves the pointer at once, and the event, a frame later, can cancel the tip about to show
+  await cell.scrollIntoViewIfNeeded();
+  await nextFrames(page);
   await cell.hover();
   await expect(page.locator('.tip')).toHaveText('Mesh not closed: volume unreliable');
   await page.mouse.move(5, 5);

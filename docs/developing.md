@@ -27,7 +27,7 @@ git commit -m "简短说明这次改了什么"
 git push
 ```
 
-推送到 `main` 后，GitHub Actions 会自动跑测试；启用 Pages 后还会自动更新网页。
+推送到 `main` 后，GitHub Actions 会自动跑测试。在线版只在发布新版本时更新（见下面「发布新版本」）。
 
 ## 在 RStudio 中
 
@@ -43,15 +43,19 @@ git push
 
 ## 发布新版本
 
-1. 修改 `package.json` 里的 `version`，并在 `CHANGELOG.md` 写上变化。
-2. 提交后打标签并推送：
+第一次发布前设置一次：
 
-   ```bash
-   git tag v0.2.0
-   git push --tags
-   ```
+- Settings → Pages → Build and deployment 的 Source 选 **GitHub Actions**。
+- Settings → Environments → `github-pages` → Deployment branches and tags：加一条规则，类型选 Tag，填 `v*`（发布是从标签运行的，默认只允许 `main`）。
+- 在 Zenodo 用 GitHub 登录，头像菜单 → GitHub → Sync now，打开 LithicAnalyst 的开关。之后每次发布都会存档并给 DOI。
 
-3. 在 GitHub 的 Releases 页面基于这个标签创建发布，附上 `dist/index.html`。
+每次发布：
+
+1. 修改 `package.json` 的 `version` 和 `CITATION.cff` 的 `version`、`date-released`；把 `CHANGELOG.md` 的 Unreleased 改成版本号和日期。提交并推送。
+2. GitHub → Releases → Draft a new release：新建标签（如 `v0.2.0`），说明从 CHANGELOG 复制，Publish release。
+3. 之后自动完成：Actions 里的 Release 把 `LithicAnalyst-0.2.0.html` 附到这次发布，并把在线版换成这个版本；Zenodo 存档并给这个版本一个 DOI。
+
+在线版也可以在 Actions → Release → Run workflow 手动更新（用 `main` 的当前代码，不附文件）。
 
 ## 界面文字与翻译
 

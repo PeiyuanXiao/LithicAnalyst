@@ -530,7 +530,10 @@ test('screenshots: the five modes in both themes, the shortcuts, the profile pan
   await expect(page.locator('#profile-panel')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/profile-panel.png` });
   await page.locator('#btn-help').click();
-  await expect(page.locator('.modal')).toBeVisible();
+  await expect(page.locator('#help-about')).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/about.png` });
+  await page.locator('#help-tab-shortcuts').click();
+  await expect(page.locator('#help-cols')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/shortcuts.png` });
 });
 

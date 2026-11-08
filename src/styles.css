@@ -1302,6 +1302,7 @@ kbd {
 }
 
 .start-title {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1370,6 +1371,17 @@ kbd {
   font-family: var(--font-data);
   font-size: 13px;
   color: var(--ink-3);
+}
+
+/* who made it and its licence, under the version: out of the flow, so the page is laid out as the reference has it */
+.start-credit {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .start-cards {
@@ -3138,6 +3150,82 @@ input[type="checkbox"]:disabled {
 .help-hold,
 .help-mouse {
   color: var(--ink-2);
+}
+
+/* the "?" dialog's two pages: about, shortcuts */
+.help-tabs {
+  display: inline-flex;
+  margin-bottom: 14px;
+}
+
+/* about: the name, then labels and their values, as the shortcuts are laid out */
+.about {
+  font-size: var(--step--1);
+}
+
+.about-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.about-logo {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  color: var(--ink);
+}
+
+.about-name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.about-version,
+.about-credit {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.about-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 18px;
+  margin: 0;
+  align-items: baseline;
+}
+
+.about-list dt {
+  color: var(--ink-2);
+}
+
+.about-list dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.about-cite {
+  margin: 0 0 6px;
+  max-width: 72ch;
+  user-select: text;
+}
+
+.about a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.about a:hover {
+  color: var(--ink);
 }
 
 /* ------------------------------------------------------------ narrow screens */

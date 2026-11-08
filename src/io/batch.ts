@@ -170,7 +170,8 @@ export function failuresCsv(failures: readonly BatchFailure[], bom: boolean): st
 
 /** What an export folder holds and how it was made (`manifest.json`). */
 export interface Manifest {
-  app: { name: string; version: string };
+  /** The program: its version, author, licence and repository, and how to cite this version (APA). */
+  app: { name: string; version: string; author: string; license: string; repository: string; citation: string };
   createdAt: string;
   /** One specimen, or every model of the folder. */
   scope: 'specimen' | 'folder';

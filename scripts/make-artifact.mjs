@@ -6,8 +6,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const src = readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');
 
 const pick = (re) => [...src.matchAll(re)].map((m) => m[0]);
+// who made it, under what licence, where it lives (vite.config.ts, credit()): kept at the top here too
+const credit = pick(/<!-- LithicAnalyst [^\n]*?-->/g).slice(0, 1);
 const title = pick(/<title>[\s\S]*?<\/title>/g)[0] ?? '<title>LithicAnalyst</title>';
-const metas = pick(/<meta name="(?:claude:viewport-fit-sides|description)"[^>]*>/g);
+const metas = pick(/<meta name="(?:claude:viewport-fit-sides|description|author)"[^>]*>/g);
 const links = pick(/<link\b[^>]*>/g).filter((l) => /fonts\.(googleapis|gstatic)\.com/.test(l));
 const styles = pick(/<style[^>]*>[\s\S]*?<\/style>/g);
 // the theme is set before the first frame (index.html), then the app itself
@@ -18,6 +20,6 @@ const bodyMarkup = (bodyMatch ? bodyMatch[1] : '<div id="app"></div>').replace(/
 
 if (!scripts.length) throw new Error('No inline module script found in dist/index.html');
 
-const out = [title, ...metas, ...links, ...themeInit, ...styles, bodyMarkup, ...scripts].join('\n');
+const out = [...credit, title, ...metas, ...links, ...themeInit, ...styles, bodyMarkup, ...scripts].join('\n');
 writeFileSync(new URL('../dist/artifact.html', import.meta.url), out);
 console.log(`artifact.html: ${(out.length / 1024).toFixed(0)} KiB`);

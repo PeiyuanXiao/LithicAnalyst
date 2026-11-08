@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/make-artifact.mjs",
     "preview": "vite preview",
+    "pages": "npm run build && rolldown scripts/pages.ts --platform node --format esm --file node_modules/.cache/lithicanalyst-pages.mjs && node node_modules/.cache/lithicanalyst-pages.mjs",
     "test": "vitest run",
     "e2e": "tsc --noEmit -p e2e && npm run build && playwright test",
     "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
@@ -15,6 +16,19 @@
     "i18n": "rolldown scripts/i18n.ts --platform node --format esm --external typescript --file node_modules/.cache/lithicanalyst-i18n.mjs && node node_modules/.cache/lithicanalyst-i18n.mjs"
   },
   "license": "MIT",
+  "author": {
+    "name": "Peiyuan Xiao",
+    "email": "pyxiao.sci@gmail.com",
+    "url": "https://peiyuanxiao.github.io/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PeiyuanXiao/LithicAnalyst.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PeiyuanXiao/LithicAnalyst/issues"
+  },
+  "homepage": "https://github.com/PeiyuanXiao/LithicAnalyst#readme",
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.3.0",
     "@fontsource/ibm-plex-sans": "5.3.0",

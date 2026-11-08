@@ -111,6 +111,7 @@ import { Popovers, onViewport } from './popover';
 import { clear, h, icon, icon20, ICONS, ICONS20 } from './dom';
 import { Feedback } from './feedback';
 import { BRAND, brandEl, svgFrom } from './brand';
+import { aboutPanel, appInfo } from './about';
 import { dateLocale, getLang, htmlLang, langInfo, LANGS, onLangChange, setLang, t } from './i18n';
 import { buildSidebar, type RefreshKind, type Sidebar } from './sidebar';
 import { buildStartPage, RINGS, type StartPage } from './startPage';
@@ -426,6 +427,8 @@ export class App implements AppApi {
   private mainEl!: HTMLElement;
   /** A module has been chosen: the workspace shows, with or without a model. */
   private entered = false;
+  /** The page the "?" button opens the dialog on: the about page first, then the one last looked at. */
+  private helpTab: 'about' | 'shortcuts' = 'about';
   private startOnScreen = false;
   private readonly statusEl: HTMLElement;
   private statusKey = '';
@@ -4582,7 +4585,7 @@ export class App implements AppApi {
 
   private manifestBase(scope: Manifest['scope'], kind: Manifest['kind'], options: Record<string, unknown>): Omit<Manifest, 'files' | 'specimens' | 'failures'> {
     return {
-      app: { name: 'LithicAnalyst', version: __APP_VERSION__ },
+      app: appInfo(),
       createdAt: new Date().toISOString(),
       scope,
       folder: this.workspace?.name ?? null,
@@ -6568,7 +6571,7 @@ export class App implements AppApi {
           break;
       }
       if (e.key === '?' || (e.shiftKey && e.code === 'Slash')) {
-        this.showHelp();
+        this.showHelp('shortcuts');
         return;
       }
       const digit = /^Digit([1-9])$/.exec(e.code) ?? /^Numpad([1-9])$/.exec(e.code);
@@ -6660,8 +6663,12 @@ export class App implements AppApi {
     }, 300);
   }
 
-  /** The shortcuts: two columns (general and mouse; the modes), keys as key caps, no explanations. */
-  private showHelp(): void {
+  /**
+   * The "?" dialog: the about page (author, links, how to cite, licence) and the shortcuts (two columns: general and
+   * mouse; the modes; keys as key caps, no explanations). The button opens it on the page last looked at, the about page
+   * the first time; the ? key on the shortcuts.
+   */
+  private showHelp(tab: 'about' | 'shortcuts' = this.helpTab): void {
     const specimen = this.store.state.specimen.type;
     const keyCount = (f: FieldDef | undefined) => (f ? keyedOptions(f, specimen).length : 0);
     const count = Math.max(keyCount(numberKeyField(SCAR_FIELDS)), keyCount(numberKeyField(CURVE_FIELDS)), keyCount(numberKeyField(REGION_FIELDS))) || 5;
@@ -6745,7 +6752,27 @@ export class App implements AppApi {
         : []),
       ...group(t('appMode.present'), [['X', 'help.k.section']]),
     );
-    const body = h('div', { class: 'help-cols', id: 'help-cols' }, left, right);
+    const shortcuts = h('div', { class: 'help-cols', id: 'help-cols' }, left, right);
+    const about = aboutPanel();
+    const show = (page: 'about' | 'shortcuts') => {
+      this.helpTab = page;
+      about.hidden = page !== 'about';
+      shortcuts.hidden = page !== 'shortcuts';
+    };
+    const tabs = segmented(
+      'help-tab',
+      null,
+      [
+        { value: 'about', label: t('help.tab.about') },
+        { value: 'shortcuts', label: t('help.tab.shortcuts') },
+      ],
+      tab,
+      (v) => show(v === 'shortcuts' ? 'shortcuts' : 'about'),
+    );
+    tabs.el.classList.add('help-tabs');
+    tabs.el.setAttribute('aria-label', t('help.title'));
+    show(tab);
+    const body = h('div', { class: 'help-body' }, tabs.el, about, shortcuts);
     void this.feedback.choose(t('help.title'), body, [{ id: 'close', label: t('dlg.close'), kind: 'plain' }], { wide: true });
 
   }
