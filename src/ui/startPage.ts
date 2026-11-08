@@ -1,8 +1,7 @@
 import { SPECIMEN_TYPES, type SpecimenType } from '../core/fields';
 import { BRAND, brandEl, brandInner, brandPrefix, svgFrom } from './brand';
 import { h } from './dom';
-import { getLang, LANGS, setLang, t, type Lang } from './i18n';
-import { STRINGS } from './strings';
+import { getLang, LANGS, setLang, t, textIn, type Lang } from './i18n';
 import { getTheme, toggleThemeFrom } from './theme';
 
 /** The rings behind the logo (also, still and fainter, behind the empty view). */
@@ -97,8 +96,8 @@ export function buildStartPage(onEnter: (type: SpecimenType) => void): StartPage
   const paint = (): void => {
     const next = nextLang();
     langBtn.textContent = next.short;
-    // in the language it goes to
-    langBtn.setAttribute('aria-label', STRINGS['start.switchLang'][next.code]);
+    // in the language it goes to (its name, until that is translated)
+    langBtn.setAttribute('aria-label', textIn(next.code, 'start.switchLang') ?? next.label);
     for (const c of cards) {
       const name = t(`specimen.type.${c.type}`);
       c.name.textContent = name;

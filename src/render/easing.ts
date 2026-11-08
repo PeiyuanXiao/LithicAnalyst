@@ -43,8 +43,6 @@ export const EASE_POP = cubicBezier(0.3, 1.6, 0.5, 1);
 export const VIEW_MOTION = {
   /** A landmark just placed grows from nothing. */
   LANDMARK_POP_MS: 220,
-  /** An arrow just drawn grows from its tail along its direction. */
-  ARROW_GROW_MS: 400,
   /** A measure's drawing fades in. */
   HINT_FADE_MS: 150,
 } as const;

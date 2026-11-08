@@ -11,9 +11,11 @@ import type { BiconeRole, BiconeSide, ConfigFace, ConfigModel, ConfigRole, Polar
 
 export type Vec3 = [number, number, number];
 
+/** Interface text: English and Chinese always; further languages (ui/i18n.ts LANGS) where translated, English standing in. */
 export interface LocalizedText {
   en: string;
   zh: string;
+  [lang: string]: string | undefined;
 }
 
 export type MeshFormat = 'ply' | 'stl' | 'obj';

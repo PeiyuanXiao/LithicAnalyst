@@ -53,8 +53,23 @@ git push
 
 3. 在 GitHub 的 Releases 页面基于这个标签创建发布，附上 `dist/index.html`。
 
+## 界面文字与翻译
+
+界面上的所有文字都在 `src/ui/strings.ts`，字段和选项的标签在 `src/core/fields.ts`。整理、核对和翻译用一张表：
+
+```bash
+npm run i18n -- export                    # 生成 i18n/texts.xlsx：每行一条文字，每种语言一列
+npm run i18n -- import i18n/texts.xlsx    # 把表里改过的文字写回源代码（--dry 只列出会改什么）
+npm run i18n -- check                     # 只检查：占位符、空白、缺少或没用到的文字、同词异译
+```
+
+- 在 Excel 或 WPS 里直接改语言列的单元格，保存为 .xlsx；不要改 `id` 列。表里的「说明 readme」页写了规则。
+- 加一种语言：在语言列后面加一列，表头写语言代码（`ja`、`ko`、`fr`、`de`、`es`、`pt-BR`、`zh-TW`……），在 `@lang.name`、`@lang.short` 两行写它自己的名称和语言按钮上的缩写，然后导入。没译的格子显示英文，可以分几次译完。
+- `{n}`、`{name}` 这样的占位符每种语言都要保留；英文和中文不能留空。有错误时导入什么都不写，只列出错误。
+- 导入后运行 `npm test`、`npm run build`。
+
 ## 约定
 
 - 项目文件格式变化要同步更新 `docs/project-format.md` 和测试；旧文件读不对时要提高 `formatVersion`。
-- 界面文字放在 `src/ui/strings.ts`，中英文都要写；界面保持精简，不放操作说明。
+- 界面文字放在 `src/ui/strings.ts`，中英文都要写；界面保持精简，不放操作说明。批量修改和翻译用上面的 `npm run i18n`。
 - 新增字段改 `src/core/fields.ts`，CSV 和界面会自动跟上。

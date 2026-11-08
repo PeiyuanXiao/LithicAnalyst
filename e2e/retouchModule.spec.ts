@@ -270,7 +270,7 @@ test('the frame and its direction: the ends exchanged on the plan and in invasiv
   await expect(page.locator('#retouch-plan-flip')).toBeVisible();
   // the technical axis, asked for: there is none
   await page.locator('#retouch-plan-axis').selectOption('technical');
-  await expect(page.locator('#retouch-plan-empty')).toContainText('technical axis');
+  await expect(page.locator('#retouch-plan-empty')).toContainText('Technological axis');
   await expect(page.locator('#retouch-plan-flip')).toBeHidden();
   await expect.poll(async () => (await retouch(page))?.reasons.invasiveness).toBe('no_axis');
   await page.locator('#retouch-plan-axis').selectOption('auto');
@@ -428,7 +428,7 @@ test('an empty value says why: an open mesh has no ERP', async ({ page }) => {
   const cell = page.locator('#retouch-erp');
   await expect(cell).toHaveText('—');
   await cell.hover();
-  await expect(page.locator('.tip')).toHaveText('The mesh is not closed: no reliable volume');
+  await expect(page.locator('.tip')).toHaveText('Mesh not closed: volume unreliable');
   await page.mouse.move(5, 5);
   // the readings under the section too
   await nextFrames(page);

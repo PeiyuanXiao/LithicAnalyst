@@ -38,7 +38,7 @@ import { SectionTool } from '../tools/sectionTool';
 import { ClickTool } from '../tools/clickTool';
 import { REGION_COLORS, RegionLayer, regionColorOf } from '../render/regionLayer';
 import { checkRelations, harrisLayout, relationInputs, relationProblems, type HarrisLayout, type RelationChecks } from '../compute/relations';
-import { harrisSvg, type HarrisStyle } from '../render/harris';
+import { HARRIS_SCREEN, harrisSvg, type HarrisStyle } from '../render/harris';
 import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import { RelationTool, type ScarPick } from '../tools/relationTool';
 import { SequenceTool } from '../tools/sequenceTool';
@@ -111,13 +111,26 @@ import { Popovers, onViewport } from './popover';
 import { clear, h, icon, icon20, ICONS, ICONS20 } from './dom';
 import { Feedback } from './feedback';
 import { BRAND, brandEl, svgFrom } from './brand';
-import { getLang, htmlLang, langInfo, LANGS, onLangChange, setLang, t } from './i18n';
+import { dateLocale, getLang, htmlLang, langInfo, LANGS, onLangChange, setLang, t } from './i18n';
 import { buildSidebar, type RefreshKind, type Sidebar } from './sidebar';
 import { buildStartPage, RINGS, type StartPage } from './startPage';
 import { getTheme, onThemeChange, toggleThemeFrom } from './theme';
 import { tip, tips } from './tooltip';
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
+/**
+ * The top bar in the room it has. Where its words do not fit (a narrow window, or a language with longer
+ * ones), it takes the narrow window's steps in turn: the modes' names go (icons stay), then the names on
+ * the header buttons. Each time it is measured afresh, so the names come back where they fit again.
+ */
+function fitTopbar(bar: HTMLElement): void {
+  const over = () => bar.scrollWidth > bar.clientWidth + 1;
+  bar.classList.remove('is-tight', 'is-tighter');
+  if (!over()) return;
+  bar.classList.add('is-tight');
+  if (over()) bar.classList.add('is-tighter');
+}
 
 /** How near a curve the cursor must be for the working edge tool to take it. */
 /** Below this width of the view the status pills are one pill with the count. */
@@ -875,7 +888,7 @@ export class App implements AppApi {
     tip(help, t('header.help'), '?');
     this.specimenBar = this.buildSpecimenBar();
     this.appModeSeg = this.buildModeSwitch();
-    return h(
+    const bar = h(
       'header',
       { class: 'topbar' },
       h(
@@ -887,7 +900,7 @@ export class App implements AppApi {
       this.appModeSeg.el,
       h(
         'nav',
-        { class: 'top-actions', 'aria-label': 'File' },
+        { class: 'top-actions', 'aria-label': t('header.file') },
         h('div', { class: 'menu-wrap' }, this.fileBtn, menu),
         this.saveBtn,
         h('span', { class: 'hdr-sep', 'aria-hidden': 'true' }),
@@ -899,6 +912,11 @@ export class App implements AppApi {
         help,
       ),
     );
+    // a window as it is, a language's longer words, the specimen's name: fitted whenever a part changes size
+    const watch = new ResizeObserver(() => (bar.isConnected ? fitTopbar(bar) : watch.disconnect()));
+    watch.observe(bar);
+    for (const part of bar.children) watch.observe(part);
+    return bar;
   }
 
   /** Save is a plain button; a dot on it while there are changes not saved (a project file or the folder's copy). */
@@ -1437,6 +1455,12 @@ export class App implements AppApi {
     this.updateMeshDependentUi();
     this.updateCursor();
     this.queueCoords();
+    // the view's own labels (the technical axis, a flake's landmarks, a measure's drawing) in the new language too
+    if (this.hasMesh()) {
+      this.syncAnnotations();
+      this.refreshHint();
+      this.viewer?.requestRender();
+    }
   }
 
   private updateUndoButtons(): void {
@@ -5670,7 +5694,7 @@ export class App implements AppApi {
     el.hidden = !shown;
     if (!shown) return;
     if (!wasShown) this.harrisFit?.();
-    body.innerHTML = this.store.state.scars.length ? harrisSvg(this.harrisLayoutNow(), this.harrisStyle(this.selectedScar())) : '';
+    body.innerHTML = this.store.state.scars.length ? harrisSvg(this.harrisLayoutNow(), this.harrisStyle(this.selectedScar()), HARRIS_SCREEN) : '';
   }
 
   /** The scar the selection shows: a selected scar, or a selected region's scar. */
@@ -6257,7 +6281,7 @@ export class App implements AppApi {
       return;
     }
     if (!saved.scars.length && !saved.curves.length && !saved.measurements.length && !saved.flake.axis) return;
-    const when = new Date(entry.savedAt).toLocaleString(getLang() === 'zh' ? 'zh-CN' : 'en-GB');
+    const when = new Date(entry.savedAt).toLocaleString(dateLocale());
     const what = countsText(saved);
     const ok = await this.feedback.confirm(
       t('dlg.restore.title'),
@@ -6927,8 +6951,7 @@ export class App implements AppApi {
       nextCurveType: () => this.nextCurveType,
       /** A landmark's diameter on the screen as drawn, in CSS pixels. */
       landmarkDiameter: (id: string) => this.landmarkLayer?.screenDiameter(id) ?? null,
-      /** How much of an arrow is drawn as it grows in (1: all of it); whether anything in the view is still coming in. */
-      arrowGrown: (id: string) => this.arrows?.grownShare(id) ?? null,
+      /** Whether anything in the view is still coming in. */
       tweening: () => this.viewer?.tweening ?? false,
       unsaved: () => this.store.history.dirty,
       /** The busy overlay over the view, as loading shows it (null: gone). */

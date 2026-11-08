@@ -42,13 +42,13 @@ test('a flake: technical axis, platform outline and ends give the measurements; 
   await expect(page.locator('#mode-axis')).toBeHidden();
   await setType(page, 'flake');
   await expect(page.locator('#mode-axis')).toBeVisible();
-  await expect(page.locator('#frame-pill')).toHaveText('PCA');
+  await expect(page.locator('#frame-pill')).toHaveText('Principal axes');
   await expect.poll(async () => (await measures(page))?.morph_length ?? null).not.toBeNull();
 
   await drawAxis(page);
   const st = await state(page);
   expect(st.specimen.frame?.source).toBe('technical_axis');
-  await expect(page.locator('#frame-pill')).toHaveText('Technical axis');
+  await expect(page.locator('#frame-pill')).toHaveText('Technological axis');
   // pressed beside P: the start went onto the ridge, a vertex, as a curve point does
   expect(Math.hypot(...st.flake.axis!.start)).toBeLessThan(1e-3);
   // the point of percussion: generated, at the start of the arrow, locked
@@ -231,7 +231,7 @@ test('the axis: a new one replaces the old, its ends drag, delete takes the poin
   const st = await state(page);
   expect(st.flake.axis).toBeNull();
   expect(st.landmarks.some((l) => l.code === 'pop')).toBe(false);
-  await expect(page.locator('#frame-pill')).toHaveText('PCA');
+  await expect(page.locator('#frame-pill')).toHaveText('Principal axes');
 });
 
 test('the type: stays with the project file, the next new model starts with it, and the outline has one curve', async ({ page }) => {
@@ -477,7 +477,7 @@ test('the tools that place things click through the labels; the select tool take
   // the whole flake seen from its ventral face: the label over the model
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
   await nextFrames(page, 3);
-  const label = page.locator('.arrow-label', { hasText: 'Technical axis' });
+  const label = page.locator('.arrow-label', { hasText: 'Technological axis' });
   const box = (await label.boundingBox())!;
   const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   // the curve tool: the model under it takes the point

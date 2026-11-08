@@ -37,8 +37,11 @@ analysis  outside this repository (R, Python, …) reads the CSV or the project 
 5. **Tools implement one interface** (`tools/tool.ts`) and are registered with the
    `ToolController`. The controller listens on the viewport in the capture phase, so a tool
    can claim a press before the camera controls see it.
-6. **Interface text lives in `ui/strings.ts`** with Chinese and English for every key. Keep
-   the interface lean: labels and controls, no explanatory paragraphs.
+6. **Interface text lives in `ui/strings.ts`** (the labels of fields and options in
+   `core/fields.ts`) with English and Chinese for every key; a further language has a property of
+   its own where it is translated, and English stands in where it is not (`t`, `tl`). Keep the
+   interface lean: labels and controls, no explanatory paragraphs. The texts go to a spreadsheet
+   and back with `npm run i18n` (see "Interface text" below).
 
 ## Mesh geometry
 
@@ -128,7 +131,11 @@ keeps the selection and the undo history.
   into a stored ZIP, `io/zip.ts`).
 * **Top bar**: the specimen button (ID and unit; its panel holds ID, unit, annotator, notes and
   the model file); the mode switch in the middle; the File menu, Save, undo and redo, the
-  language menu (`LANGS` in `ui/i18n.ts`), the theme switch and the shortcuts. Menus and small
+  language menu (`LANGS` in `ui/i18n.ts`), the theme switch and the shortcuts. Where its words do not
+  fit (a language with longer ones, a long specimen name), `fitTopbar` takes the narrow window's steps
+  in turn, measured afresh whenever a part of the bar changes size: `.is-tight` (the modes' icons
+  only), then `.is-tighter` (the header buttons' icons only). A change of language also redraws the
+  view's labels (`App.rebuildChrome` → `syncAnnotations`). Menus and small
   panels (`ui/popover.ts`, one `Popovers` shared through `AppApi.popovers`) close on a press
   outside or Esc. The display settings are a panel over the view
   (`Sidebar.displayEl`, mounted by `App.buildDisplayControl`): rows of a label and its control, with
@@ -227,9 +234,9 @@ The rules are in CLAUDE.md (外观, 动效). How they are kept:
 * **The view's tweens** (`render/viewer.ts`, `render/easing.ts`): `Viewer.tween(ms, step)` draws a
   frame every frame only while one runs, then rendering is on demand again; a press on the view and a
   figure (`makeFigure`) finish them (`finishTweens`), reduced motion gives the end at once. Only what
-  the user does by hand starts one: a landmark placed (`LandmarkLayer.pop`, `EASE_POP`), an arrow
-  drawn (`ArrowLayer.grow`, from its tail), a measure's drawing coming into view (`HintLayer.show`
-  with `fadeIn`). Loading, undo, redo, generated and imported annotations draw at once.
+  the user does by hand starts one: a landmark placed (`LandmarkLayer.pop`, `EASE_POP`) and a
+  measure's drawing coming into view (`HintLayer.show` with `fadeIn`). A drawn arrow is there whole
+  at once. Loading, undo, redo, generated and imported annotations draw at once.
 
 ## Camera transitions
 
@@ -356,7 +363,9 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   use. "Next pair" turns the camera to the shared edge nearest the middle of a border.
 * `render/harris.ts` draws the matrix as SVG (shown in a floating viewport panel,
   `ui/floatingPanel.ts`: moved by its title bar, resized from its corner and folded, its place kept
-  in the `harrisPanel` pref and fitted into the view; exported as is); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
+  in the `harrisPanel` pref and fitted into the view). One drawing, two palettes: the panel uses
+  `HARRIS_SCREEN` (the shell's variables, so it follows the theme, with the selected scar in pale
+  amber and an amber line), the exported file `HARRIS_PRINT` (fixed colours, clear ground); `render/sequenceColor.ts` gives each sequence a hue and, in an ordered one,
   light (earliest) to dark (latest), used by the `sequence` colour mode for arrows and scar
   regions. Arrows and regions of a selected relation, or of the opened problems, are drawn
   highlighted (`ArrowLayer.setHighlight`, `App.emphasis`).
@@ -685,6 +694,23 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
   box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The longest stretch is what
   design principle 10 limits to about 100 ms.
+
+## Interface text
+
+`scripts/i18n.ts` (`npm run i18n -- export | import <file> | check`, bundled like the bench) with
+`scripts/i18nTable.ts`, which `tests/i18n.test.ts` tests. It finds every literal of language codes
+with English among them (`{ zh: '…', en: '…' }`) in `src/` with the TypeScript parser: in `STRINGS`
+its id is its key, elsewhere the file, the variable and the `key` / `value` of the objects it is in
+(`fields.scar.completeness.point_complete.short`). `export` writes `i18n/texts.xlsx` (not committed): a
+column per language, every cell text (so Excel reads nothing as a number, date or formula), plus where
+a text is seen, notes (placeholders to keep) and what the check found; the rows `@lang.name` and
+`@lang.short` hold `LANGS`. `import` reads the sheet `texts` (shared strings, runs and phonetic
+guides as Excel and WPS save them, by a small unzip over `node:zlib`), and rewrites only the literals
+that changed, in their own layout; a new language column becomes a property in every literal it has a
+text for and an entry in `LANGS`. An empty English or Chinese cell, placeholders unlike the English, or
+a new language without its name stops it with nothing written. `check` lists placeholders that differ,
+empty texts, keys the code asks for and the table lacks, keys no code names (whole, by a template
+prefix, or by a prefix passed as a literal), and one English text said two ways in Chinese and back.
 
 ## Hosting
 

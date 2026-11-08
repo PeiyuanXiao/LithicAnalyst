@@ -75,12 +75,12 @@ test('records relations by clicking arrows, checks them against the sequences li
   await reverse.click();
   expect(await relations(page)).toEqual([[s2, s1, 'a_cuts_b']]);
   await page.keyboard.press('3');
-  await expect(page.locator('#relation-chip-text')).toHaveText('S2 – S1 cannot tell');
+  await expect(page.locator('#relation-chip-text')).toHaveText('S2 – S1 indeterminate');
   await expect(page.locator('#relation-chip [data-choice="ind"]')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('1');
   expect(await relations(page)).toEqual([[s2, s1, 'a_cuts_b']]);
   await page.keyboard.press('ControlOrMeta+z');
-  await expect(page.locator('#relation-chip-text')).toHaveText('S2 – S1 cannot tell');
+  await expect(page.locator('#relation-chip-text')).toHaveText('S2 – S1 indeterminate');
   await page.keyboard.press('ControlOrMeta+Shift+z');
   await expect(page.locator('#relation-chip-text')).toHaveText('S2 cuts S1');
   expect((await state(page)).relations[0].id).toBe(st.relations[0].id);
@@ -145,7 +145,7 @@ test('records relations by clicking arrows, checks them against the sequences li
   // node ↔ selection
   await page.locator('#harris-body .hm-node', { hasText: 'S1' }).click();
   expect(await selection(page)).toBe(s1);
-  await expect(page.locator('#harris-body .hm-node', { hasText: 'S1' }).locator('rect')).toHaveAttribute('stroke-width', '3');
+  await expect(page.locator('#harris-body .hm-node', { hasText: 'S1' })).toHaveClass(/is-selected/);
 
   // change a relation in the sidebar: S3 – S2 cannot tell
   await page.locator('#relation-list .relation-row').nth(1).click();
@@ -288,5 +288,51 @@ test('picks a scar known only by its region, and selects the region from the mat
   await page.locator('#btn-display').click();
   await page.locator('#harris-body .hm-node', { hasText: 'S1' }).click();
   expect(await selection(page)).toBe(st.regions[0].id);
-  await expect(page.locator('#harris-body .hm-node', { hasText: 'S1' }).locator('rect')).toHaveAttribute('stroke-width', '3');
+  await expect(page.locator('#harris-body .hm-node', { hasText: 'S1' })).toHaveClass(/is-selected/);
+});
+
+test('the Harris matrix is drawn in the colours of the theme, and exported in print colours', async ({ page }) => {
+  await openApp(page);
+  await loadMesh(page, boxPly());
+  await viewFromTop(page);
+  await page.keyboard.press('a');
+  for (const y of [-6, 6]) await dragArrow(page, boxPoint(-10, y, 5), boxPoint(10, y, 5));
+  await page.keyboard.press('b');
+  await relate(page, onArrow(6), onArrow(-6));
+  await expect(page.locator('#harris-body .hm-node')).toHaveCount(2);
+  await expect(page.locator('#harris-body .hm-edge')).toHaveCount(1);
+  const look = () =>
+    page.evaluate(() => {
+      const css = (v: string) => {
+        const d = document.createElement('div');
+        d.style.color = `var(${v})`;
+        document.body.append(d);
+        const c = getComputedStyle(d).color;
+        d.remove();
+        return c;
+      };
+      const node = document.querySelector('#harris-body .hm-node:not(.is-selected)')!;
+      return {
+        panel: getComputedStyle(document.querySelector('#harris-panel')!).backgroundColor,
+        node: getComputedStyle(node.querySelector('rect')!).fill,
+        label: getComputedStyle(node.querySelector('text')!).fill,
+        line: getComputedStyle(document.querySelector('#harris-body .hm-edge')!).stroke,
+        vars: { pop: css('--surface-pop'), surface: css('--surface'), ink: css('--ink'), ink2: css('--ink-2') },
+      };
+    });
+  const light = await look();
+  await page.locator('#harris-panel').screenshot({ path: 'test-results/harris/light.png' });
+  expect([light.panel, light.node, light.label, light.line]).toEqual([light.vars.pop, light.vars.surface, light.vars.ink, light.vars.ink2]);
+  await page.locator('#btn-theme').click();
+  await page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.theme())).toBe('dark');
+  const dark = await look();
+  await page.locator('#harris-panel').screenshot({ path: 'test-results/harris/dark.png' });
+  expect([dark.panel, dark.node, dark.label, dark.line]).toEqual([dark.vars.pop, dark.vars.surface, dark.vars.ink, dark.vars.ink2]);
+  expect(dark.node).not.toBe(light.node);
+  expect(dark.label).not.toBe(light.label);
+  // the file is for print: its own colours, whatever the theme
+  const svg = await page.evaluate(() => window.lithicanalyst.harrisSvg());
+  expect(svg).not.toContain('var(--');
+  expect(svg).toContain('fill="#ffffff"');
 });

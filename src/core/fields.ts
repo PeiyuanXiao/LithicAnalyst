@@ -43,7 +43,7 @@ export interface FieldDef {
 export const SCAR_FIELDS: FieldDef[] = [
   {
     key: 'completeness',
-    label: { zh: '完整性', en: 'Completeness' },
+    label: { zh: '完整性', en: 'Completeness', it: 'Completezza', fr: 'Complétude' },
     type: 'enum',
     default: 'point_complete',
     numberKeys: true,
@@ -51,66 +51,66 @@ export const SCAR_FIELDS: FieldDef[] = [
     options: [
       {
         value: 'point_complete',
-        label: { zh: '可见打击点+尾端完整', en: 'Point of percussion + termination' },
-        short: { zh: '打击点+尾端', en: 'Point + term.' },
+        label: { zh: '可见打击点+尾端完整', en: 'Point of percussion + termination', it: 'Punto d’impatto + terminazione', fr: 'Point d’impact + terminaison' },
+        short: { zh: '打击点+尾端', en: 'Point + term.', it: 'Impatto + term.', fr: 'Impact + term.' },
       },
       {
         value: 'bulb_complete',
-        label: { zh: '可见负向打击泡+尾端完整', en: 'Negative bulb + termination' },
-        short: { zh: '负向泡+尾端', en: 'Bulb + term.' },
+        label: { zh: '可见负向打击泡+尾端完整', en: 'Negative bulb + termination', it: 'Controbulbo + terminazione', fr: 'Contre-bulbe + terminaison' },
+        short: { zh: '负向泡+尾端', en: 'Bulb + term.', it: 'Controb. + term.', fr: 'Contre-b. + term.' },
       },
       {
         value: 'proximal_missing',
-        label: { zh: '打击点缺失+尾端完整', en: 'Proximal end missing + termination' },
-        short: { zh: '仅尾端', en: 'Term. only' },
+        label: { zh: '打击点缺失+尾端完整', en: 'Proximal end missing + termination', it: 'Estremità prossimale mancante + terminazione', fr: 'Extrémité proximale manquante + terminaison' },
+        short: { zh: '仅尾端', en: 'Term. only', it: 'Solo term.', fr: 'Term. seule' },
       },
       {
         value: 'point_truncated',
-        label: { zh: '可见打击点+尾端缺失', en: 'Point of percussion, termination missing' },
-        short: { zh: '仅打击点', en: 'Point only' },
+        label: { zh: '可见打击点+尾端缺失', en: 'Point of percussion, termination missing', it: 'Punto d’impatto, terminazione mancante', fr: 'Point d’impact, terminaison manquante' },
+        short: { zh: '仅打击点', en: 'Point only', it: 'Solo impatto', fr: 'Impact seul' },
       },
       {
         value: 'bulb_truncated',
-        label: { zh: '可见负向打击泡+尾端缺失', en: 'Negative bulb, termination missing' },
-        short: { zh: '仅负向泡', en: 'Bulb only' },
+        label: { zh: '可见负向打击泡+尾端缺失', en: 'Negative bulb, termination missing', it: 'Controbulbo, terminazione mancante', fr: 'Contre-bulbe, terminaison manquante' },
+        short: { zh: '仅负向泡', en: 'Bulb only', it: 'Solo controb.', fr: 'Contre-b. seul' },
       },
       {
         value: 'both_missing',
-        label: { zh: '两端缺失', en: 'Both ends missing' },
-        short: { zh: '两端缺失', en: 'Neither end' },
+        label: { zh: '两端缺失', en: 'Both ends missing', it: 'Entrambe le estremità mancanti', fr: 'Deux extrémités manquantes' },
+        short: { zh: '两端缺失', en: 'Neither end', it: 'Nessuna estremità', fr: 'Aucune extrémité' },
       },
     ],
   },
   {
     // empty (null) until judged; `na` means looked at and there is no termination
     key: 'termination',
-    label: { zh: '尾端形态', en: 'Termination' },
+    label: { zh: '尾端形态', en: 'Termination', it: 'Terminazione', fr: 'Terminaison' },
     type: 'enum',
     default: null,
     shiftNumberKeys: true,
     options: [
-      { value: 'feather', label: { zh: '羽状', en: 'Feather' } },
-      { value: 'step', label: { zh: '阶梯状', en: 'Step' } },
-      { value: 'hinge', label: { zh: '铰链状', en: 'Hinge' } },
-      { value: 'overshot', label: { zh: '过击', en: 'Overshot' } },
-      { value: 'na', label: { zh: '缺失', en: 'NA' } },
+      { value: 'feather', label: { zh: '羽状', en: 'Feather', it: 'A piuma', fr: 'En plume' } },
+      { value: 'step', label: { zh: '阶梯状', en: 'Step', it: 'A gradino', fr: 'Rebroussée' } },
+      { value: 'hinge', label: { zh: '铰链状', en: 'Hinge', it: 'Riflessa', fr: 'Réfléchie' } },
+      { value: 'overshot', label: { zh: '过击', en: 'Overshot', it: 'Sorpassata', fr: 'Outrepassée' } },
+      { value: 'na', label: { zh: '缺失', en: 'NA', it: 'N/D', fr: 'N/D' } },
     ],
   },
   {
     key: 'certainty',
-    label: { zh: '方向可信度', en: 'Direction certainty' },
+    label: { zh: '方向可信度', en: 'Direction certainty', it: 'Affidabilità della direzione', fr: 'Fiabilité de la direction' },
     type: 'enum',
     default: 'certain',
     listSummary: 'nonDefault',
     options: [
-      { value: 'certain', label: { zh: '确定', en: 'Certain' } },
-      { value: 'probable', label: { zh: '较确定', en: 'Probable' } },
-      { value: 'uncertain', label: { zh: '不确定', en: 'Uncertain' } },
+      { value: 'certain', label: { zh: '确定', en: 'Certain', it: 'Certa', fr: 'Certaine' } },
+      { value: 'probable', label: { zh: '较确定', en: 'Probable', it: 'Probabile', fr: 'Probable' } },
+      { value: 'uncertain', label: { zh: '不确定', en: 'Uncertain', it: 'Incerta', fr: 'Incertaine' } },
     ],
   },
   {
     key: 'note',
-    label: { zh: '备注', en: 'Note' },
+    label: { zh: '备注', en: 'Note', it: 'Nota', fr: 'Note' },
     type: 'text',
     default: '',
   },
@@ -120,7 +120,7 @@ export const SCAR_FIELDS: FieldDef[] = [
 export const CURVE_FIELDS: FieldDef[] = [
   {
     key: 'type',
-    label: { zh: '类型', en: 'Type' },
+    label: { zh: '类型', en: 'Type', it: 'Tipo', fr: 'Type' },
     type: 'enum',
     // not filled in until chosen
     default: '',
@@ -128,21 +128,21 @@ export const CURVE_FIELDS: FieldDef[] = [
     listSummary: 'always',
     allowCustom: true,
     options: [
-      { value: 'scar_boundary', label: { zh: '片疤轮廓', en: 'Scar outline' } },
-      { value: 'core_edge', label: { zh: '石核边缘', en: 'Core edge' }, types: ['core'] },
-      { value: 'edge', label: { zh: '边缘', en: 'Edge' }, types: ['flake'] },
-      { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
-      { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
-      { value: 'platform_outline', label: { zh: '台面轮廓', en: 'Platform outline' }, types: ['flake'] },
-      { value: 'retouch', label: { zh: '修理', en: 'Retouch' } },
+      { value: 'scar_boundary', label: { zh: '片疤轮廓', en: 'Scar outline', it: 'Contorno del negativo', fr: 'Contour du négatif' } },
+      { value: 'core_edge', label: { zh: '石核边缘', en: 'Core edge', it: 'Margine del nucleo', fr: 'Bord du nucléus' }, types: ['core'] },
+      { value: 'edge', label: { zh: '石片边缘', en: 'Flake edge', it: 'Margine della scheggia', fr: 'Bord de l’éclat' }, types: ['flake'] },
+      { value: 'cortex', label: { zh: '石皮', en: 'Cortex', it: 'Cortice', fr: 'Cortex' } },
+      { value: 'joint', label: { zh: '节理面', en: 'Joint surface', it: 'Superficie di diaclasi', fr: 'Surface de diaclase' } },
+      { value: 'platform_outline', label: { zh: '台面轮廓', en: 'Platform outline', it: 'Contorno del tallone', fr: 'Contour du talon' }, types: ['flake'] },
+      { value: 'retouch', label: { zh: '修理', en: 'Retouch', it: 'Ritocco', fr: 'Retouche' } },
       // older codes: read and written as they are
-      { value: 'ridge', label: { zh: '棱脊', en: 'Ridge' }, legacy: true },
-      { value: 'other', label: { zh: '其他', en: 'Other' }, legacy: true },
+      { value: 'ridge', label: { zh: '棱脊', en: 'Ridge', it: 'Nervatura', fr: 'Nervure' }, legacy: true },
+      { value: 'other', label: { zh: '其他', en: 'Other', it: 'Altro', fr: 'Autre' }, legacy: true },
     ],
   },
   {
     key: 'note',
-    label: { zh: '备注', en: 'Note' },
+    label: { zh: '备注', en: 'Note', it: 'Nota', fr: 'Note' },
     type: 'text',
     default: '',
   },
@@ -169,22 +169,22 @@ export const layerCurves = <T extends { attributes: Readonly<Record<string, Attr
 export const REGION_FIELDS: FieldDef[] = [
   {
     key: 'type',
-    label: { zh: '类型', en: 'Type' },
+    label: { zh: '类型', en: 'Type', it: 'Tipo', fr: 'Type' },
     type: 'enum',
     default: 'scar',
     numberKeys: true,
     listSummary: 'always',
     allowCustom: true,
     options: [
-      { value: 'scar', label: { zh: '片疤', en: 'Scar' } },
-      { value: 'cortex', label: { zh: '石皮', en: 'Cortex' } },
-      { value: 'joint', label: { zh: '节理面', en: 'Joint surface' } },
-      { value: 'damage', label: { zh: '破损', en: 'Damage' } },
-      { value: 'flaking_surface', label: { zh: '剥片面', en: 'Flaking surface' }, types: ['core'] },
-      { value: 'platform', label: { zh: '台面', en: 'Platform' } },
-      { value: 'ventral', label: { zh: '腹面', en: 'Ventral face' }, types: ['flake'] },
-      { value: 'dorsal', label: { zh: '背面', en: 'Dorsal face' }, types: ['flake'] },
-      { value: 'retouch', label: { zh: '修理', en: 'Retouch' } },
+      { value: 'scar', label: { zh: '片疤', en: 'Scar', it: 'Negativo', fr: 'Négatif' } },
+      { value: 'cortex', label: { zh: '石皮', en: 'Cortex', it: 'Cortice', fr: 'Cortex' } },
+      { value: 'joint', label: { zh: '节理面', en: 'Joint surface', it: 'Superficie di diaclasi', fr: 'Surface de diaclase' } },
+      { value: 'damage', label: { zh: '破损', en: 'Damage', it: 'Danneggiamento', fr: 'Endommagement' } },
+      { value: 'flaking_surface', label: { zh: '剥片面', en: 'Flaking surface', it: 'Superficie di scheggiatura', fr: 'Surface de débitage' }, types: ['core'] },
+      { value: 'platform', label: { zh: '台面', en: 'Platform', it: 'Piano di percussione / tallone', fr: 'Plan de frappe / talon' } },
+      { value: 'ventral', label: { zh: '腹面', en: 'Ventral face', it: 'Faccia ventrale', fr: 'Face ventrale' }, types: ['flake'] },
+      { value: 'dorsal', label: { zh: '背面', en: 'Dorsal face', it: 'Faccia dorsale', fr: 'Face dorsale' }, types: ['flake'] },
+      { value: 'retouch', label: { zh: '修理', en: 'Retouch', it: 'Ritocco', fr: 'Retouche' } },
     ],
   },
 ];
@@ -280,7 +280,7 @@ export const isCustomValue = (f: FieldDef, v: AttributeValue | undefined): v is 
 export function customValue(f: FieldDef, text: string, type: SpecimenType = 'core'): string {
   const s = text.trim();
   const low = s.toLowerCase();
-  const preset = offeredOptions(f, type).find((o) => [o.value, ...Object.values(o.label)].some((x) => x.toLowerCase() === low));
+  const preset = offeredOptions(f, type).find((o) => [o.value, ...Object.values(o.label)].some((x) => x?.toLowerCase() === low));
   return preset ? preset.value : s;
 }
 

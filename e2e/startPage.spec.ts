@@ -158,8 +158,9 @@ test('the language and the theme are the top bar\'s own, and stay as they were s
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.locator('.start-card-name')).toHaveText(['石核', '石片', '通用']);
   await expect(page.locator('.start-card').nth(2)).toHaveAttribute('aria-label', '通用');
-  await expect(page.locator('#start-lang')).toHaveText('EN');
-  await expect(page.locator('#start-lang')).toHaveAttribute('aria-label', 'Switch to English');
+  // the next language, named in itself
+  await expect(page.locator('#start-lang')).toHaveText('IT');
+  await expect(page.locator('#start-lang')).toHaveAttribute('aria-label', 'Passa all’italiano');
   // the same button, still in focus
   expect(await focused(page)).toBe('start-lang');
 
@@ -167,13 +168,13 @@ test('the language and the theme are the top bar\'s own, and stay as they were s
   await page.locator('#start-theme').click();
   const after = before === 'dark' ? 'light' : 'dark';
   await expect(page.locator('html')).toHaveAttribute('data-theme', after);
-  await expect(page.locator('#start-theme')).toHaveAttribute('aria-label', after === 'dark' ? '浅色外观' : '深色外观');
+  await expect(page.locator('#start-theme')).toHaveAttribute('aria-label', after === 'dark' ? '浅色模式' : '深色模式');
   await expect(page.locator('#start-root, .start-root').first()).toHaveCSS('color', after === 'dark' ? 'rgb(230, 226, 214)' : 'rgb(31, 29, 25)');
 
   await enterModule(page, 'core');
   await expect(page.locator('#empty-open')).toHaveText('打开模型');
   await expect(page.locator('#btn-lang')).toHaveText('中');
-  await expect(page.locator('#btn-theme')).toHaveAttribute('aria-label', after === 'dark' ? '浅色外观' : '深色外观');
+  await expect(page.locator('#btn-theme')).toHaveAttribute('aria-label', after === 'dark' ? '浅色模式' : '深色模式');
   // and back from the top bar
   await page.locator('#btn-lang').click();
   await page.locator('#lang-en').click();
@@ -186,6 +187,21 @@ test('the language and the theme are the top bar\'s own, and stay as they were s
   await enterModule(page);
   await page.locator('#btn-file').click();
   await expect(page.locator('#btn-close-model')).toBeEnabled();
+});
+
+test('the language button goes round every language and back to English', async ({ page }) => {
+  await openStart(page);
+  const seen: Array<[string | null, string | null, string]> = [];
+  for (let i = 0; i < 4; i++) {
+    await page.locator('#start-lang').click();
+    seen.push([await page.locator('html').getAttribute('lang'), await page.locator('#start-lang').textContent(), (await page.locator('.start-card-name').allTextContents()).join(' ')]);
+  }
+  expect(seen).toEqual([
+    ['zh-CN', 'IT', '石核 石片 通用'],
+    ['it', 'FR', 'Nucleo Scheggia Generico'],
+    ['fr', 'EN', 'Nucléus Éclat Générique'],
+    ['en', '中', 'Core Flake General'],
+  ]);
 });
 
 test('a project file says what it is, whichever card is chosen; the choice stands for what comes next', async ({ page }) => {
@@ -206,7 +222,7 @@ test('a project file says what it is, whichever card is chosen; the choice stand
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('box.ply');
   const meshChooser = page.waitForEvent('filechooser');
-  await dialog.getByRole('button', { name: 'Open that model' }).click();
+  await dialog.getByRole('button', { name: 'Open the matching model' }).click();
   await (await meshChooser).setFiles(boxPly());
   await waitForMesh(page, 'box.ply');
   await expect.poll(async () => (await state(page)).specimen.type).toBe('flake');

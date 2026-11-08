@@ -3142,6 +3142,24 @@ input[type="checkbox"]:disabled {
 
 /* ------------------------------------------------------------ narrow screens */
 
+/* words that do not fit (a language with longer ones): the steps of a narrower window (ui/app.ts fitTopbar) */
+.topbar.is-tight .mode-btn {
+  width: 40px;
+  padding: 0;
+}
+
+.topbar.is-tight .mode-btn .mode-label {
+  display: none;
+}
+
+.topbar.is-tighter .hdr-btn .btn-text {
+  display: none;
+}
+
+.topbar.is-tighter .hdr-btn.btn-primary .btn-text {
+  display: inline;
+}
+
 /* the mode switch shows icons only */
 @media (max-width: 1199px) {
   .mode-btn {
@@ -3174,7 +3192,8 @@ input[type="checkbox"]:disabled {
     grid-row: 2;
     justify-self: stretch;
   }
-  .mode-btn {
+  .mode-btn,
+  .topbar.is-tight .mode-btn {
     flex: 1 1 0;
     width: auto;
   }
@@ -3445,17 +3464,21 @@ input[type="checkbox"]:disabled {
   max-height: 55%;
 }
 
-.harris-body {
-  /* the matrix is drawn as it is exported: on white */
-  background: #ffffff;
-}
-
+/* the matrix in the shell's colours (render/harris.ts HARRIS_SCREEN); exported in print colours */
 .harris-body svg {
   display: block;
 }
 
 .harris-body .hm-node {
   cursor: pointer;
+}
+
+.harris-body .hm-node > rect {
+  transition: stroke 120ms var(--ease);
+}
+
+.harris-body .hm-node:not(.is-selected):hover > rect {
+  stroke: var(--ink);
 }
 
 /* ------------------------------------------------------------ landmarks */
@@ -4154,7 +4177,8 @@ input[type="checkbox"]:disabled {
 .config-panel {
   right: max(12px, env(safe-area-inset-right, 0px));
   bottom: 44px;
-  width: 320px;
+  /* the title and the frame's pill on one line, in every language */
+  width: 360px;
   max-width: calc(100% - 24px);
   max-height: max(160px, calc(100% - 214px));
 }

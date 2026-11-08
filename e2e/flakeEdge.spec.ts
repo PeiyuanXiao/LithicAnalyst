@@ -72,7 +72,7 @@ test('the edge need not close: open, with its ends on the outline, the faces are
   await expect.poll(async () => (await state(page)).regions.map((r) => r.type).sort()).toEqual(['dorsal', 'ventral']);
   await notDone(page, 'faces');
   await pill(page, 'faces').hover();
-  await expect(page.locator('.tip')).toContainText('both ends of the edge must reach it');
+  await expect(page.locator('.tip')).toContainText('both ends of the flake edge must meet it');
   await page.mouse.move(5, 5);
   await page.keyboard.press('v');
   await page.evaluate(async () => {

@@ -153,7 +153,7 @@ test('a flake: the measures in groups; platform width and depth 2 × 2, EPA 2 ×
 
   // the groups, their titles in the data face
   const titles = page.locator('#flake-measures .measure-group-title');
-  await expect(titles).toHaveText(['Technical axis', 'Morphology', 'Platform', 'Whole']);
+  await expect(titles).toHaveText(['Technological axis', 'Morphology', 'Platform', 'Whole']);
   expect(await titles.first().evaluate((e) => ({ font: getComputedStyle(e).fontFamily, size: getComputedStyle(e).fontSize, spacing: getComputedStyle(e).letterSpacing, color: getComputedStyle(e).color }))).toMatchObject({ size: '10.5px', color: ink3 });
   expect(await titles.first().evaluate((e) => getComputedStyle(e).fontFamily)).toContain('Plex Mono');
 
@@ -228,7 +228,7 @@ test('with no model: the module drawing over the start page grid; the sidebar ha
   await expect(ghosts.first()).toBeVisible();
   const titles = await ghosts.locator('.panel-title').allTextContents();
   // the annotate mode of a flake
-  expect(titles).toEqual(expect.arrayContaining(['Technical axis', 'Curves', 'Landmarks']));
+  expect(titles).toEqual(expect.arrayContaining(['Technological axis', 'Curves', 'Landmarks']));
   expect(await ghosts.locator('.badge').count()).toBe(0);
   const ink3 = await textColourOf(page, '--ink-3');
   expect(await ghosts.first().locator('.panel-title').evaluate((e) => getComputedStyle(e).color)).toBe(ink3);
@@ -246,8 +246,8 @@ test('with no model: the module drawing over the start page grid; the sidebar ha
   await expect(page.locator('#empty-icon')).toHaveAttribute('data-type', 'core');
   await expect(page.locator('#empty-icon')).toBeVisible();
   const coreTitles = await page.locator('#sidebar .panel-ghost:visible .panel-title').allTextContents();
-  expect(coreTitles).not.toContain('Technical axis');
-  expect(coreTitles).toContain('Scar vectors');
+  expect(coreTitles).not.toContain('Technological axis');
+  expect(coreTitles).toContain('Scar arrows');
   // a model: the real sections
   await loadMesh(page, boxPly());
   await expect(page.locator('#sidebar .panel-ghost:visible')).toHaveCount(0);
@@ -342,16 +342,13 @@ test.describe('with motion', () => {
     await expect.poll(() => page.evaluate(() => window.lithicanalyst.theme())).toBe('dark');
   });
 
-  test('what the user just made comes in: a landmark pops, an arrow grows, a pill ticks; not on undo or redo', async ({ page }) => {
+  test('what the user just made comes in: a landmark pops, a pill ticks; an arrow is there at once; not on undo or redo', async ({ page }) => {
     await box(page);
-    // an arrow drawn: it grows from its tail, and a press on the view puts it at its end at once
+    // an arrow drawn: whole at once, nothing in the view moves
     await page.keyboard.press('a');
     await dragArrow(page, boxPoint(-12, 0, 5), boxPoint(12, 0, 5));
-    const arrow = (await state(page)).scars[0].id;
-    expect(await page.evaluate((id) => window.lithicanalyst.arrowGrown(id), arrow)).toBeLessThan(1);
-    expect(await page.evaluate(() => window.lithicanalyst.tweening())).toBe(true);
-    await expect.poll(() => page.evaluate((id) => window.lithicanalyst.arrowGrown(id), arrow)).toBe(1);
-    await expect.poll(() => page.evaluate(() => window.lithicanalyst.tweening())).toBe(false);
+    expect((await state(page)).scars).toHaveLength(1);
+    expect(await page.evaluate(() => window.lithicanalyst.tweening())).toBe(false);
     // the scars' pill became done by it: it ticks
     const pill = page.locator('#status-scar_arrows');
     await expect(pill).toHaveAttribute('data-done', 'true');
@@ -363,7 +360,6 @@ test.describe('with motion', () => {
     await expect(pill).toHaveAttribute('data-done', 'true');
     await expect(pill).not.toHaveClass(/is-ticking/);
     expect(await page.evaluate(() => window.lithicanalyst.tweening())).toBe(false);
-    expect(await page.evaluate((id) => window.lithicanalyst.arrowGrown(id), arrow)).toBe(1);
 
     // a landmark placed: from nothing to its size (a little over it on the way), sampled every frame
     await page.evaluate(() => window.lithicanalyst.setTool('landmark'));

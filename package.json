@@ -11,7 +11,8 @@
     "test": "vitest run",
     "e2e": "tsc --noEmit -p e2e && npm run build && playwright test",
     "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
-    "bench": "rolldown scripts/bench.ts --platform node --format esm --file node_modules/.cache/lithicanalyst-bench.mjs && node node_modules/.cache/lithicanalyst-bench.mjs"
+    "bench": "rolldown scripts/bench.ts --platform node --format esm --file node_modules/.cache/lithicanalyst-bench.mjs && node node_modules/.cache/lithicanalyst-bench.mjs",
+    "i18n": "rolldown scripts/i18n.ts --platform node --format esm --external typescript --file node_modules/.cache/lithicanalyst-i18n.mjs && node node_modules/.cache/lithicanalyst-i18n.mjs"
   },
   "license": "MIT",
   "dependencies": {

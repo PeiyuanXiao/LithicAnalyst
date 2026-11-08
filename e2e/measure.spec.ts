@@ -65,7 +65,7 @@ test('leaves the volume empty when the model is not closed', async ({ page }) =>
   await openApp(page);
   await loadMesh(page, roofPly());
   await measureMode(page);
-  await expect(page.locator('#auto-volume')).toHaveText('Not closed');
+  await expect(page.locator('#auto-volume')).toHaveText('Mesh not closed');
   const [row] = parseCsv(await page.evaluate(() => window.lithicanalyst.exportMeasurementsCsvText()));
   expect(row).toMatchObject({ volume: '', closed: 'false' });
   expect(Number(row.surface_area)).toBeGreaterThan(0);

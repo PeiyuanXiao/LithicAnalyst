@@ -206,7 +206,7 @@ test('an empty value draws nothing and says why, as before', async ({ page }) =>
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#flake-tech_length')).toHaveText('—');
   await page.locator('#flake-tech_length').hover();
-  await expect(page.locator('.tip')).toContainText('technical axis');
+  await expect(page.locator('.tip')).toContainText('technological axis');
   await nextFrames(page, 3);
   await page.waitForTimeout(200);
   expect(await shown(page)).toBeNull();

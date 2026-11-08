@@ -89,7 +89,7 @@ test('curves split the surface into regions; regions keep their type when the cu
   await page.keyboard.press('Delete');
   await expect.poll(() => pieces(page)).toBe(1);
   expect((await regions(page))!.results.map((r) => r.conflict)).toEqual([true, true]);
-  await expect(page.locator('.toast-warn')).toContainText('same piece');
+  await expect(page.locator('.toast-warn')).toContainText('share the same surface');
   await expect(page.locator('#region-list .region-row', { hasText: 'R2' })).toContainText('Conflict');
   await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(() => pieces(page)).toBe(2);

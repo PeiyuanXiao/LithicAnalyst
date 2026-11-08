@@ -38,7 +38,7 @@ test('a columnar core: the seven traits in the panel, the view cube and the face
   await expect(page.locator('#sec-configuration')).toHaveCount(0);
   await showConfig(page, true);
   await expect(page.locator('#config-panel')).toBeVisible();
-  await expect(page.locator('#config-panel .float-head #config-frame')).toHaveText('PCA');
+  await expect(page.locator('#config-panel .float-head #config-frame')).toHaveText('Principal axes');
   // the title on one line, whole; the polarity's list as wide as the panel lets it
   const title = page.locator('#config-panel .float-title');
   expect(await title.evaluate((el) => el.scrollWidth <= el.clientWidth && el.clientHeight < 26)).toBe(true);

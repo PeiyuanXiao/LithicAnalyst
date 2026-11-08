@@ -1,9 +1,10 @@
 import type { Page } from '@playwright/test';
-import { roofPly, roofPoint } from './fixtures/meshes';
-import { dragArrow, expect, exportFile, loadMesh, openApp, test, viewFromTop, enterModule } from './helpers';
+import { roofPly, roofPoint, t1Ply } from './fixtures/meshes';
+import { annotate } from './flakeSetup';
+import { dragArrow, expect, exportFile, loadMesh, nextFrames, openApp, test, viewFromTop, enterModule } from './helpers';
 
 /** Choose a language in the language menu of the top bar. */
-async function chooseLang(page: Page, code: 'en' | 'zh'): Promise<void> {
+async function chooseLang(page: Page, code: 'en' | 'zh' | 'it' | 'fr'): Promise<void> {
   await page.locator('#btn-lang').click();
   await expect(page.locator(`#lang-${code}`)).toBeVisible();
   await page.locator(`#lang-${code}`).click();
@@ -28,7 +29,7 @@ test.describe('in a Chinese browser', () => {
 
     // the menu names each language in itself and checks the current one
     await page.locator('#btn-lang').click();
-    await expect(page.locator('#lang-menu .menu-item')).toHaveText(['English', '中文']);
+    await expect(page.locator('#lang-menu .menu-item')).toHaveText(['English', '中文', 'Italiano', 'Français']);
     await expect(page.locator('#lang-en')).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('#lang-zh')).toHaveAttribute('aria-checked', 'false');
     await page.locator('#lang-zh').click();
@@ -60,6 +61,48 @@ test.describe('in a Chinese browser', () => {
     await enterModule(page);
     await expect(page.locator('#btn-lang')).toHaveText('EN');
   });
+});
+
+test('Italian and French: the top bar stays in the window, and the labels in the view change with the rest', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openApp(page, 'flake');
+  await loadMesh(page, t1Ply());
+  await annotate(page);
+  const axisLabel = page.locator('.arrow-label').filter({ hasText: /axis|asse|axe/i });
+  /** Whether the top bar fits, its last button inside the window, and the modes' names shown. */
+  const bar = async () => {
+    await nextFrames(page, 3);
+    return page.evaluate(() => {
+      const el = document.querySelector<HTMLElement>('.topbar')!;
+      const label = document.querySelector<HTMLElement>('#app-mode-annotate .mode-label')!;
+      return {
+        fits: el.scrollWidth <= el.clientWidth + 1 && document.querySelector('#btn-help')!.getBoundingClientRect().right <= window.innerWidth,
+        names: getComputedStyle(label).display !== 'none',
+      };
+    });
+  };
+  for (const [code, lang, axis, mode] of [
+    ['en', 'en', 'Technological axis', 'Annotate'],
+    ['it', 'it', 'Asse tecnologico', 'Annotazione'],
+    ['fr', 'fr', 'Axe technologique', 'Annotation'],
+  ] as const) {
+    if (code !== 'en') await chooseLang(page, code);
+    await expect(page.locator('html')).toHaveAttribute('lang', lang);
+    await expect(page.locator('#app-mode-annotate')).toHaveAttribute('aria-label', mode);
+    // the view's own labels follow at once
+    await expect(axisLabel).toHaveText(axis);
+    // room enough: every name shown
+    expect(await bar(), code).toEqual({ fits: true, names: true });
+  }
+  // less room: the modes' names go before anything leaves the window, and come back with the room
+  await page.setViewportSize({ width: 1280, height: 800 });
+  expect(await bar()).toEqual({ fits: true, names: false });
+  await page.setViewportSize({ width: 1000, height: 800 });
+  expect((await bar()).fits).toBe(true);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  expect(await bar()).toEqual({ fits: true, names: true });
+  await chooseLang(page, 'en');
+  await expect(axisLabel).toHaveText('Technological axis');
 });
 
 test('starts in English in a new browser profile', async ({ page }) => {

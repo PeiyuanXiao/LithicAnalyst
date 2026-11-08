@@ -106,7 +106,7 @@ test('a closed edge gives the same two points; an edge stopping far short of the
   // the edge's pill says so, and goes to that edge
   await expect(pill(page, 'edge')).toHaveAttribute('data-done', 'false');
   await pill(page, 'edge').hover();
-  await expect(page.locator('.tip')).toContainText('does not reach the platform outline');
+  await expect(page.locator('.tip')).toContainText('does not meet the platform outline');
   await page.mouse.move(5, 5);
   await pill(page, 'edge').click();
   await expect(page.locator('#mode-select')).toHaveAttribute('aria-checked', 'true');

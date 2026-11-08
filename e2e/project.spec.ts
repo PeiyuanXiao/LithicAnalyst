@@ -76,7 +76,7 @@ test('saves the project file and reads it back, here and in a fresh browser', as
   const dialog = fresh.getByRole('dialog');
   await expect(dialog).toContainText('roof.ply');
   const meshChooser = fresh.waitForEvent('filechooser');
-  await dialog.getByRole('button', { name: 'Open that model' }).click();
+  await dialog.getByRole('button', { name: 'Open the matching model' }).click();
   await (await meshChooser).setFiles(ply);
   await waitForMesh(fresh, 'roof.ply');
   await expect.poll(() => content(fresh)).toEqual(before);

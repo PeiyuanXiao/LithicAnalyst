@@ -148,8 +148,6 @@ export class DrawArrowTool implements Tool {
     if (this.options) return this.options.onFinish(s, t);
     const arrow = addScarVector(this.ctx.store, { start: s.p, end: t.p, startNormal: s.n, endNormal: t.n });
     this.ctx.selection.set(arrow.id);
-    // drawn by hand: it grows in from its tail
-    this.ctx.arrows.grow(arrow.id);
   }
 
   cancel(): boolean {

@@ -244,7 +244,7 @@ test('a split by a plane is replaced, and it says so', async ({ page }) => {
   );
   await showConfig(page);
   await page.locator('#config-model-bicone').click();
-  await expect(page.locator('.toast').filter({ hasText: 'Upper / lower volume is now split along C1' })).toBeVisible();
+  await expect(page.locator('.toast').filter({ hasText: 'Upper / lower volume now split along C1' })).toBeVisible();
   expect((await state(page)).split).toMatchObject({ source: 'curve', id: 'rim' });
   expect((await state(page)).configuration.model).toBe('bicone');
   await page.keyboard.press('Control+z');
@@ -446,7 +446,7 @@ test('a curve too short to go round is left as it is', async ({ page }) => {
   await traceRim(page, [-110, -90, -70], false);
   const before = (await state(page)).curves[0];
   await page.locator('#curve-complete').click();
-  await expect(page.locator('.toast').filter({ hasText: 'Curve too short or straight to complete' })).toBeVisible();
+  await expect(page.locator('.toast').filter({ hasText: 'Curve too short or too straight to complete' })).toBeVisible();
   expect((await state(page)).curves[0]).toEqual(before);
 });
 

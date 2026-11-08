@@ -4,7 +4,7 @@ import { addScarVector, addSequence, deleteRelation, deleteScar, moveInSequence,
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import { relationsCsv, seriesCsv } from '../src/io/csv';
-import { harrisSvg } from '../src/render/harris';
+import { HARRIS_PRINT, HARRIS_SCREEN, harrisSvg } from '../src/render/harris';
 import { sequenceColor } from '../src/render/sequenceColor';
 
 const cut = (later: string, earlier: string): RelationEdge => ({ later, earlier });
@@ -272,9 +272,18 @@ describe('relations and sequences in a project', () => {
     expect(rows().S1).toBeLessThan(rows().S2);
     // the SVG: one node per scar, one line per direct relation
     const svg = harrisSvg(layout(), { labels: new Map(s.state.scars.map((x) => [x.id, x.label])), fills: new Map(), selected: a });
-    expect(svg.match(/class="hm-node"/g)).toHaveLength(3);
+    expect(svg.match(/class="hm-node( is-selected)?"/g)).toHaveLength(3);
     expect(svg.match(/<line /g)).toHaveLength(2);
     expect(svg).toContain(`data-id="${a}"`);
+    // exported in print colours (hex only); on the page in the shell's, which follow the theme
+    expect(svg).not.toContain('var(--');
+    expect(svg.match(/class="hm-node is-selected"/g)).toHaveLength(1);
+    const screen = harrisSvg(layout(), { labels: new Map(), fills: new Map([[b, '#3f7fd1']]), selected: a }, HARRIS_SCREEN);
+    expect(screen).toContain(`fill="${HARRIS_SCREEN.selectedFill}"`);
+    expect(screen).toContain(`stroke="${HARRIS_SCREEN.line}"`);
+    expect(screen).toContain('fill="#3f7fd1"');
+    expect(screen.match(/fill="var\(--surface\)"/g)).toHaveLength(1);
+    expect(HARRIS_PRINT.background).toBeNull();
     const q = addSequence(s);
     setScarSequence(s, b, q.id);
     const p = relationProblems(relationResults(s.state));

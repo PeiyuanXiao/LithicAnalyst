@@ -43,7 +43,7 @@ test('the light ball: a click and a drag set the light as the L key does, a doub
   await openApp(page);
   await loadMesh(page, columnPly());
   await displayPanel(page);
-  await expect(page.locator('#light-ball')).toHaveAttribute('aria-valuetext', 'Direction 135° · height 35°');
+  await expect(page.locator('#light-ball')).toHaveAttribute('aria-valuetext', 'Azimuth 135° · elevation 35°');
 
   // a click at the centre: from the viewer
   let at = await onBall(page, 0, 0);
@@ -55,13 +55,13 @@ test('the light ball: a click and a drag set the light as the L key does, a doub
   await page.mouse.down();
   at = await onBall(page, 0.99, 0);
   await page.mouse.move(at.x, at.y, { steps: 4 });
-  await expect(page.locator('.tip')).toContainText('height');
+  await expect(page.locator('.tip')).toContainText('elevation');
   await page.mouse.up();
   await expect(page.locator('.tip')).toHaveCount(0);
   let l = await light(page);
   expect(Math.min(l.azimuthDeg, 360 - l.azimuthDeg)).toBeLessThanOrEqual(2);
   expect(l.elevationDeg).toBeLessThanOrEqual(7);
-  await expect(page.locator('#light-ball')).toHaveAttribute('aria-valuetext', `Direction ${l.azimuthDeg}° · height ${l.elevationDeg}°`);
+  await expect(page.locator('#light-ball')).toHaveAttribute('aria-valuetext', `Azimuth ${l.azimuthDeg}° · elevation ${l.elevationDeg}°`);
 
   // the arrow keys nudge it
   await page.keyboard.press('ArrowUp');
@@ -93,5 +93,5 @@ test('the light ball: a click and a drag set the light as the L key does, a doub
 
   // and the ball shows what the L key did
   await displayPanel(page);
-  await expect(page.locator('#light-ball')).toHaveAttribute('aria-valuetext', `Direction ${l.azimuthDeg}° · height ${l.elevationDeg}°`);
+  await expect(page.locator('#light-ball')).toHaveAttribute('aria-valuetext', `Azimuth ${l.azimuthDeg}° · elevation ${l.elevationDeg}°`);
 });

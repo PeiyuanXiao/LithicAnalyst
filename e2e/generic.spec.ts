@@ -77,7 +77,7 @@ test('a generic specimen has none of the tools, panels and sections of a core or
   await page.keyboard.press('Escape');
   await page.locator('#btn-help').click();
   const help = page.getByRole('dialog');
-  await expect(help).toContainText('Curve / region type (custom)');
+  await expect(help).toContainText('Custom curve / region type');
   await expect(help).not.toContainText('Sequence');
   await expect(help).not.toContainText('Termination');
   await page.keyboard.press('Escape');
@@ -227,5 +227,5 @@ test('from another type and back: nothing is lost, and a preset type on a curve 
   // the tools come back too
   await expect(page.locator('#mode-relation')).toBeVisible();
   await expect(page.locator('#mode-sequence')).toBeVisible();
-  await expect(page.locator('#sec-arrows .panel-title')).toHaveText('Scar vectors');
+  await expect(page.locator('#sec-arrows .panel-title')).toHaveText('Scar arrows');
 });

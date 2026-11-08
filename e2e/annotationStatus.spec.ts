@@ -31,7 +31,7 @@ test('a flake from blank: each pill turns as what it stands for is made, and a c
   await setUnit(page, '');
 
   // all the items, none yet; the retouch regions apart
-  await expect(page.locator('#annotation-status .status-pill:not(.status-count)')).toHaveText(['○Unit', '○Technical axis', '○Edge', '○Platform outline', '○Dorsal / ventral', '○Retouch regions']);
+  await expect(page.locator('#annotation-status .status-pill:not(.status-count)')).toHaveText(['○Unit', '○Technological axis', '○Flake edge', '○Platform outline', '○Dorsal / ventral', '○Retouch regions']);
   await expect(pill(page, 'retouch')).toHaveClass(/is-optional/);
   await expect(page.locator('#status-count')).toBeHidden();
   expect(await status(page)).toMatchObject({ done: 0, total: 5 });
