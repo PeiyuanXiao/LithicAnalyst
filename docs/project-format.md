@@ -988,7 +988,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
   lists these names (`duplicateNames`).
 * A read-only folder (a directory upload) gets the same layout in one ZIP to unpack into it: the
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
-* `manifest.json`: `app` (`name`, `version`, `author`, `license`, `repository`, `citation`: how to cite
+* `manifest.json`: `app` (`name`, `version`, `author`: the authors, joined with commas, `license`, `repository`, `citation`: how to cite
   this version, APA style), `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
   (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and

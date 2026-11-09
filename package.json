@@ -21,6 +21,12 @@
     "email": "pyxiao.sci@gmail.com",
     "url": "https://peiyuanxiao.github.io/"
   },
+  "contributors": [
+    {
+      "name": "Ben Marwick",
+      "url": "https://orcid.org/0000-0001-7879-4531"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/PeiyuanXiao/LithicAnalyst.git"

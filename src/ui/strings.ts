@@ -732,7 +732,7 @@ export const STRINGS = {
   'help.title': { zh: '帮助', en: 'Help', it: 'Aiuto', fr: 'Aide' },
   'help.tab.about': { zh: '关于', en: 'About', it: 'Informazioni', fr: 'À propos' },
   'help.tab.shortcuts': { zh: '快捷键', en: 'Shortcuts', it: 'Scorciatoie', fr: 'Raccourcis' },
-  'about.author': { zh: '作者', en: 'Author', it: 'Autore', fr: 'Auteur' },
+  'about.author': { zh: '作者', en: 'Authors', it: 'Autori', fr: 'Auteurs' },
   'about.source': { zh: '源代码', en: 'Source code', it: 'Codice sorgente', fr: 'Code source' },
   'about.feedback': { zh: '建议与问题', en: 'Requests & issues', it: 'Richieste e segnalazioni', fr: 'Suggestions et problèmes' },
   'about.cite': { zh: '引用（APA）', en: 'Cite (APA)', it: 'Citazione (APA)', fr: 'Citer (APA)' },

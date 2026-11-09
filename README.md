@@ -100,17 +100,17 @@ The project file and every exported column are described in [docs/project-format
 
 If you use **LithicAnalyst** in your research, please cite the version you used:
 
-> Xiao, P. Y. (2026). *LithicAnalyst* (Version 1.0.0) [Computer software]. GitHub. <https://github.com/PeiyuanXiao/LithicAnalyst>
+> Xiao, P. Y., & Marwick, B. (2026). *LithicAnalyst* (Version 1.0.0) [Computer software]. GitHub. <https://github.com/PeiyuanXiao/LithicAnalyst>
 
 and refer to it in your text, for example:
 
-> “Scar directions were recorded with LithicAnalyst (Version 1.0.0; Xiao, 2026).”
+> “Scar directions were recorded with LithicAnalyst (Version 1.0.0; Xiao & Marwick, 2026).”
 
 The About page in the app (the **?** button) gives the reference for the version you have, with a button to copy it; **Cite this repository** on this page gives it in APA and BibTeX.
 
 ``` bibtex
 @software{Xiao_LithicAnalyst_2026,
-  author  = {Xiao, P. Y.},
+  author  = {Xiao, P. Y. and Marwick, B.},
   title   = {{LithicAnalyst}},
   year    = {2026},
   version = {1.0.0},
@@ -130,7 +130,7 @@ The About page in the app (the **?** button) gives the reference for the version
 
 ### 🤖 Generative AI Disclosure
 
-Generative AI was used to assist with programming during the development of this project. Claude Code, using the Opus 5.5, assisted with writing, debugging, and optimizing the code. The project developer was responsible for the overall software architecture, feature planning, visual style design, and technical decisions, and retains full responsibility for the final code and software functionality.
+Generative AI was used to assist with programming during the development of this project. Claude Code, using Claude Opus 5.5, assisted with writing, debugging, and optimizing the code. The project developer was responsible for the overall software architecture, feature planning, visual style design, and technical decisions, and retains full responsibility for the final code and software functionality.
 
 ------------------------------------------------------------------------
 

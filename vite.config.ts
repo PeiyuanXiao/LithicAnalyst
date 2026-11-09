@@ -3,17 +3,21 @@ import { readFileSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import pkg from './package.json' with { type: 'json' };
-import { cffCitationAuthors } from './src/core/citation';
+import { cffAuthors, cffCitationAuthors } from './src/core/citation';
 
 /**
- * Who made it, under what licence, where it lives: from package.json, and the copyright line from
- * LICENSE ("Copyright (c) 2026 Peiyuan Xiao"), the names to cite from CITATION.cff's preferred-citation
- * ("P. Y. Xiao"). The about page, the exports' manifest and the page's head use it.
+ * Who made it, under what licence, where it lives: the contact, licence and address from package.json,
+ * the copyright line from LICENSE ("Copyright (c) 2026 Peiyuan Xiao"), the authors from CITATION.cff
+ * ("Peiyuan Xiao, Ben Marwick") and the names to cite from its preferred-citation ("P. Y. Xiao",
+ * "Ben Marwick"). The about page, the exports' manifest and the page's head use it.
  */
 const copyright = /Copyright \(c\) (.+)/.exec(readFileSync(new URL('./LICENSE', import.meta.url), 'utf8'))?.[1].trim() ?? pkg.author.name;
-const citationAuthors = cffCitationAuthors(readFileSync(new URL('./CITATION.cff', import.meta.url), 'utf8'));
+const cff = readFileSync(new URL('./CITATION.cff', import.meta.url), 'utf8');
+const authors = cffAuthors(cff);
+const citationAuthors = cffCitationAuthors(cff);
 const ABOUT = {
-  author: pkg.author.name,
+  /** The authors, "given family", joined with commas. */
+  author: (authors.length ? authors : [pkg.author.name]).join(', '),
   /** The authors as cited, "given family". */
   citationAuthors: citationAuthors.length ? citationAuthors : [pkg.author.name],
   email: pkg.author.email,

@@ -5,6 +5,8 @@ import { BRAND, brandInner, brandSvg } from '../src/ui/brand';
 
 const DIR = resolve(__dirname, '../src/assets/brand');
 const files = readdirSync(DIR).filter((f) => f.endsWith('.svg'));
+/** The README's logo on GitHub, light and dark: never inlined into the app, so not held to what an inlined drawing must be. */
+const README_ONLY = ['logo-readme-dark.svg', 'logo-readme.svg'];
 const text = (name: string) => readFileSync(resolve(DIR, name), 'utf8');
 
 const idsIn = (svg: string) => [...svg.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
@@ -45,10 +47,15 @@ describe('brandSvg', () => {
 
 describe('the brand files', () => {
   it('are all there', () => {
-    expect(files.sort()).toEqual(['ghost-core.svg', 'ghost-flake.svg', 'ghost-general.svg', 'icon-core.svg', 'icon-flake.svg', 'icon-generic.svg', 'logo-small.svg', 'logo.svg', 'wordmark.svg']);
+    expect(files.sort()).toEqual(['ghost-core.svg', 'ghost-flake.svg', 'ghost-general.svg', 'icon-core.svg', 'icon-flake.svg', 'icon-generic.svg', 'logo-readme-dark.svg', 'logo-readme.svg', 'logo-small.svg', 'logo.svg', 'wordmark.svg']);
   });
 
-  for (const name of files) {
+  it('the README\'s logo is not part of the app', () => {
+    const brand = readFileSync(resolve(__dirname, '../src/ui/brand.ts'), 'utf8');
+    for (const name of README_ONLY) expect(brand).not.toContain(name);
+  });
+
+  for (const name of files.filter((f) => !README_ONLY.includes(f))) {
     it(`${name} holds no address but its namespace`, () => {
       const svg = text(name);
       expect(svg.match(/xmlns="[^"]+"/g)).toEqual(['xmlns="http://www.w3.org/2000/svg"']);

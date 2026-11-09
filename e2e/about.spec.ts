@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { apaCitation, cffCitationAuthors } from '../src/core/citation';
+import { apaCitation, cffAuthors, cffCitationAuthors } from '../src/core/citation';
 import { APP_URL, expect, openApp, openStart, test } from './helpers';
 
 // Who made it, where to ask, how to cite, the licence: the start page, the "?" dialog, the file itself.
@@ -11,7 +11,9 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 };
 const COPYRIGHT = /Copyright \(c\) (.+)/.exec(readFileSync(new URL('../LICENSE', import.meta.url), 'utf8'))?.[1].trim() ?? '';
 const REPOSITORY = pkg.repository.url.replace(/^git\+/, '').replace(/\.git$/, '');
-const CITATION = apaCitation({ authors: cffCitationAuthors(readFileSync(new URL('../CITATION.cff', import.meta.url), 'utf8')), year: new Date().getFullYear(), version: pkg.version, url: REPOSITORY });
+const CFF = readFileSync(new URL('../CITATION.cff', import.meta.url), 'utf8');
+const AUTHORS = cffAuthors(CFF).join(', ');
+const CITATION = apaCitation({ authors: cffCitationAuthors(CFF), year: new Date().getFullYear(), version: pkg.version, url: REPOSITORY });
 
 test('the start page names the author and the licence under the version', async ({ page }) => {
   await openStart(page);
@@ -35,7 +37,7 @@ test('the ? button opens on the about page: author, source, where to ask, how to
   await expect(page.locator('#help-cols')).toBeHidden();
   await expect(page.locator('#help-tab-about')).toHaveAttribute('aria-checked', 'true');
 
-  await expect(dialog).toContainText(pkg.author.name);
+  await expect(dialog).toContainText(AUTHORS);
   await expect(page.locator('#about-version')).toHaveText(`v${await page.evaluate(() => window.lithicanalyst.version)}`);
   await expect(page.locator('#about-credit')).toHaveText(`© ${COPYRIGHT} · ${pkg.license} License`);
   await expect(page.locator('#about-repo')).toHaveAttribute('href', REPOSITORY);
@@ -84,7 +86,7 @@ test('the built file carries the author, the licence and the address at its top'
   const html = readFileSync(new URL(APP_URL), 'utf8');
   const [, second] = html.split(/\r?\n/);
   expect(second).toBe(`<!-- LithicAnalyst ${pkg.version} · © ${COPYRIGHT} · ${pkg.license} License · ${REPOSITORY} -->`);
-  expect(html).toMatch(new RegExp(`<meta name="author" content="${pkg.author.name}"\\s*/?>`));
+  expect(html).toMatch(new RegExp(`<meta name="author" content="${AUTHORS}"\\s*/?>`));
   // the third-party notices: three-mesh-bvh's licence in full, right after, in the artifact page too
   const bvh = readFileSync(new URL('../node_modules/three-mesh-bvh/LICENSE', import.meta.url), 'utf8').replace(/\r\n?/g, '\n').trim();
   for (const file of [html, readFileSync(new URL('artifact.html', APP_URL), 'utf8')]) {

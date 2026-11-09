@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { apaAuthors, apaCitation, apaCitationParts, apaName, cffCitationAuthors } from '../src/core/citation';
+import { apaAuthors, apaCitation, apaCitationParts, apaName, cffAuthors, cffCitationAuthors } from '../src/core/citation';
 import { appInfo, citation, creditLine, ISSUES_URL, LICENSE_URL } from '../src/ui/about';
 
 describe('a name as APA writes it', () => {
@@ -26,6 +26,10 @@ describe('the names to cite, from CITATION.cff', () => {
     'authors:',
     '  - family-names: Xiao',
     '    given-names: Peiyuan',
+    '    email: someone@example.org',
+    '  - given-names: "Ben"',
+    '    family-names: Marwick',
+    '    orcid: "https://orcid.org/0000-0001-7879-4531"',
     'preferred-citation:',
     '  type: software',
     '  authors:',
@@ -46,6 +50,14 @@ describe('the names to cite, from CITATION.cff', () => {
 
   it('are none without a preferred citation', () => {
     expect(cffCitationAuthors('authors:\n  - family-names: Xiao\n    given-names: Peiyuan\n')).toEqual([]);
+  });
+
+  it('to show are the top-level authors, in order, and not those of the preferred citation', () => {
+    expect(cffAuthors(cff)).toEqual(['Peiyuan Xiao', 'Ben Marwick']);
+  });
+
+  it('to show are none without a list of authors', () => {
+    expect(cffAuthors('cff-version: 1.2.0\ntitle: LithicAnalyst\n')).toEqual([]);
   });
 });
 
@@ -82,10 +94,10 @@ describe('what the program says of itself', () => {
 
   it('is what the exports\' manifest carries, with this version\'s reference', () => {
     const cff = readFileSync(new URL('../CITATION.cff', import.meta.url), 'utf8');
-    expect(appInfo()).toEqual({ name: 'LithicAnalyst', version: pkg.version, author: pkg.author.name, license: pkg.license, repository, citation: citation() });
+    expect(appInfo()).toEqual({ name: 'LithicAnalyst', version: pkg.version, author: cffAuthors(cff).join(', '), license: pkg.license, repository, citation: citation() });
     expect(citation()).toBe(apaCitation({ authors: cffCitationAuthors(cff), year: new Date().getFullYear(), version: pkg.version, url: repository }));
-    // the author's own way of being cited
-    expect(citation().startsWith(`Xiao, P. Y. (${new Date().getFullYear()}). LithicAnalyst`)).toBe(true);
+    // the authors' own way of being cited
+    expect(citation().startsWith(`Xiao, P. Y., & Marwick, B. (${new Date().getFullYear()}). LithicAnalyst`)).toBe(true);
   });
 
   it('is what CITATION.cff says: a new version is written there too', () => {

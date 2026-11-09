@@ -23,27 +23,18 @@ export function apaAuthors(names: readonly string[]): string {
 }
 
 /**
- * The authors of the `preferred-citation` in CITATION.cff, each as "given family" ("P. Y. Xiao"): the
- * names as the program is to be cited, which may give initials apart from the display name ("Peiyuan
- * Xiao"). GitHub's "Cite this repository" reads the same entry. Empty when there is none. Only the
- * two keys are read, line by line; no YAML parser.
+ * The names in the list of authors that starts after line `from` and whose key sits at `indent`
+ * spaces, each as "given family", in order. Only `family-names` and `given-names` are read, line by
+ * line; no YAML parser. The list ends at the next key of its level or above.
  */
-export function cffCitationAuthors(cff: string): string[] {
-  const lines = cff.split(/\r?\n/);
-  const start = lines.findIndex((line) => /^preferred-citation:\s*$/.test(line));
-  if (start < 0) return [];
+function cffNames(lines: readonly string[], from: number, indent: number): string[] {
   const unquote = (value: string) => value.trim().replace(/^(["'])(.*)\1$/, '$2');
   const authors: Array<{ family?: string; given?: string }> = [];
-  let indent = -1;
-  for (const line of lines.slice(start + 1)) {
+  for (const line of lines.slice(from)) {
     if (/^\S/.test(line)) break;
     const m = /^(\s*)(-\s*)?([\w-]+):\s*(.*)$/.exec(line);
     if (!m) continue;
     const [, space, dash, key, value] = m;
-    if (indent < 0) {
-      if (key === 'authors' && !dash) indent = space.length;
-      continue;
-    }
     if (!dash && space.length <= indent) break;
     if (dash) authors.push({});
     const author = authors[authors.length - 1];
@@ -52,6 +43,32 @@ export function cffCitationAuthors(cff: string): string[] {
     if (key === 'given-names') author.given = unquote(value);
   }
   return authors.filter((a) => a.family).map((a) => [a.given, a.family].filter(Boolean).join(' '));
+}
+
+/**
+ * The authors of CITATION.cff (its top-level `authors`), each as "given family" ("Peiyuan Xiao"): the
+ * names the about page and the file's author meta show. Empty when there are none.
+ */
+export function cffAuthors(cff: string): string[] {
+  const lines = cff.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^authors:\s*$/.test(line));
+  return start < 0 ? [] : cffNames(lines, start + 1, 0);
+}
+
+/**
+ * The authors of the `preferred-citation` in CITATION.cff, each as "given family" ("P. Y. Xiao"): the
+ * names as the program is to be cited, which may give initials apart from the display name ("Peiyuan
+ * Xiao"). GitHub's "Cite this repository" reads the same entry. Empty when there is none.
+ */
+export function cffCitationAuthors(cff: string): string[] {
+  const lines = cff.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^preferred-citation:\s*$/.test(line));
+  if (start < 0) return [];
+  for (let i = start + 1; i < lines.length && !/^\S/.test(lines[i]); i++) {
+    const m = /^(\s*)authors:\s*$/.exec(lines[i]);
+    if (m) return cffNames(lines, i + 1, m[1].length);
+  }
+  return [];
 }
 
 export interface CitationSource {
