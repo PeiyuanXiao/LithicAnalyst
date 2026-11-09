@@ -12,6 +12,33 @@ Online app: <https://peiyuanxiao.github.io/LithicAnalyst/>
 
 ------------------------------------------------------------------------
 
+### 📝 Citation
+
+If you use **LithicAnalyst** in your research, please cite the version you used:
+
+> Xiao, P. Y., & Marwick, B. (2026). *LithicAnalyst* (Version 1.0.0) [Computer software]. Zenodo. <https://doi.org/10.5281/zenodo.24069150>
+
+and refer to it in your text, for example:
+
+> “Scar directions were recorded with LithicAnalyst (Version 1.0.0; Xiao & Marwick, 2026).”
+
+The DOI in the reference stands for all versions and leads to the latest. Each version also has a DOI of its own, listed under **Versions** on [Zenodo](https://doi.org/10.5281/zenodo.24069150): use that one to point to exactly the version you used.
+
+The About page in the app (the **?** button) gives the reference for the version you have, with a button to copy it; **Cite this repository** on this page gives it in APA and BibTeX.
+
+``` bibtex
+@software{Xiao_LithicAnalyst_2026,
+  author  = {Xiao, P. Y. and Marwick, B.},
+  title   = {{LithicAnalyst}},
+  year    = {2026},
+  version = {1.0.0},
+  doi     = {10.5281/zenodo.24069150},
+  url     = {https://github.com/PeiyuanXiao/LithicAnalyst}
+}
+```
+
+------------------------------------------------------------------------
+
 ### 📦 Installation
 
 Nothing needs to be installed. Chrome or Edge is recommended; in Firefox and Safari everything works, but a folder can be read and not written to.
@@ -93,33 +120,6 @@ Requires Node.js ≥ 20.
 | Folders | Every model of a folder, its project files kept alongside, and summary exports |
 
 The project file and every exported column are described in [docs/project-format.md](docs/project-format.md).
-
-------------------------------------------------------------------------
-
-### 📝 Citation
-
-If you use **LithicAnalyst** in your research, please cite the version you used:
-
-> Xiao, P. Y., & Marwick, B. (2026). *LithicAnalyst* (Version 1.0.0) [Computer software]. Zenodo. <https://doi.org/10.5281/zenodo.24069150>
-
-and refer to it in your text, for example:
-
-> “Scar directions were recorded with LithicAnalyst (Version 1.0.0; Xiao & Marwick, 2026).”
-
-The DOI in the reference stands for all versions and leads to the latest. Each version also has a DOI of its own, listed under **Versions** on [Zenodo](https://doi.org/10.5281/zenodo.24069150): use that one to point to exactly the version you used.
-
-The About page in the app (the **?** button) gives the reference for the version you have, with a button to copy it; **Cite this repository** on this page gives it in APA and BibTeX.
-
-``` bibtex
-@software{Xiao_LithicAnalyst_2026,
-  author  = {Xiao, P. Y. and Marwick, B.},
-  title   = {{LithicAnalyst}},
-  year    = {2026},
-  version = {1.0.0},
-  doi     = {10.5281/zenodo.24069150},
-  url     = {https://github.com/PeiyuanXiao/LithicAnalyst}
-}
-```
 
 ------------------------------------------------------------------------
 
