@@ -3,9 +3,11 @@ on:
   push:
     branches: [main]
   pull_request:
+# ubuntu-24.04, not ubuntu-latest: since October 2026 ubuntu-latest is Ubuntu 26.04, where the
+# Playwright of package-lock.json cannot install Chromium. Move on together with a Playwright that supports it.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -16,7 +18,7 @@ jobs:
       - run: npm test
       - run: npm run build
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
