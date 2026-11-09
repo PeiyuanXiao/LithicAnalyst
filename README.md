@@ -122,7 +122,7 @@ The About page in the app (the **?** button) gives the reference for the version
 
 ### 💬 Getting Help and Contributing
 
-- Questions, problems and feature requests are welcome as [GitHub issues](https://github.com/PeiyuanXiao/LithicAnalyst/issues/new/choose) or by e-mail to [pyxiao.sci\@gmail.com](mailto:pyxiao.sci@gmail.com){.email}.
+- Questions, problems and feature requests are welcome as [GitHub issues](https://github.com/PeiyuanXiao/LithicAnalyst/issues/new/choose) or by e-mail to [pyxiao.sci\@gmail.com](mailto:pyxiao.sci@gmail.com).
 
 - To contribute code, see [CONTRIBUTING.md](CONTRIBUTING.md); what has changed between versions is in [CHANGELOG.md](CHANGELOG.md).
 
