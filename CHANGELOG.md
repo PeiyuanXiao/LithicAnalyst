@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The reference gives LithicAnalyst's DOI on Zenodo, 10.5281/zenodo.24069150, which stands for all versions: "Zenodo. https://doi.org/…" in place of GitHub and the repository's address, on the About page and in the exports' `manifest.json`. `CITATION.cff` has the DOI too, so GitHub's "Cite this repository" gives it, and the README has its badge.
+
 ## 1.0.0 — 2026-11-08
 
 - Ben Marwick is an author, after Peiyuan Xiao: in `CITATION.cff`, so in the reference (APA, also in the exports' `manifest.json`) and in GitHub's "Cite this repository". The About page lists the authors, read from `CITATION.cff`, and so do the built file's author meta and the manifest's `app.author`.

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { apaAuthors, apaCitation, apaCitationParts, apaName, cffAuthors, cffCitationAuthors } from '../src/core/citation';
+import { apaAuthors, apaCitation, apaCitationParts, apaName, cffAuthors, cffCitationAuthors, cffCitationDoi } from '../src/core/citation';
 import { appInfo, citation, creditLine, ISSUES_URL, LICENSE_URL } from '../src/ui/about';
 
 describe('a name as APA writes it', () => {
@@ -61,11 +61,31 @@ describe('the names to cite, from CITATION.cff', () => {
   });
 });
 
+describe('the DOI to cite, from CITATION.cff', () => {
+  it('is the preferred citation\'s, as written, before the top-level one', () => {
+    const cff = ['doi: 10.5281/zenodo.1', 'preferred-citation:', '  type: software', '  authors:', '    - family-names: Xiao', '  doi: "10.5281/zenodo.2"', 'keywords:', '  - x'].join('\r\n');
+    expect(cffCitationDoi(cff)).toBe('10.5281/zenodo.2');
+  });
+
+  it('is the top-level one when the preferred citation has none', () => {
+    expect(cffCitationDoi('doi: 10.5281/zenodo.1\npreferred-citation:\n  type: software\n  url: "https://example.org"\n')).toBe('10.5281/zenodo.1');
+  });
+
+  it('is none without a DOI', () => {
+    expect(cffCitationDoi('cff-version: 1.2.0\npreferred-citation:\n  type: software\n')).toBeNull();
+  });
+});
+
 describe('the reference', () => {
   const source = { authors: ['Peiyuan Xiao'], year: 2026, version: '0.1.0', url: 'https://github.com/PeiyuanXiao/LithicAnalyst' };
 
   it('is APA software: author, year, title, version, kind, publisher, address', () => {
     expect(apaCitation(source)).toBe('Xiao, P. (2026). LithicAnalyst (Version 0.1.0) [Computer software]. GitHub. https://github.com/PeiyuanXiao/LithicAnalyst');
+  });
+
+  it('gives the DOI on Zenodo in place of the repository when there is one', () => {
+    expect(apaCitation({ ...source, doi: '10.5281/zenodo.24069150' })).toBe('Xiao, P. (2026). LithicAnalyst (Version 0.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24069150');
+    expect(apaCitation({ ...source, doi: null })).toBe(apaCitation(source));
   });
 
   it('comes in three parts, the title alone in the middle (for italics)', () => {
@@ -95,7 +115,11 @@ describe('what the program says of itself', () => {
   it('is what the exports\' manifest carries, with this version\'s reference', () => {
     const cff = readFileSync(new URL('../CITATION.cff', import.meta.url), 'utf8');
     expect(appInfo()).toEqual({ name: 'LithicAnalyst', version: pkg.version, author: cffAuthors(cff).join(', '), license: pkg.license, repository, citation: citation() });
-    expect(citation()).toBe(apaCitation({ authors: cffCitationAuthors(cff), year: new Date().getFullYear(), version: pkg.version, url: repository }));
+    expect(citation()).toBe(apaCitation({ authors: cffCitationAuthors(cff), year: new Date().getFullYear(), version: pkg.version, url: repository, doi: cffCitationDoi(cff) }));
+    // Zenodo's concept DOI, the same at the top of CITATION.cff and in its preferred citation
+    expect(cffCitationDoi(cff)).toMatch(/^10\.5281\/zenodo\.\d+$/);
+    expect(/^doi: *(\S+)/m.exec(cff)?.[1]).toBe(cffCitationDoi(cff));
+    expect(citation().endsWith(`Zenodo. https://doi.org/${cffCitationDoi(cff)}`)).toBe(true);
     // the authors' own way of being cited
     expect(citation().startsWith(`Xiao, P. Y., & Marwick, B. (${new Date().getFullYear()}). LithicAnalyst`)).toBe(true);
   });

@@ -2,7 +2,7 @@
 
 <!-- badges: start -->
 
-[![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active) [![Release](https://img.shields.io/github/v/release/PeiyuanXiao/LithicAnalyst)](https://github.com/PeiyuanXiao/LithicAnalyst/releases/latest) <!-- [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX) --> [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Browser: Chrome \| Edge](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-4285F4?logo=googlechrome&logoColor=white)](https://peiyuanxiao.github.io/LithicAnalyst/) [![Tests](https://github.com/PeiyuanXiao/LithicAnalyst/actions/workflows/ci.yml/badge.svg)](https://github.com/PeiyuanXiao/LithicAnalyst/actions/workflows/ci.yml) [![Downloads](https://img.shields.io/github/downloads/PeiyuanXiao/LithicAnalyst/total)](https://github.com/PeiyuanXiao/LithicAnalyst/releases) [![ORCID](https://img.shields.io/badge/ORCID-0009--0000--9733--5875-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0009-0000-9733-5875)
+[![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active) [![Release](https://img.shields.io/github/v/release/PeiyuanXiao/LithicAnalyst)](https://github.com/PeiyuanXiao/LithicAnalyst/releases/latest) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24069150.svg)](https://doi.org/10.5281/zenodo.24069150) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Browser: Chrome \| Edge](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-4285F4?logo=googlechrome&logoColor=white)](https://peiyuanxiao.github.io/LithicAnalyst/) [![Tests](https://github.com/PeiyuanXiao/LithicAnalyst/actions/workflows/ci.yml/badge.svg)](https://github.com/PeiyuanXiao/LithicAnalyst/actions/workflows/ci.yml) [![Downloads](https://img.shields.io/github/downloads/PeiyuanXiao/LithicAnalyst/total)](https://github.com/PeiyuanXiao/LithicAnalyst/releases) [![ORCID](https://img.shields.io/badge/ORCID-0009--0000--9733--5875-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0009-0000-9733-5875)
 
 <!-- badges: end -->
 
@@ -100,11 +100,13 @@ The project file and every exported column are described in [docs/project-format
 
 If you use **LithicAnalyst** in your research, please cite the version you used:
 
-> Xiao, P. Y., & Marwick, B. (2026). *LithicAnalyst* (Version 1.0.0) [Computer software]. GitHub. <https://github.com/PeiyuanXiao/LithicAnalyst>
+> Xiao, P. Y., & Marwick, B. (2026). *LithicAnalyst* (Version 1.0.0) [Computer software]. Zenodo. <https://doi.org/10.5281/zenodo.24069150>
 
 and refer to it in your text, for example:
 
 > “Scar directions were recorded with LithicAnalyst (Version 1.0.0; Xiao & Marwick, 2026).”
+
+The DOI in the reference stands for all versions and leads to the latest. Each version also has a DOI of its own, listed under **Versions** on [Zenodo](https://doi.org/10.5281/zenodo.24069150): use that one to point to exactly the version you used.
 
 The About page in the app (the **?** button) gives the reference for the version you have, with a button to copy it; **Cite this repository** on this page gives it in APA and BibTeX.
 
@@ -114,6 +116,7 @@ The About page in the app (the **?** button) gives the reference for the version
   title   = {{LithicAnalyst}},
   year    = {2026},
   version = {1.0.0},
+  doi     = {10.5281/zenodo.24069150},
   url     = {https://github.com/PeiyuanXiao/LithicAnalyst}
 }
 ```

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import pkg from './package.json' with { type: 'json' };
-import { cffAuthors, cffCitationAuthors } from './src/core/citation';
+import { cffAuthors, cffCitationAuthors, cffCitationDoi } from './src/core/citation';
 
 /**
  * Who made it, under what licence, where it lives: the contact, licence and address from package.json,
@@ -20,6 +20,8 @@ const ABOUT = {
   author: (authors.length ? authors : [pkg.author.name]).join(', '),
   /** The authors as cited, "given family". */
   citationAuthors: citationAuthors.length ? citationAuthors : [pkg.author.name],
+  /** The DOI to cite (Zenodo's concept DOI, all versions), from CITATION.cff; null without one. */
+  doi: cffCitationDoi(cff),
   email: pkg.author.email,
   repository: pkg.repository.url.replace(/^git\+/, '').replace(/\.git$/, ''),
   license: pkg.license,

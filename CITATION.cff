@@ -17,6 +17,8 @@ authors:
     orcid: "https://orcid.org/0000-0001-7879-4531"
 version: 1.0.0
 date-released: 2026-11-08
+# Zenodo's concept DOI: all versions, resolving to the latest. Each version has a DOI of its own on Zenodo.
+doi: 10.5281/zenodo.24069150
 license: MIT
 repository-code: "https://github.com/PeiyuanXiao/LithicAnalyst"
 keywords:
@@ -38,4 +40,5 @@ preferred-citation:
       given-names: Ben
       orcid: "https://orcid.org/0000-0001-7879-4531"
   version: 1.0.0
+  doi: 10.5281/zenodo.24069150
   url: "https://github.com/PeiyuanXiao/LithicAnalyst"

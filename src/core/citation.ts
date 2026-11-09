@@ -1,6 +1,7 @@
 /**
- * How to cite LithicAnalyst: a reference in APA style (7th edition, software), from the author,
- * the year, the version and the address of the repository. No DOM; the about page and the tests use it.
+ * How to cite LithicAnalyst: a reference in APA style (7th edition, software), from the authors,
+ * the year, the version and the DOI on Zenodo (or, without one, the address of the repository). No DOM;
+ * the about page and the tests use it.
  */
 
 /** "Peiyuan Xiao" → "Xiao, P."; "P. Y. Xiao" → "Xiao, P. Y."; "Jean-Paul Anne Martin" → "Martin, J.-P. A."; a one-word name stays as it is. */
@@ -71,12 +72,30 @@ export function cffCitationAuthors(cff: string): string[] {
   return [];
 }
 
+/**
+ * The DOI of the `preferred-citation` in CITATION.cff ("10.5281/zenodo.24069150"), else its top-level
+ * `doi`; null when there is none. As written, without "https://doi.org/".
+ */
+export function cffCitationDoi(cff: string): string | null {
+  const lines = cff.split(/\r?\n/);
+  const value = (line: string | undefined) => line?.replace(/^\s*doi:\s*/, '').trim().replace(/^(["'])(.*)\1$/, '$2') || null;
+  const start = lines.findIndex((line) => /^preferred-citation:\s*$/.test(line));
+  if (start >= 0) {
+    for (let i = start + 1; i < lines.length && !/^\S/.test(lines[i]); i++) {
+      if (/^ {2}doi:/.test(lines[i])) return value(lines[i]);
+    }
+  }
+  return value(lines.find((line) => /^doi:/.test(line)));
+}
+
 export interface CitationSource {
   authors: readonly string[];
   year: number;
   version: string;
   /** The repository's address. */
   url: string;
+  /** The DOI on Zenodo, without "https://doi.org/"; the reference then gives it in place of the repository. */
+  doi?: string | null;
 }
 
 /** The reference in three parts, the title (to be set in italics) in the middle. */
@@ -84,11 +103,11 @@ export function apaCitationParts(s: CitationSource): { before: string; title: st
   return {
     before: `${apaAuthors(s.authors)} (${s.year}). `,
     title: 'LithicAnalyst',
-    after: ` (Version ${s.version}) [Computer software]. GitHub. ${s.url}`,
+    after: ` (Version ${s.version}) [Computer software]. ${s.doi ? `Zenodo. https://doi.org/${s.doi}` : `GitHub. ${s.url}`}`,
   };
 }
 
-/** The reference as plain text: Xiao, P. (2026). LithicAnalyst (Version 0.1.0) [Computer software]. GitHub. https://… */
+/** The reference as plain text: Xiao, P. Y., & Marwick, B. (2026). LithicAnalyst (Version 1.0.0) [Computer software]. Zenodo. https://doi.org/… */
 export function apaCitation(s: CitationSource): string {
   const p = apaCitationParts(s);
   return p.before + p.title + p.after;

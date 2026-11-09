@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { apaCitation, cffAuthors, cffCitationAuthors } from '../src/core/citation';
+import { apaCitation, cffAuthors, cffCitationAuthors, cffCitationDoi } from '../src/core/citation';
 import { APP_URL, expect, openApp, openStart, test } from './helpers';
 
 // Who made it, where to ask, how to cite, the licence: the start page, the "?" dialog, the file itself.
@@ -13,7 +13,7 @@ const COPYRIGHT = /Copyright \(c\) (.+)/.exec(readFileSync(new URL('../LICENSE',
 const REPOSITORY = pkg.repository.url.replace(/^git\+/, '').replace(/\.git$/, '');
 const CFF = readFileSync(new URL('../CITATION.cff', import.meta.url), 'utf8');
 const AUTHORS = cffAuthors(CFF).join(', ');
-const CITATION = apaCitation({ authors: cffCitationAuthors(CFF), year: new Date().getFullYear(), version: pkg.version, url: REPOSITORY });
+const CITATION = apaCitation({ authors: cffCitationAuthors(CFF), year: new Date().getFullYear(), version: pkg.version, url: REPOSITORY, doi: cffCitationDoi(CFF) });
 
 test('the start page names the author and the licence under the version', async ({ page }) => {
   await openStart(page);

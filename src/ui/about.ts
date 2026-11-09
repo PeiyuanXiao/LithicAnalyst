@@ -15,7 +15,7 @@ export const LICENSE_URL = `${ABOUT.repository}/blob/main/LICENSE`;
 /** The libraries inside the file and their licences, which ask for their notices to be kept. */
 export const THIRD_PARTY = 'three.js, three-mesh-bvh (MIT) · IBM Plex (SIL OFL 1.1)';
 
-export const citationSource = (): CitationSource => ({ authors: ABOUT.citationAuthors, year: ABOUT.year, version: __APP_VERSION__, url: ABOUT.repository });
+export const citationSource = (): CitationSource => ({ authors: ABOUT.citationAuthors, year: ABOUT.year, version: __APP_VERSION__, url: ABOUT.repository, doi: ABOUT.doi });
 
 /** This version's reference, APA style, as plain text. */
 export const citation = (): string => apaCitation(citationSource());
