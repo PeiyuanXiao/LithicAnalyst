@@ -152,17 +152,16 @@ test('the card in focus is not marked; Tab goes on with it marked; Enter and Spa
 
 test('the language and the theme are the top bar\'s own, and stay as they were set here', async ({ page }) => {
   await openStart(page);
-  await expect(page.locator('#start-lang')).toHaveText('中');
-  await expect(page.locator('#start-lang')).toHaveAttribute('aria-label', '切换到中文');
+  await expect(page.locator('#start-lang')).toHaveText('EN');
+  await expect(page.locator('#start-lang')).toHaveAttribute('aria-label', 'Language');
   await page.locator('#start-lang').click();
+  await page.locator('#start-lang-zh').click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.locator('.start-card-name')).toHaveText(['石核', '石片', '通用']);
   await expect(page.locator('.start-card').nth(2)).toHaveAttribute('aria-label', '通用');
-  // the next language, named in itself
-  await expect(page.locator('#start-lang')).toHaveText('IT');
-  await expect(page.locator('#start-lang')).toHaveAttribute('aria-label', 'Passa all’italiano');
-  // the same button, still in focus
-  expect(await focused(page)).toBe('start-lang');
+  // the language it is in, and its name in it
+  await expect(page.locator('#start-lang')).toHaveText('中');
+  await expect(page.locator('#start-lang')).toHaveAttribute('aria-label', '语言');
 
   const before = await page.evaluate(() => window.lithicanalyst.theme());
   await page.locator('#start-theme').click();
@@ -189,19 +188,85 @@ test('the language and the theme are the top bar\'s own, and stay as they were s
   await expect(page.locator('#btn-close-model')).toBeEnabled();
 });
 
-test('the language button goes round every language and back to English', async ({ page }) => {
+test("the language button opens the top bar's menu: each language in itself, the current one checked", async ({ page }) => {
   await openStart(page);
-  const seen: Array<[string | null, string | null, string]> = [];
-  for (let i = 0; i < 4; i++) {
-    await page.locator('#start-lang').click();
-    seen.push([await page.locator('html').getAttribute('lang'), await page.locator('#start-lang').textContent(), (await page.locator('.start-card-name').allTextContents()).join(' ')]);
-  }
-  expect(seen).toEqual([
-    ['zh-CN', 'IT', '石核 石片 通用'],
-    ['it', 'FR', 'Nucleo Scheggia Generico'],
-    ['fr', 'EN', 'Nucléus Éclat Générique'],
-    ['en', '中', 'Core Flake General'],
+  const button = page.locator('#start-lang');
+  const menu = page.locator('#start-lang-menu');
+  const cards = async () => (await page.locator('.start-card-name').allTextContents()).join(' ');
+  await expect(button).toHaveText('EN');
+  await expect(button).toHaveAttribute('aria-haspopup', 'menu');
+  await expect(menu).toBeHidden();
+
+  await button.click();
+  await expect(menu).toBeVisible();
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  await expect(menu).toHaveClass(/popover menu/);
+  await expect(menu.locator('.menu-item')).toHaveText(['English', '中文', 'Deutsch', 'Español', 'Français', 'Italiano', 'Tiếng Việt']);
+  expect(await menu.locator('.menu-item').evaluateAll((els) => els.map((el) => [el.id, el.getAttribute('lang'), el.getAttribute('aria-checked')]))).toEqual([
+    ['start-lang-en', 'en', 'true'],
+    ['start-lang-zh', 'zh-CN', 'false'],
+    ['start-lang-de', 'de', 'false'],
+    ['start-lang-es', 'es', 'false'],
+    ['start-lang-fr', 'fr', 'false'],
+    ['start-lang-it', 'it', 'false'],
+    ['start-lang-vi', 'vi', 'false'],
   ]);
+  await expect(menu.locator('#start-lang-en .menu-check')).toBeVisible();
+  await expect(menu.locator('#start-lang-de .menu-check')).toBeHidden();
+  // nothing of the start page is over it, and the top bar's ids are not taken
+  const last = (await page.locator('#start-lang-vi').boundingBox())!;
+  expect(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('.menu-item')?.id ?? null, [last.x + last.width / 2, last.y + last.height / 2])).toBe('start-lang-vi');
+  expect(await page.locator('[id="lang-de"]').count()).toBe(1);
+
+  await page.locator('#start-lang-de').click();
+  await expect(menu).toBeHidden();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+  await expect(button).toHaveText('DE');
+  await expect(button).toHaveAttribute('aria-label', 'Sprache');
+  expect(await cards()).toBe('Kern Abschlag Allgemein');
+
+  await button.click();
+  await expect(page.locator('#start-lang-de')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#start-lang-en')).toHaveAttribute('aria-checked', 'false');
+  await page.locator('#start-lang-vi').click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'vi');
+  await expect(button).toHaveText('VI');
+  expect(await cards()).toBe('Hạch đá Mảnh tước Tổng quát');
+
+  // Esc closes it, the language as it was
+  await button.click();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'vi');
+  // so does a press outside it
+  await button.click();
+  await page.mouse.click(40, 400);
+  await expect(menu).toBeHidden();
+  await expect(page.locator('#start-page')).toBeVisible();
+  // and the keyboard: Enter opens it, Tab goes into it, Enter chooses
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  expect(await focused(page)).toBe('start-lang-zh');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  await expect(menu).toBeHidden();
+  await button.click();
+  await page.locator('#start-lang-vi').click();
+
+  // kept when the page is opened again; the top bar's button is in the same language
+  await page.reload();
+  await page.waitForFunction(() => !!window.lithicanalyst);
+  await expect(button).toHaveText('VI');
+  expect(await cards()).toBe('Hạch đá Mảnh tước Tổng quát');
+  await enterModule(page, 'core');
+  await expect(page.locator('#btn-lang')).toHaveText('VI');
+  await page.locator('#btn-lang').click();
+  await expect(page.locator('#lang-vi')).toHaveAttribute('aria-checked', 'true');
 });
 
 test('a project file says what it is, whichever card is chosen; the choice stands for what comes next', async ({ page }) => {
@@ -493,6 +558,7 @@ test.describe('in motion', () => {
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator('#start-lang').click();
+    await page.locator('#start-lang-zh').click();
     await page.mouse.move(5, 5);
     await page.waitForTimeout(200);
     await page.screenshot({ path: `${SHOTS}/start-zh-dark.png` });

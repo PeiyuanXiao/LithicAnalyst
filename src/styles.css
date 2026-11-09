@@ -52,6 +52,9 @@
   --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 5 8.6 9.6 3.6' fill='none' stroke='%23ece6d8' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   /* the interface's one easing */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* the shell's ink and shadow as the root has them (the start page's palette is its own), for its menu there */
+  --shell-ink: var(--ink);
+  --shell-shadow: var(--shadow);
   color-scheme: light;
 
   --font-ui: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
@@ -358,9 +361,10 @@ kbd {
   gap: 10px;
 }
 
+/* the unit's column as wide as its label wants, in any language */
 .spec-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 7.5em;
+  grid-template-columns: minmax(0, 1fr) minmax(7.5em, max-content);
   gap: 8px;
 }
 
@@ -545,6 +549,12 @@ kbd {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+}
+
+/* a long text (a status pill's why, an empty value's reason) wraps inside the tip's width; a short one stays on its line */
+.tip > span {
+  min-width: 0;
+  white-space: normal;
 }
 
 /* ------------------------------------------------------------ buttons */
@@ -1255,10 +1265,19 @@ kbd {
 
 .start-ctls {
   position: absolute;
+  z-index: 2;
   top: 20px;
   right: 24px;
   display: flex;
   gap: 4px;
+}
+
+/* the language menu is the top bar's, in the shell's colours */
+.start-ctls .popover {
+  --ink: var(--shell-ink);
+  --shadow: var(--shell-shadow);
+  font-size: var(--step-0);
+  line-height: 1.45;
 }
 
 .start-ctl {
@@ -3396,6 +3415,12 @@ input[type="checkbox"]:disabled {
   gap: 8px;
 }
 
+/* check boxes side by side, onto a second line where a language's words need it */
+.checks-row.checks-wrap {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
 .problem-toggle.is-warn {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
@@ -5100,12 +5125,13 @@ input[type="checkbox"]:disabled {
   font-size: var(--step--1);
 }
 
+/* a heading goes onto two lines rather than the table out of the sidebar (a longer language, a narrow window) */
 .retouch-table th {
   padding: 2px 4px;
   color: var(--ink-2);
   font-weight: 400;
   text-align: left;
-  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .retouch-table td {

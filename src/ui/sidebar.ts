@@ -2528,7 +2528,7 @@ function gmSection(api: AppApi): Section {
     };
     items.append(
       h('span', { class: 'ctl-label sub-label' }, t('gm.fixed')),
-      h('div', { class: 'checks-row' }, fixed('pop', t('landmark.pop')), fixed('platform_left', t('landmark.platformLeft')), fixed('platform_right', t('landmark.platformRight'))),
+      h('div', { class: 'checks-row checks-wrap' }, fixed('pop', t('landmark.pop')), fixed('platform_left', t('landmark.platformLeft')), fixed('platform_right', t('landmark.platformRight'))),
       h('span', { class: 'ctl-label sub-label' }, t('gm.curves')),
       curve('edge', t('gm.edge')),
       curve('platformOutline', t('gm.platformOutline')),

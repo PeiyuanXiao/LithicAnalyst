@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The interface is also in German, Spanish and Vietnamese.
+- The language menu lists English and 中文 first, then the others by their own names.
+- The start page's language button opens the same menu as the top bar's, instead of going round the languages.
+- Vietnamese letters are shown in IBM Plex: its Vietnamese subsets are bundled, so names typed in Vietnamese no longer mix fonts.
+- Long tooltips (a status pill's explanation, the reason a value is empty) wrap inside their box instead of running out of it. The headings of the retouch tables and the GM panel's fixed landmarks go onto a second line where a language or a narrow window needs it, so the sidebar no longer scrolls sideways in the retouch mode; the specimen panel's unit column is as wide as its label.
 - The reference gives LithicAnalyst's DOI on Zenodo, 10.5281/zenodo.24069150, which stands for all versions: "Zenodo. https://doi.org/…" in place of GitHub and the repository's address, on the About page and in the exports' `manifest.json`. `CITATION.cff` has the DOI too, so GitHub's "Cite this repository" gives it, and the README has its badge.
 
 ## 1.0.0 — 2026-11-08

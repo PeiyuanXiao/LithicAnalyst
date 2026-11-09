@@ -2,15 +2,19 @@ import type { LocalizedText } from '../core/types';
 import { STRINGS } from './strings';
 
 /**
- * The interface languages, each named in itself. The first is the default. Adding one: a column headed
- * with its code in the table `npm run i18n -- export` makes, imported with `npm run i18n -- import`
- * (an entry here and a property in every text of ui/strings.ts and core/fields.ts; see CONTRIBUTING.md).
+ * The interface languages, each named in itself, in the menus' order: English (the default) and Chinese,
+ * then the others by their own names. Adding one: a column headed with its code in the table
+ * `npm run i18n -- export` makes, imported with `npm run i18n -- import` (an entry at the end here, to be
+ * moved into place, and a property in every text of ui/strings.ts and core/fields.ts; see CONTRIBUTING.md).
  */
 export const LANGS = [
   { code: 'en', label: 'English', short: 'EN' },
   { code: 'zh', label: '中文', short: '中' },
-  { code: 'it', label: 'Italiano', short: 'IT' },
+  { code: 'de', label: 'Deutsch', short: 'DE' },
+  { code: 'es', label: 'Español', short: 'ES' },
   { code: 'fr', label: 'Français', short: 'FR' },
+  { code: 'it', label: 'Italiano', short: 'IT' },
+  { code: 'vi', label: 'Tiếng Việt', short: 'VI' },
 ] as const;
 
 export type Lang = (typeof LANGS)[number]['code'];
@@ -69,9 +73,6 @@ export function t(key: StringKey | string, vars?: Record<string, string | number
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
   return s;
 }
-
-/** A key's text in a given language, if it has one. */
-export const textIn = (code: Lang, key: StringKey): string | undefined => (STRINGS[key] as LocalizedText)[code] || undefined;
 
 /** Pick the current language from a field label. */
 export const tl = (text: LocalizedText): string => text[lang] || text.en;

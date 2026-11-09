@@ -93,7 +93,6 @@ const AREAS: Record<string, string> = {
 const NOTES: Record<string, string> = {
   [LANG_NAME_ID]: '该语言自己的名称，用该语言写（语言菜单） The language’s name, in itself',
   [LANG_SHORT_ID]: '语言按钮上的 1–2 个字 1–2 characters on the language button',
-  'start.switchLang': '用该语言写「切换到该语言」 “Switch to <this language>”, written in it',
 };
 
 const area = (id: string): string => AREAS[id.split('.').slice(0, 2).join('.')] ?? AREAS[id.split('.')[0]] ?? '';

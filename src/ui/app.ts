@@ -600,7 +600,7 @@ export class App implements AppApi {
     this.appEl = h('div', { class: 'app' });
     this.viewportEl = h('section', { class: 'viewport', id: 'viewport', 'data-mode': this.mode });
     this.toolbarEl = h('div', { class: 'viewport-ui vp-toolbar' });
-    this.startPage = buildStartPage((type) => this.enterModule(type));
+    this.startPage = buildStartPage((type) => this.enterModule(type), this.popovers);
     this.startEl = this.startPage.el;
     this.emptyEl = h('div', { class: 'vp-empty', id: 'viewport-empty', hidden: true });
     this.statusEl = h('div', { class: 'viewport-ui status-pills', id: 'annotation-status', role: 'group', hidden: true });
@@ -6401,12 +6401,13 @@ export class App implements AppApi {
   private wireKeyboard(): void {
     window.addEventListener('keydown', (e) => {
       if (document.querySelector('.modal-backdrop')) return;
-      // the start page's keys are its controls' own
-      if (this.startShown()) return;
+      // a menu open (the start page's language menu too) goes with Esc
       if (e.key === 'Escape' && this.popovers.close()) {
         e.preventDefault();
         return;
       }
+      // the start page's keys are its controls' own
+      if (this.startShown()) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (mod && key === 's') {

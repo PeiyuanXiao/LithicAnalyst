@@ -131,7 +131,8 @@ keeps the selection and the undo history.
   into a stored ZIP, `io/zip.ts`).
 * **Top bar**: the specimen button (ID and unit; its panel holds ID, unit, annotator, notes and
   the model file); the mode switch in the middle; the File menu, Save, undo and redo, the
-  language menu (`LANGS` in `ui/i18n.ts`), the theme switch and Help (see About and credit). Where its words do not
+  language menu (`LANGS` in `ui/i18n.ts`: English and Chinese, then the others by their own names; the button shows the
+  current language's short name, the menu each language named in itself), the theme switch and Help (see About and credit). Where its words do not
   fit (a language with longer ones, a long specimen name), `fitTopbar` takes the narrow window's steps
   in turn, measured afresh whenever a part of the bar changes size: `.is-tight` (the modes' icons
   only), then `.is-tighter` (the header buttons' icons only). A change of language also redraws the
@@ -151,7 +152,7 @@ keeps the selection and the undo history.
 
 ## Start page
 
-`ui/startPage.ts` builds `#start-page`, once: a child of `.app` over everything (fixed, below the dialogs, the toasts and the tooltips); a change of language or theme only repaints its words and its icon (`StartPage.paint`), so the entrance, the focus and the drop outline stay. It is shown until a card is pressed or a model or a folder opens (`App.startShown`; `App.entered` is view state, never in the file). While it is shown the top bar is hidden, `main` is inert and the app's keys are off, so a card's Enter and Space are its own; the view stays under it at its size, so nothing has to be set up again when a model opens, and the WebGL canvas is never 0×0. The cards write the `specimenType` preference, which `App.newSpecimenType` reads for a new model and which the specimen panel also writes; the state's own type changes only with a model, and a project applied later (`applyProject`) brings its own. While it is shown the drop outline (`dropEl`) and the busy overlay (`openMeshFile`) go on it, since what is under it cannot be seen. `App.buildEmptyView` fills `#viewport-empty`, the ways to open something in the middle of the view, shown in the workspace with no model and no folder. The mode switch is hidden with no model (`updateMeshDependentUi`); `.top-actions` holds the grid's last column, so it stays put. `App.closeModel` clears `entered`, with or without a model.
+`ui/startPage.ts` builds `#start-page`, once: a child of `.app` over everything (fixed, below the dialogs, the toasts and the tooltips); a change of language or theme only repaints its words and its icon (`StartPage.paint`), so the entrance, the focus and the drop outline stay. It is shown until a card is pressed or a model or a folder opens (`App.startShown`; `App.entered` is view state, never in the file). Its language button (`#start-lang`) is the top bar's: the current language's short name, opening the same menu (`#start-lang-menu`, items `start-lang-<code>`) through the app's `Popovers`, so a press outside or Esc closes it as they close the top bar's; it sits in `.start-ctls`, above the rest of the page, and `.start-ctls .popover` takes back the shell's ink and shadow (`--shell-ink`, `--shell-shadow`) from the page's own palette. While it is shown the top bar is hidden, `main` is inert and the app's keys are off (Esc still closes an open menu), so a card's Enter and Space are its own; the view stays under it at its size, so nothing has to be set up again when a model opens, and the WebGL canvas is never 0×0. The cards write the `specimenType` preference, which `App.newSpecimenType` reads for a new model and which the specimen panel also writes; the state's own type changes only with a model, and a project applied later (`applyProject`) brings its own. While it is shown the drop outline (`dropEl`) and the busy overlay (`openMeshFile`) go on it, since what is under it cannot be seen. `App.buildEmptyView` fills `#viewport-empty`, the ways to open something in the middle of the view, shown in the workspace with no model and no folder. The mode switch is hidden with no model (`updateMeshDependentUi`); `.top-actions` holds the grid's last column, so it stays put. `App.closeModel` clears `entered`, with or without a model.
 
 * **Motion.** The page's styles are those of its design (colours, sizes, easings and delays), with its own palette on `.start-page`; `src/styles.css` is where they now live. The entrance's animations apply under `.is-entering`, which `StartPage.leave` takes off for good, so the base state is the end state and there is nothing to undo; the rings' turning and the cards' hover states are apart from it. The rules that stop all motion under `prefers-reduced-motion` cover it.
 * **The focus.** A card pressed or reached by keyboard looks the same (`:is(:hover, … :focus-visible)`). A browser counts the focus a script gives on opening as visible, which would light the last card with nothing done, so `.quiet-focus` holds that back until the first Tab.
@@ -193,7 +194,9 @@ Nothing else needs to know the type: flake-only code already stops at `isFlake`.
   name and a key cap below an element after 300 ms of hover (at once on keyboard focus);
   `tips.showAt(x, y, …)` shows one next to the cursor. Toolbar, mode and top-bar buttons use
   them instead of `title`, as do `iconButton` and `plusButton` (`ui/controls.ts`): a button whose
-  icon says what it does shows no words; its name is in the tooltip and in `aria-label`.
+  icon says what it does shows no words; its name is in the tooltip and in `aria-label`. A tip is at
+  most 320 px wide: a short text stays on its line, a long one (a status pill's why, an empty value's
+  reason) wraps inside it.
 * **Hover** (select tool): `SelectTool` picks at most once a frame with the same pick as a click
   (arrows, curves, landmarks, measurements; BVH rays only) and tells each layer
   (`setHoverItem`) and the app (`ToolContext.hovered`, which shows "label · kind" after a pause).
@@ -713,7 +716,8 @@ a text is seen, notes (placeholders to keep) and what the check found; the rows 
 `@lang.short` hold `LANGS`. `import` reads the sheet `texts` (shared strings, runs and phonetic
 guides as Excel and WPS save them, by a small unzip over `node:zlib`), and rewrites only the literals
 that changed, in their own layout; a new language column becomes a property in every literal it has a
-text for and an entry in `LANGS`. An empty English or Chinese cell, placeholders unlike the English, or
+text for and an entry at the end of `LANGS` (whose order, the menus', is set by hand: English and Chinese, then
+the others by their own names). An empty English or Chinese cell, placeholders unlike the English, or
 a new language without its name stops it with nothing written. `check` lists placeholders that differ,
 empty texts, keys the code asks for and the table lacks, keys no code names (whole, by a template
 prefix, or by a prefix passed as a literal), and one English text said two ways in Chinese and back.
@@ -730,9 +734,10 @@ Who made the program, where to ask, how to cite it and its licence are written i
 
 ## Hosting
 
-The wordmark and the cards' ghost words are outlines of IBM Plex Sans Condensed (SIL OFL 1.1), made once from the official release (`scripts/gen-wordmark.py`, no font file in the repository). The IBM Plex fonts (SIL OFL 1.1) come from `@fontsource`: `src/fonts.css` declares only the Latin
-subset of the weights the interface uses, and the build inlines them, so the page requests
-no font server. Chinese text uses the system fonts.
+The wordmark and the cards' ghost words are outlines of IBM Plex Sans Condensed (SIL OFL 1.1), made once from the official release (`scripts/gen-wordmark.py`, no font file in the repository). The IBM Plex fonts (SIL OFL 1.1) come from `@fontsource`: `src/fonts.css` declares two subsets, Latin and
+Vietnamese, of the weights the interface uses (a face per subset and weight, each with fontsource's
+`unicode-range`, so the browser takes the Vietnamese one only for the letters in its range), and the build
+inlines them, so the page requests no font server. Chinese text uses the system fonts.
 
 `npm run build` writes `dist/index.html` (complete page, works from `file://` and any static
 host such as GitHub Pages) and `dist/artifact.html` (the same app without the document

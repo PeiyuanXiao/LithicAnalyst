@@ -1,9 +1,11 @@
 import { SPECIMEN_TYPES, type SpecimenType } from '../core/fields';
 import { creditLine } from './about';
 import { BRAND, brandEl, brandInner, brandPrefix, svgFrom } from './brand';
-import { h } from './dom';
-import { getLang, LANGS, setLang, t, textIn, type Lang } from './i18n';
+import { h, icon, ICONS } from './dom';
+import { getLang, htmlLang, langInfo, LANGS, setLang, t } from './i18n';
+import type { Popovers } from './popover';
 import { getTheme, toggleThemeFrom } from './theme';
+import { tip } from './tooltip';
 
 /** The rings behind the logo (also, still and fainter, behind the empty view). */
 export const RINGS =`<svg viewBox="0 0 1500 1500"><g fill="none">
@@ -41,10 +43,22 @@ export interface StartPage {
   paint(): void;
 }
 
-/** What the app opens on: a choice of module, and nothing to load until one is chosen. `onEnter`: the card pressed. */
-export function buildStartPage(onEnter: (type: SpecimenType) => void): StartPage {
-  const nextLang = (): (typeof LANGS)[number] => LANGS[(LANGS.findIndex((l) => l.code === getLang()) + 1) % LANGS.length];
-  const langBtn = h('button', { type: 'button', class: 'start-ctl', id: 'start-lang', onclick: () => setLang(nextLang().code as Lang) });
+/**
+ * What the app opens on: a choice of module, and nothing to load until one is chosen. `onEnter`: the card pressed;
+ * `popovers`: the app's, so its language menu closes as the top bar's do.
+ */
+export function buildStartPage(onEnter: (type: SpecimenType) => void, popovers: Popovers): StartPage {
+  // languages, as in the top bar: the current one on the button, a menu of each named in itself
+  const langMenu = h('div', { class: 'popover menu', id: 'start-lang-menu', role: 'menu', hidden: true });
+  const langBtn = h('button', { type: 'button', class: 'start-ctl', id: 'start-lang', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: () => popovers.toggle(langBtn, langMenu) });
+  tip(langBtn, () => t('header.language'));
+  const langItems = LANGS.map((l) => {
+    const check = icon(ICONS.check);
+    check.classList.add('menu-check');
+    const item = h('button', { type: 'button', id: `start-lang-${l.code}`, class: 'menu-item', role: 'menuitemradio', lang: htmlLang(l.code), onclick: () => (popovers.close(), setLang(l.code)) }, check, h('span', {}, l.label));
+    langMenu.append(item);
+    return { code: l.code, item };
+  });
   const themeBtn = h('button', { type: 'button', class: 'start-ctl', id: 'start-theme', onclick: () => toggleThemeFrom(themeBtn) });
 
   const cards = SPECIMEN_TYPES.map((type, i) => {
@@ -74,7 +88,7 @@ export function buildStartPage(onEnter: (type: SpecimenType) => void): StartPage
       { class: 'start-root' },
       h('div', { class: 'start-grid', 'aria-hidden': 'true' }),
       h('div', { class: 'start-rings st-bgin', 'aria-hidden': 'true' }, svgFrom(RINGS)),
-      h('div', { class: 'start-ctls st-fade', style: 'animation-delay: 1.4s' }, langBtn, themeBtn),
+      h('div', { class: 'start-ctls st-fade', style: 'animation-delay: 1.4s' }, h('div', { class: 'menu-wrap' }, langBtn, langMenu), themeBtn),
       h(
         'div',
         { class: 'start-hero' },
@@ -96,10 +110,9 @@ export function buildStartPage(onEnter: (type: SpecimenType) => void): StartPage
   });
 
   const paint = (): void => {
-    const next = nextLang();
-    langBtn.textContent = next.short;
-    // in the language it goes to (its name, until that is translated)
-    langBtn.setAttribute('aria-label', textIn(next.code, 'start.switchLang') ?? next.label);
+    langBtn.textContent = langInfo().short;
+    langBtn.setAttribute('aria-label', t('header.language'));
+    for (const l of langItems) l.item.setAttribute('aria-checked', String(l.code === getLang()));
     for (const c of cards) {
       const name = t(`specimen.type.${c.type}`);
       c.name.textContent = name;

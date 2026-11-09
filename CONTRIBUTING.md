@@ -36,10 +36,11 @@ npm run i18n -- check                   # checks only: placeholders, empty cells
   column or delete rows. The sheet "说明 readme" repeats these rules.
 - Keep placeholders such as `{n}` and `{name}` in every language (they may move). English and Chinese
   cannot be left empty. If anything is wrong, the import writes nothing and lists the errors.
-- **Adding a language:** add a column after the last language, headed with its code (`ja`, `de`,
+- **Adding a language:** add a column after the last language, headed with its code (`ja`, `ko`,
   `pt-BR`, `zh-TW`, …), fill in the rows `@lang.name` (the language's name in itself) and `@lang.short`
   (one or two characters for the language button), then import. Cells left empty show English, so a
-  language can be translated a part at a time.
+  language can be translated a part at a time. The import adds it at the end of `LANGS` in
+  `src/ui/i18n.ts`; move it there so that English and 中文 stay first and the others follow by their own names.
 - After an import, run `npm test` and `npm run build`.
 
 ## Conventions
@@ -53,7 +54,7 @@ npm run i18n -- check                   # checks only: placeholders, empty cells
 - **Every data change is a Command**, so undo, autosave and notifications keep working.
 - **Fields** are defined once in `src/core/fields.ts`; enum codes must stay stable once data exist.
 - **Lean interface, every language.** Every new string goes into `src/ui/strings.ts` with `en` and `zh`
-  at least (`it` and `fr` where you can; what is missing shows in English). Prefer labels and controls
+  at least (the other languages where you can; what is missing shows in English). Prefer labels and controls
   over explanatory text.
 - **Code and comments in English.**
 - **Tests.** `npm test` must pass; geometry code gets a unit test with a known answer.
