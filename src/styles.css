@@ -1146,7 +1146,7 @@ kbd {
 }
 
 /* ------------------------------------------------------------ start page
-   As design/brand-22a/startpage-reference.html has it: its colours, sizes, easings and delays. It has its own palette, on top of the shell's. */
+   Its colours, sizes, easings and delays are those of its design, and this is where they live. It has its own palette, on top of the shell's. */
 .start-page {
   --bg-top: #f0ebe0;
   --bg-bot: #dcd4c1;
