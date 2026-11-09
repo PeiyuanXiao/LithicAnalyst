@@ -4,7 +4,7 @@ import { STRINGS } from './strings';
 /**
  * The interface languages, each named in itself. The first is the default. Adding one: a column headed
  * with its code in the table `npm run i18n -- export` makes, imported with `npm run i18n -- import`
- * (an entry here and a property in every text of ui/strings.ts and core/fields.ts; see docs/developing.md).
+ * (an entry here and a property in every text of ui/strings.ts and core/fields.ts; see CONTRIBUTING.md).
  */
 export const LANGS = [
   { code: 'en', label: 'English', short: 'EN' },

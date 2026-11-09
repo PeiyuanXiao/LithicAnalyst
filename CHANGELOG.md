@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 1.0.0 — 2026-11-08
+
+- The built file carries the licence of three-mesh-bvh in full, in a comment after the credit line, as its MIT licence asks of every copy (`dist/index.html`, `dist/artifact.html` and the page `npm run pages` makes). It is read from the package at build time.
 - LithicAnalyst says who made it, and how to cite it. The "?" button opens Help, with two pages: About first (the logo, the version, the author, the source code on GitHub, where to send requests and problems — GitHub Issues or email —, the reference in APA style with a button to copy it, the MIT License and the third-party libraries), then the shortcuts; it opens on the page last looked at, and the ? key opens the shortcuts. The start page has "© 2026 Peiyuan Xiao · MIT License" under the version. The built file begins with a comment naming the program, its author, licence and address, and has an author meta tag. Every export's `manifest.json` names the author, licence and repository in `app`, with this version's reference in `app.citation`. The author, e-mail and repository are taken from `package.json`, the copyright from `LICENSE`.
 - The repository has `CITATION.cff` (GitHub's "Cite this repository"), templates for a feature request and a bug report, and the author's name in `LICENSE`.
 - LithicAnalyst can be installed like any program from a web site: `npm run pages` packs the built page with a web app manifest, a service worker and the app icons into `dist/pages/`, for GitHub Pages or any static host. Installed from Chrome or Edge, it has its icon and name in the Start menu, on the desktop and the taskbar, opens in a window of its own and works offline; a new version comes at the next launch, never in the middle of a session, and the title bar follows the light or dark appearance. `npm run pages -- --serve` serves it on `http://localhost:4173/` to try it. The single file `dist/index.html` is unchanged and still asks nothing of the network.

@@ -1,8 +1,8 @@
 {
   "name": "lithicanalyst",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Open-source 3D annotation platform for lithic artefacts: flake scar direction vectors on 3D meshes",
+  "description": "Open-source 3D annotation and measurement of lithic artefacts, in one HTML file that runs offline in the browser: flake scar directions, curves, surface regions, relations and sequences, landmarks and semilandmarks, measurements, figures and inter-observer comparison, with exports for R.",
   "type": "module",
   "scripts": {
     "dev": "vite",

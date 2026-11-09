@@ -12,7 +12,8 @@ authors:
     given-names: Peiyuan
     email: pyxiao.sci@gmail.com
     orcid: "https://orcid.org/0009-0000-9733-5875"
-version: 0.1.0
+version: 1.0.0
+date-released: 2026-11-08
 license: MIT
 repository-code: "https://github.com/PeiyuanXiao/LithicAnalyst"
 keywords:
@@ -30,5 +31,5 @@ preferred-citation:
     - family-names: Xiao
       given-names: "P. Y."
       orcid: "https://orcid.org/0009-0000-9733-5875"
-  version: 0.1.0
+  version: 1.0.0
   url: "https://github.com/PeiyuanXiao/LithicAnalyst"

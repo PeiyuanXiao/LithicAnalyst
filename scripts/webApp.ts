@@ -1,8 +1,9 @@
 // The installable web app (`npm run pages`): what the built single-file page needs to be one on a
 // static host such as GitHub Pages — a web app manifest, a service worker that keeps the app for use
 // offline, and a few tags in the page's head. dist/index.html itself is not touched: the file opened
-// from the disk still asks nothing of the network (CLAUDE.md, rule 18). Used by scripts/pages.ts and
-// the tests; no DOM, no three.js.
+// from the disk still asks nothing of the network: at run time the app loads no network resource,
+// fonts included (docs/architecture.md, "Hosting"). Used by scripts/pages.ts and the tests; no DOM,
+// no three.js.
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';

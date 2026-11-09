@@ -24,14 +24,34 @@ const ABOUT = {
   year: new Date().getFullYear(),
 };
 
-/** The author and the licence where anyone holding the file sees them: a comment at its top, and the author meta. */
+/**
+ * The bundled libraries whose licence must go with every copy, read in full from the package at build
+ * time. three.js keeps its own @license comment in the script.
+ */
+const THIRD_PARTY = ['three-mesh-bvh'];
+
+/** The third-party notices as one comment, lines joined with `eol`. */
+function thirdPartyNotice(eol: string): string {
+  const parts = THIRD_PARTY.map((name) => {
+    const { version } = JSON.parse(readFileSync(new URL(`./node_modules/${name}/package.json`, import.meta.url), 'utf8')) as { version: string };
+    const license = readFileSync(new URL(`./node_modules/${name}/LICENSE`, import.meta.url), 'utf8').replace(/\r\n?/g, '\n').trim();
+    if (/<!--|--!?>/.test(license)) throw new Error(`${name}/LICENSE has text that would end an HTML comment`);
+    return `${name} ${version}\n\n${license}`;
+  });
+  return ['<!-- Third-party software notices', ...parts, '-->'].join('\n\n').split('\n').join(eol);
+}
+
+/**
+ * The author and the licence where anyone holding the file sees them: a comment at its top, the
+ * third-party notices after it, and the author meta.
+ */
 function credit(): Plugin {
   return {
     name: 'lithicanalyst-credit',
     transformIndexHtml(html) {
       const note = `<!-- LithicAnalyst ${pkg.version} · © ${ABOUT.copyright} · ${ABOUT.license} License · ${ABOUT.repository} -->`;
       return {
-        html: html.replace(/^(<!doctype html>)(\r?\n)/i, (_, doctype: string, eol: string) => `${doctype}${eol}${note}${eol}`),
+        html: html.replace(/^(<!doctype html>)(\r?\n)/i, (_, doctype: string, eol: string) => `${doctype}${eol}${note}${eol}${thirdPartyNotice(eol)}${eol}`),
         tags: [{ tag: 'meta', attrs: { name: 'author', content: ABOUT.author }, injectTo: 'head' }],
       };
     },

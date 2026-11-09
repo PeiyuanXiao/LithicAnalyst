@@ -97,7 +97,7 @@ function prism(kind: RetouchPrismKind, opts: Parameters<typeof run>[6] = {}): Re
 describe('T7, the retouch prism', () => {
   const UNI = { D: Math.hypot(4, 8 * Math.tan(Math.PI / 6)), area: 9.2376, angle: 30, e: 4, t: 4.6188, T: 11.547 };
 
-  it('is closed, with the volume and the stations the roadmap gives', () => {
+  it('is closed, with the known volume and number of stations', () => {
     const m = retouchPrism('unifacial');
     near(Math.abs(signedVolume(m.positions, m.index)), 8868.1);
     const top = meshTopology(m.index, m.positions.length / 3);

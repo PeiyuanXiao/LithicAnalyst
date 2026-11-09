@@ -30,4 +30,4 @@ body:
     attributes:
       label: Version
       description: In the Help dialog (the ? button), on the About page.
-      placeholder: "0.1.0"
+      placeholder: "1.0.0"

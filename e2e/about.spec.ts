@@ -85,4 +85,12 @@ test('the built file carries the author, the licence and the address at its top'
   const [, second] = html.split(/\r?\n/);
   expect(second).toBe(`<!-- LithicAnalyst ${pkg.version} · © ${COPYRIGHT} · ${pkg.license} License · ${REPOSITORY} -->`);
   expect(html).toMatch(new RegExp(`<meta name="author" content="${pkg.author.name}"\\s*/?>`));
+  // the third-party notices: three-mesh-bvh's licence in full, right after, in the artifact page too
+  const bvh = readFileSync(new URL('../node_modules/three-mesh-bvh/LICENSE', import.meta.url), 'utf8').replace(/\r\n?/g, '\n').trim();
+  for (const file of [html, readFileSync(new URL('artifact.html', APP_URL), 'utf8')]) {
+    const notices = /<!-- Third-party software notices\n([\s\S]*?)-->/.exec(file.replace(/\r\n?/g, '\n'))?.[1] ?? '';
+    expect(notices).toContain('three-mesh-bvh');
+    expect(notices).toContain(bvh);
+  }
+  expect(html.split(/\r?\n/)[2]).toBe('<!-- Third-party software notices');
 });

@@ -1,5 +1,5 @@
 
-# LithicAnalyst <a href="https://github.com/PeiyuanXiao/LithicAnalyst"><img src="src/assets/brand/app-icon/app-icon.svg" align="right" height="138" alt="LithicAnalyst logo" /></a>
+# LithicAnalyst <a href="https://github.com/PeiyuanXiao/LithicAnalyst"><picture><source media="(prefers-color-scheme: dark)" srcset="src/assets/brand/logo-readme-dark.svg" /><img src="src/assets/brand/logo-readme.svg" align="right" height="180" alt="LithicAnalyst logo" /></picture></a>
 
 <!-- badges: start -->
 
@@ -150,12 +150,12 @@ The project file and every exported column are described in
 If you use **LithicAnalyst** in your research, please cite the version
 you used:
 
-> Xiao, P. Y. (2026). *LithicAnalyst* (Version 0.1.0) [Computer software].
+> Xiao, P. Y. (2026). *LithicAnalyst* (Version 1.0.0) [Computer software].
 > GitHub. <https://github.com/PeiyuanXiao/LithicAnalyst>
 
 and refer to it in your text, for example:
 
-> “Scar directions were recorded with LithicAnalyst (Version 0.1.0;
+> “Scar directions were recorded with LithicAnalyst (Version 1.0.0;
 > Xiao, 2026).”
 
 The About page in the app (the **?** button) gives the reference for
@@ -167,7 +167,7 @@ repository** on this page gives it in APA and BibTeX.
   author  = {Xiao, P. Y.},
   title   = {{LithicAnalyst}},
   year    = {2026},
-  version = {0.1.0},
+  version = {1.0.0},
   url     = {https://github.com/PeiyuanXiao/LithicAnalyst}
 }
 ```

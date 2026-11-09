@@ -18,5 +18,13 @@ playwright-report/
 # Interface text table (npm run i18n -- export)
 i18n/
 
-# The coding assistant's working instructions: kept on the author's computer
+# The author's local working files: not part of the repository
 CLAUDE.md
+CLAUDE.local.md
+docs/roadmap.md
+docs/developing.md
+.claude/
+
+# Editors
+.vscode/
+.idea/
