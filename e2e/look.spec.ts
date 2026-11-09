@@ -361,7 +361,23 @@ test.describe('with motion', () => {
     await expect(pill).not.toHaveClass(/is-ticking/);
     expect(await page.evaluate(() => window.lithicanalyst.tweening())).toBe(false);
 
-    // a landmark placed: from nothing to its size (a little over it on the way), sampled every frame
+    // a landmark placed: from nothing to its size (a little over it on the way), sampled every frame. The pop goes by the
+    // clock, and without a GPU (as on CI) one frame can take longer than the whole pop, which then shows no frame of it:
+    // while it comes in, the page's clock moves on by one 60 Hz frame for each frame drawn, however long that takes.
+    await page.evaluate(() => {
+      const real = { now: performance.now.bind(performance), raf: window.requestAnimationFrame.bind(window) };
+      (window as unknown as { realClock: typeof real }).realClock = real;
+      // the callbacks of one frame share its time: the clock moves on once a frame
+      let t = real.now();
+      let frame = -1;
+      performance.now = () => t;
+      window.requestAnimationFrame = (cb) =>
+        real.raf((ts) => {
+          if (ts !== frame) [frame, t] = [ts, t + 1000 / 60];
+          cb(t);
+        });
+    });
+    await nextFrames(page, 3);
     await page.evaluate(() => window.lithicanalyst.setTool('landmark'));
     const at = await toScreen(page, boxPoint(0, 5, 5));
     await page.evaluate(() => {
@@ -383,6 +399,12 @@ test.describe('with motion', () => {
     const sizes = await page.evaluate(() => (window as unknown as { sizes: number[] }).sizes);
     expect(Math.min(...sizes)).toBeLessThan(0.6 * full);
     expect(Math.abs(sizes[sizes.length - 1] - full)).toBeLessThan(0.5);
+    // the page's own clock again
+    await page.evaluate(() => {
+      const real = (window as unknown as { realClock: { now: () => number; raf: typeof requestAnimationFrame } }).realClock;
+      performance.now = real.now;
+      window.requestAnimationFrame = real.raf;
+    });
     // pressed on the view while it grows: at its size at once
     await page.keyboard.press('Control+z');
     await page.mouse.click(at.x, at.y);
