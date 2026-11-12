@@ -8,6 +8,17 @@ import type { Steps } from '../compute/steps';
 import type { AutoMeasurements } from '../core/derived';
 import type { ProjectState, SpecimenFrame, Vec3 } from '../core/types';
 import { centredMesh, parseMeshBuffer } from './readMesh';
+import { judgeUnits, meshSurfaceSteps, placeArrows, placementOf, type PlacedArrow, type Segment, type UnitJudgement } from '../compute/igesAlign';
+import { signedVolume } from '../compute/curvature';
+import type { MeshInfo } from '../core/types';
+
+/** A model and the vectors of its IGES file: its checksum and details, the unit judged, and the arrows when they lie on it already. */
+export interface IgesCheck {
+  info: MeshInfo;
+  judgement: UnitJudgement;
+  /** On the surface, when `judgement.aligned`; else null. */
+  arrows: PlacedArrow[] | null;
+}
 
 /** What a batch export needs from a model: its size, shape and box along each frame asked for, and the vertices' principal axes. */
 export interface MeshMeasures {
@@ -64,6 +75,21 @@ export class MeshJobs {
     this.files.delete(id);
   }
 
+  /** Which unit the IGES vectors of model `id` (read by `hash`) are in and whether they lie on it (`fileFactor`: what the file's header says, in the model's unit); the file is let go. */
+  async iges(id: number, segments: Segment[], fileFactor: number | null): Promise<IgesCheck> {
+    const f = this.files.get(id);
+    if (!f) throw new Error('The model was not read.');
+    this.files.delete(id);
+    const sha256 = f.sha256;
+    const raw = parseMeshBuffer(f.name, f.size, f.buffer, sha256);
+    const mesh = centredMesh(raw);
+    const sign = signedVolume(mesh.positions, mesh.index) < 0 ? -1 : 1;
+    const surface = await this.run(meshSurfaceSteps(mesh.positions, mesh.index, mesh.offset, sign));
+    const judgement = judgeUnits(segments, fileFactor, surface);
+    const info: MeshInfo = { fileName: raw.fileName, format: raw.format, fileSize: raw.fileSize, sha256, vertexCount: mesh.positions.length / 3, triangleCount: mesh.index.length / 3, bboxMin: mesh.min, bboxMax: mesh.max };
+    return { info, judgement, arrows: judgement.aligned ? placeArrows(segments, placementOf(judgement.factor), surface) : null };
+  }
+
   /** A specimen's points by the template, on its model: the model is read for this, and let go. */
   async gm(file: File, state: ProjectState, templateAvailable: boolean): Promise<GmResult> {
     const mesh = centredMesh(parseMeshBuffer(file.name, file.size, await file.arrayBuffer(), ''));
@@ -77,6 +103,7 @@ export type JobRequest =
   | { seq: number; type: 'hash'; id: number; file: File }
   | { seq: number; type: 'measure'; id: number; frames: Array<SpecimenFrame | null> }
   | { seq: number; type: 'drop'; id: number }
-  | { seq: number; type: 'gm'; file: File; state: ProjectState; templateAvailable: boolean };
+  | { seq: number; type: 'gm'; file: File; state: ProjectState; templateAvailable: boolean }
+  | { seq: number; type: 'iges'; id: number; segments: Segment[]; fileFactor: number | null };
 
 export type JobReply = { seq: number; ok: true; value: unknown } | { seq: number; ok: false; error: string };

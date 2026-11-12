@@ -10,7 +10,7 @@ import { bandPiecesSteps, mergePieces, retouchSideSteps, type RetouchSide } from
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { importScars, addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, GmDerived, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -18,14 +18,15 @@ import { annotationStatus, type StatusKey } from '../core/annotationStatus';
 import { CURVE_FIELDS, GENERIC_REGION_TYPE, hasVolumeSplit, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import { hasVector, retouchSettingsOf, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
+import { hasVector, retouchSettingsOf, scarsToCheck, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type MeshInfo, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, workingEdgesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
-import { APP_DIR, GM_CONFIG_FILE, SHARP_EDGE_FILE, folderPicker, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
-import { batchOutputs, gmOutputs, batchSpecimen, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
+import { APP_DIR, GM_CONFIG_FILE, SHARP_EDGE_FILE, folderPicker, igesFor, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
+import { batchOutputs, gmOutputs, batchSpecimen, storedMeshResults, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
 import { ProjectIndex, type IndexedProject } from '../io/projectIndex';
 import { createMeasurer, type MeshMeasurer } from '../io/meshMeasurer';
+import type { IgesCheck } from '../io/meshJobs';
 import BatchWorker from '../io/batchWorker?worker&inline';
 import { zipStored } from '../io/zip';
 import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
@@ -67,7 +68,13 @@ import { EDGE_ANGLE_FLAT_DEG, EDGE_ANGLE_RAMP, EdgeAngleLayer, rampPaint, SHARP_
 import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
 import { technicalFrameSteps } from '../compute/technicalFrame';
 import { frameSource } from '../core/derived';
-import { bvhPlaneCandidates, bvhRayCandidates } from '../render/bvhPlane';
+import { bvhPlaneCandidates, bvhRayCandidates, bvhSurface } from '../render/bvhPlane';
+import { headerFactor, judgeUnits, placeArrows, placementMatrix, placementOf, startPlacement, type Placement, type SurfaceQuery } from '../compute/igesAlign';
+import { sha256Hex } from '../compute/hash';
+import { igesUnitMm, readIges } from '../io/iges';
+import { IgesLayer } from '../render/igesLayer';
+import { AlignTool } from '../tools/alignTool';
+import { IgesAlign, type AlignOutcome, type IgesFile } from './igesAlign';
 import { ProfilePanel } from './profilePanel';
 import { gmCurvesCsv, gmLandmarksCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { GmLayer } from '../render/gmLayer';
@@ -594,6 +601,18 @@ export class App implements AppApi {
   private readonly projectInput: HTMLInputElement;
   private readonly compareInput: HTMLInputElement;
   private readonly folderInput: HTMLInputElement;
+  private readonly igesInput: HTMLInputElement;
+  private importIgesItem: HTMLButtonElement | null = null;
+  private importFolderItem: HTMLButtonElement | null = null;
+  private igesLayer: IgesLayer | null = null;
+  /** The vectors of an IGES file being aligned (the "Align vectors" mode), or null. */
+  private align: IgesAlign | null = null;
+  /** The folder model the vectors being aligned belong to, when it was marked "to align". */
+  private alignPath: string | null = null;
+  /** The placement confirmed last in this session ("Use previous transform"). */
+  private lastPlacement: Placement | null = null;
+  /** Folder models whose IGES file is to be aligned by hand (model path → IGES path); for this session. */
+  private pendingAlign = new Map<string, string>();
 
   constructor(private readonly root: HTMLElement) {
     document.documentElement.lang = htmlLang();
@@ -610,6 +629,7 @@ export class App implements AppApi {
     this.projectInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true, id: 'file-project' }) as HTMLInputElement;
     this.compareInput = h('input', { type: 'file', accept: '.json,application/json', multiple: true, hidden: true, id: 'file-compare' }) as HTMLInputElement;
     this.folderInput = h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, id: 'file-folder' }) as HTMLInputElement;
+    this.igesInput = h('input', { type: 'file', accept: '.igs,.iges', hidden: true, id: 'file-iges' }) as HTMLInputElement;
     this.feedback = new Feedback(this.appEl, brandEl(BRAND.logo, 'busy-logo'));
     // toasts stand at the lower right of the view, over the start page at the window's
     this.feedback.anchor = () => (this.startShown() ? null : this.viewportEl);
@@ -625,7 +645,12 @@ export class App implements AppApi {
     this.mainEl = main;
     this.buildSidebarResizer(main);
     this.appEl.prepend(this.header, main);
-    this.appEl.append(this.meshInput, this.projectInput, this.compareInput, this.folderInput);
+    this.appEl.append(this.meshInput, this.projectInput, this.compareInput, this.folderInput, this.igesInput);
+    this.igesInput.addEventListener('change', () => {
+      const f = this.igesInput.files?.[0];
+      this.igesInput.value = '';
+      if (f) void this.importIgesFile(f);
+    });
     this.folderInput.addEventListener('change', () => {
       const ws = workspaceFromFiles([...(this.folderInput.files ?? [])]);
       this.folderInput.value = '';
@@ -684,6 +709,7 @@ export class App implements AppApi {
     this.workingEdgeLayer.onLabelClick = (id) => this.selection.set(id);
     this.gmLayer = new GmLayer(viewer);
     this.hintLayer = new HintLayer(viewer);
+    this.igesLayer = new IgesLayer(viewer);
     this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
     this.viewportEl.append(this.edgeLegend);
     this.viewCube = new ViewCube(viewer);
@@ -751,6 +777,12 @@ export class App implements AppApi {
     this.tools.register(new SectionTool(ctx, this.viewportEl, () => this.modelCentre()));
     this.tools.register(new ClickTool('region', (hit) => this.clickRegion(hit.point, hit.faceIndex)));
     this.tools.register(new StationTool((x, y, following) => this.placeStation(x, y, following)));
+    this.tools.register(
+      new AlignTool(
+        { at: (x, y) => this.align?.at(x, y) ?? null, hover: (e) => this.align?.hover(e), drag: (e, x, y) => this.align?.drag(e, x, y), drop: (e, x, y) => this.align?.drop(e, x, y) },
+        () => this.updateCursor(),
+      ),
+    );
     this.tools.register(new WorkingEdgeTool({ locate: (x, y, curveId) => this.edgePlaceAt(x, y, curveId), preview: (first, over) => this.previewEdge(first, over), place: (curveId, start, end) => this.placeWorkingEdge(curveId, start, end) }, () => this.updateCursor()));
     this.tools.register(new LandmarkTool(ctx, this.landmarkLayer, (p) => this.placeLandmark(p), (l, p) => (l.code === 'platform_end' ? (this.onPlatformOutline(p) ?? l.point) : p)));
     this.tools.register(new RelationTool(ctx, (x, y, hit) => this.scarAt(x, y, hit), (a, b, at, from) => this.recordRelation(a, b, at, from)));
@@ -849,7 +881,7 @@ export class App implements AppApi {
     const menu = h('div', { class: 'popover menu', id: 'file-menu', role: 'menu', hidden: true });
     this.fileBtn = h(
       'button',
-      { type: 'button', id: 'btn-file', class: 'btn btn-quiet hdr-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('header.file'), onclick: () => this.popovers.toggle(this.fileBtn, menu) },
+      { type: 'button', id: 'btn-file', class: 'btn btn-quiet hdr-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('header.file'), onclick: () => (this.updateFileMenu(), this.popovers.toggle(this.fileBtn, menu)) },
       icon(ICONS.file),
       h('span', { class: 'btn-text' }, t('header.file')),
       icon(ICONS.chevron),
@@ -860,13 +892,20 @@ export class App implements AppApi {
     // closing has no key: Ctrl+W would close the browser's tab
     this.closeItem = item('btn-close-model', ICONS.close, t('header.close'), () => void this.closeModel()) as HTMLButtonElement;
     this.closeItem.disabled = !this.hasMesh();
+    // scar vectors from another program: into the open model, or into each model of the folder
+    this.importIgesItem = item('btn-import-iges', ICONS.file, t('header.importIges'), () => this.igesInput.click()) as HTMLButtonElement;
+    this.importFolderItem = item('btn-import-folder-iges', ICONS.open, t('header.importFolderIges'), () => void this.importFolderIges()) as HTMLButtonElement;
     menu.append(
       item('btn-open', ICONS.cube, t('header.openMesh'), () => this.meshInput.click()),
       item('btn-open-project', ICONS.project, t('header.openProject'), () => this.openProject()),
       item('btn-open-folder', ICONS.open, t('header.openFolder'), () => void this.openFolder()),
       h('hr', { class: 'menu-sep', 'aria-hidden': 'true' }),
+      this.importIgesItem,
+      this.importFolderItem,
+      h('hr', { class: 'menu-sep', 'aria-hidden': 'true' }),
       this.closeItem,
     );
+    this.updateFileMenu();
     // languages, each named in itself; the current one checked
     const langMenu = h('div', { class: 'popover menu', id: 'lang-menu', role: 'menu', hidden: true });
     const langBtn = h(
@@ -1482,12 +1521,22 @@ export class App implements AppApi {
     this.paintSaveButton();
     // (the empty view closes too, back to the choice of module)
     if (this.closeItem) this.closeItem.disabled = !has && !!this.workspace;
+    this.updateFileMenu();
     if (this.displayCtl) this.displayCtl.hidden = !has;
     this.updateSpecimenBar();
     this.sidebar.refresh('mesh');
     this.updateHarris();
     this.updateConfigPanel();
     this.updateProfile();
+  }
+
+  /** Importing needs a model (the folder's import, a folder); neither while a batch runs. */
+  private updateFileMenu(): void {
+    if (this.importIgesItem) this.importIgesItem.disabled = !this.hasMesh() || !!this.batch;
+    if (this.importFolderItem) {
+      this.importFolderItem.hidden = !this.workspace;
+      this.importFolderItem.disabled = !!this.batch;
+    }
   }
 
   private updateCursor(): void {
@@ -1587,7 +1636,7 @@ export class App implements AppApi {
     if (c.kind === 'gm') this.keepFolderGm();
     if (['gm', 'flake', 'landmarks', 'specimen', 'reset'].includes(c.kind)) this.scheduleGm();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { gm: 'landmarks', sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', workingEdges: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { imports: 'arrows', gm: 'landmarks', sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', workingEdges: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
     if (c.kind === 'workingEdges' || c.kind === 'curves' || c.kind === 'sharpEdge') {
@@ -2049,6 +2098,8 @@ export class App implements AppApi {
   setTool(wanted: string): void {
     // the retouch mode has its one tool
     const id = this.mode === 'retouch' ? 'station' : wanted === 'station' ? 'select' : wanted;
+    // another tool ends the "Align vectors" mode, as Esc does
+    if (this.align && id !== 'align') this.endAlign();
     const changed = id !== this.tools?.activeId;
     if (id !== 'curve' && this.nextCurveType) {
       this.nextCurveType = null;
@@ -2075,6 +2126,7 @@ export class App implements AppApi {
   setMode(mode: AppMode, remember = true): void {
     if (mode === this.mode) return;
     if (mode === 'retouch' && !this.isFlake()) return;
+    this.endAlign();
     // tools belong to their mode; an unfinished curve is kept (as on Esc)
     this.relationChip?.close();
     this.tools?.activeTool?.clearHover?.();
@@ -4303,13 +4355,142 @@ export class App implements AppApi {
     return this.viewer?.towardViewer() ?? [0, 0, 1];
   }
 
+  // ------------------------------------------------------------ scar vectors from an IGES file
+
+  /** The open model's surface for the nearest points (original coordinates). */
+  private surfaceQuery(): SurfaceQuery | null {
+    const l = this.loaded;
+    return l ? bvhSurface(l.geometry, l.offset, l.orientationSign, l.info.bboxMin, l.info.bboxMax) : null;
+  }
+
+  /** An IGES file's segments, checksum and name; null (and a toast) when it cannot be read or has none. */
+  private async readIgesFile(file: File): Promise<IgesFile | null> {
+    try {
+      const buffer = await file.arrayBuffer();
+      const read = readIges(new TextDecoder('latin1').decode(buffer));
+      if (!read.segments.length) {
+        this.feedback.toast(t('import.none'), 'warn');
+        return null;
+      }
+      return { name: file.name, sha256: await sha256Hex(buffer), read };
+    } catch (e) {
+      this.feedback.toast(t('import.error', { msg: (e as Error).message }), 'error');
+      return null;
+    }
+  }
+
+  /** File ▸ Import scar vectors (IGES): read it; a file imported into this specimen before is imported again only when asked. */
+  private async importIgesFile(file: File): Promise<void> {
+    if (!this.hasMesh() || this.batch) return;
+    const iges = await this.readIgesFile(file);
+    if (!iges || !this.hasMesh()) return;
+    if (this.store.state.imports.some((r) => r.sha256 === iges.sha256)) {
+      const choice = await this.feedback.choose(t('import.again.title'), t('import.again.body', { file: iges.name }), [
+        { id: 'cancel', label: t('dlg.cancel') },
+        { id: 'again', label: t('import.again.yes'), kind: 'primary' },
+      ]);
+      if (choice !== 'again') return;
+    }
+    this.startAlign(iges);
+  }
+
+  /**
+   * Show the vectors over the model in the "Align vectors" mode, in the unit judged (`judgeUnits`): where they lie on the model
+   * already, as they are, to be confirmed; else moved into the model's box when outside it, to be aligned. `path`: the folder model
+   * they were marked "to align" for.
+   */
+  private startAlign(iges: IgesFile, path: string | null = null): void {
+    const surface = this.surfaceQuery();
+    const viewer = this.viewer, layer = this.igesLayer, loaded = this.loaded;
+    if (!surface || !viewer || !layer || !loaded) return;
+    this.endAlign();
+    const fileFactor = headerFactor(igesUnitMm(iges.read.units), this.store.state.specimen.unit);
+    const judged = judgeUnits(iges.read.segments, fileFactor, surface);
+    const placement = judged.aligned ? placementOf(judged.factor) : startPlacement(iges.read.segments, judged.factor, surface);
+    this.setMode('annotate');
+    this.tools?.cancel();
+    this.selection.set(null);
+    this.align = new IgesAlign(
+      {
+        viewer,
+        area: this.viewportEl,
+        layer,
+        surface,
+        origin: loaded.offset,
+        unit: this.store.state.specimen.unit,
+        pick: (x, y) => {
+          const hit = viewer.pickSurface(x, y);
+          return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+        },
+        previous: this.lastPlacement,
+        confirm: (o) => this.confirmAlign(o),
+        cancel: () => this.endAlign(),
+      },
+      iges,
+      { factor: judged.factor, placement },
+      fileFactor,
+    );
+    this.alignPath = path;
+    this.setTool('align');
+  }
+
+  /** Leave the "Align vectors" mode; nothing changes. */
+  private endAlign(): void {
+    const a = this.align;
+    if (!a) return;
+    this.align = null;
+    this.alignPath = null;
+    a.dispose();
+    if (this.tools?.activeId === 'align') this.setTool('select');
+  }
+
+  /** Confirmed: each vector placed, its ends put on the surface, as new scars with the record of the import (one undo step). */
+  private confirmAlign(o: AlignOutcome): void {
+    const surface = this.surfaceQuery();
+    if (!surface) return;
+    const placed = placeArrows(o.segments, o.placement, surface);
+    const path = this.alignPath;
+    this.endAlign();
+    if (!placed.length) {
+      this.feedback.toast(t('import.none'), 'warn');
+      return;
+    }
+    const r = o.file.read;
+    const record = importScars(this.store, placed, {
+      kind: 'iges-scars',
+      file: o.file.name,
+      sha256: o.file.sha256,
+      unitsFlag: r.units.flag,
+      unitsName: r.units.name,
+      scale: o.placement.scale,
+      transform: placementMatrix(o.placement),
+      pairs: o.pairs,
+      residual: o.residual,
+    });
+    this.lastPlacement = structuredClone(o.placement);
+    if (path) {
+      this.pendingAlign.delete(path);
+      this.sidebar.refresh('workspace');
+    }
+    const n = record.review.length;
+    this.feedback.toast([t('import.done', { n: record.arrows.length }), n ? t('import.toCheck', { n }) : ''].filter(Boolean).join(' · '), n ? 'warn' : 'info', 4000);
+  }
+
+  /** A folder model marked "to align": into the mode with its IGES file. */
+  private async alignFromFolder(path: string, igesPath: string): Promise<void> {
+    const ws = this.workspace;
+    if (!ws || !ws.has(igesPath)) return;
+    const iges = await this.readIgesFile(await ws.read(igesPath));
+    if (iges && this.workspace === ws && this.wsIndex >= 0 && ws.meshes[this.wsIndex] === path) this.startAlign(iges, path);
+  }
+
   // ------------------------------------------------------------ workspace
 
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null {
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; toAlign: boolean[]; types: Array<SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null {
     const ws = this.workspace;
     if (!ws) return null;
     const models = ws.meshes.map((p, i) => this.modelProject(p, i));
-    return { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex, started: ws.meshes.map((p) => this.started(p)), types: models.map((m) => m?.state.specimen.type ?? null), completion: models.map((m) => {
+    return { name: ws.name, writable: ws.writable, meshes: ws.meshes, index: this.wsIndex, started: ws.meshes.map((p) => this.started(p)), toAlign: ws.meshes.map((p) => this.pendingAlign.has(p)), types: models.map((m) => m?.state.specimen.type ?? null), completion: models.map((m) => {
       if (!m) return null;
       const { done, total } = annotationStatus(m.state, m.regions);
       return { done, total };
@@ -4379,6 +4560,7 @@ export class App implements AppApi {
     this.projectIndex = new ProjectIndex(() => ws.projects, async (p) => (await ws.read(p)).text());
     this.sessionProjects.clear();
     this.undownloaded.clear();
+    this.pendingAlign.clear();
     this.gmSeen.clear();
     this.folderSharp = await this.readFolderSharp(ws);
     this.folderGm = await this.readFolderGm(ws);
@@ -4422,6 +4604,9 @@ export class App implements AppApi {
     await this.openMeshFile(await ws.read(path), { project: projects, quiet, specimenId: this.wsIds.get(path) });
     if (this.store.state.mesh?.fileName !== baseName(path)) this.wsIndex = -1;
     this.sidebar.refresh('workspace');
+    // its IGES file to align: into that mode with it
+    const iges = this.pendingAlign.get(path);
+    if (iges && !quiet && this.wsIndex === i) await this.alignFromFolder(path, iges);
   }
 
   stepWorkspace(step: number): void {
@@ -4431,19 +4616,125 @@ export class App implements AppApi {
     if (i !== this.wsIndex) void this.openWorkspaceMesh(i);
   }
 
-  /** The next model (after the open one, round to the start) without a project. */
+  /** The next model (after the open one, round to the start) without a project, or with an IGES file to align. */
   nextUnstarted(): void {
     const ws = this.workspace;
     if (!ws || this.batch) return;
     const n = ws.meshes.length;
     for (let k = 1; k <= n; k++) {
       const i = ((this.wsIndex < 0 ? -1 : this.wsIndex) + k + n) % n;
-      if (i !== this.wsIndex && !this.started(ws.meshes[i])) {
+      if (i !== this.wsIndex && (!this.started(ws.meshes[i]) || this.pendingAlign.has(ws.meshes[i]))) {
         void this.openWorkspaceMesh(i);
         return;
       }
     }
     this.feedback.toast(t('workspace.allStarted'), 'info', 2000);
+  }
+
+  /**
+   * File ▸ Import matching IGES (whole folder): each model's IGES file of the same name in its folder, read and judged (unit, and
+   * whether it lies on the model) one model at a time in the batch worker; models whose project has that file imported already
+   * are passed by. A summary, then on the user's word: those that lie on their model are imported into their projects (written
+   * as the folder's copy is, or kept for the session in a read-only folder), the others marked "to align", which opening one
+   * takes into the "Align vectors" mode with its file. Files that cannot be read are listed and leave the rest alone.
+   */
+  async importFolderIges(): Promise<void> {
+    const ws = this.workspace;
+    if (!ws || this.batch) return;
+    await this.flushFolderSave();
+    this.keepSessionProject();
+    const index = this.projectIndex;
+    await index?.ready();
+    type Ready = { path: string; iges: IgesFile; check: IgesCheck; project: ProjectState | null; open: boolean };
+    const ready: Ready[] = [], toAlign: Array<{ path: string; igesPath: string; iges: IgesFile }> = [], failures: BatchFailure[] = [];
+    let without = 0, already = 0;
+    const host = this.startShown() ? this.startEl : this.viewportEl;
+    const measurer = await createMeasurer(this.workerFactory());
+    try {
+      for (const [i, path] of ws.meshes.entries()) {
+        if (this.workspace !== ws) return;
+        const igesPath = igesFor(path, ws.iges);
+        if (!igesPath) {
+          without++;
+          continue;
+        }
+        this.feedback.busy(`${t('import.folder.reading')} ${i + 1} / ${ws.meshes.length}`, host);
+        try {
+          const file = await ws.read(igesPath);
+          const buffer = await file.arrayBuffer();
+          const read = readIges(new TextDecoder('latin1').decode(buffer));
+          if (!read.segments.length) throw new Error(t('import.none'));
+          const iges: IgesFile = { name: file.name, sha256: await sha256Hex(buffer), read };
+          const sha = await measurer.hash(i, await ws.read(path));
+          const open = i === this.wsIndex && this.hasMesh() && this.store.state.mesh?.sha256 === sha;
+          const project = open ? this.store.state : ((await this.folderProjects(path)).find((p) => p.mesh?.sha256 === sha) ?? null);
+          if (project?.imports.some((r) => r.sha256 === iges.sha256)) {
+            measurer.drop(i);
+            already++;
+            continue;
+          }
+          const unit = project?.specimen.unit ?? readPref('unit', this.store.state.specimen.unit || 'mm');
+          const check = await measurer.iges(i, read.segments, headerFactor(igesUnitMm(read.units), unit));
+          if (check.judgement.aligned && check.arrows?.length) ready.push({ path, iges, check, project: open ? null : project, open });
+          else toAlign.push({ path, igesPath, iges });
+        } catch (e) {
+          measurer.drop(i);
+          failures.push({ file: igesPath, reason: (e as Error)?.message ?? String(e) });
+        }
+      }
+    } finally {
+      measurer.dispose();
+      this.feedback.busy(null);
+    }
+    if (this.workspace !== ws) return;
+    if (!ready.length && !toAlign.length && !failures.length) {
+      this.feedback.toast(already ? t('import.folder.already', { n: already }) : t('import.folder.none'), 'info');
+      return;
+    }
+    const line = [t('import.folder.summary', { n: ready.length, m: toAlign.length, k: without }), already ? t('import.folder.already', { n: already }) : ''].filter(Boolean).join(' · ');
+    const body = h(
+      'div',
+      { class: 'import-summary' },
+      h('p', { id: 'import-folder-summary' }, line),
+      failures.length ? h('p', { class: 'import-failed-head' }, t('import.folder.failed')) : null,
+      failures.length ? h('ul', { class: 'import-failures mono', id: 'import-folder-failures' }, ...failures.map((f) => h('li', {}, `${f.file}: ${f.reason}`))) : null,
+    );
+    const something = ready.length + toAlign.length > 0;
+    const choice = await this.feedback.choose(t('import.folder.title'), body, something ? [{ id: 'cancel', label: t('dlg.cancel') }, { id: 'import', label: t('import.folder.import'), kind: 'primary' }] : [{ id: 'cancel', label: t('dlg.close') }]);
+    if (choice !== 'import' || this.workspace !== ws) return;
+    let opened: { path: string; iges: IgesFile } | null = null;
+    for (const r of ready) {
+      const j = r.check.judgement;
+      const record = { kind: 'iges-scars' as const, file: r.iges.name, sha256: r.iges.sha256, unitsFlag: r.iges.read.units.flag, unitsName: r.iges.read.units.name, scale: j.factor, transform: placementMatrix(placementOf(j.factor)), pairs: [], residual: j.residual };
+      const arrows = r.check.arrows!;
+      try {
+        // the open model: its own project, which the folder's copy follows
+        if (r.open && this.wsIndex >= 0 && ws.meshes[this.wsIndex] === r.path) {
+          importScars(this.store, arrows, record);
+          continue;
+        }
+        const store = new ProjectStore(structuredClone(r.project ?? this.freshProject(r.check.info, this.wsIds.get(r.path))));
+        importScars(store, arrows, record);
+        const stored = index?.get(projectPathFor(r.path)) ?? index?.get(legacyProjectPathFor(r.path));
+        const file = serializeProject(store.state, __APP_VERSION__, stored ? storedMeshResults(stored.derived) : null);
+        const text = JSON.stringify(file, null, 2);
+        if (ws.writable) await ws.write(projectPathFor(r.path), text);
+        else {
+          this.sessionProjects.set(r.path, text);
+          this.undownloaded.add(r.path);
+        }
+        index?.add(projectPathFor(r.path), structuredClone(file));
+      } catch (e) {
+        this.feedback.toast(t('workspace.saveFailed', { msg: `${r.path}: ${(e as Error).message}` }), 'error');
+      }
+    }
+    for (const a of toAlign) {
+      this.pendingAlign.set(a.path, a.igesPath);
+      if (this.wsIndex >= 0 && ws.meshes[this.wsIndex] === a.path && this.hasMesh()) opened = { path: a.path, iges: a.iges };
+    }
+    this.sidebar.refresh('workspace');
+    this.feedback.toast(t('import.folder.done', { n: ready.length, m: toAlign.length }), 'info', 4000);
+    if (opened) this.startAlign(opened.iges, opened.path);
   }
 
   /** Keep the open model's project up to date: in the folder, or (read-only folder) in this session's memory. */
@@ -6026,6 +6317,7 @@ export class App implements AppApi {
 
   /** Let go of the model and of everything drawn or computed for it (another model follows, or none). */
   private releaseMesh(): void {
+    this.endAlign();
     this.relationChip?.close();
     this.clearHints();
     this.surfaceSnap?.dispose();
@@ -6140,11 +6432,22 @@ export class App implements AppApi {
     this.curvBusy = false;
     v.setMesh(this.meshView.mesh, loaded.offset, loaded.diagonal);
 
+    const fresh = this.freshProject(loaded.info, specimenId);
+    this.selection.set(null);
+    this.store.reset(fresh);
+    this.startMeasuring(loaded);
+    this.applyShading();
+    this.updateMeshDependentUi();
+    this.sidebar.refresh('all');
+  }
+
+  /** A new project for a model: its ID, the annotator and unit last used, the type chosen; in a folder, the folder's rules. */
+  private freshProject(info: MeshInfo, specimenId?: string): ProjectState {
     const prev = this.store.state;
     const fresh = emptyProject();
-    fresh.mesh = loaded.info;
+    fresh.mesh = info;
     fresh.specimen = {
-      id: specimenId ?? loaded.info.fileName.replace(/\.[^.]+$/, ''),
+      id: specimenId ?? info.fileName.replace(/\.[^.]+$/, ''),
       annotator: readPref('annotator', prev.specimen.annotator),
       unit: readPref('unit', prev.specimen.unit || 'mm'),
       notes: '',
@@ -6152,14 +6455,9 @@ export class App implements AppApi {
       // the type chosen on the start page, else as the last one (a project file then says what it is)
       type: this.newSpecimenType(prev.specimen.type),
     };
-    this.selection.set(null);
     if (this.workspace && this.folderSharp) fresh.sharpEdge = { ...this.folderSharp };
     if (this.workspace && this.folderGm) fresh.gm = structuredClone(this.folderGm);
-    this.store.reset(fresh);
-    this.startMeasuring(loaded);
-    this.applyShading();
-    this.updateMeshDependentUi();
-    this.sidebar.refresh('all');
+    return fresh;
   }
 
   /**
@@ -6204,6 +6502,7 @@ export class App implements AppApi {
     this.wsDuplicates = [];
     this.sessionProjects.clear();
     this.undownloaded.clear();
+    this.pendingAlign.clear();
     this.autosaveFailed = false;
     this.selection.set(null);
     this.store.reset(emptyProject());
@@ -6418,6 +6717,17 @@ export class App implements AppApi {
       if (isTyping(e.target)) {
         if (e.key === 'Escape') (e.target as HTMLElement).blur();
         return;
+      }
+      // the "Align vectors" mode: Esc leaves it, Enter confirms; the view still turns (Space) and the light moves (L), nothing else changes meanwhile
+      if (this.align) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.endAlign();
+        } else if ((e.key === 'Enter' || e.code === 'NumpadEnter') && !mod) {
+          e.preventDefault();
+          this.align.confirm();
+        }
+        if (!(e.code === 'Space' || e.code === 'KeyL') || mod) return;
       }
       // the bar of the relation just recorded: 1 / 2 / 3, Delete; Esc lets it go
       if (this.relationChip && !mod && !e.altKey && !e.shiftKey) {
@@ -6740,6 +7050,7 @@ export class App implements AppApi {
         ['Enter', 'help.k.finish'],
         ['Backspace', 'help.k.back'],
         ['] / [', 'help.k.next'],
+        ['Enter / Esc', 'help.k.align'],
       ]),
       ...group(t('appMode.measure'), [
         ['D / G / N', 'help.k.measure'],
@@ -6798,6 +7109,15 @@ export class App implements AppApi {
       mode: () => this.mode,
       setMode: (m: AppMode) => this.setMode(m),
       exportCsvText: () => scarVectorCsv(this.store.state, { excelBom: false }, this.configResult),
+      /** The "Align vectors" mode (null: not in it): the ends as drawn and on the screen, the pairs, the residual. */
+      align: () => this.align?.info() ?? null,
+      /** What the preview draws. */
+      alignDrawn: () => this.igesLayer?.counts() ?? null,
+      /** Place an end as a drag would. */
+      alignPlace: (end: number, to: Vec3) => this.align?.placeEnd(end, to),
+      alignFit: () => this.align?.fit() ?? Promise.resolve(),
+      /** Imported scars to be checked, not edited since. */
+      toCheck: () => [...scarsToCheck(this.store.state)],
       /** A flake's frame and measurements (null for a core). */
       flake: () =>
         this.isFlake()

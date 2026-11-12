@@ -1,4 +1,4 @@
-import type { ConfigCorrections, Curve, FlakeData, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, GmConfig, SharpEdgeRule, WorkingEdge } from './types';
+import type { ConfigCorrections, Curve, FlakeData, ImportRecord, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, GmConfig, SharpEdgeRule, WorkingEdge } from './types';
 import type { LandmarkData, ProjectStore } from './store';
 
 /**
@@ -144,6 +144,36 @@ export class AddScarCommand implements Command {
     store._removeScar(this.scar.id);
     store._setNextLabelNumber(this.prevNext);
     store.notify({ kind: 'scars', ids: [this.scar.id] });
+  }
+}
+
+/**
+ * Scars brought in from a file, appended after those there are, with the record of the import: one undo step, and undoing takes
+ * the record away too.
+ */
+export class ImportScarsCommand implements Command {
+  readonly labelKey = 'cmd.importScars';
+  readonly createdAt = Date.now();
+  private prevNext = 0;
+  constructor(private readonly scars: Scar[], private readonly record: ImportRecord, private readonly nextLabelNumber: number) {}
+  apply(store: ProjectStore): void {
+    this.prevNext = store.state.nextLabelNumber;
+    for (const s of this.scars) store._insertScar(cloneScar(s));
+    store._setNextLabelNumber(Math.max(this.prevNext, this.nextLabelNumber));
+    store._setImports([...store.state.imports, structuredClone(this.record)]);
+    store.notify({ kind: 'scars', ids: this.scars.map((s) => s.id) });
+    store.notify({ kind: 'imports' });
+  }
+  revert(store: ProjectStore): void {
+    for (const s of this.scars) store._removeScar(s.id);
+    store._setNextLabelNumber(this.prevNext);
+    const key = (r: ImportRecord) => `${r.date}|${r.sha256}|${r.arrows.join(',')}`;
+    const list = [...store.state.imports];
+    const at = list.map(key).lastIndexOf(key(this.record));
+    if (at >= 0) list.splice(at, 1);
+    store._setImports(list);
+    store.notify({ kind: 'scars', ids: this.scars.map((s) => s.id) });
+    store.notify({ kind: 'imports' });
   }
 }
 

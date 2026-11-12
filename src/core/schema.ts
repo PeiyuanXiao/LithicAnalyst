@@ -7,21 +7,21 @@ import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
 import { clampFitLength } from '../compute/retouchIndex';
 import { GM_TEMPLATE_PARAMETERS } from '../compute/gmTemplate';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, GM_CONFIG_VERSION, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type GmCurveListItem, type GmTemplate, type GmTemplatePoint, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, GM_CONFIG_VERSION, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type ImportRecord, type GmCurveListItem, type GmTemplate, type GmTemplatePoint, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
-export const PROJECT_FORMAT_VERSION = 2;
+export const PROJECT_FORMAT_VERSION = 3;
 
 /**
- * Project file, format version 2. The format is the long-lived contract of the
+ * Project file, format version 3 (3 added `imports`; a file of version 2 reads as one with none). The format is the long-lived contract of the
  * tool: keep it documented (docs/project-format.md) and add a migration in
  * migrate() whenever PROJECT_FORMAT_VERSION changes. New annotation layers are
  * added next to scars; files without them stay valid.
  */
 export interface ProjectFile {
   format: typeof PROJECT_FORMAT;
-  formatVersion: 2;
+  formatVersion: 3;
   app: { name: string; version: string };
   savedAt: string;
   specimen: SpecimenInfo;
@@ -34,6 +34,8 @@ export interface ProjectFile {
   sharpEdge: SharpEdgeRule;
   gm: GmConfig;
   workingEdges: WorkingEdge[];
+  /** Annotations imported from other programs' files: one record per import. */
+  imports: ImportRecord[];
   /** Latest results computed from the annotations, for external readers; recomputed on reading. */
   derived: DerivedResults;
   nextLabelNumber: number;
@@ -67,6 +69,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     sharpEdge: { ...state.sharpEdge },
     gm: structuredClone(state.gm),
     workingEdges: structuredClone(state.workingEdges),
+    imports: structuredClone(state.imports),
     derived: computeDerived(state, mesh),
     nextLabelNumber: state.nextLabelNumber,
     nextCurveNumber: state.nextCurveNumber,
@@ -100,10 +103,14 @@ function migrateV1(raw: Record<string, unknown>): Record<string, unknown> {
   return { ...raw, formatVersion: 2, annotations: { ...annotations, scars } };
 }
 
+/** v2 → v3: `imports` was added; a file without it has none. */
+const migrateV2 = (raw: Record<string, unknown>): Record<string, unknown> => ({ ...raw, formatVersion: 3 });
+
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
   const v = raw.formatVersion;
   if (v === PROJECT_FORMAT_VERSION) return raw;
-  if (v === 1) return migrateV1(raw);
+  if (v === 2) return migrateV2(raw);
+  if (v === 1) return migrateV2(migrateV1(raw));
   if (typeof v === 'number' && v > PROJECT_FORMAT_VERSION)
     throw new ProjectFileError(
       `This project file was written by a newer version of LithicAnalyst (format ${v}). Please update the app.`,
@@ -498,6 +505,37 @@ function parseWorkingEdges(raw: unknown, curves: readonly Curve[]): WorkingEdge[
   });
 }
 
+/** The records of imports (files without them: none); one not understood is dropped, its references to scars the file does not have are dropped. */
+function parseImports(raw: unknown, scarIds: Set<string>): ImportRecord[] {
+  const num = (v: unknown, fallback = NaN) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && scarIds.has(x)) : []);
+  return (Array.isArray(raw) ? raw : []).flatMap((v): ImportRecord[] => {
+    const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+    const m = r.transform;
+    if (r.kind !== 'iges-scars' || !Array.isArray(m) || m.length !== 16 || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return [];
+    const res = (r.residual && typeof r.residual === 'object' ? r.residual : {}) as Record<string, unknown>;
+    const pairs = (Array.isArray(r.pairs) ? r.pairs : []).flatMap((p) => {
+      const q = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>;
+      const from = parseVec(q.from), to = parseVec(q.to);
+      return from && to ? [{ from, to }] : [];
+    });
+    return [{
+      kind: 'iges-scars',
+      file: str(r.file),
+      sha256: str(r.sha256),
+      date: str(r.date),
+      unitsFlag: typeof r.unitsFlag === 'number' && Number.isFinite(r.unitsFlag) ? r.unitsFlag : null,
+      unitsName: str(r.unitsName),
+      scale: num(r.scale, 1),
+      transform: [...(m as number[])],
+      pairs,
+      residual: { median: num(res.median), p90: num(res.p90), max: num(res.max) },
+      arrows: ids(r.arrows),
+      review: ids(r.review),
+    }];
+  });
+}
+
 const maxLabelNumber = (labels: string[], prefix: string): number =>
   labels.reduce((m, l) => {
     const n = new RegExp(`^${prefix}(\\d+)$`).exec(l);
@@ -568,6 +606,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     flake: parseFlake(raw.flake),
     sharpEdge: parseSharpEdge(raw.sharpEdge),
     gm: parseGmConfig(raw.gm),
+    imports: parseImports(raw.imports, new Set(scars.map((x) => x.id))),
     nextLabelNumber: Math.max(positiveInt(raw.nextLabelNumber), maxLabelNumber(scars.map((a) => a.label), 'S') + 1),
     nextCurveNumber: Math.max(positiveInt(raw.nextCurveNumber), maxLabelNumber(curves.map((c) => c.label), 'C') + 1),
     nextWorkingEdgeNumber: Math.max(positiveInt(raw.nextWorkingEdgeNumber), maxLabelNumber(workingEdges.map((e) => e.label), 'E') + 1),

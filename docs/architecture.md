@@ -9,7 +9,7 @@ tools/    interaction tools: select, draw arrow, draw curve, relation, sequence 
 render/   three.js viewer, raking light, mesh shading, arrow and curve layers
 core/     data model, fields, commands + undo history, project format   (no DOM, no three.js)
 compute/  pure geometry on typed arrays: curvature, surface paths, vertex welding, hashing
-io/       PLY / STL / OBJ import, CSV and project export, autosave, file saving
+io/       PLY / STL / OBJ import, IGES vectors, CSV and project export, autosave, file saving
 ──────────────────────────── project file (docs/project-format.md) ────────────────────────
 analysis  outside this repository (R, Python, …) reads the CSV or the project file
 ```
@@ -244,7 +244,8 @@ the workspace but loading, and the 3D view asks for frames only while a tween ru
   frame every frame only while one runs, then rendering is on demand again; a press on the view and a
   figure (`makeFigure`) finish them (`finishTweens`), reduced motion gives the end at once. Only what
   the user does by hand starts one: a landmark placed (`LandmarkLayer.pop`, `EASE_POP`) and a
-  measure's drawing coming into view (`HintLayer.show` with `fadeIn`). A drawn arrow is there whole
+  measure's drawing coming into view (`HintLayer.show` with `fadeIn`), and the vectors being aligned moving to the placement a
+  pair or a fit gave them (`IgesAlign.moveTo`, `IGES_IMPORT.MOVE_MS`). A drawn arrow is there whole
   at once. Loading, undo, redo, generated and imported annotations draw at once.
 
 ## Camera transitions
@@ -557,6 +558,44 @@ The grid's path through `gmSteps` is as it was: `tests/gmTemplate.test.ts` holds
   screen pixels (`hiddenBeyond`, `LANDMARK_PICK_PX`). Figures draw them in 2D at `FIGURE_LANDMARK_MM` on the paper, the outline included. Names carried
   over from the last specimen are kept in local preferences keyed by mesh checksum
   (`App.previousNames`); the queue itself is session state, not project data.
+
+## Importing scar vectors (IGES)
+
+Scar vectors drawn in another program come as line segments of an IGES file. Only they move to fit the model; the model and the
+stored coordinates never do, and each import is recorded in the project (`ProjectState.imports`, `ImportRecord`).
+
+* `io/iges.ts` (no DOM): `readIges` reads fixed-format IGES (80 columns, the section in column 73): the global section by its own
+  delimiters, with Hollerith strings (`globalFields`, `splitFields`), the directory two lines an entity, each entity's parameter
+  lines joined (Fortran's `D` exponents read). Lines (110, form 0), polylines (106, paths: first and last point) and rational
+  B-splines (126: a clamped one's end control points, else de Boor at its parameter limits) give segments, under the 124 matrices
+  they refer to; rays, unbounded lines, hidden entities (status `01…`), segments of no length and other entities are counted in
+  `skipped`. Segments with both ends within `IGES_IMPORT.SAME_SHARE` of their diagonal are one (`duplicates`), the other way round a
+  `conflict`. `igesUnitMm` reads the header's unit.
+* `compute/igesAlign.ts` (pure; its parameters in `IGES_IMPORT`): `judgeUnits` tries the vectors as they are and as the header
+  says (`headerFactor`, a model unit not stated counting as mm), and keeps the one of a sensible size (`SIZE_RATIO`) nearest the
+  surface, or the one nearest the model's size; `isAligned` (median within `tol`, 90 % within `P90_TOLS · tol`). A `Placement` is
+  scale (the unit's, never fitted) · rotation + translation; `fitPairs` makes it from the pairs (one: a move; two: the least turn
+  lining up their direction, the move by least squares; three or more: `kabsch`, Horn's quaternion, by `symmetricEigen`);
+  `icpSteps` is the automatic fit, trimmed rigid point-to-plane ICP; `placeArrows` puts the ends on the surface and marks those far
+  off. A `SurfaceQuery` (nearest point, outward normal, box) comes from the open mesh's BVH (`bvhSurface` in
+  `render/bvhPlane.ts`) or, in the batch worker, from a `TriangleBvh` (`meshSurfaceSteps`).
+* `ui/igesAlign.ts` (`IgesAlign`) is the "Align vectors" mode: its floating panel (`#align-panel`: unit, reverse, pairs,
+  residual, fit, undo fit, previous transform, confirm, cancel), the ends as drawn (they move to each new placement in
+  `MOVE_MS`), and the pairs, by end (`2 × segment + 0 | 1`). `tools/alignTool.ts` takes an end within `GRAB_PX` and drops it where
+  the pointer is on the model; anywhere else the view turns. `render/igesLayer.ts` draws the vectors over everything (lines with
+  a halo, heads, the ends as dots) in colours no data uses (`IGES_COLORS`).
+* `App`: File ▸ Import scar vectors (IGES) (`importIgesFile`, a file of the same checksum asked about first) → `startAlign` (into
+  the annotate mode and the `align` tool; another tool, mode or model leaves it, as Esc does; while it lasts the keys are its own
+  but Space and L) → `confirmAlign`, which calls `importScars` (`core/actions.ts`): one `ImportScarsCommand` with the scars and
+  the record. `scarsToCheck` gives the arrows marked to check and not edited since (`modifiedAt === createdAt`), shown as
+  `.check-dot` in the list; `scarSources` the `source` column of `scar_vectors.csv`.
+* **A folder** (`App.importFolderIges`): `Workspace.iges` lists the folder's IGES files and `igesFor` finds a model's (same folder,
+  same name, any case). Each model is hashed and judged in the batch worker (`MeshJobs.iges`, job `iges`), passed by when its
+  project has that file's checksum imported already. After the summary, those on their model are imported into a `ProjectStore`
+  of their project (or a fresh one, `App.freshProject`) and written as the folder's copy is (read-only: kept for the session), with
+  the results the file stored (`storedMeshResults`); the open model takes them in its own store. The others go into
+  `App.pendingAlign` (session state: "To align" in the list, counted by Shift+PageDown); opening one goes into the mode with its
+  file (`alignFromFolder`), and confirming takes the mark away.
 
 ## Workspace and batch runs
 

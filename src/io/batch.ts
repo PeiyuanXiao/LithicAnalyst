@@ -5,12 +5,12 @@ import { landmarkTable } from '../compute/landmarks';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
-import type { FlakeMeasures } from '../compute/flake';
+import type { FlakeMeasures, FlakeResult } from '../compute/flake';
 import type { RetouchIndices } from '../compute/retouchIndex';
 import type { WorkingEdgesDerived, WorkingEdgeRow } from '../compute/workingEdge';
 import { gmMissingInputs, type GmMissing } from '../compute/gm';
 import type { gmManifest } from '../compute/gmTemplate';
-import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, GmDerived, RetouchAngleCurve } from '../core/derived';
+import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, GmDerived, MeshResults, RetouchAngleCurve } from '../core/derived';
 import { hasEdgeAngles, hasVolumeSplit } from '../core/fields';
 import { measurementValue } from '../core/measurements';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
@@ -89,6 +89,34 @@ function storedRegionFit(planes: unknown, id: string): { centroid: Vec3; normal:
 function storedAuto(v: unknown): AutoMeasurements | null {
   const m = v as AutoMeasurements | null | undefined;
   return m && (m.frame === 'specimen' || m.frame === 'principal') && [m.length, m.width, m.thickness, m.surfaceArea].every((x) => typeof x === 'number' && Number.isFinite(x)) ? m : null;
+}
+
+/**
+ * What a project file stored of its model's results, as `computeDerived` takes them: to write the project again without opening the
+ * model (an import of the folder's IGES files changes only scars, which none of these depend on; what does is computed anew).
+ */
+export function storedMeshResults(derived: Record<string, unknown>): MeshResults {
+  const d = derived as Record<string, unknown> & { regions?: unknown; flake?: { measures?: unknown; geometry?: unknown } | null; edgeAngles?: { curves?: unknown } | null; retouchAngles?: { curves?: unknown } | null; workingEdges?: { edges?: unknown } | null };
+  const fits = new Map<string, { centroid: Vec3; normal: Vec3; count: number }>();
+  for (const p of Array.isArray(d.planes) ? (d.planes as PlaneResult[]) : []) {
+    const fit = storedRegionFit(d.planes, p.id);
+    if (fit) fits.set(p.id, fit);
+  }
+  return {
+    measurements: storedAuto(d.measurements),
+    vertices: storedAxes(d.vertices),
+    regions: Array.isArray(d.regions) && d.regionTotals ? { results: d.regions as RegionResult[], totals: d.regionTotals as RegionTotals } : null,
+    nodule: (d.nodule as MeshResults['nodule']) ?? null,
+    split: (d.split as MeshResults['split']) ?? null,
+    box: storedBox(d.configuration),
+    flake: d.flake?.measures && d.flake.geometry ? ({ measures: d.flake.measures, geometry: d.flake.geometry } as FlakeResult) : null,
+    regionFits: fits,
+    edgeAngles: Array.isArray(d.edgeAngles?.curves) ? (d.edgeAngles!.curves as EdgeAngleCurve[]) : null,
+    retouchAngles: Array.isArray(d.retouchAngles?.curves) ? (d.retouchAngles!.curves as RetouchAngleCurve[]) : null,
+    retouchIndices: (d.retouchIndices as RetouchIndices | undefined) ?? null,
+    gm: (d.gm as MeshResults['gm']) ?? null,
+    workingEdges: Array.isArray(d.workingEdges?.edges) ? (d.workingEdges!.edges as WorkingEdgeRow[]) : null,
+  };
 }
 
 /**

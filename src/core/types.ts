@@ -476,6 +476,49 @@ export const defaultGmConfig = (): GmConfig => ({
   template: null,
 });
 
+/**
+ * Annotations brought in from another program's file, once per import: where they came from, how they were placed on the model
+ * (only they move: the model and its coordinates never do), how far they lay from it, and what was made of them.
+ */
+export interface ImportRecord {
+  /** `iges-scars`: scar vectors from the line segments of an IGES file. */
+  kind: 'iges-scars';
+  /** The file's name. */
+  file: string;
+  /** SHA-256 of the file's bytes, hex. */
+  sha256: string;
+  /** When it was imported (ISO 8601). */
+  date: string;
+  /** What the file's header says of its units: the flag and the unit's name (not trusted: see `scale`). */
+  unitsFlag: number | null;
+  unitsName: string;
+  /** The factor taken on the file's coordinates, its unit to the model's. */
+  scale: number;
+  /** File coordinates → model coordinates: a row-major 4×4 matrix (the scale, a rotation, a translation). */
+  transform: number[];
+  /** Points of the file (its own coordinates) the user put where they belong on the model. */
+  pairs: Array<{ from: Vec3; to: Vec3 }>;
+  /** The placed ends' distances to the surface before they were put on it: median, 90 % quantile, largest (model units). */
+  residual: { median: number; p90: number; max: number };
+  /** The scars made, by id. */
+  arrows: string[];
+  /** Those with an end that lay too far from the surface: to be checked. */
+  review: string[];
+}
+
+/** Scars of an import that are to be checked and have not been edited since (an edit takes the mark away). */
+export function scarsToCheck(state: Pick<ProjectState, 'imports' | 'scars'>): Set<string> {
+  const listed = new Set(state.imports.flatMap((r) => r.review));
+  return new Set(state.scars.filter((s) => listed.has(s.id) && s.modifiedAt === s.createdAt).map((s) => s.id));
+}
+
+/** Where each imported scar came from (`iges:<file name>`), by id. */
+export function scarSources(state: Pick<ProjectState, 'imports'>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of state.imports) for (const id of r.arrows) if (!out.has(id)) out.set(id, `iges:${r.file}`);
+  return out;
+}
+
 export interface ProjectState {
   specimen: SpecimenInfo;
   mesh: MeshInfo | null;
@@ -507,6 +550,8 @@ export interface ProjectState {
   /** In a folder, the folder's own: every model of it is judged alike. */
   sharpEdge: SharpEdgeRule;
   gm: GmConfig;
+  /** Annotations imported from other programs' files, one record per import (oldest first). */
+  imports: ImportRecord[];
   /** Next number used for automatic scar labels (S1, S2, …). Never decreases except by undo. */
   nextLabelNumber: number;
   /** Next number used for automatic curve labels (C1, C2, …). */

@@ -118,6 +118,7 @@ Requires Node.js ≥ 20.
 | Figures | Six orthographic views with a scale bar, as PNG or SVG; for one specimen or a folder |
 | Compare | Agreement between observers: matched arrows and curves, region overlap, Cohen’s and Fleiss’ κ, ICC |
 | Folders | Every model of a folder, its project files kept alongside, and summary exports |
+| IGES import | Scar vectors drawn in other programs, from IGES line segments; placed on the model by pairs of points (Kabsch, by Horn, 1987) and a trimmed point-to-plane ICP (Chen & Medioni, 1992; Chetverikov et al., 2002), the model never moved |
 
 The project file and every exported column are described in [docs/project-format.md](docs/project-format.md).
 

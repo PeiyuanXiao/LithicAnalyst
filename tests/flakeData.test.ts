@@ -217,9 +217,9 @@ describe('the exports of a flake', () => {
     const s = flakeStore();
     setTechnicalAxis(s, axis);
     addScarVector(s, { start: [0, 0, 0], end: [-3, 0, 0], startNormal: n, endNormal: n });
-    expect(scarVectorCsv(s.state, { excelBom: false }).trim().split('\n')[1].split(',').at(-1)).toBe('90');
+    expect(scarVectorCsv(s.state, { excelBom: false }).trim().split('\n')[1].split(',').at(-2)).toBe('90');
     setSpecimenType(s, 'core');
-    expect(scarVectorCsv(s.state, { excelBom: false }).trim().split('\n')[1].split(',').at(-1)).toBe('');
+    expect(scarVectorCsv(s.state, { excelBom: false }).trim().split('\n')[1].split(',').at(-2)).toBe('');
   });
   it('the summary: flakes.csv only of flakes', () => {
     const make = (id: string, type: 'core' | 'flake'): BatchSpecimen => {

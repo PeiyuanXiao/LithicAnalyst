@@ -12,6 +12,7 @@ import {
   DeleteRegionCommand,
   DeleteSectionCommand,
   DeleteScarCommand,
+  ImportScarsCommand,
   SetLandmarksCommand,
   SetNoduleCommand,
   SetRelationsCommand,
@@ -40,7 +41,7 @@ import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey,
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
 import { retouchSettingsOf, type RetouchAxisChoice, type RetouchSettings } from './types';
-import type { GmConfig, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3, WorkingEdge } from './types';
+import type { GmConfig, ImportRecord, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3, WorkingEdge } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -73,6 +74,35 @@ export function addScarVector(store: ProjectStore, input: NewArrowInput): ScarWi
   };
   store.history.execute(new AddScarCommand(scar, input.label ? null : n));
   return scar;
+}
+
+/** An arrow brought in from a file, already on the surface. */
+export interface ImportedArrow {
+  start: Vec3;
+  end: Vec3;
+  /** The outward normal for both ends. */
+  normal: Vec3;
+  /** To be checked: an end lay too far from the surface. */
+  review: boolean;
+}
+
+/**
+ * Scar vectors from a file: new scars after those there are, labelled on from them, with nothing else filled in, and the record of
+ * the import (`imports`). One undo step, which takes the record away too.
+ */
+export function importScars(store: ProjectStore, arrows: readonly ImportedArrow[], record: Omit<ImportRecord, 'arrows' | 'review' | 'date'>, date = nowIso()): ImportRecord {
+  let n = store.state.nextLabelNumber;
+  const scars: ScarWithVector[] = arrows.map((a) => ({
+    id: uuid(),
+    label: labelForNumber(n++),
+    vector: { start: copy(a.start), end: copy(a.end), startNormal: copy(a.normal), endNormal: copy(a.normal) },
+    attributes: defaultAttributes(),
+    createdAt: date,
+    modifiedAt: date,
+  }));
+  const full: ImportRecord = { ...structuredClone(record), date, arrows: scars.map((s) => s.id), review: scars.filter((_, i) => arrows[i].review).map((s) => s.id) };
+  store.history.execute(new ImportScarsCommand(scars, full, n));
+  return full;
 }
 
 /** Deleting a scar also takes it out of its relations and its sequence (one undo step). */

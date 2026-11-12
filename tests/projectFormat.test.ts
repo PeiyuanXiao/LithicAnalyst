@@ -95,7 +95,7 @@ describe('project file format 2', () => {
       );
       expect(first.specimen).toEqual({ ...(raw.specimen as object), frame: null, type: 'core' });
       expect(first.nextLabelNumber).toBe(4);
-      expect(saved.formatVersion).toBe(2);
+      expect(saved.formatVersion).toBe(3);
       expect(saved.annotations.scarVectors).toBeUndefined();
       expect(saved.annotations.scars).toHaveLength(2);
       expect(saved.derived).toEqual({ measurements: null, vertices: null, manualMeasurements: [], planes: [], regions: [], regionTotals: null, nodule: null, split: null, relations: NO_RELATIONS, landmarks: { rows: [], sliders: [], sets: [] }, configuration: null, flake: null, edgeAngles: null, retouchAngles: null, sharpEdge: null, gm: null });
@@ -111,9 +111,9 @@ describe('project file format 2', () => {
   it('writes the arrow CSV of migrated files with the termination not filled in', () => {
     const csv = scarVectorCsv(parseProjectFile(v1File()), { excelBom: false });
     expect(csv).toBe(
-      'specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg\n' +
-        `LB-1023,S1,12.734,-3.118,9.905,2.051,1.877,11.402,${Math.round(Math.hypot(10.683, 4.995, 1.497) * 1e6) / 1e6},bulb_truncated,,probable,"hinge, ""step""",,,mm,\n` +
-        `LB-1023,S3,1,2,3,4,5,6,${Math.round(Math.sqrt(27) * 1e6) / 1e6},point_complete,,certain,,,,mm,\n`,
+      'specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg,source\n' +
+        `LB-1023,S1,12.734,-3.118,9.905,2.051,1.877,11.402,${Math.round(Math.hypot(10.683, 4.995, 1.497) * 1e6) / 1e6},bulb_truncated,,probable,"hinge, ""step""",,,mm,,\n` +
+        `LB-1023,S3,1,2,3,4,5,6,${Math.round(Math.sqrt(27) * 1e6) / 1e6},point_complete,,certain,,,,mm,,\n`,
     );
   });
 
@@ -144,7 +144,7 @@ describe('project file format 2', () => {
     ]);
     expect(second).toEqual(first);
     const rows = scarVectorCsv(first, { excelBom: false }).trimEnd().split('\n');
-    expect(rows).toEqual([rows[0], 'X,S1,0,0,0,3,4,0,5,both_missing,na,certain,,,,mm,']);
+    expect(rows).toEqual([rows[0], 'X,S1,0,0,0,3,4,0,5,both_missing,na,certain,,,,mm,,']);
   });
 
   it('keeps the specimen frame and rejects a malformed one', () => {

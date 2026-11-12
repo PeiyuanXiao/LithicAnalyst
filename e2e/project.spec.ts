@@ -42,7 +42,7 @@ test('saves the project file and reads it back, here and in a fresh browser', as
   const saved = await download(page, () => page.locator('#btn-save-project').click());
   expect(saved.name).toBe('roof.lithicanalyst.json');
   const file = JSON.parse(saved.text);
-  expect(file).toMatchObject({ format: 'lithicanalyst-project', formatVersion: 2, specimen: { id: 'roof', annotator: 'Observer 甲', unit: 'cm' } });
+  expect(file).toMatchObject({ format: 'lithicanalyst-project', formatVersion: 3, specimen: { id: 'roof', annotator: 'Observer 甲', unit: 'cm' } });
   expect(file.mesh).toMatchObject({ fileName: 'roof.ply', sha256: createHash('sha256').update(ply.buffer).digest('hex') });
   expect(rounded(file.annotations.scars)).toEqual(before.scars);
   expect(rounded(file.annotations.curves)).toEqual(before.curves);
@@ -113,7 +113,7 @@ test('offers to restore the autosave when the model is opened again', async ({ p
   await expect.poll(() => content(page)).toEqual(before);
 });
 
-test('opens a project file from 0.1.0 (format 1) and saves it as format 2', async ({ page }) => {
+test('opens a project file from 0.1.0 (format 1) and saves it as format 3', async ({ page }) => {
   const ply = roofPly();
   const start = roofPoint(-14, 10);
   const end = roofPoint(-8, 22);
@@ -157,7 +157,7 @@ test('opens a project file from 0.1.0 (format 1) and saves it as format 2', asyn
   expect(csv.text.split('\n')[1]).toMatch(/^roof,S7,1186,-340,/);
 
   const saved = JSON.parse((await download(page, () => page.locator('#btn-save-project').click())).text);
-  expect(saved.formatVersion).toBe(2);
+  expect(saved.formatVersion).toBe(3);
   expect(saved.annotations.scarVectors).toBeUndefined();
   expect(saved.annotations.scars).toEqual([scar]);
   expect(saved.specimen.frame).toBeNull();

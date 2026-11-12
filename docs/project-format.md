@@ -1,4 +1,4 @@
-# LithicAnalyst project file — format version 2
+# LithicAnalyst project file — format version 3
 
 A project file (`*.lithicanalyst.json`) holds everything one annotator (`specimen.annotator`)
 recorded on one mesh in one session of annotation. It does not contain the mesh itself; it
@@ -22,7 +22,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | key | type | notes |
 |---|---|---|
 | `format` | `"lithicanalyst-project"` | required |
-| `formatVersion` | `2` | required |
+| `formatVersion` | `3` | required |
 | `app` | `{ name, version }` | software that wrote the file |
 | `savedAt`, `createdAt`, `modifiedAt` | ISO 8601 strings | |
 | `specimen` | `{ id, annotator, unit, notes, frame, type }` | see below |
@@ -44,6 +44,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `gm` | object | which points a specimen has for geometric morphometrics, see "Geometric morphometrics"; files without it: the default |
 | `sharpEdge` | `{ method, distance, threshold }` | what counts as a sharp edge, see "Sharp edge"; files without it: three points at 2 mm, no threshold |
 | `workingEdges` | array | stretches of the curves measured for edge angles, measured on their own, see "Working edges"; files without it: none |
+| `imports` | array | one record per import of annotations from another program's file, oldest first, see "Imports"; files without it: none |
 | `derived` | object | latest computed results, see below |
 | `nextLabelNumber` | integer | next automatic scar label (`S{n}`) |
 | `nextCurveNumber` | integer | next automatic curve label (`C{n}`) |
@@ -62,6 +63,31 @@ Readers should ignore keys they do not know. Future annotation layers will be ad
 `mesh.sha256` is the checksum of the file's bytes; `vertexCount` and `triangleCount` describe the
 mesh as the app uses it: vertices with identical coordinates merged (also in PLY files whose
 faces each have vertices of their own) and degenerate triangles left out.
+
+## Imports
+
+Annotations brought in from another program's file are new annotations like any other, in the model's original coordinates; only
+they were moved to fit the model, never the model. Each import adds one record to `imports`, so that where they came from and how
+they were placed can be traced and done again:
+
+| key | type | notes |
+|---|---|---|
+| `kind` | `"iges-scars"` | scar vectors from the line segments of an IGES file |
+| `file` | string | the file's name |
+| `sha256` | string | SHA-256 of the file's bytes, hex; a file with the same checksum imported into the same specimen again is asked about first |
+| `date` | ISO 8601 string | when it was imported; also the new scars' `createdAt` and `modifiedAt` |
+| `unitsFlag`, `unitsName` | integer or `null`, string | what the file's global section says of its units (fields 14 and 15); not trusted, see `scale` |
+| `scale` | number | the factor taken on the file's coordinates: its unit to the model's (`1` as they are, `10` centimetres to millimetres …) |
+| `transform` | 16 numbers | file coordinates → model coordinates, a row-major 4×4 matrix: `scale` times a rotation, and a translation |
+| `pairs` | array of `{ from, to }` | points of the file (its own coordinates) the user put where they belong on the model; empty when none were needed |
+| `residual` | `{ median, p90, max }` | the placed ends' distances to the surface (model units) before they were put on it |
+| `arrows` | array of scar ids | the scars made, in the order of the file's segments |
+| `review` | array of scar ids | those with an end further than three times the tolerance (0.5 % of the model's box diagonal) from the surface: to be checked. The app marks such a scar until it is edited once (its `modifiedAt` no longer equals its `createdAt`) |
+
+The scars themselves are ordinary scars: `vector.start` and `vector.end` the surface points nearest the placed ends,
+`startNormal` and `endNormal` both the outward normal at the surface point nearest the arrow's middle, every attribute not filled
+in, labels on from `nextLabelNumber`. The IGES file's first point of a line is the arrow's start (the point-of-percussion side),
+unless the user reversed them all before confirming. Undoing the import removes its scars and its record.
 
 ## Specimen
 
@@ -776,10 +802,11 @@ One row per scar that has a direction arrow (scars with `"vector": null` are lef
 configuration, a face code, and `flaking_surface` its flaking surface, e.g. `F1` — empty when the
 scar's face is no flaking surface, and both empty before the mesh is measured or for a flake;
 `tech_angle_deg`, for a flake with a technical frame: the arrow projected onto the frame's XY plane, +Y
-being 0° and counter-clockwise as seen from the dorsal side positive, in (−180°, 180°]; else empty):
+being 0° and counter-clockwise as seen from the dorsal side positive, in (−180°, 180°]; else empty;
+`source`: where an imported arrow came from, `iges:<file name>` (see "Imports"), empty for one drawn in the app):
 
 ```
-specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg
+specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg,source
 ```
 
 Flakes (`<specimen>_flakes.csv`, one row per flake, empty where there is no value; see "Flakes"; `frame_source` is
@@ -1018,6 +1045,12 @@ no box and uses the project's stored split (`derived.split`).
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.
 The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
+
+## Changes from format version 2
+
+Format 3 adds `imports` (see "Imports"); a file of format 2 reads as one with none, and saving writes format 3. Nothing else
+changed, so a reader of format 2 that ignores unknown keys reads format 3 files too. `scar_vectors.csv` gains `source` as its
+last column.
 
 ## Changes from format version 1
 

@@ -1,7 +1,8 @@
 import type { GmResult } from '../compute/gm';
 import { runSliced } from '../compute/steps';
 import type { ProjectState, SpecimenFrame } from '../core/types';
-import { MeshJobs, type JobReply, type JobRequest, type MeshMeasures } from './meshJobs';
+import type { Segment } from '../compute/igesAlign';
+import { MeshJobs, type IgesCheck, type JobReply, type JobRequest, type MeshMeasures } from './meshJobs';
 
 /** A request without its sequence number (for each kind of request). */
 type Request = JobRequest extends infer R ? (R extends JobRequest ? Omit<R, 'seq'> : never) : never;
@@ -14,13 +15,15 @@ export interface MeshMeasurer {
   drop(id: number): void;
   /** A specimen's points by the template, on its model. */
   gm(file: File, state: ProjectState, templateAvailable: boolean): Promise<GmResult>;
+  /** The IGES vectors of model `id` (read by `hash`): their unit, whether they lie on it, and then the arrows; the model is let go. */
+  iges(id: number, segments: Segment[], fileFactor: number | null): Promise<IgesCheck>;
   dispose(): void;
 }
 
 /** On the page, in slices between frames (where no worker can be made). */
 function pageMeasurer(): MeshMeasurer {
   const jobs = new MeshJobs((steps) => runSliced(steps));
-  return { inWorker: false, hash: (id, f) => jobs.hash(id, f), measure: (id, fr) => jobs.measure(id, fr), drop: (id) => jobs.drop(id), gm: (f, st, there) => jobs.gm(f, st, there), dispose: () => {} };
+  return { inWorker: false, hash: (id, f) => jobs.hash(id, f), measure: (id, fr) => jobs.measure(id, fr), drop: (id) => jobs.drop(id), gm: (f, st, there) => jobs.gm(f, st, there), iges: (id, s, k) => jobs.iges(id, s, k), dispose: () => {} };
 }
 
 /**
@@ -66,6 +69,7 @@ export async function createMeasurer(make: (() => Worker) | null, timeoutMs = 40
     measure: (id, frames) => ask<MeshMeasures>({ type: 'measure', id, frames }),
     drop: (id) => void ask({ type: 'drop', id }).catch(() => {}),
     gm: (file, state, templateAvailable) => ask<GmResult>({ type: 'gm', file, state, templateAvailable }),
+    iges: (id, segments, fileFactor) => ask<IgesCheck>({ type: 'iges', id, segments, fileFactor }),
     dispose: () => {
       fail(new Error('Cancelled.'));
       worker.terminate();

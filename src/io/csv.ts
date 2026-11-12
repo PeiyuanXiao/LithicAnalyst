@@ -16,7 +16,7 @@ import { frameSource, type AutoMeasurements, type EdgeAngleCurve } from '../core
 import { CURVE_FIELDS, SCAR_FIELDS } from '../core/fields';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
-import { hasVector, type ProjectState } from '../core/types';
+import { hasVector, scarSources, type ProjectState } from '../core/types';
 import { distance } from '../core/vec';
 
 export interface CsvOptions {
@@ -42,7 +42,7 @@ export const csvCell = (v: unknown): string => {
  * stay the same in every interface language. `platform_face` and
  * `flaking_surface` come from the volumetric configuration (empty without it,
  * or for a scar on a face or cone that is no flaking surface; the bicone has no
- * platforms).
+ * platforms). `source` says where an imported arrow came from (`iges:<file name>`), empty for one drawn here.
  */
 export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, config: CoreConfiguration | null = null): string {
   const header = [
@@ -60,7 +60,9 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
     'flaking_surface',
     'unit',
     'tech_angle_deg',
+    'source',
   ];
+  const sources = scarSources(state);
   const placed = new Map<string, { platform?: string; surface: string | null }>((config?.scars ?? []).map((p) => [p.id, p]));
   const flakeFrame = state.specimen.type === 'flake' ? state.flake.axis?.matrix ?? null : null;
   // a generic specimen's arrows have no scar attributes, whatever they held on another type
@@ -82,6 +84,7 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
       csvCell(state.specimen.unit),
       // a flake's scars, in its technical frame
       flakeFrame ? cell(techAngleDeg(flakeFrame, a.vector.start, a.vector.end)) : '',
+      csvCell(sources.get(a.id) ?? ''),
     ].join(','),
   );
   const body = [header.join(','), ...rows].join('\n') + '\n';

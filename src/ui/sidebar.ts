@@ -65,7 +65,7 @@ import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
 import { deleteWorkingEdge, updateWorkingEdge } from '../core/actions';
-import { retouchSettingsOf, type AttributeValue, type Curve, type Measurement, type PlaneMethod, type Scar, type Vec3, type GmConfig, type SharpEdgeRule } from '../core/types';
+import { retouchSettingsOf, scarsToCheck, type AttributeValue, type Curve, type Measurement, type PlaneMethod, type Scar, type Vec3, type GmConfig, type SharpEdgeRule } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, arrowColorModeOf, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
@@ -213,6 +213,7 @@ function arrowsSection(api: AppApi): Section {
     const unit = st.specimen.unit;
     const colorMode = arrowColorModeOf(api.display.arrows.colorMode, st.specimen.type);
     const seq = colorMode === 'sequence' ? sequenceColors(st.sequences) : null;
+    const toCheck = scarsToCheck(st);
     for (const a of st.scars) {
       const isSel = a.id === sel;
       const color = isSel ? ARROW_COLORS.selected : arrowColor(a, colorMode, seq);
@@ -227,7 +228,7 @@ function arrowsSection(api: AppApi): Section {
           ondblclick: () => api.focusArrow(a.id),
         },
         h('span', { class: 'chip', style: `--chip:${color}` }),
-        h('span', { class: 'arrow-id mono' }, a.label),
+        h('span', { class: 'arrow-id mono' }, a.label, toCheck.has(a.id) ? h('span', { class: 'check-dot', role: 'img', title: t('arrows.toCheck'), 'aria-label': t('arrows.toCheck') }) : null),
         h('span', { class: 'arrow-meta' }, generic ? '' : listSummary(a.attributes)),
         ...valueCells(a.vector ? quantity('length', vectorLength(a.vector), unit) : [MISSING, '']),
       );
@@ -2775,6 +2776,7 @@ function workspaceSection(api: AppApi): Section {
           ws.completion[i] ? h('span', { class: 'ws-done mono', 'data-done': String(ws.completion[i]!.done === ws.completion[i]!.total) }, `${ws.completion[i]!.done}/${ws.completion[i]!.total}`) : null,
           ws.gm[i] ? h('span', { class: 'ws-gm mono', 'data-done': String(ws.gm[i]!.done), title: ws.gm[i]!.flagged ? t('gm.flagged', { n: ws.gm[i]!.flagged }) : undefined }, `GM ${ws.gm[i]!.done ? '✓' : '○'}`) : null,
           ws.template === ws.meshes[i] ? h('span', { class: 'ws-template' }, t('workspace.template')) : null,
+          ws.toAlign[i] ? h('span', { class: 'ws-align' }, t('workspace.toAlign')) : null,
         ),
       );
     }
@@ -2812,7 +2814,7 @@ function workspaceSection(api: AppApi): Section {
     }
     prev.disabled = !!b || ws.index <= 0;
     next.disabled = !!b || ws.index >= ws.meshes.length - 1;
-    nextNew.disabled = !!b || ws.started.every(Boolean);
+    nextNew.disabled = !!b || (ws.started.every(Boolean) && !ws.toAlign.some(Boolean));
     list.classList.toggle('is-busy', !!b);
     download.hidden = ws.writable;
     download.disabled = !!b || !ws.undownloaded;

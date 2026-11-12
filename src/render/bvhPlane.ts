@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { INTERSECTED, NOT_INTERSECTED, type MeshBVH } from 'three-mesh-bvh';
+import { INTERSECTED, NOT_INTERSECTED, type HitPointInfo, type MeshBVH } from 'three-mesh-bvh';
+import { faceNormal, type SurfaceQuery } from '../compute/igesAlign';
+import type { Vec3 } from '../core/types';
 import type { RayCandidates } from '../compute/gm';
 import type { PlaneCandidates } from '../compute/meshSection';
 
@@ -44,5 +46,27 @@ export function bvhPlaneCandidates(geometry: THREE.BufferGeometry): PlaneCandida
         return false;
       },
     });
+  };
+}
+
+/**
+ * The model's surface for the nearest point (original coordinates), from the mesh's BVH: `offset` is where its positions start,
+ * `sign` +1 when its triangles face outward. Null without a BVH.
+ */
+export function bvhSurface(geometry: THREE.BufferGeometry, offset: Vec3, sign: number, min: Vec3, max: Vec3): SurfaceQuery | null {
+  const bvh = geometry.boundsTree as unknown as MeshBVH | undefined;
+  if (!bvh || !geometry.index) return null;
+  const positions = geometry.getAttribute('position').array as ArrayLike<number>;
+  const index = geometry.index.array as ArrayLike<number>;
+  const q = new THREE.Vector3();
+  const hit = {} as HitPointInfo;
+  return {
+    min: [...min] as Vec3,
+    max: [...max] as Vec3,
+    closest: (p) => {
+      const h = bvh.closestPointToPoint(q.set(p[0] - offset[0], p[1] - offset[1], p[2] - offset[2]), hit);
+      if (!h || h.faceIndex < 0) return null;
+      return { point: [h.point.x + offset[0], h.point.y + offset[1], h.point.z + offset[2]], normal: faceNormal(positions, index, h.faceIndex, sign), distance: h.distance };
+    },
   };
 }

@@ -83,7 +83,7 @@ describe('batch outputs', () => {
     const text = (suffix: string) => out.find((f) => f.suffix === suffix)!.text.trim().split('\n');
     expect(text('configuration.csv')).toEqual(['specimen_id,model,frame,facial_character,flaking_surface_relation,platform_relation,polarity,file', 'A,box,principal,unifacial,,single,unipolar_longitudinal,site/A.ply']);
     expect(text('flaking_surfaces.csv')[0]).toBe('specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis,file');
-    expect(text('scar_vectors.csv')[0].endsWith(',note,platform_face,flaking_surface,unit,tech_angle_deg')).toBe(true);
+    expect(text('scar_vectors.csv')[0].endsWith(',note,platform_face,flaking_surface,unit,tech_angle_deg,source')).toBe(true);
   });
 
   it('lists the models that failed', () => {

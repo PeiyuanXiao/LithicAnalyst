@@ -200,9 +200,9 @@ describe('CSV export', () => {
     const csv = scarVectorCsv(s.state, { excelBom: false });
     const lines = csv.trimEnd().split('\n');
     expect(lines[0]).toBe(
-      ['specimen_id', 'scar_id', 'start_x', 'start_y', 'start_z', 'end_x', 'end_y', 'end_z', 'length', ...SCAR_FIELDS.map((f) => f.key), 'platform_face', 'flaking_surface', 'unit', 'tech_angle_deg'].join(','),
+      ['specimen_id', 'scar_id', 'start_x', 'start_y', 'start_z', 'end_x', 'end_y', 'end_z', 'length', ...SCAR_FIELDS.map((f) => f.key), 'platform_face', 'flaking_surface', 'unit', 'tech_angle_deg', 'source'].join(','),
     );
-    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg');
+    expect(lines[0]).toBe('specimen_id,scar_id,start_x,start_y,start_z,end_x,end_y,end_z,length,completeness,termination,certainty,note,platform_face,flaking_surface,unit,tech_angle_deg,source');
     // the termination: empty until judged; NA once the completeness says it is missing
     expect(lines[1].startsWith('LB-1023,S1,10,0,0,30,0,0,20,point_complete,,certain,"step ""hinge"", maybe')).toBe(true);
     expect(csv).toContain(',bulb_truncated,na,certain,,,,mm');

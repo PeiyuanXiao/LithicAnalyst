@@ -153,7 +153,7 @@ export interface AppApi {
    * The open folder: its models (paths), which one is open (−1: none of them), which have a
    * project and of which type (null: no project, or not read yet), and (read-only folder) how many edited models were not downloaded.
    */
-  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<import('../core/fields').SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null;
+  workspaceInfo(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; toAlign: boolean[]; types: Array<import('../core/fields').SpecimenType | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null;
   openWorkspaceMesh(i: number): Promise<void>;
   stepWorkspace(step: number): void;
   /** Open the next model without a project. */

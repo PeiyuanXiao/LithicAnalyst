@@ -4812,6 +4812,77 @@ input[type="checkbox"]:disabled {
   color: var(--accent-text);
 }
 
+/* ------------------------------------------------------------ scar vectors from an IGES file */
+
+/* an imported arrow to check: a dot in the warning colour after its label, gone once it is edited */
+.check-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--warn);
+  vertical-align: middle;
+}
+
+/* a folder model whose IGES file is to be aligned */
+.ws-align {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--step--1);
+}
+
+/* the "Align vectors" panel: at the right of the view, under the display button */
+.align-panel {
+  right: max(12px, env(safe-area-inset-right, 0px));
+  top: 56px;
+  width: 300px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 110px);
+}
+
+.align-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+.align-summary {
+  color: var(--ink-2);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.align-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.align-pairs .arrow-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  padding: 2px 4px 2px 8px;
+}
+
+.align-actions {
+  justify-content: flex-end;
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.import-failures {
+  max-height: 160px;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  overflow: auto;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
 .gm-missing {
   margin: 0;
   padding-left: 16px;

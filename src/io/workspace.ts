@@ -16,6 +16,8 @@ export interface Workspace {
   meshes: string[];
   /** Project files, by path: those in LithicAnalyst/projects/ and (from earlier versions) any next to the models. */
   projects: string[];
+  /** IGES files (scar vectors from other programs), by path. */
+  iges: string[];
   has(path: string): boolean;
   /** A file or folder at this path (also one the listing leaves out, such as earlier exports). */
   exists(path: string): Promise<boolean>;
@@ -59,6 +61,7 @@ export const legacyProjectPathFor = (meshPath: string): string => `${meshPath.re
 
 const isMesh = (name: string) => (SUPPORTED_EXTENSIONS as readonly string[]).includes(extensionOf(name));
 const isJson = (name: string) => extensionOf(name) === 'json';
+const isIges = (name: string) => ['igs', 'iges'].includes(extensionOf(name));
 const byPath = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
 /** A folder that is not read: one starting with ".", or the app's own (other than its projects at the top). */
@@ -70,25 +73,34 @@ function skipDir(parts: readonly string[]): boolean {
   return app > 0 || (parts.length > 1 && parts[1] !== 'projects');
 }
 
-/** What a file of the folder is: a model, a project file, or neither. */
-export function classify(path: string): 'mesh' | 'project' | null {
+/** What a file of the folder is: a model, a project file, an IGES file, or none of them. */
+export function classify(path: string): 'mesh' | 'project' | 'iges' | null {
   const parts = path.split('/');
   const name = parts.pop()!;
   if (skipDir(parts)) return null;
   if (parts[0] === APP_DIR) return parts[1] === 'projects' && isJson(name) ? 'project' : null;
   if (isMesh(name)) return 'mesh';
+  if (isIges(name)) return 'iges';
   return isJson(name) ? 'project' : null;
 }
 
-function listing(paths: Iterable<string>): { meshes: string[]; projects: string[] } {
+/** The IGES file of a model: in its folder, of the same name (`site1/stone01.ply` → `site1/stone01.igs` or `.iges`, any case). */
+export function igesFor(meshPath: string, igesPaths: readonly string[]): string | null {
+  const stem = meshPath.replace(/\.[^./]+$/, '').toLowerCase();
+  return igesPaths.find((p) => p.replace(/\.[^./]+$/, '').toLowerCase() === stem) ?? null;
+}
+
+function listing(paths: Iterable<string>): { meshes: string[]; projects: string[]; iges: string[] } {
   const meshes: string[] = [];
   const projects: string[] = [];
+  const iges: string[] = [];
   for (const p of paths) {
     const k = classify(p);
     if (k === 'mesh') meshes.push(p);
     else if (k === 'project') projects.push(p);
+    else if (k === 'iges') iges.push(p);
   }
-  return { meshes: meshes.sort(byPath), projects: projects.sort(byPath) };
+  return { meshes: meshes.sort(byPath), projects: projects.sort(byPath), iges: iges.sort(byPath) };
 }
 
 /** The folder picker, where the browser has one and allows it (not inside a frame); null otherwise. */
@@ -125,12 +137,13 @@ export async function workspaceFromHandle(root: DirectoryHandle): Promise<Worksp
     }
     return dir;
   };
-  const { meshes, projects } = listing(files.keys());
+  const { meshes, projects, iges } = listing(files.keys());
   const ws: Workspace = {
     name: root.name,
     writable: true,
     meshes,
     projects,
+    iges,
     has: (path) => files.has(path),
     exists: async (path) => {
       if (files.has(path) || dirs.has(path)) return true;
@@ -180,12 +193,13 @@ export function workspaceFromFiles(list: readonly File[]): Workspace | null {
   if (!list.length) return null;
   const rel = (f: File) => (f.webkitRelativePath || f.name).split('/').slice(f.webkitRelativePath ? 1 : 0).join('/');
   const files = new Map(list.map((f) => [rel(f), f] as const).filter(([p]) => classify(p) || isFolderSettings(p)));
-  const { meshes, projects } = listing(files.keys());
+  const { meshes, projects, iges } = listing(files.keys());
   return {
     name: (list[0].webkitRelativePath || '').split('/')[0] || 'folder',
     writable: false,
     meshes,
     projects,
+    iges,
     has: (path) => files.has(path),
     exists: async (path) => files.has(path) || [...files.keys()].some((k) => k.startsWith(`${path}/`)),
     read: async (path) => {

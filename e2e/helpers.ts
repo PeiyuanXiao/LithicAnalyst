@@ -15,6 +15,24 @@ export interface LithicApi {
   view(toward: Vec3, up: Vec3): void;
   setTool(id: string): void;
   exportCsvText(): string;
+  /** The "Align vectors" mode (null: not in it). */
+  align(): {
+    file: string;
+    factor: number;
+    flip: boolean;
+    pairs: number;
+    residual: { median: number; p90: number; max: number };
+    tol: number;
+    aligned: boolean;
+    fitted: boolean;
+    placement: { scale: number; rotation: number[]; translation: Vec3 };
+    ends: Array<{ end: number; point: Vec3; x: number; y: number; visible: boolean }>;
+  } | null;
+  alignDrawn(): { arrows: number; warned: number } | null;
+  alignPlace(end: number, to: Vec3): void;
+  alignFit(): Promise<void>;
+  /** Imported scars to be checked, not edited since. */
+  toCheck(): string[];
   /** A flake's frame and measurements (null for a core). */
   flake(): {
     axis: ProjectState['flake']['axis'];
@@ -118,7 +136,7 @@ export interface LithicApi {
   module(): 'core' | 'flake' | 'generic' | null;
   openFolderHandle(handle: never): Promise<void>;
   specimenIds(): Record<string, string>;
-  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; types: Array<'core' | 'flake' | 'generic' | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null;
+  workspace(): { name: string; writable: boolean; meshes: string[]; index: number; started: boolean[]; toAlign: boolean[]; types: Array<'core' | 'flake' | 'generic' | null>; completion: Array<{ done: number; total: number } | null>; gm: Array<{ done: boolean; flagged: number } | null>; template: string | null; undownloaded: number } | null;
   landmarkTable(): import('../src/compute/landmarks').LandmarkTable;
   exportLandmarksText(kind: 'tps' | 'fcsv' | 'csv' | 'sliders'): string;
   mode(): string;
