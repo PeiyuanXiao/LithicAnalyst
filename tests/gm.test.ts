@@ -454,7 +454,7 @@ describe('the exports', () => {
     const { s, run } = t1Scene();
     const r = run({ edge: { on: true, points: 4 }, platformOutline: { on: false, points: 3 }, ventral: { on: true, rows: 1, cols: 1 }, dorsal: { on: false, rows: 1, cols: 1 }, platform: { on: false, rows: 1, cols: 1 } });
     const rows = landmarksCsv(s.state, r, { excelBom: false }).trim().split('\n');
-    expect(rows[0]).toBe('specimen_id,index,name,kind,set_id,x,y,z');
+    expect(rows[0]).toBe('specimen_id,index,name,kind,set_id,x,y,z,note');
     expect(rows.length - 1).toBe(r.rows.length);
     expect(rows[1].startsWith(',1,pop,fixed,,')).toBe(true);
     expect(rows[4].split(',').slice(1, 5)).toEqual(['4', 'edge_2', 'curve', 'edge']);

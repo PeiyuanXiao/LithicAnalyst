@@ -656,7 +656,7 @@ describe('the settings in the project', () => {
 describe('the tables', () => {
   const s = new ProjectStore(emptyProject());
   s.state.curves.push({ id: 'C1', label: 'C7', anchors: [], points: [], anchorIndex: [], closed: false, attributes: { type: 'edge' }, createdAt: '', modifiedAt: '' });
-  s.state.regions.push({ id: 'R1', label: 'R4', seed: [0, 0, 0], type: 'retouch', scarId: null, retouchLayer: 1, createdAt: '', modifiedAt: '' });
+  s.state.regions.push({ id: 'R1', label: 'R4', seed: [0, 0, 0], type: 'retouch', scarId: null, retouchLayer: 1, note: '', createdAt: '', modifiedAt: '' });
   const r = prism('unifacial').indices;
 
   it('flakes.csv ends with the fifteen columns of the indices, in their order', () => {

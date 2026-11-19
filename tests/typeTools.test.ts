@@ -20,7 +20,7 @@ function oldFile(type: SpecimenType): ReturnType<typeof serializeProject> {
       { id: 'rim', label: 'C1', anchors: RIM, points: RIM, anchorIndex: [0, 1, 2, 3], closed: true, edgeAngle: true, attributes: { type: 'core_edge', note: '' }, createdAt: T, modifiedAt: T },
       { id: 'other', label: 'C2', anchors: RIM, points: RIM, anchorIndex: [0, 1, 2, 3], closed: true, attributes: { type: type === 'flake' ? 'edge' : 'core_edge', note: '' }, createdAt: T, modifiedAt: T },
     ],
-    workingEdges: [{ id: 'e1', label: 'E1', name: 'left', curveId: 'rim', start: RIM[0], end: RIM[2], createdAt: T, modifiedAt: T }],
+    workingEdges: [{ id: 'e1', label: 'E1', name: 'left', curveId: 'rim', start: RIM[0], end: RIM[2], note: '', createdAt: T, modifiedAt: T }],
     nextWorkingEdgeNumber: 2,
     split: { source: 'curve', id: 'rim', upHint: [0, 0, 1], swap: true },
     sharpEdge: { method: 'three_points', distance: 2, threshold: 45 },

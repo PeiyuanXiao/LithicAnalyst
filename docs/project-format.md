@@ -474,12 +474,13 @@ A working edge is a stretch of a curve measured for edge angles (a flake's `edge
 
 ```json
 "workingEdges": [
-  { "id": "…", "label": "E1", "name": "left side", "curveId": "…", "start": [12.1, 3.4, 0.2], "end": [-11.8, 4.0, 0.1], "createdAt": "…", "modifiedAt": "…" }
+  { "id": "…", "label": "E1", "name": "left side", "curveId": "…", "start": [12.1, 3.4, 0.2], "end": [-11.8, 4.0, 0.1], "note": "", "createdAt": "…", "modifiedAt": "…" }
 ],
 "nextWorkingEdgeNumber": 2
 ```
 
 * `label`: `E{n}`, given in turn, never used again. `name`: the user's, may be empty. `curveId`: its curve; one on a curve the file does not have is dropped on reading.
+* `note`: the annotator's free text, may be empty; a file written before it has none (read as empty). Last column of `working_edges.csv`.
 * `start`, `end`: points on the curve, original coordinates. They are placed on the curve's reference curve (see "Edge angles": the nearest point) whenever they are used, so they follow the curve when it changes. Without a stated unit there is no reference curve, and positions are along the curve itself.
 * **Its stretch**: on an open curve, between the two, in either order. Round a closed curve, from `start` in the curve's direction to `end`, which may go on past the curve's start; exchanging the two gives the other stretch.
 * **Limits**: at least `WORKING_EDGE_MIN_MM` (2) long (no check of the length without a stated unit), and no overlap with another on the curve; they may share an end. A curve deleted takes its working edges with it. A curve no longer measured keeps them, and they take no part in anything until it is measured again.
@@ -491,6 +492,7 @@ A working edge is a stretch of a curve measured for edge angles (a flake's `edge
 * `removed_volume`: Σ weight × missing area, the missing areas as filled in along the whole curve. `erp_filled_share`: the weight of its filled stations / of its retouched stations; above `ERP_MAX_FILLED_SHARE` its `removed_volume` and `erp` are empty (`too_many_gaps`), whatever the specimen has. `erp`: `removed_volume` / (the specimen's `removed_volume` + the model's volume), so the edges' add up to the specimen's, less the stations in none; empty as the specimen's is, or when the specimen's `removed_volume` is.
 * `giur`, `giur_stations`: as the specimen's, over the stations that belong to it. `retouched_length`: the weights of its retouched stations. `retouch_perimeter`, `_dorsal`, `_ventral`: those weights (of that side's) / its `length`.
 * `edge_curvature`, `_chord`, `_depth`: R6 / R3, R3, R6 as the specimen's, over all the stations it takes in (both ends included, retouched or not) on the plan. An implied edge on a closed curve has none (`whole_edge`).
+* **Mean edge angles** (`edge_angle_3pt_2mm` … `edge_angle_2ln_10mm`, on screen in the table of the edge angles): for each method and distance, the plain arithmetic mean, unweighted, of the stations of the edge that have an angle there; the stations of an edge are those whose `working_edge` in `edge_angles.csv` is its label (all of the curve's for an implied edge). Empty when none has one. The file takes the angles as `edge_angles.csv` writes them (six decimals) and writes the mean to ten, so that in R `aggregate(angle_deg ~ curve_id + working_edge + method + distance, data = read.csv("…_edge_angles.csv", na.strings = ""), FUN = mean)` gives the same means to 1e-9 (`working_edge` read as `""` for an implied edge; `distance` in the coordinate unit, the column's millimetres only with `mm`). The standard deviation and the number of stations are shown on screen, not exported.
 * A working edge with no retouched station counts as not retouched: 0 for all of these but the curvature.
 * `length`: the weights of all its stations (the length of its stretch without stations). `sharp_length`: the part of the sharp stretches in it; empty without a threshold.
 
@@ -579,8 +581,10 @@ The points, in their order. None can be moved on its own; a change of the config
 ## Surface region
 
 ```json
-{ "id": "…", "label": "R1", "seed": [12.1, -3.4, 8.8], "type": "cortex", "scarId": null, "createdAt": "…", "modifiedAt": "…" }
+{ "id": "…", "label": "R1", "seed": [12.1, -3.4, 8.8], "type": "cortex", "scarId": null, "note": "", "createdAt": "…", "modifiedAt": "…" }
 ```
+
+* `note`: the annotator's free text, may be empty; a file written before it has none (read as empty). Last column of `regions.csv`.
 
 * The curves split the surface into pieces: each curve is turned into mesh edges (each point to
   its nearest vertex, gaps joined by shortest paths over mesh edges), and triangles are grouped
@@ -616,10 +620,11 @@ The points, in their order. None can be moved on its own; a change of the config
 ## Landmarks
 
 ```json
-{ "id": "…", "name": "apex", "point": [12.1, -3.4, 8.8], "createdAt": "…", "modifiedAt": "…" }
+{ "id": "…", "name": "apex", "point": [12.1, -3.4, 8.8], "note": "", "createdAt": "…", "modifiedAt": "…" }
 { "id": "…", "label": "SL1", "curveId": "…", "count": 10, "startLandmarkId": "…", "endLandmarkId": null, "createdAt": "…", "modifiedAt": "…" }
 ```
 
+* `note` (fixed landmarks, those of a flake's own too): the annotator's free text, may be empty; a file written before it has none (read as empty). Last column of `landmarks.csv`. Semilandmark sets have no note.
 * Fixed landmarks: a surface point (snapped onto the nearest place of a ridge or valley when the snap setting
   says so) and a free name. Their order in the list is the export order.
 * Curve semilandmarks: `count` points at equal arc length along the curve's traced points. With a
@@ -886,10 +891,10 @@ specimen_id,plane_id,method,center_x,center_y,center_z,normal_x,normal_y,normal_
 Surface regions (`<specimen>_regions.csv`, one row each; `type` a code or the annotator's own text; `parent_region`: the upper region a lower one lies in, by its `region_id`, else empty):
 
 ```
-specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer
+specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer,note
 ```
 
-`retouch_layer`: of a retouch region, else empty.
+`retouch_layer`: of a retouch region, else empty. `note`: the region's.
 
 Retouch layers (`<specimen>_retouch_angles.csv`, long format: one row per station, layer and method; see "Retouch layers"; `retouch_region`: where the layer begins; `distance`: from the edge to the layer's outer end, along the section; `method` `three_points`, `two_lines` or `layer_face`; `working_edge` that of the station):
 
@@ -919,8 +924,10 @@ By the grid the files and their bytes are as they always were. The summary of a 
 Working edges (`<specimen>_working_edges.csv`, one row per working edge of each curve measured, and one per such curve without any, `working_edge` empty; see "Working edges"; lengths in the coordinate unit, the volume in unit³, ratios as 0 to 1; those from `retouched_length` on empty for a core or a general specimen; in a folder's summary `sharp_length` is by the folder's rule):
 
 ```
-specimen_id,working_edge,name,curve_id,start_position,end_position,length,sharp_length,retouched_length,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,removed_volume,erp,erp_filled_share,giur,giur_stations,edge_curvature,edge_curvature_chord,edge_curvature_depth
+specimen_id,working_edge,name,curve_id,start_position,end_position,length,sharp_length,retouched_length,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,removed_volume,erp,erp_filled_share,giur,giur_stations,edge_curvature,edge_curvature_chord,edge_curvature_depth,edge_angle_3pt_2mm,edge_angle_3pt_5mm,edge_angle_3pt_10mm,edge_angle_2ln_2mm,edge_angle_2ln_5mm,edge_angle_2ln_10mm,note
 ```
+
+`edge_angle_*`: the mean edge angles in degrees, `3pt` three points and `2ln` two lines, at 2, 5 and 10 mm (see "Working edges", how to get them again from `edge_angles.csv`); for an implied edge, of the whole curve. `note`: the working edge's (empty for an implied edge).
 
 Sharp edge (`<specimen>_edge_sharp.csv`, one row per sharp stretch, under the rule, cut in two where a working edge begins or ends: the rows of one stretch have its `segment`, from 1, and their lengths add up to its length; see "Sharp edge"; `distance` in the coordinate unit; `working_edge` the working edge it lies in, empty when in none):
 
@@ -956,8 +963,9 @@ then each semilandmark set), numbered from 1:
 * `<specimen>_landmarks.fcsv`: 3D Slicer markups (`# Markups fiducial file version = 4.11`,
   `# CoordinateSystem = LPS`), label = name, description = set label; coordinates as in the mesh
   file (Slicer reads model files as LPS by default).
-* `<specimen>_landmarks.csv`: `specimen_id,index,name,kind,set_id,x,y,z` (`kind` is `fixed` or
-  `curve`).
+* `<specimen>_landmarks.csv`: `specimen_id,index,name,kind,set_id,x,y,z,note` (`kind` is `fixed` or
+  `curve`; `note` of a fixed landmark, empty for semilandmarks). The points for geometric morphometrics
+  (`gm_landmarks.csv`) have no `note`.
 * `<specimen>_sliders.csv`: `before,slider,after`, one row per sliding semilandmark, by `index`
   (geomorph's `curves` matrix: `as.matrix(read.csv(…))`).
 
@@ -1017,7 +1025,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app` (`name`, `version`, `author`: the authors, joined with commas, `license`, `repository`, `citation`: how to cite
   this version, APA style), `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options` (figures: `format` and `figure`, the figure settings: `views`, `lightElevation`, `overlays` — `arrows`, `curves`, `planes`, `regions`, `landmarks`, `scaleBar`, `sections` (where the sections cut the model, marked on the views) —, `scale`, `dpi` and `background`: `white` or `transparent`), `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
+  (`tables` or `figures`), `options` (figures: `format` and `figure`, the figure settings: `views`, `lightElevation`, `overlays` — `arrows`, `curves`, `planes`, `regions`, `landmarks`, `scaleBar`, `sections` (where the sections cut the model, marked on the views), `legend` (what the colours drawn stand for; `false` by default) —, `scale`, `dpi` and `background`: `white` or `transparent`), `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 
@@ -1043,8 +1051,12 @@ box (`derived.configuration`) stands for its model like the other stored results
 no box and uses the project's stored split (`derived.split`).
 
 Enumerated fields are written as their codes, which are the same in every interface language.
-Numbers use `.` as the decimal separator and up to six decimals. Text is quoted per RFC 4180.
+Numbers use `.` as the decimal separator and up to six decimals (the mean edge angles of `working_edges.csv`: ten). Text is quoted per RFC 4180.
 The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
+
+Notes on regions, landmarks and working edges (`note`) came without a new format version: a file without them reads as one with empty notes, and a reader that ignores unknown keys reads the new files.
+
+A region exported as a mesh (the region's details, "PLY"; a download, not part of the project or of a folder's exports): `<specimen>_<region>_<type>.ply`, binary little-endian PLY with `element vertex` (`float x, y, z`, the model file's own coordinates; the vertices the region's triangles use, each once) and `element face` (`list uchar int vertex_indices`), no colours or normals. Its header comments: `LithicAnalyst <version>`, `specimen <id>`, `region <label> <type>`, `unit <unit>` (`unit unspecified` without one), `source <model file> sha256 <checksum>`.
 
 ## Changes from format version 2
 

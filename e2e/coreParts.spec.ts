@@ -59,7 +59,7 @@ test('a core: flaking surfaces between its edges, scars lying in them; custom is
   await expect(page.locator('#region-scar')).toBeVisible();
 
   const rows = parseCsv(await page.evaluate(() => window.lithicanalyst.exportRegionsCsvText()));
-  expect(Object.keys(rows[0])).toEqual(['specimen_id', 'region_id', 'type', 'scar_id', 'area', 'unit', 'parent_region', 'retouch_layer']);
+  expect(Object.keys(rows[0])).toEqual(['specimen_id', 'region_id', 'type', 'scar_id', 'area', 'unit', 'parent_region', 'retouch_layer', 'note']);
   expect(rows.find((r) => r.type === 'scar')!.parent_region).toBe(surface.label);
 
   // custom: the last key

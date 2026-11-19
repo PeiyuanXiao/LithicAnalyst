@@ -25,8 +25,8 @@ export interface FigureSettings {
   views: FigureView[];
   /** Height of the raking light above the page (degrees); it comes from the upper left. */
   lightElevation: number;
-  /** `sections`: where the sections in the figure cut the model, marked on the views, with their labels at the ends. */
-  overlays: { arrows: boolean; curves: boolean; planes: boolean; regions: boolean; landmarks: boolean; scaleBar: boolean; sections: boolean };
+  /** `sections`: where the sections in the figure cut the model, marked on the views, with their labels at the ends. `legend`: what the colours drawn stand for. */
+  overlays: { arrows: boolean; curves: boolean; planes: boolean; regions: boolean; landmarks: boolean; scaleBar: boolean; sections: boolean; legend: boolean };
   /** Paper size / real size. */
   scale: number;
   dpi: number;
@@ -39,7 +39,7 @@ export const FIGURE_LANDMARK_MM = 1.2;
 export const DEFAULT_FIGURE: FigureSettings = {
   views: ['front', 'left'],
   lightElevation: 35,
-  overlays: { arrows: true, curves: true, planes: false, regions: true, landmarks: true, scaleBar: true, sections: true },
+  overlays: { arrows: true, curves: true, planes: false, regions: true, landmarks: true, scaleBar: true, sections: true, legend: false },
   scale: 1,
   dpi: 600,
   background: 'white',
@@ -68,14 +68,75 @@ export interface SectionDrawing {
   trace: { normal: Vec3; lines: Array<{ points: Vec3[]; closed: boolean }> } | null;
 }
 
+/** The legend's text and samples on the paper (mm): the text, a block of colour, a line or an arrow, the gaps, the rows. */
+export const LEGEND_MM = { text: 2.6, block: 3, line: 6, gap: 1.2, between: 3, afterBar: 4, row: 4.5 } as const;
+
+/** What an object drawn on a figure stands for in its legend: its category (`key`), words, colours, and place among its kind's (`rank`). */
+export interface LegendEntry {
+  key: string;
+  label: string;
+  /** One, or several drawn under one category (a region type whose regions differ in colour). */
+  colors: string[];
+  rank: number;
+}
+
+export type LegendKind = 'arrow' | 'region' | 'curve' | 'plane' | 'landmark';
+export const LEGEND_KINDS: readonly LegendKind[] = ['arrow', 'region', 'curve', 'plane', 'landmark'];
+
+/** An item of the legend: a landmark's key is `fixed` or `semi`. */
+export interface LegendItem extends LegendEntry {
+  kind: LegendKind;
+}
+
+/** The objects a figure draws (each with what it stands for, when its colour means something) and the regions painted. */
+export interface LegendSource {
+  arrows: ReadonlyArray<{ legend?: LegendEntry }>;
+  curves: ReadonlyArray<{ legend?: LegendEntry }>;
+  planes: ReadonlyArray<{ legend?: LegendEntry }>;
+  landmarks: ReadonlyArray<{ legend?: LegendEntry }>;
+  regions: readonly LegendEntry[];
+}
+
+/**
+ * What goes into the legend: with it switched on, the categories of the objects given (those the figure draws) whose overlay is on, each
+ * once with all its colours; arrows, regions, curves, planes, landmarks, each kind by rank. Objects without an entry (arrows of one colour or
+ * coloured by direction) are not listed.
+ */
+export function legendItems(overlays: FigureSettings['overlays'], drawn: LegendSource): LegendItem[] {
+  if (!overlays.legend) return [];
+  const on: Record<LegendKind, boolean> = { arrow: overlays.arrows, region: overlays.regions, curve: overlays.curves, plane: overlays.planes, landmark: overlays.landmarks };
+  const from: Record<LegendKind, ReadonlyArray<LegendEntry | undefined>> = {
+    arrow: drawn.arrows.map((x) => x.legend),
+    region: drawn.regions,
+    curve: drawn.curves.map((x) => x.legend),
+    plane: drawn.planes.map((x) => x.legend),
+    landmark: drawn.landmarks.map((x) => x.legend),
+  };
+  const out: LegendItem[] = [];
+  for (const kind of LEGEND_KINDS) {
+    if (!on[kind]) continue;
+    const byKey = new Map<string, LegendItem>();
+    for (const e of from[kind]) {
+      if (!e) continue;
+      const item = byKey.get(e.key);
+      if (!item) byKey.set(e.key, { kind, key: e.key, label: e.label, colors: [...new Set(e.colors)], rank: e.rank });
+      else for (const c of e.colors) if (!item.colors.includes(c)) item.colors.push(c);
+    }
+    out.push(...[...byKey.values()].sort((a, b) => a.rank - b.rank));
+  }
+  return out;
+}
+
 export interface FigureOverlays {
-  arrows: Array<{ start: Vec3; end: Vec3; startNormal: Vec3; endNormal: Vec3; color: string }>;
-  curves: Array<{ points: Vec3[]; closed: boolean; color: string }>;
-  planes: Array<{ lines: Array<{ points: Vec3[]; closed: boolean }>; color: string }>;
+  arrows: Array<{ start: Vec3; end: Vec3; startNormal: Vec3; endNormal: Vec3; color: string; legend?: LegendEntry }>;
+  curves: Array<{ points: Vec3[]; closed: boolean; color: string; legend?: LegendEntry }>;
+  planes: Array<{ lines: Array<{ points: Vec3[]; closed: boolean }>; color: string; legend?: LegendEntry }>;
   /** Fixed landmarks (`fixed`) and semilandmarks, drawn as dots where they are seen. */
-  landmarks: Array<{ point: Vec3; color: string; fixed: boolean }>;
+  landmarks: Array<{ point: Vec3; color: string; fixed: boolean; legend?: LegendEntry }>;
   /** Section drawings placed to the right of the views. */
   sections: SectionDrawing[];
+  /** The regions painted on the model, as the legend lists them (none: no legend items for regions). */
+  regions?: LegendEntry[];
 }
 
 export interface FigureContext {
@@ -148,6 +209,13 @@ export interface FigureLayoutSection {
   labelY: number;
 }
 
+/** A legend item's place (pixels): its sample from `x`, its text from `textX`, both on the line `y` (the middle of the row). */
+export interface FigureLayoutLegend extends LegendItem {
+  x: number;
+  y: number;
+  textX: number;
+}
+
 export interface FigureLayout {
   width: number;
   height: number;
@@ -157,6 +225,9 @@ export interface FigureLayout {
   views: FigureLayoutView[];
   sections: FigureLayoutSection[];
   scaleBar: { x0: number; x1: number; y: number; length: number; unit: string } | null;
+  /** The bottom row (the scale bar's): its middle line, where it begins, how far it may go, and the margin. */
+  bottom: { y: number; left: number; right: number; margin: number };
+  legend: FigureLayoutLegend[];
 }
 
 export interface Figure {
@@ -199,6 +270,46 @@ export function sectionTraceViews(normal: Vec3, views: readonly FigureView[], fr
 /** A label's width on the paper, about (pixels, for a font of `font` pixels). */
 const labelWidth = (label: string, font: number) => 0.6 * font * label.length;
 
+/** A text's width, about: Chinese, Japanese and Korean characters a whole font size, others 0.6 of it. */
+export const textWidth = (text: string, font: number): number => [...text].reduce((w, ch) => w + (ch.codePointAt(0)! >= 0x2e80 ? 1 : 0.6) * font, 0);
+
+/** The text of the scale bar. */
+const barText = (bar: NonNullable<FigureLayout['scaleBar']>) => `${bar.length} ${bar.unit}`;
+
+/**
+ * The legend placed at the bottom of the figure: on the scale bar's row, right of its text (from the left without a bar), on as many rows
+ * as it needs, each item where it fits, else at the start of the next row. The figure grows by those rows (and by the bottom row
+ * itself without a scale bar), and wider when an item alone is wider than the row. `mmToPx`: as the figure's.
+ */
+export function placeLegend(layout: FigureLayout, items: readonly LegendItem[], mmToPx: (mm: number) => number): FigureLayout {
+  if (!items.length) return { ...layout, legend: [] };
+  const font = mmToPx(LEGEND_MM.text);
+  const { bottom } = layout;
+  const bar = layout.scaleBar;
+  const sampleW = (it: LegendItem) => mmToPx(it.kind === 'region' || it.kind === 'landmark' ? LEGEND_MM.block : LEGEND_MM.line);
+  const pitch = Math.round(mmToPx(LEGEND_MM.row));
+  let x = bar ? bar.x1 + font * 0.5 + textWidth(barText(bar), font) + mmToPx(LEGEND_MM.afterBar) : bottom.left;
+  let y = bottom.y;
+  let used = false;
+  let right = 0;
+  const placed: FigureLayoutLegend[] = [];
+  for (const it of items) {
+    const w = sampleW(it) + mmToPx(LEGEND_MM.gap) + textWidth(it.label, font);
+    if (x + w > bottom.right && (used || x > bottom.left)) {
+      x = bottom.left;
+      y += pitch;
+      used = false;
+    }
+    placed.push({ ...it, x, y, textX: x + sampleW(it) + mmToPx(LEGEND_MM.gap) });
+    right = Math.max(right, x + w);
+    x += w + mmToPx(LEGEND_MM.between);
+    used = true;
+  }
+  // the bottom row had no room of its own without a scale bar
+  const grow = (bar ? 0 : Math.round(mmToPx(9))) + (y - bottom.y);
+  return { ...layout, height: layout.height + grow, width: Math.max(layout.width, Math.ceil(right + bottom.margin)), legend: placed };
+}
+
 /** A round scale-bar length, about a third of `span`, and its divisions. */
 export function scaleBarLength(span: number): { length: number; step: number } {
   const target = span / 3;
@@ -209,9 +320,13 @@ export function scaleBarLength(span: number): { length: number; step: number } {
   return { length, step: d === 1 ? base / 5 : base };
 }
 
-/** The figure's size and layout without rendering it (for showing the size before exporting). */
-export function figureLayout(ctx: FigureContext, frame: number[], unit: string, settings: FigureSettings, sections: SectionDrawing[] = []): FigureLayout {
-  return planFigure(ctx, frame, unit, settings, sections).layout;
+/**
+ * The figure's size and layout without rendering it (for showing the size before exporting). `legend`: the items of all the objects
+ * given (what the model hides is only known once the views are rendered, so the figure may have fewer).
+ */
+export function figureLayout(ctx: FigureContext, frame: number[], unit: string, settings: FigureSettings, sections: SectionDrawing[] = [], legend: readonly LegendItem[] = []): FigureLayout {
+  const plan = planFigure(ctx, frame, unit, settings, sections);
+  return placeLegend(plan.layout, plan.layout.views.length ? legend : [], plan.mmToPx);
 }
 
 /**
@@ -314,23 +429,22 @@ function planFigure(ctx: FigureContext, frame: number[], unit: string, settings:
     // centre each view in its cell (cells of a row share its height, of a column its width)
     return { view: v, x: colX[d.col] + Math.floor((colW[d.col] - s.w) / 2), y: rowY[d.row] + Math.floor((rowH[d.row] - s.h) / 2), width: s.w, height: s.h };
   });
-  const barLayout = bar
-    ? (() => {
-        const x0 = layoutViews[0]?.x ?? layoutSections[0]?.x ?? margin;
-        const yb = height - margin - Math.round(mmToPx(3));
-        return { x0, x1: x0 + bar.length * pxPerUnit, y: yb, length: bar.length, unit };
-      })()
-    : null;
-  const layout: FigureLayout = { width, height, pxPerUnit, mmPerPx: mm ? 1 / pxPerMm : null, views: layoutViews, sections: layoutSections, scaleBar: barLayout };
+  // the bottom row: the scale bar, and the legend on from it
+  const left = layoutViews[0]?.x ?? layoutSections[0]?.x ?? margin;
+  const bottomY = Math.max(y - gap, sy - gap) + Math.round(mmToPx(9)) - Math.round(mmToPx(3));
+  const barLayout = bar ? { x0: left, x1: left + bar.length * pxPerUnit, y: bottomY, length: bar.length, unit } : null;
+  const layout: FigureLayout = { width, height, pxPerUnit, mmPerPx: mm ? 1 / pxPerMm : null, views: layoutViews, sections: layoutSections, scaleBar: barLayout, bottom: { y: bottomY, left, right: width - margin, margin }, legend: [] };
   return { layout, size, axes, axis, lo, hi, pxPerUnit, mm, mmToPx };
 }
 
 type Plan = ReturnType<typeof planFigure> & { layoutViews: FigureLayoutView[] };
 
 function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: FigureOverlays, plan: Plan): Figure {
-  const { layout, layoutViews, size, axes, axis, lo, hi, pxPerUnit, mm, mmToPx } = plan;
+  const { layoutViews, size, axes, axis, lo, hi, pxPerUnit, mm, mmToPx } = plan;
   const viewNames = layoutViews.map((v) => v.view);
   const labelFont = mmToPx(SECTION_LABEL_MM);
+  // what is seen in at least one view (for the legend)
+  const seen = { arrows: new Set<number>(), curves: new Set<number>(), planes: new Set<number>(), landmarks: new Set<number>() };
   // ------------------------------------------------------------ render the views
   const rendered: RenderedView[] = layoutViews.map((lv) => {
     const d = VIEWS[lv.view];
@@ -385,7 +499,7 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
     // an arrow on a surface seen edge-on is unreadable: only draw arrows on surfaces facing this view
     const facing = (a: FigureOverlays['arrows'][number]) => vdot(vadd(a.startNormal, a.endNormal), toward) > 0.5;
     const arrows = settings.overlays.arrows
-      ? overlays.arrows.filter(facing).map((a) => {
+      ? overlays.arrows.flatMap((a, k) => (facing(a) ? [{ a, k }] : [])).map(({ a, k }) => {
           // like the 3D arrows: straight, lifted along the normals
           const lift = ctx.diagonal * 0.004;
           const pts: Vec3[] = [];
@@ -398,13 +512,32 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
           const r = runs(pts, false);
           const tip = visible(pts[24]) ? toPx(pts[24]) : null;
           const back = toPx(pts[0]);
+          if (r.length || tip) seen.arrows.add(k);
           return { runs: r, head: tip ? ([back[0], back[1], tip[0], tip[1]] as [number, number, number, number]) : null, color: a.color };
         })
       : [];
     const lines: RenderedView['lines'] = [];
-    if (settings.overlays.curves) for (const c of overlays.curves) lines.push({ runs: runs(c.points, c.closed), color: c.color, kind: 'curve' });
-    if (settings.overlays.planes) for (const pl of overlays.planes) for (const l of pl.lines) lines.push({ runs: runs(l.points, l.closed), color: pl.color, kind: 'plane' });
-    const dots = settings.overlays.landmarks ? overlays.landmarks.filter((l) => visible(l.point)).map((l) => ({ at: toPx(l.point), color: l.color, fixed: l.fixed })) : [];
+    if (settings.overlays.curves)
+      overlays.curves.forEach((c, k) => {
+        const r = runs(c.points, c.closed);
+        if (r.length) seen.curves.add(k);
+        lines.push({ runs: r, color: c.color, kind: 'curve' });
+      });
+    if (settings.overlays.planes)
+      overlays.planes.forEach((pl, k) => {
+        for (const l of pl.lines) {
+          const r = runs(l.points, l.closed);
+          if (r.length) seen.planes.add(k);
+          lines.push({ runs: r, color: pl.color, kind: 'plane' });
+        }
+      });
+    const dots = settings.overlays.landmarks
+      ? overlays.landmarks.flatMap((l, k) => {
+          if (!visible(l.point)) return [];
+          seen.landmarks.add(k);
+          return [{ at: toPx(l.point), color: l.color, fixed: l.fixed }];
+        })
+      : [];
 
     // the sections' positions, on the views that look along them, with the label beyond either end
     const traces: RenderedView['traces'] = [];
@@ -449,11 +582,21 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
     dash: [mmToPx(SECTION_DASH_MM[0]), mmToPx(SECTION_DASH_MM[1])],
     label: labelFont,
   };
+  // the legend: of what was seen (the regions as painted, when there are views)
+  const pick = <T>(list: readonly T[], keep: Set<number>) => list.filter((_, k) => keep.has(k));
+  const items = legendItems(settings.overlays, {
+    arrows: pick(overlays.arrows, seen.arrows),
+    curves: pick(overlays.curves, seen.curves),
+    planes: pick(overlays.planes, seen.planes),
+    landmarks: pick(overlays.landmarks, seen.landmarks),
+    regions: rendered.length ? overlays.regions ?? [] : [],
+  });
+  const layout = placeLegend(plan.layout, items, mmToPx);
   const drawn = sectionsInPixels(overlays.sections, layout, pxPerUnit);
   const background = figureBackgroundColor(settings.background);
   return {
     layout,
-    png: () => composePng(rendered, drawn, layout, stroke, settings.dpi, !!mm, background),
+    png: () => composePng(rendered, drawn, layout, stroke, settings.dpi, !!mm, background, mmToPx),
     svg: () => composeSvg(rendered, drawn, layout, stroke, mmToPx, background),
   };
 }
@@ -695,11 +838,105 @@ function drawScaleBar(g: CanvasRenderingContext2D, layout: FigureLayout, stroke:
   g.font = `${font}px Helvetica, Arial, sans-serif`;
   g.textBaseline = 'top';
   g.textAlign = 'left';
-  g.fillText(`${bar.length} ${bar.unit}`, bar.x1 + font * 0.5, bar.y - font * 0.55);
+  g.fillText(barText(bar), bar.x1 + font * 0.5, bar.y - font * 0.55);
   g.restore();
 }
 
-async function composePng(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, dpi: number, physical: boolean, background: string | null): Promise<Uint8Array> {
+/** A colour too light to be seen on white paper by itself (`#rgb` or `#rrggbb`): a curve of no type, say. */
+export function lightColor(color: string): boolean {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color);
+  if (!m) return false;
+  const hex = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.85 * 255;
+}
+
+interface LegendShapes {
+  blocks?: Array<{ x: number; y: number; w: number; h: number; color: string }>;
+  /** A thin dark edge round the blocks, or under the line (`casing`: its width), for a colour too light to be seen on white. */
+  edged?: boolean;
+  casing?: number;
+  dot?: { x: number; y: number; r: number; color: string };
+  line?: [number, number, number, number];
+  width?: number;
+  color?: string;
+  head?: Array<[number, number]>;
+}
+
+/** A legend sample's shapes (pixels): a block of colour (in stripes, for several), a line, an arrow (its head), or a dot. */
+function legendSample(it: FigureLayoutLegend, stroke: Strokes, mmToPx: (mm: number) => number): LegendShapes {
+  const block = mmToPx(LEGEND_MM.block), line = mmToPx(LEGEND_MM.line);
+  if (it.kind === 'region') return { blocks: it.colors.map((c, i) => ({ x: it.x + (i * block) / it.colors.length, y: it.y - block / 2, w: block / it.colors.length, h: block, color: c })), edged: it.colors.some(lightColor) };
+  if (it.kind === 'landmark') return { dot: { x: it.x + block / 2, y: it.y, r: dotRadius({ fixed: it.key === 'fixed' }, stroke), color: it.colors[0] } };
+  const seg: [number, number, number, number] = [it.x, it.y, it.x + line, it.y];
+  const width = it.kind === 'arrow' ? stroke.arrow : stroke.line;
+  const casing = lightColor(it.colors[0]) ? width + 2 * dotOutline(stroke) : undefined;
+  if (it.kind === 'arrow') return { line: seg, width, casing, color: it.colors[0], head: headPoints(seg, stroke.head) };
+  return { line: seg, width, casing, color: it.colors[0] };
+}
+
+function drawLegend(g: CanvasRenderingContext2D, layout: FigureLayout, stroke: Strokes, mmToPx: (mm: number) => number): void {
+  if (!layout.legend.length) return;
+  const font = mmToPx(LEGEND_MM.text);
+  g.save();
+  g.lineCap = 'round';
+  for (const it of layout.legend) {
+    const s = legendSample(it, stroke, mmToPx);
+    for (const b of s.blocks ?? []) {
+      g.fillStyle = b.color;
+      g.fillRect(b.x, b.y, b.w, b.h);
+    }
+    if (s.edged && s.blocks?.length) {
+      const first = s.blocks[0], last = s.blocks[s.blocks.length - 1];
+      g.strokeStyle = '#000';
+      g.lineWidth = dotOutline(stroke);
+      g.strokeRect(first.x, first.y, last.x + last.w - first.x, first.h);
+    }
+    if (s.dot) {
+      g.beginPath();
+      g.arc(s.dot.x, s.dot.y, s.dot.r, 0, 2 * Math.PI);
+      g.fillStyle = s.dot.color;
+      g.fill();
+      g.strokeStyle = '#000';
+      g.lineWidth = dotOutline(stroke);
+      g.stroke();
+    }
+    if (s.line) {
+      g.strokeStyle = s.color!;
+      g.lineWidth = s.width!;
+      const [x0, y0, x1, y1] = s.head ? [s.line[0], s.line[1], s.head[0][0] - (s.head[0][0] - s.line[0]) * 0.2, s.line[3]] : s.line;
+      if (s.casing) {
+        g.strokeStyle = '#000';
+        g.lineWidth = s.casing;
+        g.beginPath();
+        g.moveTo(x0, y0);
+        g.lineTo(x1, y1);
+        g.stroke();
+        g.strokeStyle = s.color!;
+        g.lineWidth = s.width!;
+      }
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x1, y1);
+      g.stroke();
+      if (s.head) {
+        g.fillStyle = s.color!;
+        g.beginPath();
+        s.head.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py)));
+        g.closePath();
+        g.fill();
+      }
+    }
+    g.fillStyle = '#000';
+    g.font = `${font}px ${LABEL_FONT}`;
+    g.textAlign = 'left';
+    g.textBaseline = 'alphabetic';
+    g.fillText(it.label, it.textX, it.y + font * 0.36);
+  }
+  g.restore();
+}
+
+async function composePng(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, dpi: number, physical: boolean, background: string | null, mmToPx: (mm: number) => number): Promise<Uint8Array> {
   const canvas = document.createElement('canvas');
   canvas.width = layout.width;
   canvas.height = layout.height;
@@ -721,6 +958,7 @@ async function composePng(views: RenderedView[], sections: DrawnSection[], layou
   drawSections(g, sections, stroke, layout.mmPerPx ? 1.2 / layout.mmPerPx : 12);
   drawSectionLabels(g, layout, stroke);
   drawScaleBar(g, layout, stroke, layout.mmPerPx ? 2.6 / layout.mmPerPx : 24);
+  drawLegend(g, layout, stroke, mmToPx);
   const png = await canvasPng(canvas);
   return physical ? pngWithDpi(png, dpi) : png;
 }
@@ -792,7 +1030,30 @@ async function composeSvg(views: RenderedView[], sections: DrawnSection[], layou
     const ticks = barTicks(bar, layout.pxPerUnit).map((tx) => `M${f2(tx)} ${f2(bar.y)} V${f2(bar.y - font * 0.6)}`).join(' ');
     out.push(`<g id="scale-bar" stroke="#000" stroke-width="${f2(stroke.line)}" fill="none">`);
     out.push(`<path d="M${f2(bar.x0)} ${f2(bar.y)} H${f2(bar.x1)} ${ticks}"/>`);
-    out.push(`<text x="${f2(bar.x1 + font * 0.5)}" y="${f2(bar.y + font * 0.35)}" font-family="Helvetica, Arial, sans-serif" font-size="${f2(font)}" fill="#000" stroke="none">${esc(`${bar.length} ${bar.unit}`)}</text>`);
+    out.push(`<text x="${f2(bar.x1 + font * 0.5)}" y="${f2(bar.y + font * 0.35)}" font-family="Helvetica, Arial, sans-serif" font-size="${f2(font)}" fill="#000" stroke="none">${esc(barText(bar))}</text>`);
+    out.push('</g>');
+  }
+  if (layout.legend.length) {
+    const font = mmToPx(LEGEND_MM.text);
+    out.push(`<g id="legend" font-family="${LABEL_FONT}" font-size="${f2(font)}">`);
+    for (const it of layout.legend) {
+      const s = legendSample(it, stroke, mmToPx);
+      out.push(`<g class="legend-item" data-kind="${it.kind}" data-key="${esc(it.key)}">`);
+      for (const b of s.blocks ?? []) out.push(`<rect x="${f2(b.x)}" y="${f2(b.y)}" width="${f2(b.w)}" height="${f2(b.h)}" fill="${esc(b.color)}" stroke="none"/>`);
+      if (s.edged && s.blocks?.length) {
+        const first = s.blocks[0], last = s.blocks[s.blocks.length - 1];
+        out.push(`<rect x="${f2(first.x)}" y="${f2(first.y)}" width="${f2(last.x + last.w - first.x)}" height="${f2(first.h)}" fill="none" stroke="#000" stroke-width="${f2(dotOutline(stroke))}"/>`);
+      }
+      if (s.dot) out.push(`<circle cx="${f2(s.dot.x)}" cy="${f2(s.dot.y)}" r="${f2(s.dot.r)}" fill="${esc(s.dot.color)}" stroke="#000" stroke-width="${f2(dotOutline(stroke))}"/>`);
+      if (s.line) {
+        const end = s.head ? s.head[0][0] - (s.head[0][0] - s.line[0]) * 0.2 : s.line[2];
+        if (s.casing) out.push(`<line x1="${f2(s.line[0])}" y1="${f2(s.line[1])}" x2="${f2(end)}" y2="${f2(s.line[3])}" stroke="#000" stroke-width="${f2(s.casing)}" stroke-linecap="round"/>`);
+        out.push(`<line x1="${f2(s.line[0])}" y1="${f2(s.line[1])}" x2="${f2(end)}" y2="${f2(s.line[3])}" stroke="${esc(s.color!)}" stroke-width="${f2(s.width!)}" stroke-linecap="round"/>`);
+        if (s.head) out.push(`<polygon points="${pts(s.head)}" fill="${esc(s.color!)}" stroke="none"/>`);
+      }
+      out.push(`<text x="${f2(it.textX)}" y="${f2(it.y + font * 0.36)}" fill="#000" stroke="none">${esc(it.label)}</text>`);
+      out.push('</g>');
+    }
     out.push('</g>');
   }
   out.push('</svg>');

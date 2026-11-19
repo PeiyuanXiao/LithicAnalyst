@@ -523,7 +523,9 @@ export class UpdateRegionCommand implements Command {
   readonly createdAt = Date.now();
   constructor(
     private readonly before: Region,
-    private readonly after: Region,
+    private after: Region,
+    /** Commands with the same mergeKey issued within a short window collapse into one undo step (typing a note). */
+    private readonly mergeKey: string | null = null,
   ) {}
   apply(store: ProjectStore): void {
     store._putRegion(structuredClone(this.after));
@@ -532,6 +534,13 @@ export class UpdateRegionCommand implements Command {
   revert(store: ProjectStore): void {
     store._putRegion(structuredClone(this.before));
     store.notify({ kind: 'regions', ids: [this.before.id] });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof UpdateRegionCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
   }
 }
 

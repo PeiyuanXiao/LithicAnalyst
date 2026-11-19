@@ -65,6 +65,9 @@ export class EdgeAngleChart {
   private dragging = false;
   private cursorAt: number | null = null;
   private cursorEl: SVGElement | null = null;
+  /** A mean of the table under the chart, under the pointer: a dashed line at its value. */
+  private mean: { value: number; color: string } | null = null;
+  private meanEl: SVGElement | null = null;
   /** A press on the plot: the position of the station nearest it. */
   onPick: ((position: number) => void) | null = null;
 
@@ -80,6 +83,23 @@ export class EdgeAngleChart {
       if (!c || !this.onPick || e.button !== 0) return;
       this.onPick(c.positions[this.nearest(e)]);
     });
+  }
+
+  /** A dashed line across the plot at `value` (null: none); not drawn where the value lies outside the angles shown. */
+  setMean(value: number | null, color = 'currentColor'): void {
+    this.mean = value === null ? null : { value, color };
+    this.placeMean();
+  }
+
+  private placeMean(): void {
+    this.meanEl?.remove();
+    this.meanEl = null;
+    const c = this.current, m = this.mean;
+    if (!c || !m) return;
+    const y = c.y(m.value);
+    if (y < TOP - 0.5 || y > HEIGHT - BOTTOM + 0.5) return;
+    this.meanEl = svg('line', { x1: LEFT, x2: WIDTH - RIGHT, y1: y, y2: y, id: `${this.prefix}-chart-mean`, class: 'edge-chart-mean', style: `stroke:${m.color}`, 'data-value': m.value });
+    this.plot.append(this.meanEl);
   }
 
   /** The vertical line of a position along the curve (null: none). */
@@ -122,6 +142,7 @@ export class EdgeAngleChart {
     clear(this.legend);
     this.cross = null;
     this.cursorEl = null;
+    this.meanEl = null;
     this.dots = [];
     this.current = null;
     this.el.hidden = !input?.positions.length;
@@ -212,6 +233,7 @@ export class EdgeAngleChart {
     });
     this.current = { ...input, x, y, angleAt, order, shows };
     this.placeCursor();
+    this.placeMean();
   }
 
   /** The threshold: a dashed line in the colour of its series, with a wider line to take hold of. */

@@ -48,7 +48,8 @@ test('the edge of the bicone: results and edge_angles.csv; the curve drawn by it
   await expect(page.locator('#edge-chart .edge-chart-line')).toHaveCount(3);
   await expect(page.locator('#edge-chart-legend .edge-chart-key')).toHaveText(['2 mm', '5 mm', '10 mm']);
   const key = await page.evaluate(() => window.lithicanalyst.edgeColors()?.key);
-  await page.locator('#edge-method-two_lines').click();
+  // a method's row in the table of means: all its distances
+  await page.locator('#edge-mean-row-two_lines').click();
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.edgeColors()?.key)).not.toBe(key);
   // hovering reads every line at the nearest station
   const plot = (await page.locator('#edge-chart').boundingBox())!;

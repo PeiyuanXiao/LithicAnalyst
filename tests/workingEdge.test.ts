@@ -37,7 +37,7 @@ function meanEdgeOf(m: Mesh): number {
 
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const t = '2026-11-05T00:00:00.000Z';
-const edgeOf = (label: string, curveId: string, start: Vec3, end: Vec3): WorkingEdge => ({ id: label, label, name: '', curveId, start, end, createdAt: t, modifiedAt: t });
+const edgeOf = (label: string, curveId: string, start: Vec3, end: Vec3): WorkingEdge => ({ id: label, label, name: '', curveId, start, end, note: '', createdAt: t, modifiedAt: t });
 
 /** A closed curve or an open one, as a curve of the project (anchors at its ends). */
 const shape = (points: Vec3[], closed: boolean) => ({ anchors: [points[0], points[points.length - 1]], points, anchorIndex: [0, points.length - 1], closed });

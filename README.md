@@ -81,7 +81,7 @@ Requires Node.js ≥ 20.
 |:-----------------------|:-----------------------|:-----------------------|
 | Draw arrow | A | Direction of a flake scar, from the point of percussion to the termination; completeness and termination type |
 | Draw curve | P | Polyline on the surface that follows ridges and valleys: scar outlines, edges, platform outlines |
-| Region | R | Surfaces bounded by curves: scar, cortex, joint, damage, retouch; a flake’s platform, ventral and dorsal faces |
+| Region | R | Surfaces bounded by curves: scar, cortex, joint, damage, retouch; a flake’s platform, ventral and dorsal faces; each can be exported as a PLY mesh |
 | Relation, Sequence | B, Q | Which scar cuts which, and removal sequences, with a live Harris matrix |
 | Landmark | K | Named fixed landmarks; curve semilandmarks along curves |
 | Technological axis | T | A flake’s axis from the point of percussion, which sets its coordinate system |
@@ -94,7 +94,7 @@ Requires Node.js ≥ 20.
 | Dimensions | Length, width and thickness along a flake’s technological axis or the specimen’s orientation; morphological length, width and thickness |
 | Surface area, volume | Of the whole model (volume on closed meshes only) |
 | Platform | Width and depth (straight and along the surface), area; exterior platform angle (EPA, up to 3 mm from the edge as in Grosman et al., 2022) and interior platform angle (IPA) |
-| Edge angles | Every 1 mm along an edge, at 2, 5 and 10 mm from it, by the three-point and two-line methods (Schunk et al., 2023); the parts of an edge sharper than a threshold |
+| Edge angles | Every 1 mm along an edge, at 2, 5 and 10 mm from it, by the three-point and two-line methods (Schunk et al., 2023); means per working edge; the parts of an edge sharper than a threshold |
 | Volumetric configuration | Cores: faciality, flaking surfaces and their relations, platforms and polarity, on a box or bicone model, drawing on the Logical Analytical System |
 | Manual | Distances (straight and along the surface), angles, sections |
 

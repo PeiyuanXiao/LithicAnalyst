@@ -294,6 +294,8 @@ function parseRegion(raw: unknown, i: number): Region {
     scarId: typeof r.scarId === 'string' ? r.scarId : null,
     ...(type === 'retouch' ? { retouchLayer: Number.isInteger(r.retouchLayer) && (r.retouchLayer as number) >= 1 ? (r.retouchLayer as number) : 1 } : {}),
     ...(r.auto === true ? { auto: true, ...(typeof r.curveId === 'string' ? { curveId: r.curveId } : {}) } : {}),
+    // (files written before notes on regions: none)
+    note: str(r.note),
     createdAt: str(r.createdAt, t),
     modifiedAt: str(r.modifiedAt, t),
   };
@@ -404,7 +406,7 @@ function parseLandmark(raw: unknown, i: number): Landmark {
   if (!isFiniteVec(r.point)) throw new ProjectFileError(`Landmark ${i + 1} needs a numeric "point" [x, y, z].`);
   const t = nowIso();
   const code: Pick<Landmark, 'code' | 'auto'> = r.code === 'pop' || r.code === 'platform_end' ? { code: r.code, ...(r.code === 'platform_end' && r.auto === true ? { auto: true as const } : {}) } : {};
-  return { id: str(r.id) || uuid(), name: str(r.name, `LM${i + 1}`), point: [r.point[0], r.point[1], r.point[2]], ...code, createdAt: str(r.createdAt, t), modifiedAt: str(r.modifiedAt, t) };
+  return { id: str(r.id) || uuid(), name: str(r.name, `LM${i + 1}`), point: [r.point[0], r.point[1], r.point[2]], ...code, note: str(r.note), createdAt: str(r.createdAt, t), modifiedAt: str(r.modifiedAt, t) };
 }
 
 /** A set whose curve is missing stays (it has no points); references to unknown landmarks are dropped. */
@@ -501,7 +503,7 @@ function parseWorkingEdges(raw: unknown, curves: readonly Curve[]): WorkingEdge[
   return (Array.isArray(raw) ? raw : []).flatMap((v, i): WorkingEdge[] => {
     const e = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
     if (!isFiniteVec(e.start) || !isFiniteVec(e.end) || !curves.some((c) => c.id === e.curveId)) return [];
-    return [{ id: str(e.id) || uuid(), label: str(e.label) || `E${i + 1}`, name: str(e.name), curveId: e.curveId as string, start: [e.start[0], e.start[1], e.start[2]], end: [e.end[0], e.end[1], e.end[2]], createdAt: str(e.createdAt, t), modifiedAt: str(e.modifiedAt, t) }];
+    return [{ id: str(e.id) || uuid(), label: str(e.label) || `E${i + 1}`, name: str(e.name), curveId: e.curveId as string, start: [e.start[0], e.start[1], e.start[2]], end: [e.end[0], e.end[1], e.end[2]], note: str(e.note), createdAt: str(e.createdAt, t), modifiedAt: str(e.modifiedAt, t) }];
   });
 }
 

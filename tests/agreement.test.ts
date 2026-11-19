@@ -185,7 +185,7 @@ describe('comparing observers', () => {
     // four triangles of areas 1, 1, 2, 4; A: cortex, cortex, scar(R1), scar(R2); B: cortex, joint, scar(R1), scar(R1)
     const area = [1, 1, 2, 4];
     const obs = (label: string, s: ProjectStore, type: number[], region: number[]): ObserverData => ({ label, state: s.state, planes: [], faces: { type: Uint8Array.from(type), region: Int32Array.from(region) }, measures: {} });
-    for (const s of [a, b]) for (let i = 0; i < 2; i++) s.history.execute({ labelKey: 'x', createdAt: 0, apply: () => s._insertRegion({ id: `${s === a ? 'a' : 'b'}${i}`, label: `R${i + 1}`, seed: [0, 0, 0], type: 'scar', scarId: null, createdAt: '', modifiedAt: '' }), revert: () => {} });
+    for (const s of [a, b]) for (let i = 0; i < 2; i++) s.history.execute({ labelKey: 'x', createdAt: 0, apply: () => s._insertRegion({ id: `${s === a ? 'a' : 'b'}${i}`, label: `R${i + 1}`, seed: [0, 0, 0], type: 'scar', scarId: null, note: '', createdAt: '', modifiedAt: '' }), revert: () => {} });
     const rows = compareObservers([obs('A', a, [2, 2, 1, 1], [0, 0, 0, 1]), obs('B', b, [2, 3, 1, 1], [0, 1, 0, 0])], { gate: 1, faceArea: area });
     const get = (key: string, metric: string, type = 'region') => rows.find((r) => r.itemType === type && r.itemKey === key && r.metric === metric)?.value;
     expect(get('cortex', 'iou')).toBeCloseTo(0.5, 12);

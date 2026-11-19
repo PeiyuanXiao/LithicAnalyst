@@ -109,9 +109,9 @@ describe('landmark table, sliders and exports', () => {
     expect(fcsv[5]).toBe('3,4,0,0,0,0,0,1,1,1,0,SL1_1,SL1,');
     expect(fcsv).toHaveLength(3 + 8 + 1);
     const csv = landmarksCsv(s.state, t, { excelBom: false }).split('\n');
-    expect(csv[0]).toBe('specimen_id,index,name,kind,set_id,x,y,z');
-    expect(csv[2]).toBe('LB 3,2,"tip, distal",fixed,,8,0,0');
-    expect(csv[8]).toBe('LB 3,8,SL2_4,curve,SL2,0,4,0');
+    expect(csv[0]).toBe('specimen_id,index,name,kind,set_id,x,y,z,note');
+    expect(csv[2]).toBe('LB 3,2,"tip, distal",fixed,,8,0,0,');
+    expect(csv[8]).toBe('LB 3,8,SL2_4,curve,SL2,0,4,0,');
   });
 
   it('follow the curve and the landmarks; undo; save and read back', () => {

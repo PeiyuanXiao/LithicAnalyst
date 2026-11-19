@@ -83,6 +83,13 @@ export interface LithicApi {
   };
   exportWorkingEdgesCsvText(): string;
   exportEdgeSharpCsvText(): string;
+  /** What the 3D view draws now: by id, the semilandmarks counted, and the curve coloured by its edge angles. */
+  drawn(): { arrows: string[]; curves: string[]; landmarks: string[]; semilandmarks: number; regions: string[]; workingEdges: string[]; edgeColored: string | null };
+  /** The ids hidden for the session. */
+  hidden(): string[];
+  setHidden(id: string, hidden: boolean): void;
+  /** How many triangles a region's piece has. */
+  regionFaceCount(id: string): Promise<number>;
   annotationStatus(): import('../src/core/annotationStatus').AnnotationStatus;
   nextCurveType(): string | null;
   placePlatformEnd(point: Vec3): void;

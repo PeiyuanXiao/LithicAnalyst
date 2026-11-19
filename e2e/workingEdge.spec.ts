@@ -79,7 +79,7 @@ test('two halves by the tool: their rows, the columns of the files, the charts a
   expect((await page.evaluate(() => window.lithicanalyst.workingEdges().drawn))?.lines).toBe(4);
   const out = await exportFile(page, 'working-edges');
   expect(out.name).toBe('tool_working_edges.csv');
-  expect(out.text.split('\n')[0]).toBe('specimen_id,working_edge,name,curve_id,start_position,end_position,length,sharp_length,retouched_length,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,removed_volume,erp,erp_filled_share,giur,giur_stations,edge_curvature,edge_curvature_chord,edge_curvature_depth');
+  expect(out.text.split('\n')[0]).toBe('specimen_id,working_edge,name,curve_id,start_position,end_position,length,sharp_length,retouched_length,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,removed_volume,erp,erp_filled_share,giur,giur_stations,edge_curvature,edge_curvature_chord,edge_curvature_depth,edge_angle_3pt_2mm,edge_angle_3pt_5mm,edge_angle_3pt_10mm,edge_angle_2ln_2mm,edge_angle_2ln_5mm,edge_angle_2ln_10mm,note');
   const table = parseCsv(out.text);
   expect(table.map((r) => r.working_edge)).toEqual(['E1', 'E2']);
   expect(Math.abs(Number(table[0].edge_curvature) - 0.5)).toBeLessThan(0.02);

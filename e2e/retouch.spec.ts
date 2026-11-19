@@ -92,14 +92,14 @@ test('retouch layers: the curves and regions, each layer\'s angles, retouch_angl
   const lines = page.locator('#edge-chart .edge-chart-line');
   await expect(lines).toHaveCount(3);
   await expect(page.locator('#edge-chart-legend .edge-chart-key')).toHaveText(['2 mm', '5 mm', '10 mm']);
-  await expect(page.locator('#edge-method-layer_face')).toHaveCount(0);
-  await expect(page.locator('#edge-series-L1')).toHaveCount(0);
+  await expect(page.locator('#edge-mean-table tbody tr')).toHaveCount(2);
+  await expect(page.locator('#edge-mean-row-layer_face')).toHaveCount(0);
   const key = await page.evaluate(() => window.lithicanalyst.edgeColors()?.key);
-  await page.locator('#edge-series-d10').click();
+  await page.locator('#edge-mean-three_points-10').click();
   await expect(lines).toHaveCount(1);
   await expect(lines).toHaveAttribute('data-series', 'd10');
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.edgeColors()?.key)).not.toBe(key);
-  await page.locator('#edge-series-all').click();
+  await page.locator('#edge-mean-row-three_points').click();
   await expect(lines).toHaveCount(3);
 
   // the export: a row per station, layer and method
@@ -230,9 +230,10 @@ test('the sharp edge: a threshold, by hand, dragged or suggested; the stretches 
   await page.locator('#sharp-distance').selectOption('5');
   await expect.poll(async () => (await state(page)).sharpEdge.distance).toBe(5);
   await expect(page.locator('#edge-chart .edge-chart-line')).toHaveAttribute('data-series', 'd5');
-  await page.locator('#edge-series-d10').click();
+  const ruleMethod = (await state(page)).sharpEdge.method;
+  await page.locator(`#edge-mean-${ruleMethod}-10`).click();
   await expect(page.locator('#edge-chart-threshold')).toHaveCount(0);
-  await page.locator('#edge-series-d5').click();
+  await page.locator(`#edge-mean-${ruleMethod}-5`).click();
   await expect(page.locator('#edge-chart-threshold')).toHaveCount(1);
 
   // the export and the project file

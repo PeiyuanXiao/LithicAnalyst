@@ -27,6 +27,7 @@ import { frameAxes } from '../src/core/frame';
 import { bvhPlaneCandidates, bvhRayCandidates } from '../src/render/bvhPlane';
 import { layPatchSteps } from '../src/compute/gmTemplate';
 import { facesOfPiecesSteps, polylineEdgesSteps, regionsSteps } from '../src/compute/regions';
+import { facesOfPieceSteps, regionPlySteps } from '../src/io/regionPly';
 import { anchorWarpSteps } from '../src/compute/tps';
 import { triangleBvhSteps } from '../src/compute/triangleBvh';
 import { splitByLoopSteps } from '../src/compute/split';
@@ -268,8 +269,16 @@ async function benchGenerated(triangles: number): Promise<void> {
   const layers = steps(`8 retouch layers along ${edgeLength.toFixed(0)} mm (${rimPart.count} pieces)`, retouchAnglesSteps({ positions: pos, index: idx, offset: o, points: rim, closed: true, unit: 'mm', meanEdge: base.meanEdge, candidates, pieceOfFace: rimPart.region, pieces: layered }));
   console.log(`${layers?.stations.filter((s) => s.stretches.length).length ?? 0} stations with a layer`);
 
+  // ⑧b a region as a PLY mesh: the larger side of the rim, about half the model
+  const pieceSizes = new Uint32Array(rimPart.count);
+  for (let t = 0; t < rimPart.region.length; t++) pieceSizes[rimPart.region[t]]++;
+  const largest = pieceSizes.indexOf(Math.max(...pieceSizes));
+  const plyFaces = steps(`8b a region's triangles (${pieceSizes[largest]})`, facesOfPieceSteps(rimPart.region, largest));
+  const ply = steps('8c that region as PLY', regionPlySteps({ positions: pos, index: idx, offset: o, faces: plyFaces, comments: ['bench'] }));
+  console.log(`${(ply.length / 1e6).toFixed(1)} MB of PLY`);
+
   // ⑨ the points for geometric morphometrics, by the default configuration: the core's edge as the edge and as the outline, the platform stand-in as the platform
-  const ended = (x: Vec3, code: 'pop' | 'platform_end', i: number) => ({ id: `${code}${i}`, name: code, code, point: x, createdAt: '', modifiedAt: '' });
+  const ended = (x: Vec3, code: 'pop' | 'platform_end', i: number) => ({ id: `${code}${i}`, name: code, code, point: x, note: '', createdAt: '', modifiedAt: '' });
   const gmState: ProjectState = {
     ...emptyProject(),
     specimen: { ...emptyProject().specimen, type: 'flake' },

@@ -114,6 +114,10 @@ export interface AppApi {
   /** Surface regions as found on the mesh (null before it is partitioned). */
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null;
   setRegionType(id: string, type: string): void;
+  /** Whether a region has triangles to export (its seed on the mesh). */
+  regionHasFaces(id: string): boolean;
+  /** A region as a PLY mesh of its own (a download). */
+  exportRegionPly(id: string): void;
   volumeSplit(): import('../compute/split').VolumeSplit | null;
   /** Null before the mesh is measured. */
   meshClosed(): boolean | null;
@@ -210,6 +214,8 @@ export interface AppApi {
   edgeAngleResult(curveId: string): import('../compute/edgeAngle').EdgeAngleResult | null;
   /** The method the chart and the colours show. */
   readonly edgeMethod: import('../compute/edgeAngle').EdgeAngleMethod;
+  /** A curve's mean edge angles over all its stations (`edge` null) or a working edge's (by label), and the stations in scope. */
+  edgeAngleMeansOf(curveId: string, edge: string | null): { means: import('../compute/edgeAngle').EdgeAngleMeans; stations: number[] } | null;
   flakeEmptyReasons(): Partial<Record<FlakeMeasure, FlakeEmptyReason>> | null;
   gmResult(): GmResult | null;
   /** How the template stands (null: there is none). */
@@ -265,4 +271,9 @@ export interface AppApi {
   focusWorkingEdge(id: string): void;
   /** The row picked (its id; null: none). */
   planEdge(): string | null;
+  /** An annotation hidden for the session (view state: not drawn, not picked, not in figures; never in the file, never undone). */
+  isHidden(id: string): boolean;
+  setHidden(id: string, hidden: boolean): void;
+  /** Show these again (a list's "n hidden"). */
+  showAll(ids: readonly string[]): void;
 }

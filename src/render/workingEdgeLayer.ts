@@ -38,6 +38,7 @@ export interface DrawnEdge {
 }
 
 interface Visual {
+  id: string;
   lines: Line2[];
   geometries: LineGeometry[];
   label: CSS2DObject;
@@ -125,7 +126,7 @@ export class WorkingEdgeLayer {
     label.position.set(m[0] - o[0], m[1] - o[1], m[2] - o[2]);
     label.visible = labels;
     this.group.add(label);
-    return { lines, geometries, label };
+    return { id: e.id, lines, geometries, label };
   }
 
   /**
@@ -207,6 +208,11 @@ export class WorkingEdgeLayer {
   /** How many are drawn, and how (for tests). */
   counts(): { edges: number; lines: number; handles: number } {
     return { edges: this.visuals.length, lines: this.visuals.reduce((s, v) => s + v.lines.length, 0), handles: this.ends.length };
+  }
+
+  /** The working edges drawn (for tests). */
+  drawnIds(): string[] {
+    return this.visuals.map((v) => v.id);
   }
 
   private clearVisuals(): void {

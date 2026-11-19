@@ -54,6 +54,48 @@ export interface EdgeAngleResult {
   stations: EdgeAngleStation[];
 }
 
+/** The mean of one method at one distance over some stations: plain, of the stations with a value; `sd` the sample standard deviation (null for fewer than two). */
+export interface EdgeAngleMean {
+  mean: number | null;
+  sd: number | null;
+  /** The stations with a value. */
+  n: number;
+}
+
+/** Per method, the means in the order of `EDGE_ANGLE_DISTANCES_MM`. */
+export type EdgeAngleMeans = Record<EdgeAngleMethod, EdgeAngleMean[]>;
+
+/** The methods as the columns of the exports name them (`flakes.csv`'s EPA columns, `working_edges.csv`'s means). */
+export const EDGE_ANGLE_METHOD_SHORT: Record<EdgeAngleMethod, string> = { three_points: '3pt', two_lines: '2ln' };
+
+/** The columns of the means in `working_edges.csv`: each method, then each distance (`edge_angle_3pt_2mm`, …). */
+export const EDGE_ANGLE_MEAN_COLUMNS = EDGE_ANGLE_METHODS.flatMap((m) => EDGE_ANGLE_DISTANCES_MM.map((d) => `edge_angle_${EDGE_ANGLE_METHOD_SHORT[m]}_${d}mm`));
+
+/**
+ * The mean edge angle of the stations in scope (indices into `result.stations`; all of them when left out), for each method and
+ * distance apart: the plain arithmetic mean of the stations that have a value there, each counted once, unweighted.
+ */
+export function edgeAngleMeans(result: { stations: ReadonlyArray<Pick<EdgeAngleStation, 'three_points' | 'two_lines'>> }, stationsInScope?: readonly number[]): EdgeAngleMeans {
+  const scope = stationsInScope ?? result.stations.map((_, k) => k);
+  const of = (m: EdgeAngleMethod, i: number): EdgeAngleMean => {
+    const values: number[] = [];
+    for (const k of scope) {
+      const v = result.stations[k]?.[m][i];
+      if (v !== null && v !== undefined && Number.isFinite(v)) values.push(v);
+    }
+    const n = values.length;
+    if (!n) return { mean: null, sd: null, n: 0 };
+    let sum = 0;
+    for (const v of values) sum += v;
+    const mean = sum / n;
+    if (n < 2) return { mean, sd: null, n };
+    let ss = 0;
+    for (const v of values) ss += (v - mean) ** 2;
+    return { mean, sd: Math.sqrt(ss / (n - 1)), n };
+  };
+  return { three_points: EDGE_ANGLE_DISTANCES_MM.map((_, i) => of('three_points', i)), two_lines: EDGE_ANGLE_DISTANCES_MM.map((_, i) => of('two_lines', i)) };
+}
+
 /**
  * What to colour: the curve itself, with a point at least every half station, each with the value of the
  * station nearest it. The straight lines from station to station would cut through the mesh where it turns.

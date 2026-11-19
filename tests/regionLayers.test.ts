@@ -57,7 +57,7 @@ function t1Layers() {
   return { m, lower, upper, over, faceAt, dorsal };
 }
 
-const region = (id: string, type: string): Region => ({ id, label: id, seed: [0, 0, 0], type, scarId: null, createdAt: '', modifiedAt: '' });
+const region = (id: string, type: string): Region => ({ id, label: id, seed: [0, 0, 0], type, scarId: null, note: '', createdAt: '', modifiedAt: '' });
 
 describe('two layers of regions', () => {
   const { m, lower, upper, over, faceAt, dorsal } = t1Layers();
@@ -124,9 +124,9 @@ describe('two layers of regions', () => {
       { id: 'b', label: 'R2', type: 'retouch, fine', scarId: null, area: 10, conflict: false, parent: 'a', retouchLayer: null },
     ];
     const rows = regionsCsv(s.state, results, { excelBom: false }).trim().split('\n');
-    expect(rows[0]).toBe('specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer');
-    expect(rows[1]).toBe(',R1,dorsal,,100,mm,,');
-    expect(rows[2]).toBe(',R2,"retouch, fine",,10,mm,R1,');
+    expect(rows[0]).toBe('specimen_id,region_id,type,scar_id,area,unit,parent_region,retouch_layer,note');
+    expect(rows[1]).toBe(',R1,dorsal,,100,mm,,,');
+    expect(rows[2]).toBe(',R2,"retouch, fine",,10,mm,R1,,');
   });
 });
 

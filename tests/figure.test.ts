@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { nestLoops, signedArea, simplifyLoop, traceOutlines } from '../src/compute/contour';
 import { crc32, pngDpi, pngWithDpi } from '../src/io/png';
-import { DEFAULT_FIGURE, FIGURE_VIEWS, figureLayout, SECTION_LABEL_GAP_MM, SECTION_LABEL_MM, sectionTraceViews, type FigureContext, type FigureSettings, type SectionDrawing } from '../src/render/figure';
+import { DEFAULT_FIGURE, FIGURE_VIEWS, figureLayout, LEGEND_MM, legendItems, lightColor, placeLegend, SECTION_LABEL_GAP_MM, SECTION_LABEL_MM, sectionTraceViews, textWidth, type FigureContext, type FigureSettings, type LegendEntry, type LegendItem, type SectionDrawing } from '../src/render/figure';
 
 const area = (loop: Array<[number, number]>) => Math.abs(loop.reduce((s, p, i) => s + p[0] * loop[(i + 1) % loop.length][1] - loop[(i + 1) % loop.length][0] * p[1], 0) / 2);
 
@@ -115,5 +115,91 @@ describe('figure layout', () => {
     const reach = px(SECTION_LABEL_GAP_MM) + 0.6 * px(SECTION_LABEL_MM) * 2;
     expect(on.views[0].x).toBe(Math.round(reach + px(0.5)));
     expect(on.sections[0].x - (on.views[0].x + on.views[0].width)).toBe(Math.round(2 * reach + px(1)));
+  });
+
+  const item = (kind: LegendItem['kind'], key: string, label = key): LegendItem => ({ kind, key, label, colors: ['#000'], rank: 0 });
+
+  it('puts the legend on the scale bar\'s row, right of its text, and on new rows when it does not fit', () => {
+    // three views side by side: room on the scale bar's row
+    const base = figureLayout(ctx, I, 'mm', settings({ views: ['front', 'left', 'back'] }));
+    expect(base.legend).toEqual([]);
+    const bar = base.scaleBar!;
+    const font = px(LEGEND_MM.text);
+    const one = placeLegend(base, [item('curve', 'edge', 'Edge')], px);
+    expect(one.height).toBe(base.height);
+    expect(one.legend[0].y).toBe(bar.y);
+    expect(one.legend[0].x).toBeCloseTo(bar.x1 + font * 0.5 + textWidth(`${bar.length} ${bar.unit}`, font) + px(LEGEND_MM.afterBar), 6);
+    // a 6 mm line, the gap, then the text
+    expect(one.legend[0].textX - one.legend[0].x).toBeCloseTo(px(LEGEND_MM.line + LEGEND_MM.gap), 6);
+    // many: the rows go on under it from the left, and the figure grows by them
+    const many = placeLegend(base, Array.from({ length: 12 }, (_, i) => item('region', `r${i}`, `Region type ${i}`)), px);
+    const rows = [...new Set(many.legend.map((x) => x.y))];
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows[0]).toBe(bar.y);
+    expect(many.height - base.height).toBe(rows[rows.length - 1] - bar.y);
+    expect(many.legend.find((x) => x.y === rows[1])!.x).toBe(base.bottom.left);
+    expect(many.width).toBe(base.width);
+    expect(many.legend.every((x) => x.textX + textWidth(x.label, font) <= base.bottom.right + 1e-6)).toBe(true);
+    // a figure too narrow for anything beside the bar: the legend starts on the next row
+    const narrow = figureLayout(ctx, I, 'mm', settings());
+    const below = placeLegend(narrow, [item('curve', 'edge', 'Edge')], px);
+    expect(below.legend[0]).toMatchObject({ x: narrow.bottom.left, y: narrow.scaleBar!.y + Math.round(px(LEGEND_MM.row)) });
+    // a region's sample is a 3 mm block
+    expect(many.legend[0].textX - many.legend[0].x).toBeCloseTo(px(LEGEND_MM.block + LEGEND_MM.gap), 6);
+    // without a scale bar the row is the legend's own: from the left, the figure 9 mm taller
+    const bare = figureLayout(ctx, I, 'mm', settings({ overlays: { ...DEFAULT_FIGURE.overlays, scaleBar: false } }));
+    const legendOnly = placeLegend(bare, [item('plane', 'p', 'P1')], px);
+    expect(legendOnly.legend[0].x).toBe(bare.bottom.left);
+    expect(legendOnly.height - bare.height).toBe(Math.round(px(9)));
+    // and figureLayout takes the items it is given
+    expect(figureLayout(ctx, I, 'mm', settings(), [], [item('curve', 'edge')]).legend).toHaveLength(1);
+  });
+});
+
+describe('legend items', () => {
+  const on = { ...DEFAULT_FIGURE.overlays, legend: true, planes: true };
+  const e = (key: string, rank: number, color = '#111', label = key): { legend: LegendEntry } => ({ legend: { key, label, colors: [color], rank } });
+  const drawn = {
+    arrows: [e('completeness:bulb_complete', 1, '#a'), e('completeness:point_complete', 0, '#b'), e('completeness:bulb_complete', 1, '#a'), {}],
+    curves: [e('edge', 2), e('scar_boundary', 0), e('edge', 2)],
+    planes: [e('P2', 1), e('P1', 0)],
+    landmarks: [e('semi', 1), e('fixed', 0), e('semi', 1)],
+    regions: [{ key: 'scar', label: 'Scar', colors: ['#1'], rank: 0 }, { key: 'cortex', label: 'Cortex', colors: ['#2'], rank: 10 }, { key: 'scar', label: 'Scar', colors: ['#3'], rank: 0 }],
+  };
+
+  it('a colour too light for white paper is told apart (its sample gets a dark edge)', () => {
+    expect(lightColor('#f2f5f3')).toBe(true);
+    expect(lightColor('#fff')).toBe(true);
+    expect(lightColor('#ff5b4f')).toBe(false);
+    expect(lightColor('#ffc61a')).toBe(false);
+    expect(lightColor('var(--x)')).toBe(false);
+  });
+
+  it('off by default: none', () => {
+    expect(DEFAULT_FIGURE.overlays.legend).toBe(false);
+    expect(legendItems(DEFAULT_FIGURE.overlays, drawn)).toEqual([]);
+  });
+
+  it('each category drawn once, by kind and rank; a type in several colours keeps them all; arrows without an entry left out', () => {
+    const items = legendItems(on, drawn);
+    expect(items.map((x) => `${x.kind}:${x.key}`)).toEqual([
+      'arrow:completeness:point_complete',
+      'arrow:completeness:bulb_complete',
+      'region:scar',
+      'region:cortex',
+      'curve:scar_boundary',
+      'curve:edge',
+      'plane:P1',
+      'plane:P2',
+      'landmark:fixed',
+      'landmark:semi',
+    ]);
+    expect(items.find((x) => x.key === 'scar')!.colors).toEqual(['#1', '#3']);
+  });
+
+  it('only the overlays switched on', () => {
+    const items = legendItems({ ...on, arrows: false, regions: false, landmarks: false }, drawn);
+    expect([...new Set(items.map((x) => x.kind))]).toEqual(['curve', 'plane']);
+    expect(legendItems(on, { arrows: [{}, {}], curves: [], planes: [], landmarks: [], regions: [] })).toEqual([]);
   });
 });

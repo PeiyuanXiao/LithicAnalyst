@@ -332,6 +332,11 @@ export class ArrowLayer {
     if (this.last) this.sync(this.last.state, this.last.selected, this.last.display, this.last.handles);
   }
 
+  /** The scars whose arrows are drawn (for tests; not the technical axis). */
+  drawnIds(): string[] {
+    return [...this.visuals.keys()].filter((id) => id !== this.axis?.id);
+  }
+
   /** The arrow under the select tool's cursor (an id of another layer, or null: none). */
   setHoverItem(id: string | null): void {
     const own = id !== null && this.visuals.has(id) ? id : null;

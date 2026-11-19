@@ -2645,6 +2645,40 @@ input[type="checkbox"]:disabled {
   margin: 0;
 }
 
+/* lists whose rows have an eye (hidden for the session): one more column */
+.num-list.has-eyes {
+  grid-template-columns: auto auto minmax(0, 1fr) max-content max-content auto;
+}
+
+.landmark-row {
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+}
+
+/* a row hidden for the session recedes; its eye stays as it is */
+.arrow-row.is-hidden > :not(.row-eye) {
+  opacity: 0.45;
+}
+
+/* "2 hidden" beside a list's title: a press shows them again */
+.pill-hidden {
+  margin-left: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pill-hidden:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+.sub-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .plane-inputs {
   display: grid;
   gap: 4px;
@@ -4707,6 +4741,44 @@ input[type="checkbox"]:disabled {
   stroke-width: 1.5px;
   stroke-dasharray: 5 3;
   pointer-events: none;
+}
+
+/* the mean of the cell under the pointer */
+.edge-chart-mean {
+  stroke-width: 1.2px;
+  stroke-dasharray: 2 2;
+  pointer-events: none;
+}
+
+.edge-mean-box {
+  margin-block: 6px 10px;
+}
+
+/* the method and distances the chart and the colours show: as a fixed cell */
+.measure-table td.is-chosen,
+.measure-row-pick.is-chosen {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* a row's name in the table of means: all its distances */
+.measure-row-pick {
+  all: unset;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  padding: 0 4px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.measure-row-pick:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.measure-row-pick:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
 }
 
 .edge-chart-threshold-grip {

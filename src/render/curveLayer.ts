@@ -405,6 +405,11 @@ export class CurveLayer {
     this.resync();
   }
 
+  /** The curves drawn (for tests). */
+  drawnIds(): string[] {
+    return [...this.visuals.keys()];
+  }
+
   sync(state: Readonly<ProjectState>, selected: string | null, display: ArrowDisplay, showHandles: boolean): void {
     this.last = { state, selected, display, handles: showHandles };
     const seen = new Set<string>();

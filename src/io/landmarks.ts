@@ -1,5 +1,5 @@
 import type { GmResult } from '../compute/gm';
-import type { LandmarkRow, LandmarkTable } from '../compute/landmarks';
+import { shownLandmarks, type LandmarkRow, type LandmarkTable } from '../compute/landmarks';
 import type { ProjectState } from '../core/types';
 import { csvCell, fmt, type CsvOptions } from './csv';
 
@@ -28,10 +28,22 @@ export function landmarksFcsv(table: Pick<LandmarkTable, 'rows'>): string {
   return [...head, ...rows].join('\n') + '\n';
 }
 
-/** One row per point: `kind` is `fixed`, `curve` or `surface`; `set_id` names the semilandmark set. */
-export function landmarksCsv(state: Readonly<ProjectState>, table: Pick<LandmarkTable, 'rows'>, opts: CsvOptions): string {
+/** One row per point: `kind` is `fixed`, `curve` or `surface`; `set_id` names the semilandmark set. (The points for geometric morphometrics by the grid, to the byte.) */
+function pointsCsv(state: Readonly<ProjectState>, table: Pick<LandmarkTable, 'rows'>, opts: CsvOptions): string {
   const header = 'specimen_id,index,name,kind,set_id,x,y,z';
   const rows = table.rows.map((r) => [csvCell(state.specimen.id), String(r.index), csvCell(r.name), r.kind, csvCell(r.setId), ...r.point.map(fmt)].join(','));
+  return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
+}
+
+/**
+ * The landmarks' table (`landmarkTable` of the state): one row per point, `kind` `fixed` or `curve`, `set_id` the semilandmark set, and last
+ * the `note` of a fixed landmark (its rows come first, in the order of `shownLandmarks`); empty for the semilandmarks.
+ */
+export function landmarksCsv(state: Readonly<ProjectState>, table: Pick<LandmarkTable, 'rows'>, opts: CsvOptions): string {
+  const fixed = shownLandmarks(state);
+  const note = (r: LandmarkRow) => (r.kind === 'fixed' ? fixed[r.index - 1]?.note ?? '' : '');
+  const header = 'specimen_id,index,name,kind,set_id,x,y,z,note';
+  const rows = table.rows.map((r) => [csvCell(state.specimen.id), String(r.index), csvCell(r.name), r.kind, csvCell(r.setId), ...r.point.map(fmt), csvCell(note(r))].join(','));
   return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';
 }
 
@@ -51,11 +63,11 @@ export function gmSurfacesCsv(gm: Pick<GmResult, 'surfaces'>): string {
 }
 
 /**
- * The points by a configuration, as the landmarks' table. By the grid it is that table, to the byte. By a template each row also says its number within its curve or
+ * The points by a configuration, as the landmarks' table without its notes. By the grid it is that table, to the byte. By a template each row also says its number within its curve or
  * patch (`set_index`; `index` stays the point's number in the file, which the sliding definitions go by) and whether the check flagged it; `name` is the landmark's name, the curve's or the region's type, to take a part in R.
  */
 export function gmLandmarksCsv(state: Readonly<ProjectState>, gm: Pick<GmResult, 'rows' | 'method'>, opts: CsvOptions): string {
-  if (gm.method !== 'template') return landmarksCsv(state, gm, opts);
+  if (gm.method !== 'template') return pointsCsv(state, gm, opts);
   const header = 'specimen_id,index,name,kind,set_id,x,y,z,set_index,flagged';
   const rows = gm.rows.map((r) => [csvCell(state.specimen.id), String(r.index), csvCell(r.name), r.kind, csvCell(r.setId), ...coordinates(r), r.setIndex === undefined ? '' : String(r.setIndex), r.flagged ? '1' : '0'].join(','));
   return (opts.excelBom ? '﻿' : '') + [header, ...rows].join('\n') + '\n';

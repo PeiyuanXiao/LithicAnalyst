@@ -573,7 +573,8 @@ describe('a flake by a template', () => {
     expect(h(landmarksTps(s.state, r))).toBe(GOLDEN.tps);
     expect(h(landmarksFcsv(r))).toBe(GOLDEN.fcsv);
     expect(h(gmLandmarksCsv(s.state, r, { excelBom: false }))).toBe(GOLDEN.csv);
-    expect(gmLandmarksCsv(s.state, r, { excelBom: false })).toBe(landmarksCsv(s.state, r, { excelBom: false }));
+    // the landmarks' table without its last column, the notes
+    expect(gmLandmarksCsv(s.state, r, { excelBom: false })).toBe(landmarksCsv(s.state, r, { excelBom: false }).split('\n').map((l) => l.replace(/,[^,]*$/, '')).join('\n'));
     expect(h(gmCurvesCsv(r))).toBe(GOLDEN.curves);
     expect(h(gmSurfacesCsv(r))).toBe(GOLDEN.surfaces);
   });

@@ -4,6 +4,7 @@ import {
   setCurveEdgeAngle,
   setPlaneRegion,
   setRegionRetouchLayer, otherRetouchSide, setRegionScar, setGmConfig, setSharpEdge,
+  setRegionNote, setLandmarkNote, setWorkingEdgeNote,
   addSemilandmarkSet,
   deleteLandmark,
   deleteSemilandmarkSet,
@@ -53,7 +54,7 @@ import { measuredLine } from '../compute/measuredLine';
 import { planeMethodsOf } from '../compute/planes';
 import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, hasEdgeAngles, hasVolumeSplit, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
 import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
-import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
+import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMean, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
 import { edgeAxis, rangeOf, type EdgeRetouchKey } from '../compute/workingEdge';
@@ -93,7 +94,7 @@ import { tip, tips } from './tooltip';
 /** The trash can, in the danger colour. */
 const deleteButton = (id: string, onClick: () => void) => iconButton(ICONS.trash, t('arrows.delete'), onClick, { id, danger: true });
 
-export type RefreshKind = 'retouch' | 'station' | 'all' | 'flake' | 'edge' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'hidden' | 'retouch' | 'station' | 'all' | 'flake' | 'edge' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
 
 interface Section {
   el: HTMLElement;
@@ -153,6 +154,51 @@ function setCount(badge: HTMLElement, n: number): void {
 
 const metaRow = (term: string, value: Node | string, title?: string) => [h('dt', {}, term), h('dd', { title }, value)];
 
+/** The eye of a list's row, as a plane's: shown, or hidden for the session; a press on it does not select the row. */
+function rowEye(api: AppApi, id: string, label: string): HTMLInputElement {
+  const eye = h('input', { type: 'checkbox', class: 'plane-eye row-eye', 'data-eye': id, title: t('list.show'), 'aria-label': `${t('list.show')} ${label}` }) as HTMLInputElement;
+  eye.checked = !api.isHidden(id);
+  eye.addEventListener('click', (e) => e.stopPropagation());
+  eye.addEventListener('change', () => api.setHidden(id, !eye.checked));
+  return eye;
+}
+
+/** "2 hidden" beside a list's title while any of it is hidden: a press shows them all again (in a card's title, without folding the card). */
+function hiddenPill(api: AppApi, id: string): { el: HTMLButtonElement; set: (ids: readonly string[]) => void } {
+  let ids: string[] = [];
+  const el = h('button', { type: 'button', class: 'pill pill-hidden', id, hidden: true }) as HTMLButtonElement;
+  tip(el, t('list.showAll'));
+  el.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    api.showAll(ids);
+  });
+  return {
+    el,
+    set: (all) => {
+      ids = all.filter((x) => api.isHidden(x));
+      el.hidden = !ids.length;
+      el.textContent = t('list.hidden', { n: ids.length });
+    },
+  };
+}
+
+/** A card's "n hidden", right after its title. */
+function titlePill(api: AppApi, el: HTMLElement, id: string): ReturnType<typeof hiddenPill> {
+  const pill = hiddenPill(api, id);
+  el.querySelector('.panel-title')!.after(pill.el);
+  return pill;
+}
+
+/** The note field (of scars and curves): its label serves the notes of regions, landmarks and working edges too. */
+const NOTE_FIELD = SCAR_FIELDS.find((f) => f.key === 'note')!;
+
+/** A note box, as a curve's: one undo step while typing. */
+function noteRow(id: string, value: string, onInput: (v: string) => void): { el: HTMLElement; input: HTMLInputElement | HTMLTextAreaElement } {
+  const row = textRow(id, tl(NOTE_FIELD.label), value, onInput, { multiline: true });
+  return { el: h('div', { class: 'field' }, row.el), input: row.input };
+}
+
 // ---------------------------------------------------------------- arrows
 
 /** An enum value as shown: its option's label, the user's own text, or — when not filled in. */
@@ -184,6 +230,8 @@ function arrowsSection(api: AppApi): Section {
   const inspector = h('div', { class: 'inspector', id: 'arrow-inspector' });
   body.append(list, inspector);
   const title = el.querySelector('.panel-title') as HTMLElement;
+  const hiddenCount = titlePill(api, el, 'scar-list-hidden');
+  list.classList.add('has-eyes');
 
   let builtFor: string | null = null;
   let refs: { label: HTMLInputElement; setters: Array<(a: Scar) => void>; coords: HTMLElement; length: HTMLElement } | null = null;
@@ -208,6 +256,7 @@ function arrowsSection(api: AppApi): Section {
     const generic = st.specimen.type === 'generic';
     title.textContent = t(generic ? 'sec.arrows.generic' : 'sec.arrows');
     setCount(badge, st.scars.length);
+    hiddenCount.set(st.scars.map((s) => s.id));
     list.hidden = st.scars.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -221,7 +270,7 @@ function arrowsSection(api: AppApi): Section {
       const li = h(
         'li',
         {
-          class: 'arrow-row',
+          class: `arrow-row${api.isHidden(a.id) ? ' is-hidden' : ''}`,
           role: 'option',
           'aria-selected': String(isSel),
           'data-id': a.id,
@@ -232,6 +281,7 @@ function arrowsSection(api: AppApi): Section {
         h('span', { class: 'arrow-id mono' }, a.label, toCheck.has(a.id) ? h('span', { class: 'check-dot', role: 'img', title: t('arrows.toCheck'), 'aria-label': t('arrows.toCheck') }) : null),
         h('span', { class: 'arrow-meta' }, generic ? '' : listSummary(a.attributes)),
         ...valueCells(a.vector ? quantity('length', vectorLength(a.vector), unit) : [MISSING, '']),
+        rowEye(api, a.id, a.label),
       );
       list.append(li);
       if (isSel) requestAnimationFrame(() => revealInList(list, li));
@@ -305,7 +355,8 @@ function arrowsSection(api: AppApi): Section {
         h('button', { type: 'button', class: 'icon-btn', id: 'insp-focus', title: t('arrows.focus'), 'aria-label': t('arrows.focus'), onclick: () => api.selection.id && api.focusArrow(api.selection.id) }, icon(ICONS.target)),
         deleteButton('insp-delete', () => api.selection.id && deleteScar(api.store, api.selection.id)),
       );
-      const fields = st.specimen.type === 'generic' ? [] : [...SCAR_FIELDS.map((f) => buildField(f, a)), sequenceField()];
+      // a generic specimen's arrows: the note alone
+      const fields = st.specimen.type === 'generic' ? [buildField(NOTE_FIELD, a)] : [...SCAR_FIELDS.map((f) => buildField(f, a)), sequenceField()];
       const coordsEl = h('dl', { class: 'coord-grid', id: 'arrow-coords' });
       const lengthEl = h('dl', { class: 'num-grid' });
       inspector.append(head, ...fields.map((f) => f.el), coordsEl, lengthEl);
@@ -329,7 +380,7 @@ function arrowsSection(api: AppApi): Section {
   const refresh = (kind: RefreshKind) => {
     if (kind === 'mesh' || kind === 'curves') return;
     renderList();
-    if (kind !== 'display') renderInspector(kind === 'all');
+    if (kind !== 'display' && kind !== 'hidden') renderInspector(kind === 'all');
   };
   refresh('all');
   return { el, refresh };
@@ -343,6 +394,8 @@ function curvesSection(api: AppApi): Section {
   const list = h('ol', { class: 'arrow-list num-list', id: 'curve-list', role: 'listbox', 'aria-label': t('sec.curves') });
   const inspector = h('div', { class: 'inspector', id: 'curve-inspector' });
   body.append(list, inspector);
+  const hiddenCount = titlePill(api, el, 'curve-list-hidden');
+  list.classList.add('has-eyes');
 
   let builtFor: string | null = null;
   let refs: { label: HTMLInputElement; setters: Array<(c: Curve) => void>; meta: HTMLElement; complete: HTMLButtonElement; edge: HTMLInputElement; edgeStatus: HTMLElement } | null = null;
@@ -350,6 +403,7 @@ function curvesSection(api: AppApi): Section {
   const renderList = () => {
     const st = api.store.state;
     setCount(badge, st.curves.length);
+    hiddenCount.set(st.curves.map((c) => c.id));
     list.hidden = st.curves.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -360,7 +414,7 @@ function curvesSection(api: AppApi): Section {
       const li = h(
         'li',
         {
-          class: 'arrow-row curve-row',
+          class: `arrow-row curve-row${api.isHidden(c.id) ? ' is-hidden' : ''}`,
           role: 'option',
           'aria-selected': String(isSel),
           'data-id': c.id,
@@ -371,6 +425,7 @@ function curvesSection(api: AppApi): Section {
         h('span', { class: 'arrow-id mono' }, c.label),
         h('span', { class: 'arrow-meta' }, listSummary(c.attributes, CURVE_FIELDS)),
         ...valueCells(quantity('length', curveLength(c), unit)),
+        rowEye(api, c.id, c.label),
       );
       list.append(li);
       if (isSel) requestAnimationFrame(() => revealInList(list, li));
@@ -469,7 +524,7 @@ function curvesSection(api: AppApi): Section {
     if (kind === 'mesh' || kind === 'arrows') return;
     renderList();
     // another type of specimen offers other curve types
-    if (kind !== 'display') renderInspector(kind === 'all' || kind === 'specimen');
+    if (kind !== 'display' && kind !== 'hidden') renderInspector(kind === 'all' || kind === 'specimen');
   };
   refresh('all');
   return { el, refresh };
@@ -484,12 +539,15 @@ function workingEdgesSection(api: AppApi): Section {
   const generate = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'working-edge-generate', onclick: () => api.generateWorkingEdges() }, t('edges.generate')) as HTMLButtonElement;
   const foot = h('div', { class: 'btn-row' }, generate);
   body.append(list, inspector, foot);
+  const hiddenCount = titlePill(api, el, 'working-edge-list-hidden');
+  list.classList.add('has-eyes');
   let builtFor: string | null = null;
-  let refs: { name: HTMLInputElement; other: HTMLElement; status: HTMLElement } | null = null;
+  let refs: { name: HTMLInputElement; note: HTMLInputElement | HTMLTextAreaElement; other: HTMLElement; status: HTMLElement } | null = null;
 
   const renderList = () => {
     const st = api.store.state;
     setCount(badge, st.workingEdges.length);
+    hiddenCount.set(st.workingEdges.map((e) => e.id));
     list.hidden = !st.workingEdges.length;
     clear(list);
     const sel = api.selection.id;
@@ -499,11 +557,12 @@ function workingEdgesSection(api: AppApi): Section {
       const length = rows.find((d) => d.row.id === e.id)?.row.length ?? (c ? rangeOf(edgeAxis(measuredLine(c, st), st.specimen.unit), e.start, e.end).length : null);
       const li = h(
         'li',
-        { class: 'arrow-row', role: 'option', 'aria-selected': String(e.id === sel), 'data-id': e.id, onclick: () => api.selection.set(e.id) },
+        { class: `arrow-row${api.isHidden(e.id) ? ' is-hidden' : ''}`, role: 'option', 'aria-selected': String(e.id === sel), 'data-id': e.id, onclick: () => api.selection.set(e.id) },
         h('span', { class: 'chip chip-line', style: `--chip:${e.id === sel ? CURVE_COLORS.selected : workingEdgeColor(e.label)}` }),
         h('span', { class: 'arrow-id mono' }, e.label),
         h('span', { class: 'arrow-meta' }, [e.name, c?.label].filter(Boolean).join(' · ')),
         ...valueCells(quantity('length', length, st.specimen.unit)),
+        rowEye(api, e.id, e.label),
       );
       list.append(li);
       if (e.id === sel) requestAnimationFrame(() => revealInList(list, li));
@@ -523,26 +582,29 @@ function workingEdgesSection(api: AppApi): Section {
       clear(inspector);
       const id = e.id;
       const name = textRow('working-edge-name', t('edges.name'), e.name, (v) => void updateWorkingEdge(api.store, id, { name: v }));
+      const note = noteRow('working-edge-note', e.note, (v) => setWorkingEdgeNote(api.store, id, v));
       const other = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'working-edge-other', onclick: () => api.otherEdgeStretch(id) }, t('edges.other'));
       const status = h('span', { class: 'pill pill-warn', id: 'working-edge-not-measured', hidden: true }, t('edges.notMeasured'));
       inspector.append(
         h('div', { class: 'insp-head' }, h('span', { class: 'arrow-id mono', id: 'working-edge-label' }, e.label), deleteButton('working-edge-delete', () => deleteWorkingEdge(api.store, id))),
         h('div', { class: 'field' }, name.el),
+        note.el,
         status,
         h('div', { class: 'btn-row' }, other),
       );
-      refs = { name: name.input as HTMLInputElement, other: other.parentElement as HTMLElement, status };
+      refs = { name: name.input as HTMLInputElement, note: note.input, other: other.parentElement as HTMLElement, status };
       builtFor = e.id;
     }
     const st = api.store.state;
     const c = api.store.curve(e.curveId);
     softSet(refs.name, e.name);
+    softSet(refs.note, e.note);
     refs.other.hidden = !c || !measuredLine(c, st).closed;
     refs.status.hidden = !!c && measuresEdgeAngle(c, st.specimen.type);
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'mesh', 'curves', 'selection', 'specimen', 'edge', 'retouch', 'figure'].includes(kind)) return;
+    if (!['all', 'mesh', 'curves', 'selection', 'specimen', 'edge', 'retouch', 'figure', 'hidden'].includes(kind)) return;
     renderList();
     renderInspector();
   };
@@ -804,6 +866,8 @@ interface MeasureCell {
   value: number | null;
   label: string;
   reason?: string;
+  /** More about a value, in its tooltip. */
+  more?: string;
 }
 
 /**
@@ -817,7 +881,8 @@ function measureTable(id: string, kind: Quantity, unit: string, columns: string[
       td.dataset.hint = c.hint;
       td.tabIndex = 0;
     }
-    if (c.reason) tip(td, c.reason);
+    const said = c.reason ?? c.more;
+    if (said) tip(td, said);
     return td;
   };
   return h(
@@ -984,10 +1049,8 @@ function edgeAngleSection(api: AppApi): Section {
   const status = h('span', { class: 'pill pill-warn', id: 'edge-no-unit', hidden: true }, t('edge.noUnit'));
   tip(status, t('edge.noUnitWhy'));
   const list = h('ol', { class: 'arrow-list num-list', id: 'edge-angle-list', role: 'listbox', 'aria-label': t('sec.edgeAngle') });
-  const method = segmented('edge-method', null, EDGE_ANGLE_METHODS.map((m) => ({ value: m, label: t(`edge.method.${m}`) })), api.edgeMethod, (v) => api.setEdgeMethod(v as EdgeAngleMethod));
-  const seriesBox = h('div', { id: 'edge-series-box' });
-  let seriesKey = '';
-  let seriesControl: ReturnType<typeof segmented> | null = null;
+  // the means over the stations in view, a method a row and a distance a column: a click on one shows it, on a row's name all its distances
+  const meanBox = h('div', { id: 'edge-mean-box', class: 'edge-mean-box', hidden: true });
   const chart = new EdgeAngleChart();
   chart.el.hidden = true;
   const edgeView = edgeChoice('edge-view', () => refresh('edge'));
@@ -1019,9 +1082,62 @@ function edgeAngleSection(api: AppApi): Section {
   );
   const colorBy = segmented('edge-color', null, [{ value: 'angle', label: t('edge.color.angle') }, { value: 'sharp', label: t('edge.color.sharp') }], api.edgeColorMode, (v) => api.setEdgeColorMode(v as 'angle' | 'sharp'));
   const sharpSummary = h('dl', { class: 'num-grid', id: 'sharp-summary' });
-  body.append(status, list, method.el, seriesBox, edgeView.el, chart.el, rule, colorBy.el, sharpSummary);
+  body.append(status, list, edgeView.el, chart.el, meanBox, rule, colorBy.el, sharpSummary);
   watchHints(api, list);
   watchHints(api, sharpSummary);
+  watchHints(api, meanBox);
+  meanBox.addEventListener('pointerleave', () => chart.setMean(null));
+  /** What a mean's tooltip says: its SD (of two or more) and how many stations. */
+  const meanTip = (x: EdgeAngleMean) => {
+    const n = t(x.n === 1 ? 'edge.mean.one' : 'edge.mean.n', { n: fmtCount(x.n) });
+    return x.sd === null ? n : `SD ${fmtQuantity('angle', x.sd)}° · ${n}`;
+  };
+  /** The table of means of the curve `id` over the stretch in view (null: all of it), the cells shown marked. */
+  const meanTable = (id: string, edge: string | null, chosen: string): HTMLElement | null => {
+    const got = api.edgeAngleMeansOf(id, edge);
+    if (!got) return null;
+    const empty = t(got.stations.length ? 'edge.mean.tooShort' : 'edge.mean.noStations');
+    const rows = EDGE_ANGLE_METHODS.map((m) => ({
+      head: t(`edge.method.${m}`),
+      cells: EDGE_ANGLE_DISTANCES_MM.map((d, i): MeasureCell => {
+        const x = got.means[m][i];
+        return { id: `edge-mean-${m}-${d}`, hint: `edgemean:${id}|${edge ?? ''}|${m}|${i}`, value: x.mean, label: `${t(`edge.method.${m}`)} ${d} mm`, reason: x.mean === null ? empty : undefined, more: x.mean === null ? undefined : meanTip(x) };
+      }),
+    }));
+    const table = measureTable('edge-mean-table', 'angle', api.store.state.specimen.unit, EDGE_ANGLE_DISTANCES_MM.map((d) => `${d} mm`), rows);
+    table.querySelectorAll('tbody tr').forEach((tr, r) => {
+      const m = EDGE_ANGLE_METHODS[r];
+      const shownRow = m === api.edgeMethod && chosen === 'all';
+      const th = tr.querySelector('th')!;
+      // a row's name: all three distances of its method
+      const pick = h('button', { type: 'button', class: `measure-row-pick${shownRow ? ' is-chosen' : ''}`, id: `edge-mean-row-${m}`, 'aria-pressed': String(shownRow) }, th.textContent ?? '');
+      pick.addEventListener('click', () => {
+        api.setEdgeMethod(m);
+        api.setEdgeSeries('all');
+      });
+      th.replaceChildren(pick);
+      tr.querySelectorAll('td').forEach((td, i) => {
+        const d = EDGE_ANGLE_DISTANCES_MM[i];
+        const x = got.means[m][i];
+        const on = m === api.edgeMethod && (chosen === 'all' || chosen === `d${d}`);
+        td.classList.toggle('is-chosen', on);
+        td.setAttribute('aria-pressed', String(on));
+        if (x.mean === null) return;
+        const mean = x.mean;
+        // the mean on the chart, as a dashed line in its distance's colour
+        const show = () => chart.setMean(mean, `var(--series-${i + 1})`);
+        td.addEventListener('pointerenter', show);
+        td.addEventListener('focus', show);
+        td.addEventListener('pointerleave', () => chart.setMean(null));
+        td.addEventListener('blur', () => chart.setMean(null));
+        td.addEventListener('click', () => {
+          api.setEdgeMethod(m);
+          api.setEdgeSeries(`d${d}`);
+        });
+      });
+    });
+    return table;
+  };
   /** The lines of the selected curve in the method shown: the distances. */
   const chartSeries = (edge: EdgeAngleResult, m: EdgeAngleMethod, unit: string): ChartSeries[] => {
     const u = quantityUnit('length', unit);
@@ -1054,26 +1170,20 @@ function edgeAngleSection(api: AppApi): Section {
     });
     const shown = sel && curves.some((c) => c.id === sel) ? api.edgeAngleResult(sel) : null;
     const m = api.edgeMethod;
-    method.set(m);
-    (method.el as HTMLElement).hidden = !shown;
-    // what can be chosen to show: all, a distance
+    // what is shown: all the distances, or one (chosen in the table of means)
     const all = shown ? chartSeries(shown, m, st.specimen.unit) : [];
-    const options = [...new Map(all.map((s) => [s.id, s.key])).entries()];
-    const key = options.map((o) => o.join(':')).join();
-    if (key !== seriesKey) {
-      seriesKey = key;
-      clear(seriesBox);
-      seriesControl = options.length > 1 ? segmented('edge-series', null, [{ value: 'all', label: t('edge.series.all') }, ...options.map(([value, label]) => ({ value, label }))], api.edgeSeries, (v) => api.setEdgeSeries(v)) : null;
-      if (seriesControl) seriesBox.append(seriesControl.el);
-    }
-    const chosen = options.some(([id]) => id === api.edgeSeries) ? api.edgeSeries : 'all';
-    seriesControl?.set(chosen);
-    seriesBox.hidden = !seriesControl;
+    const chosen = all.some((s) => s.id === api.edgeSeries) ? api.edgeSeries : 'all';
     const rl = st.sharpEdge;
     const sharp = sel && shown ? api.sharpOf(sel) : null;
     const ruleShown = rl.threshold !== null && rl.method === m && (chosen === 'all' || chosen === `d${rl.distance}`);
     const ruleIndex = EDGE_ANGLE_DISTANCES_MM.indexOf(rl.distance as (typeof EDGE_ANGLE_DISTANCES_MM)[number]);
     const stretches = edgeView.update(shown && sel ? api.workingEdgesOn(sel) : []);
+    // the means over the stretch in view: all of the curve, or a working edge
+    rebuildHints(api, meanBox, () => {
+      const table = shown && sel ? meanTable(sel, stretches.view?.label ?? null, chosen) : null;
+      if (table) meanBox.append(table);
+    });
+    meanBox.hidden = !meanBox.childElementCount;
     chart.set(
       shown
         ? {
@@ -1656,6 +1766,8 @@ function figureSection(api: AppApi): Section {
   const overlay = (id: string, key: keyof FigureSettings['overlays'], label: string) =>
     checkbox(id, label, api.figure.overlays[key], (on) => api.setFigure((f) => (f.overlays[key] = on)));
   const scaleBarEl = overlay('fig-scalebar', 'scaleBar', t('figure.scaleBar'));
+  // what the colours drawn stand for (off unless asked for)
+  const legendEl = overlay('fig-legend', 'legend', t('figure.legend'));
   const overlayEls = [
     overlay('fig-arrows', 'arrows', t('figure.arrows')),
     overlay('fig-curves', 'curves', t('figure.curves')),
@@ -1664,7 +1776,7 @@ function figureSection(api: AppApi): Section {
     overlay('fig-landmarks', 'landmarks', t('figure.landmarks')),
     overlay('fig-sections', 'sections', t('figure.sections')),
   ];
-  const overlays = h('div', { class: 'fig-views', role: 'group', 'aria-label': t('figure.overlays') }, ...overlayEls, scaleBarEl);
+  const overlays = h('div', { class: 'fig-views', role: 'group', 'aria-label': t('figure.overlays') }, ...overlayEls, scaleBarEl, legendEl);
   const OVERLAY_KEYS = ['arrows', 'curves', 'planes', 'regions', 'landmarks', 'sections'] as const;
   const scale = segmented('fig-scale', t('figure.scale'), [
     { value: '0.5', label: '1:2' },
@@ -1691,6 +1803,7 @@ function figureSection(api: AppApi): Section {
     const f = api.figure;
     viewBoxes.forEach((b, i) => (b.checked = f.views.includes(FIGURE_VIEWS[i])));
     overlayEls.forEach((el, i) => ((el.querySelector('input') as HTMLInputElement).checked = f.overlays[OVERLAY_KEYS[i]]));
+    (legendEl.querySelector('input') as HTMLInputElement).checked = f.overlays.legend;
     light.set(f.lightElevation);
     scale.set(String(f.scale));
     dpi.set(String(f.dpi));
@@ -1725,8 +1838,12 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
   body.append(list, inspector, totals, facesOpen);
   const typeField = REGION_FIELDS[0];
   let builtFor = '';
+  let noteInput: HTMLInputElement | HTMLTextAreaElement | null = null;
+  let plyButton: HTMLButtonElement | null = null;
+  const hiddenCount = titlePill(api, el, 'region-list-hidden');
+  list.classList.add('has-eyes');
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'regions', 'selection', 'specimen', 'arrows', 'sequences', 'display', 'mesh', 'flake'].includes(kind)) return;
+    if (!['all', 'regions', 'selection', 'specimen', 'arrows', 'sequences', 'display', 'mesh', 'flake', 'hidden'].includes(kind)) return;
     if (kind === 'all') builtFor = '';
     const st = api.store.state;
     const info = api.regionInfo();
@@ -1737,6 +1854,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     const generic = st.specimen.type === 'generic';
     const upperRegion = (x: { type: string }) => isUpperRegion(x.type, st.specimen.type);
     setCount(badge, shownRegions.length);
+    hiddenCount.set(shownRegions.map((x) => x.id));
     list.hidden = shownRegions.length === 0;
     clear(list);
     const sel = api.selection.id;
@@ -1750,11 +1868,12 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
       list.append(
         h(
           'li',
-          { class: 'arrow-row region-row', role: 'option', 'aria-selected': String(isSel), 'data-id': r.id, onclick: () => api.selection.set(r.id) },
+          { class: `arrow-row region-row${api.isHidden(r.id) ? ' is-hidden' : ''}`, role: 'option', 'aria-selected': String(isSel), 'data-id': r.id, onclick: () => api.selection.set(r.id) },
           h('span', { class: 'chip', style: `--chip:${regionColorOf(r, st.scars, seq)}` }),
           h('span', { class: 'arrow-id mono' }, r.label),
           h('span', { class: 'arrow-meta' }, `${fieldText(typeField, r.type)}${r.type === 'retouch' && !generic ? ` · ${t('edge.layer', { n: r.retouchLayer ?? 1 })}` : ''}${scar ? ` · ${scar}` : ''}${parent ? ` · ${parent}` : ''}${res?.conflict ? ` · ${t('region.conflict')}` : ''}`),
           ...valueCells(area(res?.area ?? null)),
+          rowEye(api, r.id, r.label),
         ),
       );
     }
@@ -1764,6 +1883,8 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     if (key !== builtFor) {
       builtFor = key;
       clear(inspector);
+      noteInput = null;
+      plyButton = null;
       if (r) {
         inspector.append(customField(api, typeField, 'region-type', r.type, st.specimen.type, (v) => setType(r.id, v)).el);
         if (r.type === 'scar' && !generic) {
@@ -1776,10 +1897,19 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
           const layers = segmented('region-layer', t('region.retouchLayer'), RETOUCH_LAYERS.map((n) => ({ value: String(n), label: String(n) })), String(r.retouchLayer ?? 1), (v) => setRegionRetouchLayer(api.store, r.id, Number(v)));
           inspector.append(layers.el);
         }
+        const note = noteRow('region-note', r.note, (v) => setRegionNote(api.store, r.id, v));
+        noteInput = note.input;
+        inspector.append(note.el);
+        // its triangles as a mesh of their own
+        const id = r.id;
+        plyButton = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'region-ply', onclick: () => api.exportRegionPly(id) }, 'PLY') as HTMLButtonElement;
         // one that follows a retouch curve may lie on the wrong side of it
-        inspector.append(h('div', { class: 'btn-row' }, r.curveId ? iconButton(ICONS.swap, t('region.otherSide'), () => otherRetouchSide(api.store, r.id), { id: 'region-other-side' }) : null, deleteButton('region-delete', () => deleteRegion(api.store, r.id))));
+        inspector.append(h('div', { class: 'btn-row' }, plyButton, r.curveId ? iconButton(ICONS.swap, t('region.otherSide'), () => otherRetouchSide(api.store, r.id), { id: 'region-other-side' }) : null, deleteButton('region-delete', () => deleteRegion(api.store, r.id))));
       }
     }
+    if (r && noteInput) softSet(noteInput, r.note);
+    // (no triangles: the seed is off the mesh, or the surface is not cut yet)
+    if (r && plyButton) plyButton.disabled = !api.regionHasFaces(r.id);
     clear(totals);
     // (by the preset types: free text has no totals)
     totals.hidden = !info || shownRegions.length === 0 || generic;
@@ -2227,12 +2357,16 @@ function landmarksSection(api: AppApi): Section {
   }, 'semilandmark-add');
   const setList = h('ol', { class: 'arrow-list num-list', id: 'semilandmark-list', role: 'listbox', 'aria-label': t('semi.title') });
   const setInspector = h('div', { class: 'inspector', id: 'semilandmark-inspector' });
-  const setHead = h('span', { class: 'ctl-label sub-label' }, t('semi.title'));
+  const setHidden = hiddenPill(api, 'semilandmark-list-hidden');
+  const setHead = h('div', { class: 'sub-head' }, h('span', { class: 'ctl-label sub-label' }, t('semi.title')), setHidden.el);
   body.append(names, list, inspector, setHead, setList, addSet, setInspector);
+  const fixedHidden = titlePill(api, el, 'landmark-list-hidden');
+  setList.classList.add('has-eyes');
 
   let dragId: string | null = null;
   let builtFor: string | null = null;
   let nameInput: HTMLInputElement | null = null;
+  let noteInput: HTMLInputElement | HTMLTextAreaElement | null = null;
   let setBuiltFor: string | null = null;
   let countInput: HTMLInputElement | null = null;
 
@@ -2244,12 +2378,14 @@ function landmarksSection(api: AppApi): Section {
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'landmarks', 'curves', 'selection', 'mesh', 'specimen', 'flake'].includes(kind)) return;
+    if (!['all', 'landmarks', 'curves', 'selection', 'mesh', 'specimen', 'flake', 'hidden'].includes(kind)) return;
     const st = api.store.state;
     const sel = api.selection.id;
     const table = api.landmarkTable();
     const fixed = shownLandmarks(st);
     setCount(badge, fixed.length);
+    fixedHidden.set(fixed.map((l) => l.id));
+    setHidden.set(st.semilandmarks.map((q) => q.id));
     const sides = platformSides(st.flake.axis?.matrix, fixed);
     /** What the list calls a landmark: those of the flake's own by what they are. */
     const nameOf = (l: (typeof fixed)[number]) => (l.code === 'pop' ? t('landmark.pop') : l.code !== 'platform_end' ? l.name : landmarkName(l, sides) === 'platform_left' ? t('landmark.platformLeft') : landmarkName(l, sides) === 'platform_right' ? t('landmark.platformRight') : t('landmark.platformEnd'));
@@ -2278,11 +2414,12 @@ function landmarksSection(api: AppApi): Section {
       const i = st.landmarks.indexOf(l);
       const li = h(
         'li',
-        { class: 'arrow-row landmark-row', role: 'option', 'aria-selected': String(l.id === sel), 'data-id': l.id, draggable: 'true', onclick: () => api.selection.set(l.id) },
+        { class: `arrow-row landmark-row${api.isHidden(l.id) ? ' is-hidden' : ''}`, role: 'option', 'aria-selected': String(l.id === sel), 'data-id': l.id, draggable: 'true', onclick: () => api.selection.set(l.id) },
         h('span', { class: 'chip chip-dot', style: `--chip:${l.id === sel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.fixed}` }),
         h('span', { class: 'arrow-id mono' }, String(shown + 1)),
         h('span', { class: 'arrow-meta' }, nameOf(l)),
-        l.code === 'pop' ? h('span', { class: 'landmark-lock', id: 'landmark-pop-lock', title: t('landmark.locked'), 'aria-label': t('landmark.locked') }, icon(ICONS.lock)) : null,
+        l.code === 'pop' ? h('span', { class: 'landmark-lock', id: 'landmark-pop-lock', title: t('landmark.locked'), 'aria-label': t('landmark.locked') }, icon(ICONS.lock)) : h('span', { class: 'landmark-lock' }),
+        rowEye(api, l.id, nameOf(l)),
       );
       li.addEventListener('dragstart', (e) => {
         dragId = l.id;
@@ -2311,6 +2448,7 @@ function landmarksSection(api: AppApi): Section {
       clear(inspector);
       builtFor = null;
       nameInput = null;
+      noteInput = null;
     } else {
       if (builtFor !== l.id || !nameInput) {
         clear(inspector);
@@ -2318,10 +2456,13 @@ function landmarksSection(api: AppApi): Section {
         nameInput = row.input as HTMLInputElement;
         // a landmark of the flake's own is named by what it is
         nameInput.disabled = !!l.code;
-        inspector.append(row.el, h('div', { class: 'landmark-body' }));
+        const note = noteRow('landmark-note', l.note, (v) => setLandmarkNote(api.store, l.id, v));
+        noteInput = note.input;
+        inspector.append(row.el, note.el, h('div', { class: 'landmark-body' }));
         builtFor = l.id;
       }
       softSet(nameInput, nameOf(l));
+      if (noteInput) softSet(noteInput, l.note);
       const holder = inspector.querySelector('.landmark-body') as HTMLElement;
       clear(holder);
       const i = st.landmarks.indexOf(l);
@@ -2350,11 +2491,12 @@ function landmarksSection(api: AppApi): Section {
       setList.append(
         h(
           'li',
-          { class: 'arrow-row semilandmark-row', role: 'option', 'aria-selected': String(q.id === sel), 'data-id': q.id, onclick: () => api.selection.set(q.id) },
+          { class: `arrow-row semilandmark-row${api.isHidden(q.id) ? ' is-hidden' : ''}`, role: 'option', 'aria-selected': String(q.id === sel), 'data-id': q.id, onclick: () => api.selection.set(q.id) },
           h('span', { class: 'chip chip-dot', style: `--chip:${q.id === sel ? LANDMARK_COLORS.selected : LANDMARK_COLORS.semi}` }),
           h('span', { class: 'arrow-id mono' }, q.label),
           h('span', { class: 'arrow-meta' }, curve?.label ?? MISSING),
           ...valueCells([res?.valid ? fmtCount(q.count) : MISSING, '']),
+          rowEye(api, q.id, q.label),
         ),
       );
     }

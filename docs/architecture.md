@@ -150,6 +150,28 @@ keeps the selection and the undo history.
   the view. `App.updateCursor` puts the active tool in `data-tool` on the viewport: under the tools that place
   things on the model, the style sheet takes `pointer-events` from the labels, so a click reaches the model.
 
+## Hidden for the session
+
+The rows of the lists of arrows, curves, regions, fixed landmarks, semilandmark sets and working edges have an eye (`rowEye` in
+`ui/sidebar.ts`, the plane list's `plane-eye` style); a press on it hides or shows that object and does not select its row. What is
+hidden is view state: `App.hiddenBy`, ids by the open model's checksum, never in the file, never a Command (nothing to undo, no
+unsaved dot). `releaseMesh` clears it — another model, File ▸ Close —, but not during a batch run, which opens the folder's models in
+turn and comes back to this one. Planes keep their own `visible`, which is data.
+
+* **Drawing.** `App.syncAnnotations` hands the arrow and curve layers `shownState()` (the state without what is hidden), the landmark
+  layer the shown landmarks and sets; `syncWorkingEdges` leaves out a hidden edge and the edges of a hidden curve; `paintRegions`
+  colours no hidden region (the first shown region of a piece gets it). What a layer does not draw it cannot pick: the select tool,
+  labels and handles go by the layers. The region tool and the relation tool skip a hidden region's piece (no new region is made on it).
+  `syncEdgeColors` does not colour a hidden curve, `hintOf` draws nothing for one.
+* **What stays.** The data, the partition (a hidden curve still cuts the surface), the areas, every measure and every export.
+* **Figures** (`App.figureOverlays`) leave out what is hidden; the regions' colours come from the paint, which already does.
+* **The lists**: a hidden row is faded (`.is-hidden`) but can be selected, its details shown, without showing it again. Beside a list's
+  title, "n hidden" (`hiddenPill`, `#<list>-hidden`) while any of it is hidden: a press shows them all (in a card's summary it does not
+  fold the card). The semilandmark sets have theirs beside their sub-title. The sidebar refreshes with the kind `hidden`.
+* `window.lithicanalyst.drawn()` reads what the layers drew (`drawnIds`, `LandmarkLayer.drawn`, the painted regions, the curve
+  coloured by its edge angles); `hidden()` and `setHidden()` are the state.
+* The compare mode draws the other observers with their own layers, which this does not touch.
+
 ## Start page
 
 `ui/startPage.ts` builds `#start-page`, once: a child of `.app` over everything (fixed, below the dialogs, the toasts and the tooltips); a change of language or theme only repaints its words and its icon (`StartPage.paint`), so the entrance, the focus and the drop outline stay. It is shown until a card is pressed or a model or a folder opens (`App.startShown`; `App.entered` is view state, never in the file). Its language button (`#start-lang`) is the top bar's: the current language's short name, opening the same menu (`#start-lang-menu`, items `start-lang-<code>`) through the app's `Popovers`, so a press outside or Esc closes it as they close the top bar's; it sits in `.start-ctls`, above the rest of the page, and `.start-ctls .popover` takes back the shell's ink and shadow (`--shell-ink`, `--shell-shadow`) from the page's own palette. While it is shown the top bar is hidden, `main` is inert and the app's keys are off (Esc still closes an open menu), so a card's Enter and Space are its own; the view stays under it at its size, so nothing has to be set up again when a model opens, and the WebGL canvas is never 0×0. The cards write the `specimenType` preference, which `App.newSpecimenType` reads for a new model and which the specimen panel also writes; the state's own type changes only with a model, and a project applied later (`applyProject`) brings its own. While it is shown the drop outline (`dropEl`) and the busy overlay (`openMeshFile`) go on it, since what is under it cannot be seen. `App.buildEmptyView` fills `#viewport-empty`, the ways to open something in the middle of the view, shown in the workspace with no model and no folder. The mode switch is hidden with no model (`updateMeshDependentUi`); `.top-actions` holds the grid's last column, so it stays put. `App.closeModel` clears `entered`, with or without a model.
@@ -317,6 +339,18 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   labels the margin and the gaps between views grow to hold them (`planFigure`). Each section
   drawing has its label above it on the left (`FigureLayoutSection.labelY`), with or without the
   marks; an empty label is left out with its room.
+* **Legend** (overlay `legend`, off by default): each object handed to the figure may carry a `LegendEntry` (its category `key`, words,
+  colours, rank), made by `App.figureOverlays` in the interface language: arrows by completeness, certainty or sequence (one colour and
+  direction give none), curves by type, planes by label, landmarks fixed or semi; and `FigureOverlays.regions`, the regions painted, by
+  type (retouch by layer; a type drawn in several colours, as scars are, keeps them all and is drawn as stripes). `drawFigure` notes which
+  objects some view shows (`seen`) and `legendItems` (pure) takes those whose overlay is on, each category once, by kind and rank; the
+  regions count as painted when there are views. `placeLegend` (pure) puts the items on the bottom row (`FigureLayout.bottom`, the scale
+  bar's), right of the bar's text, each where it fits or on a new row from the left; the figure grows by the rows (by the row itself without a
+  bar) and, for an item wider than the row, in width. The views do not move. Samples: a 3 mm block, a 6 mm line or arrow, a dot (a colour
+  too light for white paper, `lightColor`, as a curve of no type, gets a thin dark edge); text
+  2.6 mm in the scale bar's font (`LEGEND_MM`; widths by `textWidth`, CJK characters a whole font size). SVG: `<g id="legend">`, a
+  `<g class="legend-item" data-kind data-key>` each with its `<text>`; PNG the same layout (`drawLegend`). `figureLayout` (the size
+  shown before exporting) takes the items of all the objects, so it may count one more than what the views show.
 
 ## Surface regions
 
@@ -344,6 +378,14 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   `withRetouchCurvesKept` marks the curves of an older file `off` as it opens, so it gains none.
 * `addRegion` / `setRegionType` create a scar without a direction in the same undo step when a
   scar region has no arrow, and remove it again when it is no longer used (`CompoundCommand`).
+* **Notes**: regions, fixed landmarks and working edges have a `note` (`setRegionNote`, `setLandmarkNote`, `setWorkingEdgeNote`;
+  typing merges into one step by a merge key, as scars' and curves' notes do: `UpdateRegionCommand`, `SetLandmarksCommand`,
+  `SetWorkingEdgesCommand`). A generic specimen's arrows show the note field alone. `landmarks.csv` takes the fixed landmarks' notes by
+  their order (`shownLandmarks`); `gm_landmarks.csv` is written without them (`pointsCsv`), so the grid's files stay as they were.
+* **A region as a mesh** (`io/regionPly.ts`, no DOM): `facesOfPieceSteps` takes the triangles of the region's piece (`App.regionPiece`:
+  the lower partition, else the upper), `regionPlySteps` writes binary little-endian PLY of those triangles and the vertices they use
+  (renumbered in typed arrays), in the file's coordinates (local + offset), with header comments (`regionPlyComments`); both in slices
+  (`runSliced`). The region's "PLY" button downloads it (`App.exportRegionPly`, `saveFile`), disabled while the region has no piece.
 * The curve tool snaps points onto existing curves (T-junctions) so curves can close regions.
 
 ## Relations and sequences
@@ -512,6 +554,15 @@ sphere), A on it and the two ways along the line. `App.updateEdgeAngles` runs it
 in `App.edgeResults`; they go to `derived.edgeAngles`, which the summary export reads as it does the regions. In the measure mode the selected curve is drawn by `render/edgeAngleLayer.ts` (`Line2`
 with vertex colours, one hue, along the curve's own points by `valuesAlongCurve`: straight lines between stations would cut through the mesh; the curve layer then draws only its label, `drawnElsewhere`, since two lines at one depth fight) with a scale of two numbers (`#edge-legend`), and `ui/edgeAngleChart.ts` draws the angle along it in the section
 of the edge angles.
+
+**The table of means** (`compute/edgeAngle.ts`: `edgeAngleMeans`, pure; `App.edgeAngleMeansOf`): under the chart, a `measureTable` of the
+mean per method (rows) and distance (columns) over the stretch the chart shows (`edgeChoice`: all of the curve, or a working edge's
+stations by `edgeLabels`, as `edge_angles.csv` says them). It replaces the method and distance buttons: `App.edgeMethod` and
+`edgeSeries` are still what the chart and the colours show; a click on a cell sets both, on a row's name the method and all its distances,
+and the cells shown are marked (`is-chosen`), so the sharp edge's rule, which sets them too, moves the mark. A cell's tooltip gives the
+SD and the number of stations, or why it is empty; the pointer on it draws its mean on the chart (`EdgeAngleChart.setMean`, dashed) and,
+after the usual delay, its stations on the model (hint `edgemean:<curve>|<edge>|<method>|<distance index>`, never pinned). In
+`working_edges.csv` the same means come from the angles as `edge_angles.csv` writes them, to ten decimals, so R gets them back to 1e-9.
 
 **The line measured** (`compute/measuredLine.ts`, pure): `measuredLine(curve, state)` is what a curve is measured along: a flake's edge without what runs along the closed platform outline, any other curve as it is. It needs the state alone, no mesh, so the app, the tables and the summary export all get the same line, and it is kept per `points` array (curves change by being replaced). Everything that measures goes through it: the stations (`updateEdgeAngles`, `updateRetouchAngles`, `sectionAtStation`), `sharpOf`, the working edges (`edgeAxis`, `edgeLabels`, the actions and the layer), the colours along the curve. What cuts the regions or draws the curve itself reads the curve. `App.lineOf` is the shorthand. GM goes on cutting the edge at the platform ends itself (`edgeLine`).
 

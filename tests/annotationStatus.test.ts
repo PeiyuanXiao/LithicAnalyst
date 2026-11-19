@@ -10,7 +10,7 @@ const project = (type: SpecimenType, unit = ''): ProjectState => {
   return st;
 };
 const curve = (type: string, closed = false): Curve => ({ id: type, label: 'C1', anchors: [], points: [], anchorIndex: [], closed, attributes: { type, note: '' }, createdAt: '', modifiedAt: '' });
-const region = (type: string): Region => ({ id: type, label: 'R1', seed: [0, 0, 0], type, scarId: null, createdAt: '', modifiedAt: '' });
+const region = (type: string): Region => ({ id: type, label: 'R1', seed: [0, 0, 0], type, scarId: null, note: '', createdAt: '', modifiedAt: '' });
 const along = (a: Vec3, b: Vec3): Vec3[] => {
   const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])));
   return Array.from({ length: n }, (_, k): Vec3 => [a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, a[2] + ((b[2] - a[2]) * k) / n]);

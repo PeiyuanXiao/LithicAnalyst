@@ -49,7 +49,9 @@ test('a generic specimen has none of the tools, panels and sections of a core or
   await page.evaluate(() => window.lithicanalyst.selectForTest(window.lithicanalyst.state().scars[0].id));
   await expect(page.locator('#insp-label')).toHaveValue('S1');
   await expect(page.locator('#arrow-coords')).toBeVisible();
-  for (const id of ['field-completeness-point_complete', 'field-termination-feather', 'field-note', 'scar-sequence']) await expect(page.locator(`#${id}`)).toHaveCount(0);
+  // the note alone
+  for (const id of ['field-completeness-point_complete', 'field-termination-feather', 'scar-sequence']) await expect(page.locator(`#${id}`)).toHaveCount(0);
+  await expect(page.locator('#field-note')).toHaveCount(1);
   await expect(page.locator('#scar-list .arrow-meta')).toHaveText('');
   // its number keys set nothing
   const attributes = (await state(page)).scars[0].attributes;

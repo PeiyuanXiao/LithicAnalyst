@@ -231,6 +231,8 @@ export interface Region {
   auto?: boolean;
   /** The retouch curve a region with `auto` follows. */
   curveId?: string;
+  /** The annotator's free text; may be empty. */
+  note: string;
   createdAt: string;
   modifiedAt: string;
 }
@@ -277,6 +279,8 @@ export interface WorkingEdge {
   curveId: string;
   start: Vec3;
   end: Vec3;
+  /** The annotator's free text; may be empty. */
+  note: string;
   createdAt: string;
   modifiedAt: string;
 }
@@ -293,6 +297,8 @@ export interface Landmark {
   code?: LandmarkCode;
   /** A platform end that follows the curves: where the edge meets the platform outline. Moved by hand, it stays where it was put. */
   auto?: true;
+  /** The annotator's free text; may be empty. */
+  note: string;
   createdAt: string;
   modifiedAt: string;
 }

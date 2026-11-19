@@ -252,12 +252,12 @@ function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[
   const t = nowIso();
   for (const type of wanted) {
     if (st.regions.some((r) => r.auto && r.type === type)) continue;
-    parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: null, auto: true, createdAt: t, modifiedAt: t }, n));
+    parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: null, auto: true, note: '', createdAt: t, modifiedAt: t }, n));
     n++;
   }
   for (const c of bands) {
     if (st.regions.some((r) => r.auto && r.curveId === c.id)) continue;
-    parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(c.points[0]), type: 'retouch', scarId: null, retouchLayer: 1, auto: true, curveId: c.id, createdAt: t, modifiedAt: t }, n));
+    parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(c.points[0]), type: 'retouch', scarId: null, retouchLayer: 1, auto: true, curveId: c.id, note: '', createdAt: t, modifiedAt: t }, n));
     n++;
   }
   return parts;
@@ -406,13 +406,13 @@ export function addWorkingEdge(store: ProjectStore, input: { curveId: string; st
   const st = store.state;
   const n = st.nextWorkingEdgeNumber;
   const t = nowIso();
-  const edge: WorkingEdge = { id: uuid(), label: `E${n}`, name: input.name ?? '', curveId: input.curveId, start: copy(input.start), end: copy(input.end), createdAt: t, modifiedAt: t };
+  const edge: WorkingEdge = { id: uuid(), label: `E${n}`, name: input.name ?? '', curveId: input.curveId, start: copy(input.start), end: copy(input.end), note: '', createdAt: t, modifiedAt: t };
   store.history.execute(setEdges(store, 'cmd.addWorkingEdge', [...st.workingEdges, edge], n + 1));
   return { edge, refused: null };
 }
 
-/** Its ends or its name; ends that would make it too short or overlap another are refused, and it stays as it is. */
-export function updateWorkingEdge(store: ProjectStore, id: string, patch: { start?: Vec3; end?: Vec3; name?: string }): WorkingEdgeOutcome | null {
+/** Its ends, its name or its note; ends that would make it too short or overlap another are refused, and it stays as it is. Typing a name or a note merges. */
+export function updateWorkingEdge(store: ProjectStore, id: string, patch: { start?: Vec3; end?: Vec3; name?: string; note?: string }): WorkingEdgeOutcome | null {
   const e = store.workingEdge(id);
   if (!e) return null;
   const start = patch.start ?? e.start, end = patch.end ?? e.end;
@@ -420,10 +420,18 @@ export function updateWorkingEdge(store: ProjectStore, id: string, patch: { star
     const refused = refusal(store, e.curveId, start, end, id);
     if (refused) return { edge: null, refused };
   }
-  const after: WorkingEdge = { ...e, start: copy(start), end: copy(end), name: patch.name ?? e.name, modifiedAt: nowIso() };
+  const after: WorkingEdge = { ...e, start: copy(start), end: copy(end), name: patch.name ?? e.name, note: patch.note ?? e.note, modifiedAt: nowIso() };
   const st = store.state;
-  store.history.execute(setEdges(store, 'cmd.editWorkingEdge', st.workingEdges.map((x) => (x.id === id ? after : x)), st.nextWorkingEdgeNumber, patch.name !== undefined && !patch.start && !patch.end ? `edge-name:${id}` : null));
+  const moved = !!patch.start || !!patch.end;
+  const merge = moved ? null : patch.name !== undefined ? `edge-name:${id}` : patch.note !== undefined ? `edge-note:${id}` : null;
+  store.history.execute(setEdges(store, 'cmd.editWorkingEdge', st.workingEdges.map((x) => (x.id === id ? after : x)), st.nextWorkingEdgeNumber, merge));
   return { edge: after, refused: null };
+}
+
+/** A working edge's note (typing merges into one step). */
+export function setWorkingEdgeNote(store: ProjectStore, id: string, note: string): void {
+  const e = store.workingEdge(id);
+  if (e && e.note !== note) updateWorkingEdge(store, id, { note });
 }
 
 /** The other way round a closed curve: its two ends exchanged. */
@@ -451,7 +459,7 @@ export function generateWorkingEdges(store: ProjectStore, curves: ReadonlyArray<
     const axis = edgeAxis(line, st.specimen.unit);
     for (const r of retouchRunEdges(line, stations, st.specimen.unit)) {
       if (refusalOf(axis, r.start, r.end, edges.filter((e) => e.curveId === curveId))) continue;
-      edges.push({ id: uuid(), label: `E${n}`, name: '', curveId, start: copy(r.start), end: copy(r.end), createdAt: t, modifiedAt: t });
+      edges.push({ id: uuid(), label: `E${n}`, name: '', curveId, start: copy(r.start), end: copy(r.end), note: '', createdAt: t, modifiedAt: t });
       n++;
     }
   }
@@ -633,7 +641,7 @@ export function addRegion(store: ProjectStore, seed: Vec3, type: RegionType, sca
     parts.push(s.command);
     linked = s.scar.id;
   }
-  const region: Region = { id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: scarRegion ? linked : null, createdAt: t, modifiedAt: t };
+  const region: Region = { id: uuid(), label: `R${n}`, seed: copy(seed), type, scarId: scarRegion ? linked : null, note: '', createdAt: t, modifiedAt: t };
   parts.push(new AddRegionCommand(region, n));
   store.history.execute(parts.length === 1 ? parts[0] : new CompoundCommand('cmd.addRegion', parts));
   return region;
@@ -693,6 +701,13 @@ export function setRegionScar(store: ProjectStore, id: string, scarId: string): 
   const update = new UpdateRegionCommand(structuredClone(before), { ...structuredClone(before), scarId, modifiedAt: nowIso() });
   const drop = dropAreaScar(store, before);
   store.history.execute(drop.length ? new CompoundCommand('cmd.editRegion', [update, ...drop]) : update);
+}
+
+/** A region's note (typing merges into one step). */
+export function setRegionNote(store: ProjectStore, id: string, note: string): void {
+  const before = store.region(id);
+  if (!before || before.note === note) return;
+  store.history.execute(new UpdateRegionCommand(structuredClone(before), { ...structuredClone(before), note, modifiedAt: nowIso() }, `region-note:${id}`));
 }
 
 /** Which retouch layer a retouch region is. */
@@ -867,7 +882,7 @@ const touch = <T extends { modifiedAt: string }>(x: T): T => Object.assign(x, { 
 export function addLandmark(store: ProjectStore, point: Vec3, name?: string): Landmark {
   const n = store.state.nextLandmarkNumber;
   const t = nowIso();
-  const lm: Landmark = { id: uuid(), name: name ?? `LM${n}`, point: copy(point), createdAt: t, modifiedAt: t };
+  const lm: Landmark = { id: uuid(), name: name ?? `LM${n}`, point: copy(point), note: '', createdAt: t, modifiedAt: t };
   changeLandmarks(store, 'cmd.addLandmark', (d) => {
     d.landmarks.push(structuredClone(lm));
     if (name === undefined) d.nextLandmarkNumber = n + 1;
@@ -890,6 +905,13 @@ export const renameLandmark = (store: ProjectStore, id: string, name: string): v
     const l = d.landmarks.find((x) => x.id === id);
     if (l && !l.code && l.name !== name) touch(l).name = name;
   }, `landmark-name:${id}`);
+
+/** A fixed landmark's note, the flake's own landmarks' too (typing merges into one step). */
+export const setLandmarkNote = (store: ProjectStore, id: string, note: string): void =>
+  changeLandmarks(store, 'cmd.editLandmarkNote', (d) => {
+    const l = d.landmarks.find((x) => x.id === id);
+    if (l && l.note !== note) touch(l).note = note;
+  }, `landmark-note:${id}`);
 
 /** Move a landmark to position `index` of the list (the export order). */
 export const reorderLandmark = (store: ProjectStore, id: string, index: number): void =>
@@ -947,7 +969,7 @@ function syncPlatformEnds(d: LandmarkData, curves: readonly Curve[]): void {
     else if (JSON.stringify(l.point) !== JSON.stringify(p)) touch(l).point = copy(p);
   }
   const t = nowIso();
-  for (const p of found) d.landmarks.push({ id: uuid(), name: 'platform_end', point: copy(p), code: 'platform_end', auto: true, createdAt: t, modifiedAt: t });
+  for (const p of found) d.landmarks.push({ id: uuid(), name: 'platform_end', point: copy(p), code: 'platform_end', auto: true, note: '', createdAt: t, modifiedAt: t });
 }
 
 /** A flake read from a file: its ends as the curves say, for a file from before they did. */
@@ -967,7 +989,7 @@ export function placePlatformEnd(store: ProjectStore, point: Vec3): string {
     return near.id;
   }
   const t = nowIso();
-  const lm: Landmark = { id: uuid(), name: 'platform_end', point: copy(point), code: 'platform_end', createdAt: t, modifiedAt: t };
+  const lm: Landmark = { id: uuid(), name: 'platform_end', point: copy(point), code: 'platform_end', note: '', createdAt: t, modifiedAt: t };
   changeLandmarks(store, 'cmd.addLandmark', (d) => void d.landmarks.push(structuredClone(lm)));
   return lm.id;
 }
@@ -1151,7 +1173,7 @@ export function setTechnicalAxis(store: ProjectStore, input: NewAxisInput): Tech
   const lmAfter = structuredClone(lmBefore);
   const pop = lmAfter.landmarks.find((l) => l.code === 'pop');
   if (pop) touch(pop).point = copy(input.start);
-  else lmAfter.landmarks.unshift({ id: uuid(), name: 'pop', point: copy(input.start), code: 'pop', createdAt: t, modifiedAt: t });
+  else lmAfter.landmarks.unshift({ id: uuid(), name: 'pop', point: copy(input.start), code: 'pop', note: '', createdAt: t, modifiedAt: t });
   parts.push(new SetLandmarksCommand('cmd.setAxis', lmBefore, lmAfter));
   parts.push(...autoRegionChanges(store, { curves: st.curves, axis }, input.start));
   const before = st.specimen;

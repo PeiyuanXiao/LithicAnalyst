@@ -179,6 +179,11 @@ export class LandmarkLayer {
     this.viewer.requestRender();
   }
 
+  /** The fixed landmarks drawn and how many semilandmarks (for tests). */
+  drawn(): { fixed: string[]; semi: number } {
+    return { fixed: [...this.fixed.keys()], semi: this.semi.filter((d) => d.root.visible).length };
+  }
+
   /** The landmark under the select tool's cursor (an id of another layer, or null: none). */
   setHoverItem(id: string | null): void {
     const own = id !== null && this.fixed.has(id) ? id : null;

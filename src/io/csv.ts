@@ -6,7 +6,7 @@ import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
 import type { RegionResult, RegionTotals } from '../compute/regions';
 import type { AgreementRow, SummaryRow } from '../compute/agreement';
-import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS } from '../compute/edgeAngle';
+import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_MEAN_COLUMNS, EDGE_ANGLE_METHODS, edgeAngleMeans, type EdgeAngleStation } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS } from '../compute/retouchAngle';
 import { RETOUCH_SUMMARY, type RetouchIndices } from '../compute/retouchIndex';
 import { sharpOfCurve } from '../compute/sharpEdge';
@@ -65,8 +65,8 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
   const sources = scarSources(state);
   const placed = new Map<string, { platform?: string; surface: string | null }>((config?.scars ?? []).map((p) => [p.id, p]));
   const flakeFrame = state.specimen.type === 'flake' ? state.flake.axis?.matrix ?? null : null;
-  // a generic specimen's arrows have no scar attributes, whatever they held on another type
-  const attribute = (a: { attributes: Record<string, unknown> }, key: string) => (state.specimen.type === 'generic' ? '' : csvCell(a.attributes[key]));
+  // a generic specimen's arrows have no scar attributes but the note, whatever they held on another type
+  const attribute = (a: { attributes: Record<string, unknown> }, key: string) => (state.specimen.type === 'generic' && key !== 'note' ? '' : csvCell(a.attributes[key]));
   const rows = state.scars.filter(hasVector).map((a) =>
     [
       csvCell(state.specimen.id),
@@ -179,16 +179,36 @@ export function edgeSharpCsv(state: Readonly<ProjectState>, curves: readonly Edg
 }
 
 /** The columns of working_edges.csv after `specimen_id`. */
-export const WORKING_EDGE_COLUMNS = ['working_edge', 'name', 'curve_id', 'start_position', 'end_position', 'length', 'sharp_length', 'retouched_length', 'retouch_perimeter', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral', 'removed_volume', 'erp', 'erp_filled_share', 'giur', 'giur_stations', 'edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth'] as const;
+export const WORKING_EDGE_COLUMNS = ['working_edge', 'name', 'curve_id', 'start_position', 'end_position', 'length', 'sharp_length', 'retouched_length', 'retouch_perimeter', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral', 'removed_volume', 'erp', 'erp_filled_share', 'giur', 'giur_stations', 'edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth', ...EDGE_ANGLE_MEAN_COLUMNS, 'note'] as const;
+
+/** An angle as edge_angles.csv writes it (to 6 decimals), read back. */
+const asWritten = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : Number(fmt(v)));
+
+/** A mean edge angle: to 10 decimals, so that the mean of the values in edge_angles.csv is it to 1e-9. */
+const meanCell = (v: number | null): string => (v === null ? '' : String(Math.round(v * 1e10) / 1e10));
+
+/**
+ * The mean edge angles of a row of working_edges.csv: each method and distance, of the stations whose `working_edge` in edge_angles.csv is
+ * the row's (all of the curve's for an implied edge), from the values as that file has them, so that grouping it in R gives them again.
+ */
+function edgeMeanCells(e: WorkingEdgeRow, curves: readonly EdgeAngleCurve[], edgeAt: (curveId: string, position: number) => string): string[] {
+  const r = curves.find((x) => x.curveId === e.curveId);
+  if (!r) return EDGE_ANGLE_MEAN_COLUMNS.map(() => '');
+  const stations: Array<Pick<EdgeAngleStation, 'three_points' | 'two_lines'>> = r.stations.map((s) => ({ three_points: s.three_points.map(asWritten), two_lines: s.two_lines.map(asWritten) }));
+  const scope = r.stations.flatMap((s, k) => (edgeAt(e.curveId, s.position) === e.label ? [k] : []));
+  const means = edgeAngleMeans({ stations }, scope);
+  return EDGE_ANGLE_METHODS.flatMap((m) => means[m].map((x) => meanCell(x.mean)));
+}
 
 /**
  * One row per working edge of the curves measured, and one per such curve without any (`working_edge` empty): lengths in the coordinate
  * unit, ratios as 0–1. The columns from the retouch indices are empty but for a flake. The sharp length is judged anew by the
- * state's rule (in a folder, the folder's), from the curves' edge angles.
+ * state's rule (in a folder, the folder's), from the curves' edge angles. Then the mean edge angles (`edgeMeanCells`), and the edge's note.
  */
 export function workingEdgesCsv(state: Readonly<ProjectState>, edges: readonly WorkingEdgeRow[], curves: readonly EdgeAngleCurve[], opts: CsvOptions): string {
   const label = new Map(state.curves.map((c) => [c.id, c.label]));
   const rule = state.sharpEdge;
+  const edgeAt = edgeLabels(state);
   const sharpLength = (e: WorkingEdgeRow): number | null => {
     const c = state.curves.find((x) => x.id === e.curveId), r = curves.find((x) => x.curveId === e.curveId);
     const line = c ? measuredLine(c, state) : null;
@@ -220,6 +240,9 @@ export function workingEdgesCsv(state: Readonly<ProjectState>, edges: readonly W
       cell(e.edge_curvature),
       cell(e.edge_curvature_chord),
       cell(e.edge_curvature_depth),
+      ...edgeMeanCells(e, curves, edgeAt),
+      // (an implied edge is no working edge: no note)
+      csvCell(e.label ? state.workingEdges.find((x) => x.id === e.id)?.note ?? '' : ''),
     ].join(','),
   );
   return (opts.excelBom ? '\uFEFF' : '') + [['specimen_id', ...WORKING_EDGE_COLUMNS].join(','), ...rows].join('\n') + '\n';
@@ -382,15 +405,16 @@ export function planesCsv(state: Readonly<ProjectState>, planes: PlaneResult[], 
   return (opts.excelBom ? '﻿' : '') + [header.join(','), ...rows].join('\n') + '\n';
 }
 
-/** One row per surface region; `scar_id` is the label of the scar it belongs to; area in unit². */
+/** One row per surface region; `scar_id` is the label of the scar it belongs to; area in unit²; `note`: the annotator's. */
 export function regionsCsv(state: Readonly<ProjectState>, regions: RegionResult[], opts: CsvOptions): string {
-  const header = ['specimen_id', 'region_id', 'type', 'scar_id', 'area', 'unit', 'parent_region', 'retouch_layer'];
+  const header = ['specimen_id', 'region_id', 'type', 'scar_id', 'area', 'unit', 'parent_region', 'retouch_layer', 'note'];
   // those that follow a flake's annotations belong to the flake
   const hidden = state.specimen.type === 'flake' ? [] : state.regions.filter((r) => r.auto).map((r) => r.id);
   const rows = regions.filter((r) => !hidden.includes(r.id)).map((r) => {
     const scar = r.scarId ? state.scars.find((s) => s.id === r.scarId)?.label ?? '' : '';
     const parent = r.parent ? regions.find((x) => x.id === r.parent)?.label ?? '' : '';
-    return [csvCell(state.specimen.id), csvCell(r.label), csvCell(r.type), csvCell(scar), cell(r.area), csvCell(state.specimen.unit), csvCell(parent), cell(r.retouchLayer ?? null)].join(',');
+    const note = state.regions.find((x) => x.id === r.id)?.note ?? '';
+    return [csvCell(state.specimen.id), csvCell(r.label), csvCell(r.type), csvCell(scar), cell(r.area), csvCell(state.specimen.unit), csvCell(parent), cell(r.retouchLayer ?? null), csvCell(note)].join(',');
   });
   return (opts.excelBom ? '\uFEFF' : '') + [header.join(','), ...rows].join('\n') + '\n';
 }
