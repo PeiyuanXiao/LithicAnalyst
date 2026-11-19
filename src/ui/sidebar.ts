@@ -58,7 +58,8 @@ import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMean, type E
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
 import { edgeAxis, rangeOf, type EdgeRetouchKey } from '../compute/workingEdge';
-import { EPA_DISTANCES_MM, type FlakeMeasure } from '../compute/flake';
+import { AGREEMENT_FLAKE_MEASURES, EPA_DISTANCES_MM, type FlakeMeasure } from '../compute/flake';
+import { bsaSettingsOf, VI_WIDTHS_MM } from '../compute/bulb';
 import { gmCounts, gmListTotal, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
 import { FLAKE_TEMPLATE_PATCHES, gmConfigSummary, GM_TEMPLATE_PARAMETERS, usesTemplate } from '../compute/gmTemplate';
 import { landmarkName, platformSides, shownLandmarks } from '../compute/landmarks';
@@ -721,7 +722,23 @@ function displaySection(api: AppApi): Section {
     { value: 'plain', label: t('shading.plain') },
     { value: 'scan', label: t('shading.scan'), disabled: !api.hasScanColors() },
     { value: 'curvature', label: t('shading.curvature') },
+    { value: 'height', label: t('shading.height'), disabled: !api.heightReferences().length },
   ], d.shading, (v) => api.setDisplay((x) => (x.shading = v as ShadingMode), 'shading'));
+  // by height over a plane: which, and how far either way the colours go
+  const heightLegend = h('p', { class: 'field-hint legend' }, h('span', { class: 'legend-ramp', 'aria-hidden': 'true' }), t('display.heightLegend'));
+  const heightRef = h('select', { id: 'height-ref', class: 'ctl-select' }) as HTMLSelectElement;
+  heightRef.addEventListener('change', () => api.setDisplay((x) => (x.heightRef = heightRef.value), 'height'));
+  const heightRefRow = h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'height-ref' }, t('display.heightRef')), heightRef);
+  const range0 = api.heightRange();
+  const heightRange = slider({
+    id: 'height-range', label: t('display.heightRange'), min: range0.min, max: range0.max, step: range0.step, value: range0.value,
+    format: (v) => {
+      const u = api.heightRange().unit;
+      return `± ${fmtNum(v, u === 'mm' ? 2 : 3)}${u ? ` ${u}` : ''}`;
+    },
+    onInput: (v) => api.setHeightRange(v),
+  });
+  const heightGroup = h('div', { class: 'subgroup', id: 'height-group' }, heightLegend, heightRefRow, heightRange.el);
   const curvBusy = h('span', { class: 'busy-inline', hidden: true }, t('display.curvComputing'));
   const curvLegend = h('p', { class: 'field-hint legend' }, h('span', { class: 'legend-ramp', 'aria-hidden': 'true' }), t('display.curvLegend'), curvBusy);
   const curvScale = slider({
@@ -764,7 +781,7 @@ function displaySection(api: AppApi): Section {
     panelRow('retouch-edge-show', t('retouch.edge'), d.retouchEdge, (v) => api.setDisplay((x) => (x.retouchEdge = v), 'retouch')),
   ];
 
-  body.append(shading.el, curvGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, gmPoints.el, ...retouchRows.map((r) => r.el), h('div', { class: 'check-row' }, labels, hidden, regions));
+  body.append(shading.el, curvGroup, heightGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, gmPoints.el, ...retouchRows.map((r) => r.el), h('div', { class: 'check-row' }, labels, hidden, regions));
 
   const refresh = (kind: RefreshKind) => {
     // these panels belong to the annotate mode
@@ -795,6 +812,22 @@ function displaySection(api: AppApi): Section {
     if (scanBtn) scanBtn.disabled = !api.hasScanColors();
     curvGroup.hidden = api.display.shading !== 'curvature';
     curvBusy.hidden = !api.curvatureBusy();
+    // the planes there are to go by; none: no shading by height
+    const refs = api.heightReferences();
+    const heightBtn = shading.el.querySelector('[data-value="height"]') as HTMLButtonElement | null;
+    if (heightBtn) heightBtn.disabled = !refs.length;
+    heightGroup.hidden = api.display.shading !== 'height' || !refs.length;
+    const shown = refs.map((r) => `${r.value}:${r.label}`).join();
+    if (heightRef.dataset.refs !== shown) {
+      heightRef.dataset.refs = shown;
+      clear(heightRef);
+      heightRef.append(...refs.map((r) => h('option', { value: r.value }, r.label)));
+    }
+    heightRef.value = api.heightReference() ?? '';
+    const range = api.heightRange();
+    const input = heightRange.el.querySelector('input') as HTMLInputElement;
+    Object.assign(input, { min: String(range.min), max: String(range.max), step: String(range.step) });
+    if (document.activeElement !== input) heightRange.set(range.value);
     ball.set(api.display.light.azimuthDeg, api.display.light.elevationDeg);
   };
   refresh('all');
@@ -954,9 +987,13 @@ function measureAutoSection(api: AppApi): Section {
 }
 
 /** The kind of quantity of each of a flake's measurements. */
-const flakeQuantity = (k: string): Quantity => (k === 'platform_area' ? 'area' : k.startsWith('epa') || k === 'ipa' || k.endsWith('_deg') ? 'angle' : 'length');
+const flakeQuantity = (k: string): Quantity => (k === 'platform_area' ? 'area' : k.startsWith('epa') || k.startsWith('bulb_angle') || k === 'ipa' || k === 'psia' || k === 'bsa' || k.endsWith('_deg') ? 'angle' : 'length');
 
-/** A flake's measurements (measure mode), in the order they are exported: technical axis, morphology, platform (two small tables), the whole. */
+/**
+ * A flake's measurements (measure mode): technical axis, morphology, the whole, then the proximal end: the platform's width and depth
+ * (a small table), its area, EPA (a table), IPA, PSIA, the bulb angle (a row of two), BSA with its level, VI (a row of three) and the
+ * mesh's resolution round P, which recedes.
+ */
 function flakeSection(api: AppApi): Section {
   const { el, body } = section('flake', t('sec.measureAuto'));
   const box = h('div', { class: 'measure-groups measure-auto', id: 'flake-measures' });
@@ -974,11 +1011,24 @@ function flakeSection(api: AppApi): Section {
       const row = (k: FlakeMeasure) => measureRow(t(`flake.${k}`), flakeQuantity(k), value(k), u, `flake-${k}`, `flake:${k}`, reason(k));
       const cell = (k: FlakeMeasure): MeasureCell => ({ id: `flake-${k}`, hint: `flake:${k}`, value: value(k), label: t(`flake.${k}`), reason: reason(k) });
       const a = api.autoMeasurements();
+      // the BSA's row says its level, faintly, before the angle
+      const bsaRow = row('bsa');
+      bsaRow[1].prepend(h('span', { class: 'measure-aside', id: 'flake-bsa-level' }, `${fmtNum(bsaSettingsOf(api.store.state.flake).level, 2)} mm · `));
+      // the mesh's resolution round P is no measure of the flake: it recedes
+      const meshRow = row('pop_mesh_edge');
+      for (const c of meshRow) c.classList.add('is-quiet');
       box.append(
         measureGroup(t('measure.group.axis'), measureList(row('tech_length'), row('tech_width'), row('tech_thickness'))),
         measureGroup(t('measure.group.morph'), measureList(row('morph_length'), row('morph_width'), row('morph_thickness'), row('morph_tech_angle_deg'))),
         measureGroup(
-          t('measure.group.platform'),
+          t('measure.group.whole'),
+          measureList(
+            measureRow(t('measure.area'), 'area', a?.surfaceArea ?? null, u, 'flake-area', 'flake:area'),
+            a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : measureRow(t('measure.volume'), 'volume', a?.volume ?? null, u, 'flake-volume', 'flake:volume'),
+          ),
+        ),
+        measureGroup(
+          t('measure.group.proximal'),
           measureTable('flake-platform-table', 'length', u, [t('flake.table.chord'), t('flake.table.path')], [
             { head: t('flake.table.width'), cells: [cell('platform_width_chord'), cell('platform_width_path')] },
             { head: t('flake.table.depth'), cells: [cell('platform_depth_chord'), cell('platform_depth_path')] },
@@ -994,14 +1044,11 @@ function flakeSection(api: AppApi): Section {
               { head: `EPA ${t('edge.method.two_lines')}`, cells: [cell('epa_2ln_1mm'), cell('epa_2ln_2mm'), cell('epa_2ln_3mm')] },
             ],
           ),
-          measureList(row('ipa')),
-        ),
-        measureGroup(
-          t('measure.group.whole'),
-          measureList(
-            measureRow(t('measure.area'), 'area', a?.surfaceArea ?? null, u, 'flake-area', 'flake:area'),
-            a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : measureRow(t('measure.volume'), 'volume', a?.volume ?? null, u, 'flake-volume', 'flake:volume'),
-          ),
+          measureList(row('ipa'), row('psia')),
+          measureTable('flake-bulb-table', 'angle', u, [t('edge.method.three_points'), t('edge.method.two_lines')], [{ head: t('flake.table.bulb'), cells: [cell('bulb_angle_3pt_1mm'), cell('bulb_angle_2ln_1mm')] }]),
+          measureList(bsaRow),
+          measureTable('flake-vi-table', 'length', u, VI_WIDTHS_MM.map((w) => `${fmtNum(w, 1)} mm`), [{ head: t('flake.table.vi'), cells: [cell('vi_0_5mm'), cell('vi_1_0mm'), cell('vi_1_5mm')] }]),
+          measureList(meshRow),
         ),
       );
     });
@@ -3093,7 +3140,7 @@ function agreementSection(api: AppApi): Section {
       if (itemType === 'region' && !key.includes('|')) return fieldText(REGION_FIELDS[0], key);
       if (itemType === 'region') return t('agree.scarRegions');
       if (itemType === 'region_type') return t('agree.regionTypes');
-      if (itemType === 'measurement') return ['length', 'width', 'thickness', 'cortex_ratio'].includes(key) || key.startsWith('area_') ? t(`agree.measure.${key}`) : key;
+      if (itemType === 'measurement') return ['length', 'width', 'thickness', 'cortex_ratio'].includes(key) || key.startsWith('area_') ? t(`agree.measure.${key}`) : (AGREEMENT_FLAKE_MEASURES as readonly string[]).includes(key) ? t(`flake.${key}`) : key;
       return '';
     };
     const focus = api.agreementFocus();

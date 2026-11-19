@@ -5,7 +5,7 @@ import { landmarkTable } from '../compute/landmarks';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
-import type { FlakeMeasures, FlakeResult } from '../compute/flake';
+import { AGREEMENT_FLAKE_MEASURES, storedFlakeMeasures, type FlakeMeasures, type FlakeResult } from '../compute/flake';
 import type { RetouchIndices } from '../compute/retouchIndex';
 import type { WorkingEdgesDerived, WorkingEdgeRow } from '../compute/workingEdge';
 import { gmMissingInputs, type GmMissing } from '../compute/gm';
@@ -159,6 +159,14 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     const sp = p.derived.split as { ratio?: number | null } | null | undefined;
     if (hasVolumeSplit(st.specimen.type) && typeof sp?.ratio === 'number') values.volume_ratio = sp.ratio;
     for (const m of st.measurements) values[m.label] = measurementValue(m);
+    // a flake's own measures, as the project stored them
+    if (st.specimen.type === 'flake') {
+      const flake = storedFlakeMeasures(p.derived);
+      for (const k of AGREEMENT_FLAKE_MEASURES) {
+        const v = flake?.[k];
+        if (typeof v === 'number') values[k] = v;
+      }
+    }
     observers.set(who, values);
   }
   const { state, derived } = primary.project;

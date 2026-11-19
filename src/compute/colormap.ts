@@ -58,3 +58,25 @@ export function curvatureColors(values: Float32Array, range: number, contrast: n
   }
   return out;
 }
+
+/** Heights over a plane as linear-space RGB (3 per vertex): below it slate, above it ochre, full at ±`range`. */
+export function heightColors(heights: Float32Array, range: number): Float32Array {
+  const out = new Float32Array(heights.length * 3);
+  const c: [number, number, number] = [0, 0, 0];
+  const lut = new Float32Array(1024 * 3);
+  for (let i = 0; i < 1024; i++) {
+    divergingColor((i / 1023) * 2 - 1, c);
+    lut[3 * i] = srgbToLinear(c[0]);
+    lut[3 * i + 1] = srgbToLinear(c[1]);
+    lut[3 * i + 2] = srgbToLinear(c[2]);
+  }
+  const s = 1 / (range || 1);
+  for (let i = 0; i < heights.length; i++) {
+    const t = Math.max(-1, Math.min(1, heights[i] * s));
+    const u = Math.round((t + 1) * 511.5);
+    out[3 * i] = lut[3 * u];
+    out[3 * i + 1] = lut[3 * u + 1];
+    out[3 * i + 2] = lut[3 * u + 2];
+  }
+  return out;
+}

@@ -5,7 +5,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import type { HintArc, HintDots, HintFaces, HintLine, HintRole, MeasureHint } from '../compute/measureHint';
+import type { HintArc, HintDots, HintFaces, HintLine, HintPatch, HintRole, MeasureHint } from '../compute/measureHint';
 import type { Vec3 } from '../core/types';
 import { EASE, VIEW_MOTION } from './easing';
 import type { Viewer } from './viewer';
@@ -20,6 +20,8 @@ const HALO_OPACITY = 0.55;
 /** The grey's edge is fainter: it should read as grey, not as the edge. */
 const OTHER_HALO_OPACITY = 0.45;
 const FACE_OPACITY = { current: 0.36, upper: 0.3, lower: 0.4 };
+/** A piece of a plane: fainter than a piece of the surface, so the surface shows through it. */
+const PATCH_OPACITY = 0.22;
 /** The lower side of a split: a light slate beside the accent. */
 const LOWER_TINT = '#a9c3da';
 /** A label on an angle stands off to the side, or it would cover a small arc. */
@@ -70,7 +72,7 @@ export class HintLayer {
   private labels: CSS2DObject[] = [];
   /** Materials and geometries made for the hint shown. */
   private owned: Array<{ dispose: () => void }> = [];
-  private counted = { lines: 0, dots: 0, arcs: 0, faces: 0, labels: 0 };
+  private counted = { lines: 0, dots: 0, arcs: 0, faces: 0, labels: 0, patches: 0 };
   /** Each material's opacity as a share of its own (it fades in). */
   private fades: Array<(f: number) => void> = [];
   /** Counts the hints shown: a fade belongs to the one it began with. */
@@ -93,6 +95,7 @@ export class HintLayer {
       if (prim.kind === 'line') this.line(prim, colors, origin);
       else if (prim.kind === 'arc') this.arc(prim, colors, origin);
       else if (prim.kind === 'dots') this.dots(prim, colors, origin);
+      else if (prim.kind === 'patch') this.patch(prim, colors, origin);
       else this.faces(prim, colors, position, index);
     }
     if (fadeIn) {
@@ -218,6 +221,25 @@ export class HintLayer {
     this.counted.faces++;
   }
 
+  /** A flat piece of a plane, as a fan from its first corner; seen from both sides, under the lines. */
+  private patch(prim: HintPatch, colors: HintColors, origin: Vec3): void {
+    if (prim.points.length < 3) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.local(prim.points, origin)), 3));
+    const idx: number[] = [];
+    for (let i = 1; i + 1 < prim.points.length; i++) idx.push(0, i, i + 1);
+    g.setIndex(idx);
+    const material = new THREE.MeshBasicMaterial({ color: colors.current, transparent: true, opacity: PATCH_OPACITY, depthWrite: false, depthTest: false, side: THREE.DoubleSide });
+    this.fading(material, PATCH_OPACITY);
+    this.owned.push(g, material);
+    const mesh = new THREE.Mesh(g, material);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = ORDER.faces;
+    this.things.push(mesh);
+    this.group.add(mesh);
+    this.counted.patches++;
+  }
+
   private label(text: string, at: Vec3, role: HintRole, origin: Vec3, center?: [number, number]): void {
     const el = document.createElement('div');
     el.className = `hint-label hint-label-${role}`;
@@ -243,12 +265,12 @@ export class HintLayer {
     this.things = [];
     this.labels = [];
     this.owned = [];
-    this.counted = { lines: 0, dots: 0, arcs: 0, faces: 0, labels: 0 };
+    this.counted = { lines: 0, dots: 0, arcs: 0, faces: 0, labels: 0, patches: 0 };
     this.viewer.requestRender();
   }
 
   /** What is drawn now, for the tests. */
-  counts(): { lines: number; dots: number; arcs: number; faces: number; labels: number } {
+  counts(): { lines: number; dots: number; arcs: number; faces: number; labels: number; patches: number } {
     return { ...this.counted };
   }
 }

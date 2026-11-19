@@ -6,8 +6,9 @@ import { BICONE_ROLES, BICONE_SIDES, CONFIG_FACES, CONFIG_MODELS, CONFIG_ROLES, 
 import { MEASURE_POINTS } from './measurements';
 import { nowIso, uuid } from './ids';
 import { clampFitLength } from '../compute/retouchIndex';
+import { BSA_LEVEL_DEFAULT_MM, bsaSettingsOf, clampBsaLevel } from '../compute/bulb';
 import { GM_TEMPLATE_PARAMETERS } from '../compute/gmTemplate';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, GM_CONFIG_VERSION, RETOUCH_AXES, retouchSettingsOf, type GmConfig, type ImportRecord, type GmCurveListItem, type GmTemplate, type GmTemplatePoint, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, GM_CONFIG_VERSION, RETOUCH_AXES, retouchSettingsOf, type BsaSettings, type GmConfig, type ImportRecord, type GmCurveListItem, type GmTemplate, type GmTemplatePoint, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -65,7 +66,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     nodule: structuredClone(state.nodule),
     split: structuredClone(state.split),
     configuration: structuredClone(state.configuration),
-    flake: { ...structuredClone(state.flake), retouch: { ...retouchSettingsOf(state.flake) } },
+    flake: { ...structuredClone(state.flake), retouch: { ...retouchSettingsOf(state.flake) }, bsa: structuredClone(bsaSettingsOf(state.flake)) },
     sharpEdge: { ...state.sharpEdge },
     gm: structuredClone(state.gm),
     workingEdges: structuredClone(state.workingEdges),
@@ -470,6 +471,15 @@ function parseRetouchSettings(raw: unknown): RetouchSettings | null {
   return fitLength === null && axis === 'auto' && !flip ? null : { fitLength, axis, flip };
 }
 
+/** The BSA's settings, or null for the default (files without them: the default); a level out of range is brought into it, ends that are not two points are dropped. */
+function parseBsaSettings(raw: unknown): BsaSettings | null {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const level = typeof r.level === 'number' && Number.isFinite(r.level) ? clampBsaLevel(r.level) : BSA_LEVEL_DEFAULT_MM;
+  const e = r.ends;
+  const ends = Array.isArray(e) && e.length === 2 && isFiniteVec(e[0]) && isFiniteVec(e[1]) ? ([[e[0][0], e[0][1], e[0][2]], [e[1][0], e[1][1], e[1][2]]] as [Vec3, Vec3]) : null;
+  return level === BSA_LEVEL_DEFAULT_MM && !ends ? null : { level, ends };
+}
+
 /** A flake's own data (files without it: none). An axis without numeric ends is dropped. */
 function parseFlake(raw: unknown): FlakeData {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -478,8 +488,10 @@ function parseFlake(raw: unknown): FlakeData {
   const normal = (v: unknown): Vec3 => (isFiniteVec(v) ? normalize(v) : [0, 0, 1]);
   const m = a?.matrix;
   const retouch = parseRetouchSettings(r.retouch);
+  const bsa = parseBsaSettings(r.bsa);
   return {
     ...(retouch ? { retouch } : {}),
+    ...(bsa ? { bsa } : {}),
     axis: a && isFiniteVec(a.start) && isFiniteVec(a.end)
       ? {
           id: str(a.id) || uuid(),

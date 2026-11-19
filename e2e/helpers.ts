@@ -42,6 +42,9 @@ export interface LithicApi {
     geometry: import('../src/compute/flake').FlakeGeometry | null;
     parameters: unknown;
     platformAuto: Vec3 | null;
+    /** The bulb as last measured (its level, ends, outline, strips), and the ventral reference plane. */
+    bulb: import('../src/compute/flake').BulbConstruction | null;
+    plane: import('../src/compute/bulb').BulbPlane | null;
   } | null;
   sectionPanel(): { shown: boolean; at: number; width: number | null; thickness: number | null; ring: number };
   exportFlakesCsvText(): string;
@@ -116,9 +119,17 @@ export interface LithicApi {
   measureHint(): {
     key: string | null;
     pinned: string | null;
-    prims: Array<{ kind: 'line' | 'dots' | 'arc' | 'faces'; part: string; role: string; label: string | null; points: Vec3[] | null }>;
-    drawn: { lines: number; dots: number; arcs: number; faces: number; labels: number } | null;
+    prims: Array<{ kind: 'line' | 'dots' | 'arc' | 'faces' | 'patch'; part: string; role: string; label: string | null; points: Vec3[] | null }>;
+    drawn: { lines: number; dots: number; arcs: number; faces: number; patches?: number; labels: number } | null;
     labels: string[];
+  };
+  /** Shading by height: the shading, its reference plane and those offered, its range, and how many contour segments (thin, the BSA level's thick). */
+  heightShading(): {
+    shading: string;
+    reference: string | null;
+    references: Array<{ value: string; label: string }>;
+    range: { value: number; min: number; max: number; step: number; unit: string };
+    contours: { thin: number; thick: number; shown: boolean } | null;
   };
   nodule(): (import('../src/compute/sphere').SphereFit & { regions: string[] }) | null;
   exportRegionsCsvText(): string;

@@ -2408,6 +2408,16 @@ input[type="checkbox"]:disabled {
   color: var(--ink-3);
 }
 
+/* said beside a value, faintly (the BSA's level) */
+.measure-aside {
+  color: var(--ink-3);
+}
+
+/* a row that is no measure of the specimen (the mesh's resolution): it recedes */
+.num-grid .is-quiet {
+  color: var(--ink-3);
+}
+
 /* a value with nothing in it: the whole row, or the cell, recedes; "—" stays */
 .num-grid .is-missing,
 .measure-table .is-missing {
@@ -4650,6 +4660,77 @@ input[type="checkbox"]:disabled {
 
 .profile-slider {
   width: 100%;
+}
+
+/* the bulb angle on the longitudinal section */
+.profile-bulb {
+  fill: #c8611f;
+}
+
+.profile-bulb-line,
+.profile-bulb-chord,
+.profile-bulb-arc {
+  fill: none;
+  stroke: #c8611f;
+  stroke-width: 1.2;
+}
+
+.profile-bulb-chord {
+  stroke-width: 2.4;
+}
+
+/* the panel's two pages, in its title bar */
+.profile-page-switch {
+  margin-left: auto;
+}
+
+/* the bulb page: lines of equal height by their colour, the level's thicker; the strips, the lines to the ends, the angle */
+.bulb-contour {
+  fill: none;
+  stroke-width: 1;
+}
+
+.bulb-contour.is-level {
+  stroke-width: 2.6;
+}
+
+.bulb-strip {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+
+.bulb-line,
+.bulb-arc {
+  fill: none;
+  stroke: #1f9e89;
+  stroke-width: 1.4;
+}
+
+.bulb-end {
+  fill: var(--accent);
+  stroke: var(--ink);
+  stroke-width: 1;
+  cursor: grab;
+}
+
+.bulb-apex {
+  fill: #c8611f;
+}
+
+.bulb-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bulb-controls .ctl-input {
+  width: 6em;
+}
+
+.bulb-drawing {
+  touch-action: none;
 }
 
 .profile-readings {

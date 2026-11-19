@@ -27,9 +27,9 @@ test('the stepped tool: the indices of two layers and of one, and of another fit
   expect(r.erp_filled_share).toBeLessThan(0.05);
   expect(r.giur_stations).toBe(r.stations.length);
 
-  // flakes.csv ends with the fifteen columns
+  // flakes.csv: the fifteen columns, before the proximal end's ten
   const flakes = await exportFile(page, 'flakes');
-  expect(flakes.text.trim().split('\n')[0].split(',').slice(-15)).toEqual(NEW_COLUMNS);
+  expect(flakes.text.trim().split('\n')[0].split(',').slice(-25, -10)).toEqual(NEW_COLUMNS);
   const [row] = parseCsv(flakes.text);
   expect(row.retouch_axis).toBe('longest');
   expect(row.retouch_fit_length).toBe('5');

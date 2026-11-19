@@ -69,7 +69,7 @@ test('hovering technical length: the axis, the box and three lines; gone when th
 
   await away(page);
   await expect.poll(() => shown(page)).toBeNull();
-  expect((await hint(page)).drawn).toEqual({ lines: 0, dots: 0, arcs: 0, faces: 0, labels: 0 });
+  expect((await hint(page)).drawn).toEqual({ lines: 0, dots: 0, arcs: 0, faces: 0, patches: 0, labels: 0 });
   await expect(page.locator('.hint-label')).toHaveCount(0);
 
   // a click fixes it

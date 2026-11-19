@@ -1,6 +1,7 @@
 import type { RetouchAngleCurve } from '../core/derived';
 import { isBicone, type CoreConfiguration } from '../compute/bicone';
-import { FLAKE_MEASURES, type FlakeMeasures } from '../compute/flake';
+import { FLAKE_MEASURES, FLAKE_PROXIMAL_COLUMNS, type FlakeMeasures } from '../compute/flake';
+import { bsaSettingsOf } from '../compute/bulb';
 import { techAngleDeg } from '../compute/technicalFrame';
 import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
@@ -253,15 +254,20 @@ export const RETOUCH_FLAKE_COLUMNS = ['retouch_axis', 'retouch_fit_length', ...R
 
 /**
  * One row per flake: where its frame came from, and its measurements (empty where there is no value; lengths in the specimen's unit), then
- * its retouch indices (`retouch`: null when they have not been computed; left out: the measurements alone).
+ * its retouch indices (`retouch`: null when they have not been computed; left out: the measurements alone), then the proximal measures:
+ * PSIA, the bulb angle, the BSA with its level and whether its ends were set by hand (`true` / `false`), the vertical intervals and the
+ * mesh's mean edge length round P.
  */
-export function flakesCsv(state: Readonly<ProjectState>, measures: FlakeMeasures | null, opts: CsvOptions, retouch?: RetouchIndices | null): string {
+export function flakesCsv(state: Readonly<ProjectState>, measures: Partial<FlakeMeasures> | null, opts: CsvOptions, retouch?: RetouchIndices | null): string {
   const header: string[] = ['specimen_id', 'unit', 'frame_source', ...FLAKE_MEASURES];
   const row = [csvCell(state.specimen.id), csvCell(state.specimen.unit), csvCell(frameSource(state)), ...FLAKE_MEASURES.map((k) => cell(measures?.[k] ?? null))];
   if (retouch !== undefined) {
     header.push(...RETOUCH_FLAKE_COLUMNS);
     row.push(retouch?.axis ?? '', cell(retouch?.fitLength ?? null), ...RETOUCH_SUMMARY.map((k) => cell(retouch?.[k] ?? null)));
   }
+  const bsa = bsaSettingsOf(state.flake);
+  header.push(...FLAKE_PROXIMAL_COLUMNS);
+  row.push(...FLAKE_PROXIMAL_COLUMNS.map((k) => (k === 'bsa_level_mm' ? fmt(bsa.level) : k === 'bsa_ends_moved' ? String(!!bsa.ends) : cell(measures?.[k] ?? null))));
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
 }
 

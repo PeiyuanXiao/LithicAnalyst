@@ -302,7 +302,7 @@ A row of a measure in the measure mode shows on the model how it was taken. What
 * `compute/measureHint.ts` (pure) turns those into a `MeasureHint`: lines, dots, arcs and pieces of surface, each `current` (the measure of the row) or `other` (the rest of the drawing). An arc carries its vertex and its two directions, so the tests can read the angle back. An empty value gives null. `MEASURE_HINT_PARAMETERS` holds the delay and the shares that size arcs and such.
 * `render/hintLayer.ts` draws one in the overlay (so figures leave it out): `Line2` lines of a constant width on the screen, point sprites, CSS labels that let the pointer through, all without a depth test and over everything else. Pieces of surface share the mesh's vertex buffer; the platform shows through the model, a whole model or a split's two sides are tinted where they are seen (seen through, they would only add up to a blur).
 * `App`: `hoverHint` (after `HOVER_MS`), `focusHint` (the keyboard's, `:focus-visible`), `pinHint`; the first of hover, focus and pinned is drawn (`syncHint`, from `hintOf`, which goes by the key `group:item` the row has in `data-hint`). `refreshHint` runs when what it draws from changes; `clearHints` on another mode, specimen or type. `hintMuted` keeps a row just let go from coming straight back under the pointer. A curve's row of edge angles has no pin: a click selects the curve, as ever.
-* `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks). The automatic measures are in groups (`measureGroup`; a flake's: technical axis, morphology, platform, whole; a core's and a generic specimen's: dimensions, whole); platform width and depth and the EPA are small tables (`measureTable`), each cell a measure of its own with its key and its focus. The export order is the order on screen.
+* `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks). The automatic measures are in groups (`measureGroup`; a flake's: technical axis, morphology, whole, proximal end; a core's and a generic specimen's: dimensions, whole); platform width and depth, the EPA, the bulb angle and VI are small tables (`measureTable`), each cell a measure of its own with its key and its focus. The export order is the order on screen.
 
 ## Specimen frame
 
@@ -547,6 +547,59 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
   `App.moveProfile` cuts at most once a frame (`crossSectionAt`), `ringLayer` (a solid `BorderLayer`) shows it on the model. Its place and the
   position of the slider are view state, never in the file.
 
+## The proximal end
+
+PSIA, the bulb angle, BSA, VI and the mesh's edge at P are flake measures like the rest: `flakeMeasuresSteps` computes them with the others,
+each with its construction, `FLAKE_EMPTY_REASONS` (now also `no_ventral`, `no_bulb`, `bulb_one_side`) says why one is empty, and
+`derived.flake.measures` keeps the latest. The bulb's own work is in `compute/bulb.ts` (pure, in steps); its named constants go into
+`FLAKE_PARAMETERS`.
+
+* **PSIA**: the angle at P between the lines to the two platform ends, in 3D (`construction.psia`). It needs P and both ends, not a unit.
+* **Bulb angle**: `platformProfile` walks the ventral side of the long section from the start of its platform stretch: three points to the
+  point `BULB_ANGLE_DISTANCE_MM` along it, two lines by the chord `TWO_LINES_LENGTH_MM` long centred there; both measured from the platform
+  line's direction, as IPA. The profile panel draws them on the long section.
+* **Reference plane** (`referencePlaneSteps`): least squares over the ventral face's surface (each triangle by its area and its own second
+  moments, so the mesh's density does not weigh), its normal away from the dorsal face (−Z of the technical frame), `y` the technical +Y laid
+  on it, `x` = normal × `y`. The ventral face is the upper-layer region of that type, as the regions cut it (`App.ventralFaces`).
+* **The main bulb** (`bulbSteps`): the heights of the ventral vertices over the plane; the vertices at or above the level L
+  (`state.flake.bsa.level`, mm) joined along the triangles' edges (union–find) into parts; the main bulb is the part that comes nearest P,
+  within `BSA_NEAR_POP_MM` (of two as near, the larger). Its outline is the iso-line at L on the triangles round it (marching triangles, the
+  segments joined into lines), not the region's border.
+* **Ends and BSA**: as seen from P laid on the plane, the outline's points farthest round from +Y each way (azimuths `atan2(x, y)`, left
+  first). Both must lie on their own side of the axis, else `bulb_one_side`. BSA is the angle at P between the lines to the two ends, on the
+  plane. `state.flake.bsa.ends` (set on the bulb page) stands instead, whatever the outline does; `bsa_ends_moved` says so in flakes.csv.
+* **VI**: for each of `VI_WIDTHS_MM`, the strip `w` wide along `y` from P to the bulb's top (its highest vertex); the ventral triangles over
+  the strip are rasterised onto samples `VI_SAMPLE_MM` apart (the outermost surface where several lie over a sample), and VI is the range of
+  the heights. Each strip returns its corners and its highest and lowest samples, for the hint and the bulb page.
+* **Mesh at P** (`meshEdgeNearSteps`): the mean length of the mesh's edges with both ends within `POP_MESH_RADIUS_MM` of P, from the edge table
+  built once a model. It says how far the bulb's numbers can be trusted; the list shows it receding.
+* **Settings**: `setBsaLevel` (clamped to `BSA_LEVEL_RANGE_MM`, `BSA_LEVEL_STEP_MM`) and `setBsaEnds` are `SetFlakeCommand`s; changes of the
+  level within `MERGE_WINDOW_MS` make one undo step. A flake without `bsa` uses `defaultBsaSettings()`.
+* **Measure list**: the flake's groups are technical axis, morphology, whole, proximal end; the proximal end lists platform width and depth,
+  platform area, EPA, IPA, PSIA, the bulb angle (a table: three points, two lines), BSA with its level before it, VI (a table: 0.5, 1.0,
+  1.5 mm) and the mesh's edge at P. Each cell's hint draws only the returned geometry: PSIA's lines and arc; the bulb angle's points, chord and
+  arc; BSA's plane (a `patch` prim), outline, ends, lines and arc; VI's strip, its top and its highest and lowest samples; the mesh's edges
+  round P.
+
+### Shading by height
+
+`display.shading = 'height'` colours each vertex by its height over a reference plane (`heightsSteps`, then `heightColors`, the diverging map:
+blue below, orange above, a pale grey on the plane) within ± the range. The references are the ventral reference plane (flakes) and every valid
+fitted plane (`App.heightReferences`); the choice and the range are display settings in the preferences, never in the file. The range is in
+mm when the unit is stated (`HEIGHT_RANGE_MM`), else `HEIGHT_RANGE_DIAGONAL` of the model's diagonal. Lines of equal height
+(`isoSegmentsSteps`) at k·`HEIGHT_CONTOUR_SHARE`·range for k = −2…2, and on the ventral plane the BSA level too, thicker, go to
+`render/contourLayer.ts` (`LineSegments2`, in the overlay like the hints). `App.updateHeightShading` reruns in slices when the plane, range,
+level or model changes.
+
+### The bulb page
+
+The profile panel has two pages (`profile-page`: sections, bulb; view state). `ui/bulbPage.ts` draws the bulb seen along the reference
+plane's normal, +Y up: the lines of equal height over a window round the bulb and P (`windowContoursSteps`, `bulbWindow`; at most
+`WINDOW_CONTOUR_MAX` levels, else the interval doubles), the level's outline thicker, P, the two ends, the lines to them and the arc, the top,
+the VI strips and a scale bar. The level box sets `bsa.level` on change; an end dragged lets go onto the outline (Shift: onto the ventral
+surface under the pointer, `surfaceOverSteps`, in slices) and `App.dropBulbEnd` keeps the other end where it is; "Reset" clears `bsa.ends`. Why there is no
+bulb shows as a warning pill. The page has no image export.
+
 ## Edge angles
 
 A flake's (`hasEdgeAngles`). `compute/edgeAngle.ts` is pure: `referenceCurve`, then per station a section (`sectionByPlane` with a `SectionReach`: the BVH, `render/bvhPlane.ts`, also prunes by the
@@ -724,6 +777,13 @@ stored coordinates never do, and each import is recorded in the project (`Projec
   `assign` (Hungarian method with a distance limit), `cohenKappa`, `fleissKappa`, `icc21`,
   `curveDistance`, `compareObservers` (the long table) and `summarize`. It reruns, debounced,
   after any change while the mode is shown.
+* A flake's own measures (`AGREEMENT_FLAKE_MEASURES`: those of flakes.csv but the retouch indices,
+  the BSA's level and moved ends and the mesh's edge at P) are measurement rows after length, width,
+  thickness, the region areas and the cortex ratio, in that order, named as the measure list names
+  them (`flake.<key>`). The open project's are its latest; another observer's are those its file
+  stored (`storedFlakeMeasures`), else `App.observerFlake` computes them from its own axis, ends,
+  regions, unit and BSA settings, in slices, and keeps them while those stay the same. icc.csv takes the
+  same keys from each file's `derived.flake.measures`.
 
 ## Cortex sphere
 
@@ -838,7 +898,7 @@ Harris matrix) are downloads as before (`io/saveFile.ts`).
   its own copy.
 * `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
-  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The longest stretch is what
+  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The proximal end (reference plane, bulb, BSA, VI, the mesh at P, shading by height and the bulb page's lines) is timed on T8 (`tests/meshes.ts`) made as dense (rings 0.02 mm apart). The longest stretch is what
   design principle 10 limits to about 100 ms.
 
 ## Interface text

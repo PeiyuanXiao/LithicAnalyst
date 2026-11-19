@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { convexHull } from '../src/compute/convexHull';
-import { emptyFlakeMeasures, FLAKE_PARAMETERS, flakeMeasures, FLAKE_MEASURES, morphDimensions, morphTechAngle, type FlakeMeasure, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
+import { ALL_FLAKE_MEASURES, emptyFlakeMeasures, FLAKE_PARAMETERS, flakeMeasures, FLAKE_MEASURES, morphDimensions, morphTechAngle, type FlakeMeasure, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
 import { buildEdges } from '../src/compute/meshGeometry';
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
 import { regionPlane } from '../src/compute/planes';
@@ -469,8 +469,10 @@ describe('why a measure is empty', () => {
 
   it('nothing is empty on a flake annotated in full', () => {
     const r = run();
-    expect(r.reasons).toEqual({});
+    // (T1 is given no ventral face here: the bulb's measures are T8's, in tests/bulb.test.ts)
+    expect(r.reasons).toEqual({ bsa: 'no_ventral', vi_0_5mm: 'no_ventral', vi_1_0mm: 'no_ventral', vi_1_5mm: 'no_ventral' });
     for (const k of FLAKE_MEASURES) expect(r.measures[k]).not.toBeNull();
+    for (const k of ['psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'pop_mesh_edge'] as const) expect(r.measures[k]).not.toBeNull();
   });
 
   it('no stated unit: the EPAs, not the IPA', () => {
@@ -526,6 +528,6 @@ describe('why a measure is empty', () => {
   });
 
   it('the reasons are not in the measures, so neither in the file nor in the tables', () => {
-    expect(Object.keys(run({ platform: false }).measures)).toEqual([...FLAKE_MEASURES]);
+    expect(Object.keys(run({ platform: false }).measures)).toEqual([...ALL_FLAKE_MEASURES]);
   });
 });

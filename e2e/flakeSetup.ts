@@ -25,6 +25,13 @@ export async function drawAxis(page: Page): Promise<void> {
 export async function drawOutline(page: Page): Promise<void> {
   await page.evaluate(() => window.lithicanalyst.view([0, -0.98, 0.196], [0, 0.196, 0.98]));
   await nextFrames(page);
+  // the profile panel, open since the axis, lies over the face's right-hand corners: folded while the outline is drawn
+  const profile = page.locator('#profile-panel');
+  const fold = (await profile.isVisible()) && !(await profile.evaluate((e) => e.classList.contains('is-collapsed')));
+  if (fold) {
+    await page.locator('#profile-fold').click();
+    await expect(page.locator('#profile-body')).toBeHidden();
+  }
   await page.keyboard.press('p');
   const corner = (x: number, f: number): Vec3 => [x, -2 * f, 10 * f];
   // Shift: no snapping; a little inside the corners
@@ -40,6 +47,7 @@ export async function drawOutline(page: Page): Promise<void> {
   await page.keyboard.press('v');
   await page.keyboard.press('5');
   await expect.poll(async () => (await state(page)).curves[0].attributes.type).toBe('platform_outline');
+  if (fold) await page.locator('#profile-fold').click();
 }
 
 /** The two platform ends placed by hand, beside the outline's corners, with no edge yet to give them (as a file from before they followed the curves has them). */

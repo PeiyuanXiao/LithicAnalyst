@@ -153,7 +153,7 @@ test('a flake: the measures in groups; platform width and depth 2 × 2, EPA 2 ×
 
   // the groups, their titles in the data face
   const titles = page.locator('#flake-measures .measure-group-title');
-  await expect(titles).toHaveText(['Technological axis', 'Morphology', 'Platform', 'Whole']);
+  await expect(titles).toHaveText(['Technological axis', 'Morphology', 'Whole', 'Proximal end']);
   expect(await titles.first().evaluate((e) => ({ font: getComputedStyle(e).fontFamily, size: getComputedStyle(e).fontSize, spacing: getComputedStyle(e).letterSpacing, color: getComputedStyle(e).color }))).toMatchObject({ size: '10.5px', color: ink3 });
   expect(await titles.first().evaluate((e) => getComputedStyle(e).fontFamily)).toContain('Plex Mono');
 

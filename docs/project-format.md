@@ -326,7 +326,8 @@ the type deletes nothing: the other type's data stay in the file and come back w
   "axis": { "id": "…", "start": [0, 0, 0], "end": [0, 40, 0], "startNormal": [0, 0, -1], "endNormal": [0, 0, -1],
             "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], "failure": null, "createdAt": "…", "modifiedAt": "…" },
   "otherFrame": null,
-  "retouch": { "fitLength": null, "axis": "auto", "flip": false }
+  "retouch": { "fitLength": null, "axis": "auto", "flip": false },
+  "bsa": { "level": 0.1, "ends": null }
 }
 ```
 
@@ -355,9 +356,15 @@ the type deletes nothing: the other type's data stay in the file and come back w
   the platform outline leave a way round, and neither is assigned). So the edge is open with its ends on a platform outline, and closed where there is none.
 * A region with `auto: true` follows those annotations, and its `seed` says nothing. Given another type by hand it becomes an ordinary region
   at that place; a region the user has typed in that piece stands instead. These regions are the flake's: a core neither shows nor exports them.
+* `bsa`: the settings of the bulb surface angle. `level` (mm, −1 to 1 in steps of 0.01; default `BSA_LEVEL_DEFAULT_MM` 0.1): the level
+  above the ventral reference plane at which the bulb's outline is taken. `ends` (null: the outline's own): the two ends of the angle set by
+  hand on the bulb page, original coordinates on the ventral surface, left (−X) first; once one is moved both are kept, and they stand
+  whatever the level or the outline does. Absent (files from before, or a flake left at the defaults): `{ "level": 0.1, "ends": null }`.
+  Saving writes it always.
 
 **Derived** (`derived.flake`): `parameters`, `frameSource`, `measures` and `geometry` (points of the measures, for the
-profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ventral`, `ventralLine`).
+profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ventral`, `ventralLine`,
+`bulbAt`, `bulbQ`, `bulbChord`; the last three absent in files from before).
 
 Lengths are in the coordinate unit. Millimetre parameters are converted by `specimen.unit`; without a stated unit
 what needs them is not measured.
@@ -376,6 +383,12 @@ what needs them is not measured.
 | `epa_3pt_1mm`, `_2mm`, `_3mm` | EPA, three points: between E→P along the platform line and E→Q_d |
 | `epa_2ln_1mm`, `_2mm`, `_3mm` | EPA, two lines: between E→P along the platform line and the tangent at Q_d, away from E |
 | `ipa` | between the platform line (P→E) and the line fitted to the ventral profile |
+| `psia` | platform surface interior angle, PSIA (McPherron et al. 2020): the angle at P between the lines to the two platform ends, in 3D; no unit needed |
+| `bulb_angle_3pt_1mm` | bulb angle, three points (Li et al. 2022): at the platform stretch's near end, between the platform line (P→E) and the line to Q_v |
+| `bulb_angle_2ln_1mm` | bulb angle, two lines: between the platform line (P→E) and the tangent at Q_v, away from the platform |
+| `bsa` | bulb surface angle (Nagai 2026): the angle at P, on the ventral reference plane, between the lines to the bulb outline's two ends |
+| `vi_0_5mm`, `vi_1_0mm`, `vi_1_5mm` | vertical interval (Nagai 2026): the range of the ventral surface's heights over the reference plane in a strip 0.5, 1.0, 1.5 mm wide from P to the bulb's top |
+| `pop_mesh_edge` | the mean length of the mesh's edges with both ends within `POP_MESH_RADIUS_MM` of P (how fine the mesh is where the bulb is measured) |
 
 * **S**, the longitudinal section: where the plane X = 0 cuts the mesh, the line nearest P.
 * **The platform stretch**: the part of S on the platform region nearest P; its end nearer P must be within
@@ -387,10 +400,25 @@ what needs them is not measured.
 * **IPA's line**: from the stretch's near end along S away from it (the ventral side), up to S's largest Y, the part with
   Y in `IPA_BAND` × `tech_length`, resampled and fitted the same way, directed +Y. It keeps off the bulb and the distal curve.
 * A line takes `MIN_FIT_POINTS` (2) points before resampling: a platform stretch always gives one, as does any part of the ventral side within the band (with the points where the band begins and ends). No such part: no IPA. Fewer than two ends: the two widths are empty.
+* **Q_v**: from the platform stretch's near end along S away from it (the ventral side), arc length `BULB_ANGLE_DISTANCE_MM` (1.0);
+  the tangent there as for Q_d. Empty when S ends first.
+* **The ventral reference plane**: the least-squares plane of the ventral region's surface (each triangle by its area and its own second
+  moments), normal away from the dorsal face. **Height**: the distance above it, outward positive.
+* **The main bulb**: the ventral vertices at or above the level (`bsa.level`) joined along the triangles' edges into parts; the part that
+  comes nearest P, within `BSA_NEAR_POP_MM` (2) (of two as near, the larger). **Its outline**: where the triangles round it cross the level.
+  **Its ends**: seen from P laid onto the plane, the outline's points farthest round from the technical +Y (laid onto the plane) each way;
+  both must lie on their own side of +Y. **Its top**: its highest vertex.
+* **VI's strips**: on the plane, from P to the top, `VI_WIDTHS_MM` [0.5, 1.0, 1.5] wide, sampled every `VI_SAMPLE_MM` (0.02) (where
+  several layers of the surface lie over a sample, the outermost).
+* Empty: without a unit, the bulb angle, BSA, VI and `pop_mesh_edge` (`no_unit`); without a ventral region, BSA and VI (`no_ventral`); with
+  no part near P, or no outline, BSA and VI (`no_bulb`); with both ends on one side, BSA (`bulb_one_side`). Ends set by hand give a BSA
+  whatever the outline.
 * **Paths** run on the region's triangles only: the shortest way over its mesh edges; then, on the triangles that way passes
   through, over 3 points on each side, those crossings pulled taut.
 * `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `FIT_RESAMPLE_COUNT` 200,
-  `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND` [0.25, 0.75], `MIN_FIT_POINTS` 2, `PLATFORM_START_EDGES` 3.
+  `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND` [0.25, 0.75], `MIN_FIT_POINTS` 2, `PLATFORM_START_EDGES` 3,
+  `BULB_ANGLE_DISTANCE_MM` 1, `BSA_LEVEL_DEFAULT_MM` 0.1, `BSA_LEVEL_RANGE_MM` [−1, 1], `BSA_NEAR_POP_MM` 2, `VI_WIDTHS_MM` [0.5, 1, 1.5],
+  `VI_SAMPLE_MM` 0.02, `POP_MESH_RADIUS_MM` 2.
 
 ## Edge angles
 
@@ -818,10 +846,12 @@ Flakes (`<specimen>_flakes.csv`, one row per flake, empty where there is no valu
 `specimen.frame.source`, or `principal` without a frame):
 
 ```
-specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth
+specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth,psia,bulb_angle_3pt_1mm,bulb_angle_2ln_1mm,bsa,bsa_level_mm,bsa_ends_moved,vi_0_5mm,vi_1_0mm,vi_1_5mm,pop_mesh_edge
 ```
 
-The last fifteen are the retouch indices, see "Retouch indices": `retouch_axis` `technical` or `longest`, empty without a frame; `retouch_fit_length` in mm; lengths in the unit, `removed_volume` in unit³; shares as decimals from 0 to 1.
+The fifteen from `retouch_axis` to `edge_curvature_depth` are the retouch indices, see "Retouch indices": `retouch_axis` `technical` or `longest`, empty without a frame; `retouch_fit_length` in mm; lengths in the unit, `removed_volume` in unit³; shares as decimals from 0 to 1.
+
+The last ten are the proximal end, see "Flakes": `psia`, `bulb_angle_3pt_1mm`, `bulb_angle_2ln_1mm`, `bsa` in degrees; `bsa_level_mm` the level the BSA was taken at (mm); `bsa_ends_moved` `true` when its ends were set by hand, else `false`; `vi_0_5mm`, `vi_1_0mm`, `vi_1_5mm` in mm; `pop_mesh_edge` in the unit.
 
 Retouched stations (`<specimen>_retouch_sections.csv`, one row per retouched station; `station` counts from 0; `segment` the segment of A, 1 to 8, on the plan, whichever face; `x`, `y` A on the plan; `removed_area` in unit²; `filled` `true` when that area comes from the stations on either side, and then `original_angle_deg` and `recession` are empty; `retouch_height`, `thickness`, `giur` empty where the station takes no part in GIUR; `working_edge` the label of the working edge it belongs to, empty when in none or on a curve without any):
 
@@ -1036,7 +1066,9 @@ specimen), and — with several observers per model, told apart by `specimen.ann
 `icc.csv`: `measure,n_specimens,n_raters,icc` (ICC(2,1), two-way random, absolute agreement,
 single rater; over the specimens every observer measured; measures: length, width, thickness
 along each observer's frame, cortex_ratio, nodule_radius, volume_ratio from the stored derived
-results, and manual measurements by label). A model that cannot be read or measured is left out
+results, manual measurements by label, and of flakes the measures of `derived.flake.measures` by their
+column names, those of flakes.csv but the retouch indices, `bsa_level_mm`, `bsa_ends_moved` and
+`pop_mesh_edge`). A model that cannot be read or measured is left out
 and listed in `failures`. The stored results of a model's project files are used instead of
 reading the model when every one of them was written by the same version of the app and holds
 `derived.measurements` (and `derived.vertices` when it has planes); the tables are the same

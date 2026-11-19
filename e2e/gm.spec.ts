@@ -30,6 +30,8 @@ async function drawAxis(page: Page): Promise<void> {
 /** The outline round the P–E face, and the edge along the ventral face's boundary; its ends give the platform's, and without them it stops well short of the outline. */
 async function annotate(page: Page, ends = true): Promise<void> {
   await drawAxis(page);
+  // the profile panel, open since the axis, lies over the face's right-hand corners
+  if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
   await page.evaluate(() => window.lithicanalyst.view([0, -0.98, 0.196], [0, 0.196, 0.98]));
   await nextFrames(page);
   await page.keyboard.press('p');
@@ -47,7 +49,6 @@ async function annotate(page: Page, ends = true): Promise<void> {
   if (ends) {
     for (const x of [-14.9, 14.9]) await page.evaluate((p) => window.lithicanalyst.placePlatformEnd(p), [x, -0.02, 0.1] as Vec3);
   }
-  if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [-1, 0, 0]));
   await nextFrames(page);
   await page.keyboard.press('p');

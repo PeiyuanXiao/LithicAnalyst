@@ -36,6 +36,10 @@ import { emptyProject } from '../src/core/store';
 import { defaultRetouchSettings, type Curve, type ProjectState, type Scar, type Vec3 } from '../src/core/types';
 import { buildLoadedMesh } from '../src/io/loadMesh';
 import { SurfaceSnap } from '../src/tools/surfaceSnap';
+import { BSA_LEVEL_DEFAULT_MM, bulbSteps, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, referencePlaneSteps, surfaceOverSteps, windowContoursSteps } from '../src/compute/bulb';
+import { heightColors } from '../src/compute/colormap';
+import { buildEdgesSteps } from '../src/compute/meshGeometry';
+import { flakeT8 } from '../tests/meshes';
 
 const rows: Array<{ label: string; total: number; longest: number }> = [];
 
@@ -340,8 +344,37 @@ async function benchGenerated(triangles: number): Promise<void> {
       return regionTree.closest(c);
     }));
   }
+  benchProximal(triangles);
   console.log('');
   report();
+}
+
+/**
+ * ⑫ The proximal end, on T8 (tests/meshes.ts: a flake with a bulb, in mm) made as dense as the model above: the ventral reference plane,
+ * the bulb (its outline, BSA, VI), the mesh round P, shading by height (heights, colours, lines) and the bulb page's lines.
+ */
+function benchProximal(triangles: number): void {
+  // ventral + dorsal ≈ 4 × rings × arcs triangles, rings 0.02 mm apart over T8's 20 mm
+  const step = 0.02, arcs = 2 * Math.round(triangles / (4 * (20 / step)) / 2) + 1;
+  const t8 = flakeT8(false, { step, arcs });
+  const { positions: pos, index: idx, ventral } = t8;
+  console.log(`T8: ${idx.length / 3} triangles, ${ventral.length} of them ventral`);
+  const P: Vec3 = [0, 0, 0];
+  const plane = steps('12a the ventral reference plane', referencePlaneSteps(pos, idx, ventral, [0, 0, -1], [0, 1, 0]));
+  if (!plane) throw new Error('no ventral plane');
+  const bulb = steps('12b the bulb: outline, ends, BSA, VI', bulbSteps({ positions: pos, index: idx, faces: ventral, plane, P, mm: 1, level: BSA_LEVEL_DEFAULT_MM, ends: null }));
+  console.log(`BSA ${bulb.bsa?.toFixed(2)}°, VI ${bulb.vi?.map((s) => s.value?.toFixed(3)).join(' / ')} mm`);
+  const edges = steps("12c the mesh's edges (once a model)", buildEdgesSteps(idx, pos.length / 3));
+  steps(`12d mean edge within ${POP_MESH_RADIUS_MM} mm of P`, meshEdgeNearSteps(pos, idx, P, POP_MESH_RADIUS_MM, edges));
+  steps('12e an end let go off the outline (Shift): the surface over it', surfaceOverSteps(pos, idx, ventral, plane, 1, 2));
+  const heights = steps('12f shading by height: each vertex\'s height', heightsSteps(pos, plane.point, plane.normal));
+  const range = HEIGHT_RANGE_MM.default;
+  once('12g its colours', () => heightColors(heights, range));
+  const interval = HEIGHT_CONTOUR_SHARE * range;
+  const levels = [-2, -1, 0, 1, 2].map((k) => k * interval);
+  const lines = steps('12h its lines (5 levels and the BSA level, every triangle)', isoSegmentsSteps(pos, idx, heights, [...levels, BSA_LEVEL_DEFAULT_MM]));
+  console.log(`${lines.reduce((n, l) => n + l.length / 6, 0)} contour segments`);
+  if (bulb.extent) steps('12i the bulb page\'s lines', windowContoursSteps(pos, idx, ventral, plane, bulb.P0, bulbWindow(bulb.extent, 1), interval, BSA_LEVEL_DEFAULT_MM));
 }
 
 const arg = process.argv[2];

@@ -93,7 +93,7 @@ Requires Node.js ≥ 20.
 |:-----------------------------------|:-----------------------------------|
 | Dimensions | Length, width and thickness along a flake’s technological axis or the specimen’s orientation; morphological length, width and thickness |
 | Surface area, volume | Of the whole model (volume on closed meshes only) |
-| Platform | Width and depth (straight and along the surface), area; exterior platform angle (EPA, up to 3 mm from the edge as in Grosman et al., 2022) and interior platform angle (IPA) |
+| Platform and bulb | Width and depth (straight and along the surface), area; exterior platform angle (EPA, up to 3 mm from the edge as in Grosman et al., 2022), interior platform angle (IPA) and platform surface interior angle (PSIA; McPherron et al., 2020); bulb angle at 1 mm (Li et al., 2022); bulb surface angle (BSA) and vertical interval (VI) of the bulb (Nagai, 2026) |
 | Edge angles | Every 1 mm along an edge, at 2, 5 and 10 mm from it, by the three-point and two-line methods (Schunk et al., 2023); means per working edge; the parts of an edge sharper than a threshold |
 | Volumetric configuration | Cores: faciality, flaking surfaces and their relations, platforms and polarity, on a box or bicone model, drawing on the Logical Analytical System |
 | Manual | Distances (straight and along the surface), angles, sections |
@@ -116,7 +116,7 @@ Requires Node.js ≥ 20.
 | Semilandmarks | Along curves; on surfaces, a grid in a flake’s technological frame, or points laid on a template and carried to every specimen by thin-plate spline |
 | Landmark exports | TPS, 3D Slicer `.fcsv` and CSV, with sliding definitions for geomorph and Morpho |
 | Figures | Six orthographic views with a scale bar, as PNG or SVG; for one specimen or a folder |
-| Compare | Agreement between observers: matched arrows and curves, region overlap, Cohen’s and Fleiss’ κ, ICC |
+| Compare | Agreement between observers: matched arrows and curves, region overlap, flake measures, Cohen’s and Fleiss’ κ, ICC |
 | Folders | Every model of a folder, its project files kept alongside, and summary exports |
 | IGES import | Scar vectors drawn in other programs, from IGES line segments; placed on the model by pairs of points (Kabsch, by Horn, 1987) and a trimmed point-to-plane ICP (Chen & Medioni, 1992; Chetverikov et al., 2002), the model never moved |
 

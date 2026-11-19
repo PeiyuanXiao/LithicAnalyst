@@ -377,6 +377,15 @@ export interface FlakeData {
   otherFrame: SpecimenFrame | null;
   /** The settings of the retouch indices; absent while they are the default (a file always has them). */
   retouch?: RetouchSettings;
+  /** The settings of the bulb surface angle; absent while they are the default (a file always has them). */
+  bsa?: BsaSettings;
+}
+
+/** A flake's bulb surface angle: the level of the bulb's outline over the ventral reference plane (mm), and its two ends set by hand (null: the outline's). */
+export interface BsaSettings {
+  level: number;
+  /** Original coordinates, on the ventral surface; once one is moved, both are kept. */
+  ends: [Vec3, Vec3] | null;
 }
 
 /** A flake's settings of the retouch indices. */

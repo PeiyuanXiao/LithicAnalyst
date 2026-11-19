@@ -183,10 +183,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await placeEnds(page);
       await drawEdge(page);
       await page.locator('#app-mode-measure').click();
+      // all but the bulb's: T6's bump rises above the BSA's level only farther than 2 mm from P, so there is no bulb by that method (T8 is the bulb's body)
+      const BULB = ['bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm'];
       await expect.poll(async () => {
         const m = await measures(page);
         return m ? Object.entries(m).filter(([, v]) => v === null).map(([k]) => k) : ['none yet'];
-      }).toEqual([]);
+      }).toEqual(BULB);
+      const reasons = (await page.evaluate(() => window.lithicanalyst.flake()))!.reasons!;
+      for (const k of BULB) expect(reasons[k as keyof typeof reasons], k).toBe('no_bulb');
       const m = (await measures(page))!;
       expect(Math.abs(m.platform_depth_chord! - 7.04)).toBeLessThan(0.1);
       // (the ends are clicked just inside the outline's corners, which come to a point at the model's outline)

@@ -426,3 +426,120 @@ export function flakeT6(K = 14): Mesh {
   for (let f = 0; f < tris.length; f += 3) if (!drop.has(f)) kept.push(tris[f], tris[f + 1], tris[f + 2]);
   return { positions: new Float32Array(pos), index: new Uint32Array(kept) };
 }
+
+// ------------------------------------------------------------ T8, the bulb
+
+/**
+ * T8: a flake whose ventral face carries a bulb of percussion of known shape. Coordinates are the technical frame's: P at the origin,
+ * +Y distal, +Z dorsal. The ventral face is the half disc y ≥ 0 of radius R, at z = −b(r, φ) (φ from +Y toward +X, degrees): flat
+ * but for a fan from P, |φ| ≤ φ2, whose height along it rises from P and falls to nothing at Rb, its sides narrow smooth bands
+ * (φ1 to φ2), a little lower toward them so that its top is on φ = 0. The platform is the plane y = 0, from the ventral edge up to the
+ * dorsal dome z = D (1 − r²/R²), which meets the ventral face at r = R. Closed, triangles outward.
+ */
+export const T8 = { R: 20, D: 8, a0: 0.6, r0: 2, Rb: 12, phi1: 31, phi2: 35, toward: 0.2 };
+
+/** The bulb's height over the flat ventral face at (r, φ), outward (−z). */
+export function t8Bulb(r: number, phiDeg: number): number {
+  const { a0, r0, Rb, phi1, phi2, toward } = T8;
+  if (r >= Rb) return 0;
+  const a = Math.abs(phiDeg);
+  const side = a <= phi1 ? 1 : a >= phi2 ? 0 : 0.5 * (1 + Math.cos((Math.PI * (a - phi1)) / (phi2 - phi1)));
+  return a0 * (r / r0) * Math.exp(1 - r / r0) * (1 - (r / Rb) ** 2) ** 2 * side * (1 - toward * (phiDeg / phi2) ** 2);
+}
+
+/** The dorsal dome's height at radius r. */
+export const t8Dorsal = (r: number): number => T8.D * (1 - (r / T8.R) ** 2);
+
+/** The radii of T8's rings (P is at 0): fine near P, coarser outward; the last is R. */
+export function t8Rings(fine: boolean): number[] {
+  const out: number[] = [];
+  const run = (to: number, step: number) => {
+    let r = out.length ? out[out.length - 1] : 0;
+    while (r + step <= to + 1e-9) {
+      r = Math.round((r + step) * 1e6) / 1e6;
+      out.push(r);
+    }
+  };
+  run(4, fine ? 0.05 : 0.2);
+  run(T8.Rb, fine ? 0.2 : 0.5);
+  run(T8.R, fine ? 0.5 : 1);
+  return out;
+}
+
+/**
+ * T8 as a mesh: `fine` for the unit tests, else coarse enough for the end-to-end tests. `arcs` steps of the half circle (an odd number,
+ * so the section through P along +Y runs between the rays), `rows` rows up the platform. The ventral, platform and dorsal triangles are
+ * listed apart.
+ */
+/** The steps of T8's half circle (an odd number), fine or coarse. */
+export const t8Arcs = (fine: boolean): number => (fine ? 241 : 145);
+
+export function flakeT8(fine = true, dense: { step: number; arcs: number } | null = null): Mesh & { ventral: Uint32Array; platform: Uint32Array; dorsal: Uint32Array } {
+  // `dense` (the bench): rings `step` apart all the way out, `arcs` steps of the half circle
+  const rings = dense ? Array.from({ length: Math.round(T8.R / dense.step) }, (_, i) => Math.round((i + 1) * dense.step * 1e6) / 1e6) : t8Rings(fine);
+  const arcs = dense ? dense.arcs : t8Arcs(fine);
+  const rows = fine ? 40 : 24;
+  const N = rings.length;
+  const pos: number[] = [];
+  const add = (p: Vec3): number => {
+    pos.push(p[0], p[1], p[2]);
+    return pos.length / 3 - 1;
+  };
+  const phiOf = (j: number) => -90 + (180 * j) / arcs;
+  /** A point at radius r and the j-th angle, its height h; on the two rays along y = 0 exactly so. */
+  const at = (r: number, j: number, h: number): Vec3 => {
+    if (j === 0) return [-r, 0, h];
+    if (j === arcs) return [r, 0, h];
+    const f = (phiOf(j) * Math.PI) / 180;
+    return [r * Math.sin(f), r * Math.cos(f), h];
+  };
+  const P = add([0, 0, 0]);
+  const V: number[][] = rings.map((r) => Array.from({ length: arcs + 1 }, (_, j) => add(at(r, j, -t8Bulb(r, phiOf(j))))));
+  const E = add([0, 0, T8.D]);
+  // the dorsal rings but the last, which is the ventral one (the sharp edge)
+  const D: number[][] = rings.map((r, i) => (i === N - 1 ? V[N - 1] : Array.from({ length: arcs + 1 }, (_, j) => add(at(r, j, t8Dorsal(r))))));
+  const tris: number[] = [];
+  const parts: Array<'ventral' | 'platform' | 'dorsal'> = [];
+  const vtx = (v: number): Vec3 => [pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]];
+  const tri = (a: number, b: number, c: number, part: 'ventral' | 'platform' | 'dorsal', out: Vec3) => {
+    if (a === b || b === c || c === a) return;
+    const A = vtx(a), B = vtx(b), C = vtx(c);
+    const u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], w = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+    const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    if (n[0] * out[0] + n[1] * out[1] + n[2] * out[2] >= 0) tris.push(a, b, c);
+    else tris.push(a, c, b);
+    parts.push(part);
+  };
+  // the ventral face (outward −z) and the dorsal face (+z): a fan round the centre, then the rings
+  for (const [centre, grid, part, out] of [[P, V, 'ventral', [0, 0, -1]], [E, D, 'dorsal', [0, 0, 1]]] as const) {
+    for (let j = 0; j < arcs; j++) tri(centre, grid[0][j], grid[0][j + 1], part, out as Vec3);
+    for (let i = 0; i + 1 < N; i++)
+      for (let j = 0; j < arcs; j++) {
+        tri(grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], part, out as Vec3);
+        tri(grid[i][j], grid[i + 1][j + 1], grid[i][j + 1], part, out as Vec3);
+      }
+  }
+  // the platform, in the plane y = 0 (outward −y): columns at the rings' x, `rows` rows each, the last one at the sharp edge a point
+  const column = (c: number): number[] => {
+    const i = Math.abs(c) - 1;
+    if (c === 0) return [P, ...Array.from({ length: rows - 1 }, (_, k) => add([0, 0, (T8.D * (k + 1)) / rows])), E];
+    const j = c < 0 ? 0 : arcs;
+    if (i === N - 1) return [V[i][j]];
+    const x = c < 0 ? -rings[i] : rings[i];
+    return [V[i][j], ...Array.from({ length: rows - 1 }, (_, k) => add([x, 0, (t8Dorsal(rings[i]) * (k + 1)) / rows])), D[i][j]];
+  };
+  const columns = new Map<number, number[]>();
+  for (let c = -N; c <= N; c++) columns.set(c, column(c));
+  for (let c = -N; c < N; c++) {
+    const a = columns.get(c)!, b = columns.get(c + 1)!;
+    if (a.length === 1) for (let k = 0; k < rows; k++) tri(a[0], b[k], b[k + 1], 'platform', [0, -1, 0]);
+    else if (b.length === 1) for (let k = 0; k < rows; k++) tri(a[k], b[0], a[k + 1], 'platform', [0, -1, 0]);
+    else
+      for (let k = 0; k < rows; k++) {
+        tri(a[k], b[k], b[k + 1], 'platform', [0, -1, 0]);
+        tri(a[k], b[k + 1], a[k + 1], 'platform', [0, -1, 0]);
+      }
+  }
+  const of = (p: string) => Uint32Array.from(parts.flatMap((x, t) => (x === p ? [t] : [])));
+  return { positions: new Float32Array(pos), index: new Uint32Array(tris), ventral: of('ventral'), platform: of('platform'), dorsal: of('dorsal') };
+}

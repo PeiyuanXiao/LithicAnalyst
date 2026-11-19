@@ -10,7 +10,7 @@ import { bandPiecesSteps, mergePieces, retouchSideSteps, type RetouchSide } from
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { importScars, addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { importScars, addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, setBsaEnds, setBsaLevel, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, GmDerived, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -31,6 +31,9 @@ import BatchWorker from '../io/batchWorker?worker&inline';
 import { zipStored } from '../io/zip';
 import { fileStem, initHostDownloads, runningInHost, saveFile, saveTextFile } from '../io/saveFile';
 import { facesOfPieceSteps, regionPlyComments, regionPlySteps } from '../io/regionPly';
+import { bsaSettingsOf, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_DIAGONAL, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, planeCoords, surfaceOverSteps, VI_WIDTHS_MM, windowContoursSteps, type BulbPlane } from '../compute/bulb';
+import { heightColors } from '../compute/colormap';
+import { ContourLayer } from '../render/contourLayer';
 import { askToWrite, droppedHandle, isAbort, openFilePicker, saveFilePicker, writeHandle, type ProjectFileHandle } from '../io/fileHandle';
 import { ArrowLayer, arrowColor, arrowColorModeOf, ARROW_COLORS, DEFAULT_ARROW_DISPLAY, type ArrowColorMode } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
@@ -48,7 +51,7 @@ import { SequenceTool } from '../tools/sequenceTool';
 import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjacency';
 import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
-import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
+import { AGREEMENT_FLAKE_MEASURES, FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, storedFlakeMeasures, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, EDGE_ANGLE_PARAMETERS, edgeAngleMeans, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleMeans, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { gmAnchorRows, gmMissingInputs, gmSteps, type GmMissing, type GmResult } from '../compute/gm';
 import { anchorsHashOf, gmCacheKey, gmConfigSummary, gmInUse, gmManifest, gmStanding, GM_TEMPLATE_PARAMETERS, layPatchSteps, regionsHashOf, sameGmConfig, usesTemplate } from '../compute/gmTemplate';
@@ -78,6 +81,7 @@ import { IgesLayer } from '../render/igesLayer';
 import { AlignTool } from '../tools/alignTool';
 import { IgesAlign, type AlignOutcome, type IgesFile } from './igesAlign';
 import { ProfilePanel } from './profilePanel';
+import { BulbPage, type BulbEndDrop } from './bulbPage';
 import { gmCurvesCsv, gmLandmarksCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { GmLayer } from '../render/gmLayer';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
@@ -161,6 +165,8 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   light: { ...DEFAULT_LIGHT },
   curvScale: 2,
   curvContrast: 1,
+  heightRef: 'ventral',
+  heightRangeMm: HEIGHT_RANGE_MM.default,
   arrows: { ...DEFAULT_ARROW_DISPLAY },
   curveSnap: 'ridge',
   regions: true,
@@ -195,6 +201,10 @@ interface Observer {
   /** Region of each triangle, and what it was computed from. */
   faces: { key: string; labels: FaceLabels | null; upper: FaceLabels | null } | null;
   table: LandmarkTable | null;
+  /** A flake's measures as its file stored them (the file is this model's), or null. */
+  stored?: Partial<FlakeMeasures> | null;
+  /** The same computed from its own annotations, and what from (when the file has none). */
+  flake?: { key: string; measures: FlakeMeasures } | null;
 }
 
 /** Arrow settings as saved, without the thickness earlier versions kept. */
@@ -210,8 +220,10 @@ function loadDisplay(): DisplaySettings {
   return {
     ...DEFAULT_DISPLAY,
     ...saved,
-    shading: saved.shading === 'curvature' ? 'curvature' : 'plain',
+    shading: saved.shading === 'curvature' || saved.shading === 'height' ? saved.shading : 'plain',
     curvScale: Math.max(0, Math.min(100, Math.round(saved.curvScale ?? DEFAULT_DISPLAY.curvScale))),
+    heightRef: typeof saved.heightRef === 'string' ? saved.heightRef : DEFAULT_DISPLAY.heightRef,
+    heightRangeMm: typeof saved.heightRangeMm === 'number' && Number.isFinite(saved.heightRangeMm) ? Math.max(HEIGHT_RANGE_MM.min, Math.min(HEIGHT_RANGE_MM.max, saved.heightRangeMm)) : HEIGHT_RANGE_MM.default,
     light: { ...DEFAULT_LIGHT, ...(saved.light ?? {}), fillIntensity: DEFAULT_LIGHT.fillIntensity },
     arrows: { ...DEFAULT_ARROW_DISPLAY, ...withoutThickness(saved.arrows) },
     curveSnap: SNAP_MODES.includes(saved.curveSnap as SnapMode) ? (saved.curveSnap as SnapMode) : DEFAULT_DISPLAY.curveSnap,
@@ -414,6 +426,11 @@ export class App implements AppApi {
   private curvature: CurvatureService | null = null;
   private surfaceSnap: SurfaceSnap | null = null;
   private curvToken = 0;
+  /** Shading by height: what the colours and lines were made from, the request in hand, and the range without a stated unit (this model's, in its units). */
+  private heightKey = '';
+  private heightToken = 0;
+  private heightRangeUnits: number | null = null;
+  private contourLayer: ContourLayer | null = null;
   private curvTimer = 0;
   private curvBusy = false;
   private pendingProject: ProjectState | null = null;
@@ -512,6 +529,13 @@ export class App implements AppApi {
   private profilePanel: ProfilePanel | null = null;
   private profileEl: HTMLElement | null = null;
   private profileFit: (() => void) | null = null;
+  /** The profile panel's page: the two sections, or the bulb seen on the ventral reference plane (view state, never in the file). */
+  private profilePage: 'section' | 'bulb' = 'section';
+  private bulbPage: BulbPage | null = null;
+  private profilePageSeg: { set: (v: string) => void } | null = null;
+  private bulbToken = 0;
+  /** The ventral face's triangles as last measured (the bulb page's lines and an end let go off the outline). */
+  private ventralFaces: Uint32Array | null = null;
   /** The profile panel's section across, as a share of the technical length (a view state, never in the file). */
   private profileAt = 0.5;
   private profileCross: CrossSection | null = null;
@@ -724,6 +748,7 @@ export class App implements AppApi {
     this.borderLayer = new BorderLayer(viewer);
     this.ringLayer = new BorderLayer(viewer, true);
     this.edgeLayer = new EdgeAngleLayer(viewer);
+    this.contourLayer = new ContourLayer(viewer);
     this.retouchLayer = new RetouchLayer(viewer);
     this.workingEdgeLayer = new WorkingEdgeLayer(viewer);
     this.workingEdgeLayer.onLabelClick = (id) => this.selection.set(id);
@@ -2224,6 +2249,10 @@ export class App implements AppApi {
         this.applyShading();
         this.sidebar.refresh('display');
         break;
+      case 'height':
+        void this.updateHeightShading();
+        this.sidebar.refresh('display');
+        break;
       case 'curvature':
         // the scale slider can ask for up to 100 passes; wait until it settles
         clearTimeout(this.curvTimer);
@@ -3076,13 +3105,13 @@ export class App implements AppApi {
   }
 
   /** The flake's platform region: the pieces of surface of its `platform` regions, and their area. */
-  private platformPieces(): { pieces: Set<number>; area: number } | null {
+  private platformPieces(type = 'platform'): { pieces: Set<number>; area: number } | null {
     const part = this.upper?.partition;
     if (!part) return null;
     const pieces = new Set<number>();
     this.store.state.regions.forEach((r, i) => {
       const c = this.upperComponent[i];
-      if (r.type === 'platform' && c >= 0) pieces.add(c);
+      if (r.type === type && c >= 0) pieces.add(c);
     });
     if (!pieces.size) return null;
     let area = 0;
@@ -3108,7 +3137,12 @@ export class App implements AppApi {
     if (this.loaded !== loaded) return;
     const plat = this.platformPieces();
     const faces = plat ? await runSliced(facesOfPiecesSteps(this.upper!.partition, plat.pieces)) : null;
+    // the ventral face: the reference plane of the BSA and the shading by height
+    const vent = this.platformPieces('ventral');
+    const ventralFaces = vent ? await runSliced(facesOfPiecesSteps(this.upper!.partition, vent.pieces)) : null;
     if (token !== this.flakeToken) return;
+    this.ventralFaces = ventralFaces;
+    const bsa = bsaSettingsOf(st.flake);
     const axis = st.flake.axis;
     // the longitudinal section changes only with the axis
     const sectionKey = JSON.stringify([axis?.matrix, axis?.start]);
@@ -3128,12 +3162,18 @@ export class App implements AppApi {
         morph: this.flakeMorph!.value,
         candidates: bvhPlaneCandidates(g),
         section: known,
+        ventralFaces,
+        bsa: { level: bsa.level, ends: bsa.ends },
+        edges: base.edges,
       }),
     );
     if (token !== this.flakeToken) return;
     if (axis?.matrix) this.flakeSection = { loaded, key: sectionKey, line: result.section };
     this.flake = result;
     this.sidebar.refresh('flake');
+    // the ventral reference plane may have come, gone or moved
+    this.sidebar.refresh('display');
+    void this.updateHeightShading();
     this.updateProfile();
     this.syncCrossSection();
     this.refreshHint();
@@ -4366,22 +4406,113 @@ export class App implements AppApi {
   }
 
   private buildProfilePanel(): void {
+    // its two pages: the sections, the bulb
+    const page = segmented('profile-page', null, [
+      { value: 'section', label: t('profile.page.section') },
+      { value: 'bulb', label: t('profile.page.bulb') },
+    ], this.profilePage, (v) => this.setProfilePage(v as 'section' | 'bulb'));
+    page.el.classList.add('profile-page-switch');
     const panel = floatingPanel({
       id: 'profile',
       title: t('profile.title'),
       pref: 'profilePanel',
       area: this.viewportEl,
       onClose: () => this.setDisplay((d) => (d.profile = false), 'profile'),
+      extras: [page.el],
     });
     const content = new ProfilePanel();
     content.onMove = (f) => this.moveProfile(f);
-    panel.body.append(content.el);
+    const bulb = new BulbPage();
+    bulb.onLevel = (v) => setBsaLevel(this.store, v);
+    bulb.onReset = () => setBsaEnds(this.store, null);
+    bulb.onEnds = (d) => void this.dropBulbEnd(d);
+    panel.body.append(content.el, bulb.el);
     if (this.profileEl) this.profileEl.replaceWith(panel.el);
     else this.viewportEl.append(panel.el);
     this.profileEl = panel.el;
     this.profileFit = panel.fit;
     this.profilePanel = content;
+    this.bulbPage = bulb;
+    this.profilePageSeg = page;
+    this.setProfilePage(this.profilePage);
+  }
+
+  /** The profile panel's page: the sections, or the bulb. */
+  setProfilePage(page: 'section' | 'bulb'): void {
+    this.profilePage = page;
+    if (this.profilePanel) this.profilePanel.el.hidden = page !== 'section';
+    if (this.bulbPage) this.bulbPage.el.hidden = page !== 'bulb';
+    this.profilePageSeg?.set(page);
     this.updateProfile();
+  }
+
+  /** The ventral reference plane and P, in the mesh's coordinates. */
+  private localBulb(): { plane: BulbPlane; P0: Vec3 } | null {
+    const b = this.flake?.construction.bulb, o = this.loaded?.offset;
+    if (!b || !o) return null;
+    const local = (p: Vec3): Vec3 => [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+    return { plane: { ...b.plane, point: local(b.plane.point) }, P0: local(b.P0) };
+  }
+
+  /** The bulb page: the bulb as measured, at once, then the lines of equal height over its window (in slices). */
+  private async updateBulbPage(): Promise<void> {
+    const page = this.bulbPage, loaded = this.loaded, r = this.flake;
+    if (!page || !loaded || this.profilePage !== 'bulb' || !this.profileShown() || !r) return;
+    const st = this.store.state;
+    const mm = mmPerUnit(st.specimen.unit);
+    const b = r.construction.bulb;
+    const found = b && b.extent ? b : null;
+    // why there is nothing to draw: no ventral face, no unit, no bulb
+    const why = r.reasons.bsa ?? r.reasons.vi_1_0mm ?? (found ? null : 'no_bulb');
+    const level = bsaSettingsOf(st.flake).level;
+    const content = {
+      bulb: found,
+      reason: found ? null : why ? t(`flake.empty.${why}`) : null,
+      contours: [] as Array<{ level: number; segments: Vec3[] }>,
+      range: this.heightRangeUnitsNow(),
+      levelUnits: mm ? level / mm : 0,
+      levelMm: level,
+      mm: mm ?? 1,
+      unit: st.specimen.unit,
+      bsa: r.measures.bsa,
+      vi: VI_WIDTHS_MM.map((_, i) => r.construction.bulb?.vi?.[i]?.value ?? null),
+    };
+    page.set(content);
+    const local = this.localBulb();
+    if (!found || !mm || !local || !this.ventralFaces) return;
+    const token = ++this.bulbToken;
+    const g = loaded.geometry;
+    const o = loaded.offset;
+    const lines = await runSliced(
+      windowContoursSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, this.ventralFaces, local.plane, local.P0, bulbWindow(found.extent!, mm), HEIGHT_CONTOUR_SHARE * content.range, content.levelUnits),
+    );
+    if (token !== this.bulbToken || this.loaded !== loaded) return;
+    page.set({ ...content, contours: lines.map((l) => ({ level: l.level, segments: l.segments.map((p): Vec3 => [p[0] + o[0], p[1] + o[1], p[2] + o[2]]) })) });
+  }
+
+  /**
+   * An end of the BSA let go on the bulb page: on the outline, or (Shift) on the ventral surface over that place, found in slices; the
+   * other end kept where it is.
+   */
+  private async dropBulbEnd(d: BulbEndDrop): Promise<void> {
+    const r = this.flake, b = r?.construction.bulb, loaded = this.loaded, local = this.localBulb();
+    if (!b?.ends || !loaded || !local) return;
+    let p = d.onOutline;
+    if (!p && this.ventralFaces) {
+      const { plane, P0 } = local;
+      const q: Vec3 = [P0[0] + d.u * plane.x[0] + d.v * plane.y[0], P0[1] + d.u * plane.x[1] + d.v * plane.y[1], P0[2] + d.u * plane.x[2] + d.v * plane.y[2]];
+      const [u, v] = planeCoords(plane, q);
+      const g = loaded.geometry;
+      const s = await runSliced(surfaceOverSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, this.ventralFaces, plane, u, v));
+      // the bulb measured anew meanwhile: that drop no longer applies
+      if (this.flake !== r || this.loaded !== loaded) return;
+      if (s) p = [s[0] + loaded.offset[0], s[1] + loaded.offset[1], s[2] + loaded.offset[2]];
+    }
+    if (!p) {
+      void this.updateBulbPage();
+      return;
+    }
+    setBsaEnds(this.store, d.index === 0 ? [p, b.ends[1]] : [b.ends[0], p]);
   }
 
   /** Show or hide the panel, and draw what it shows. */
@@ -4410,6 +4541,7 @@ export class App implements AppApi {
     });
     if (!was) this.profileFit?.();
     this.syncCrossSection();
+    void this.updateBulbPage();
   }
 
   /** The slider, the marker: the section across is cut at most once a frame. */
@@ -5532,7 +5664,7 @@ export class App implements AppApi {
       const st = structuredClone(p.state);
       const used = new Set(this.observers.map((o) => o.color));
       const color = OBSERVER_COLORS.find((c) => !used.has(c)) ?? OBSERVER_COLORS[this.observers.length % OBSERVER_COLORS.length];
-      this.observers.push({ id: uuid(), label: st.specimen.annotator || p.path, fileName: p.path, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st) });
+      this.observers.push({ id: uuid(), label: st.specimen.annotator || p.path, fileName: p.path, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st), stored: storedFlakeMeasures(p.derived) });
       added++;
     }
     if (!added) this.feedback.toast(t('compare.noneInFolder'), 'info', 2500);
@@ -5544,8 +5676,11 @@ export class App implements AppApi {
     if (!sha) return;
     for (const f of files) {
       let st: ProjectState;
+      let stored: Partial<FlakeMeasures> | null = null;
       try {
-        st = parseProjectFile(JSON.parse(await f.text()));
+        const raw = JSON.parse(await f.text());
+        st = parseProjectFile(raw);
+        stored = storedFlakeMeasures((raw as { derived?: unknown })?.derived);
       } catch (err) {
         this.feedback.toast(`${f.name}: ${err instanceof Error ? err.message : String(err)}`, 'error');
         continue;
@@ -5557,7 +5692,7 @@ export class App implements AppApi {
       const used = new Set(this.observers.map((o) => o.color));
       const color = OBSERVER_COLORS.find((c) => !used.has(c)) ?? OBSERVER_COLORS[this.observers.length % OBSERVER_COLORS.length];
       const label = st.specimen.annotator || f.name.replace(/\.json$/i, '').replace(/\.lithicanalyst$/i, '');
-      this.observers.push({ id: uuid(), label, fileName: f.name, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st) });
+      this.observers.push({ id: uuid(), label, fileName: f.name, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st), stored });
     }
     this.observersChanged();
   }
@@ -5715,6 +5850,54 @@ export class App implements AppApi {
   }
 
   /** Region of each triangle by an observer's curves and region seeds, in the two layers (cached until they change). */
+  /**
+   * An observer's flake measures: those its file stored when it has them all, else computed from its own annotations (its axis, platform
+   * ends, platform and ventral faces as its regions cut them, its unit and BSA settings), in slices, kept while they stay the same.
+   */
+  private async observerFlake(o: Observer, st: Readonly<ProjectState>, upper: FaceLabels | null): Promise<Partial<FlakeMeasures> | null> {
+    if (o.stored && AGREEMENT_FLAKE_MEASURES.every((k) => k in o.stored!)) return o.stored;
+    const base = this.measureBase, loaded = this.loaded;
+    if (!base || !loaded) return null;
+    const of = (type: string): Uint32Array | null => {
+      if (!upper) return null;
+      const want = this.faceTypes.indexOf(type);
+      const out: number[] = [];
+      for (let f = 0; f < upper.type.length; f++) if (upper.type[f] === want) out.push(f);
+      return out.length ? Uint32Array.from(out) : null;
+    };
+    const platform = of('platform'), ventral = of('ventral');
+    const ends = st.landmarks.filter((l) => l.code === 'platform_end').map((l) => l.point);
+    const bsa = bsaSettingsOf(st.flake);
+    const key = JSON.stringify([st.flake.axis?.matrix, st.flake.axis?.start, ends, st.specimen.unit, bsa, platform?.length, ventral?.length, upper ? Array.from(upper.type.subarray(0, 64)) : null]);
+    if (o.flake?.key === key) return o.flake.measures;
+    const morph = await this.morphOf(loaded);
+    const areas = this.triangleAreas();
+    let platformArea = 0;
+    if (platform && areas) for (const f of platform) platformArea += areas[f];
+    const g = loaded.geometry;
+    const r = await runSliced(
+      flakeMeasuresSteps({
+        positions: g.getAttribute('position').array as Float32Array,
+        index: g.index!.array as Uint32Array,
+        offset: loaded.offset,
+        matrix: st.flake.axis?.matrix ?? null,
+        P: st.flake.axis?.start ?? null,
+        ends,
+        platformFaces: platform,
+        platformArea: platform ? platformArea : null,
+        unit: st.specimen.unit,
+        meanEdge: base.meanEdge,
+        morph,
+        candidates: bvhPlaneCandidates(g),
+        ventralFaces: ventral,
+        bsa: { level: bsa.level, ends: bsa.ends },
+        edges: base.edges,
+      }),
+    );
+    o.flake = { key, measures: r.measures };
+    return r.measures;
+  }
+
   private async observerFaces(o: Observer, st: Readonly<ProjectState>): Promise<{ labels: FaceLabels | null; upper: FaceLabels | null } | null> {
     if (!st.regions.length) return null;
     const key = JSON.stringify([st.specimen.type, st.flake.axis?.end, st.curves.map((c) => [c.points, c.closed, c.attributes.type, c.retouchSide]), st.regions.map((r) => [r.seed, r.type, r.auto, r.curveId])]);
@@ -5810,6 +5993,12 @@ export class App implements AppApi {
         // (the user's own types are compared as regions, not as measurements)
         FACE_TYPES.forEach((type, i) => i > 0 && (measures[`area_${type}`] = sums[i]));
         measures.cortex_ratio = base.surfaceArea > 0 ? sums[2] / base.surfaceArea : null;
+      }
+      // a flake's own measures: the open project's as measured, another's as its file stored them, else from its annotations
+      if (st.specimen.type === 'flake') {
+        const flake = o.state ? await this.observerFlake(o, st, layers?.upper ?? null) : this.flake?.measures ?? null;
+        if (token !== this.agreementToken) return;
+        for (const k of AGREEMENT_FLAKE_MEASURES) measures[k] = flake?.[k] ?? null;
       }
       data.push({ label: labels.get(o.id)!, state: st, planes: st.planes.map((p) => computePlane(p, st, axes)), faces, upper: layers?.upper ?? null, measures });
       await nextFrame();
@@ -6395,6 +6584,9 @@ export class App implements AppApi {
     if (!base || !loaded) return;
     for (const r of this.planes) if (r.valid) this.cutModel(r.id, r.center!, r.normal!);
     this.sidebar?.refresh('planes');
+    // a plane the shading goes by may have moved, come or gone
+    this.sidebar?.refresh('display');
+    void this.updateHeightShading();
   }
 
   measuringBusy(): boolean {
@@ -6618,6 +6810,97 @@ export class App implements AppApi {
     if (this.display.shading === 'scan' && !mv.hasScanColors) this.display.shading = 'plain';
     mv.setShading(this.display.shading);
     if (this.display.shading === 'curvature') void this.updateCurvatureColors();
+    void this.updateHeightShading();
+    this.viewer?.requestRender();
+  }
+
+  /** What heights can be shown over: the ventral face's reference plane (a flake with one), then the valid fitted planes. */
+  heightReferences(): Array<{ value: string; label: string }> {
+    const out: Array<{ value: string; label: string }> = [];
+    if (this.isFlake() && this.flake?.construction.plane) out.push({ value: 'ventral', label: t('height.ventral') });
+    for (const p of this.planes) if (p.valid && p.center && p.normal) out.push({ value: p.id, label: p.label });
+    return out;
+  }
+
+  /** The reference in use: the one chosen when there is such, else the first there is. */
+  heightReference(): string | null {
+    const refs = this.heightReferences();
+    return (refs.find((r) => r.value === this.display.heightRef) ?? refs[0])?.value ?? null;
+  }
+
+  private heightPlane(): { point: Vec3; normal: Vec3; ventral: boolean } | null {
+    const ref = this.heightReference();
+    if (ref === 'ventral') {
+      const p = this.flake!.construction.plane!;
+      return { point: p.point, normal: p.normal, ventral: true };
+    }
+    const p = this.planes.find((x) => x.id === ref);
+    return p?.center && p.normal ? { point: p.center, normal: p.normal, ventral: false } : null;
+  }
+
+  /** The range of the shading by height (±), as its slider shows it: mm with a stated unit, else the model's units. */
+  heightRange(): { value: number; min: number; max: number; step: number; unit: string } {
+    if (mmPerUnit(this.store.state.specimen.unit)) return { value: this.display.heightRangeMm, min: HEIGHT_RANGE_MM.min, max: HEIGHT_RANGE_MM.max, step: HEIGHT_RANGE_MM.step, unit: 'mm' };
+    const d = HEIGHT_RANGE_DIAGONAL * (this.loaded?.diagonal ?? 1);
+    return { value: this.heightRangeUnits ?? d, min: d / 10, max: d * 10, step: d / 10, unit: '' };
+  }
+
+  setHeightRange(value: number): void {
+    if (mmPerUnit(this.store.state.specimen.unit)) this.setDisplay((d) => (d.heightRangeMm = value), 'height');
+    else {
+      this.heightRangeUnits = value;
+      void this.updateHeightShading();
+    }
+  }
+
+  /** The range in the model's units. */
+  private heightRangeUnitsNow(): number {
+    const mm = mmPerUnit(this.store.state.specimen.unit);
+    return mm ? this.display.heightRangeMm / mm : this.heightRange().value;
+  }
+
+  /**
+   * Shading by height over the reference plane: every vertex's height, coloured from slate (below) to ochre (above) at ±range; lines of
+   * equal height every 0.4 of the range within it, and over the ventral reference plane the BSA's level, thicker. Only what changed is
+   * done again (in slices).
+   */
+  private async updateHeightShading(): Promise<void> {
+    const mv = this.meshView, loaded = this.loaded, layer = this.contourLayer;
+    if (!mv || !loaded || !layer) return;
+    const on = this.display.shading === 'height';
+    layer.group.visible = on;
+    const ref = on ? this.heightPlane() : null;
+    if (!ref) {
+      if (on) mv.setHeightColors(null);
+      layer.clear();
+      this.heightKey = '';
+      this.viewer?.requestRender();
+      return;
+    }
+    const range = this.heightRangeUnitsNow();
+    const mm = mmPerUnit(this.store.state.specimen.unit);
+    const level = ref.ventral && mm ? bsaSettingsOf(this.store.state.flake).level / mm : null;
+    const key = JSON.stringify([ref.point, ref.normal, range, level, loaded.offset]);
+    if (key === this.heightKey) return;
+    this.heightKey = key;
+    const token = ++this.heightToken;
+    const o = loaded.offset;
+    const g = loaded.geometry;
+    const pos = g.getAttribute('position').array as Float32Array;
+    const heights = await runSliced(heightsSteps(pos, [ref.point[0] - o[0], ref.point[1] - o[1], ref.point[2] - o[2]], ref.normal));
+    if (token !== this.heightToken || this.loaded !== loaded) return;
+    mv.setHeightColors(heightColors(heights, range));
+    const interval = HEIGHT_CONTOUR_SHARE * range;
+    const levels = [-2, -1, 0, 1, 2].map((k) => k * interval);
+    const lines = await runSliced(isoSegmentsSteps(pos, g.index!.array as Uint32Array, heights, level !== null ? [...levels, level] : levels));
+    if (token !== this.heightToken || this.loaded !== loaded) return;
+    const thin = new Float32Array(levels.reduce((n, _, i) => n + lines[i].length, 0));
+    let at = 0;
+    for (let i = 0; i < levels.length; i++) {
+      thin.set(lines[i], at);
+      at += lines[i].length;
+    }
+    layer.sync(thin, level !== null ? lines[levels.length] : null, o);
     this.viewer?.requestRender();
   }
 
@@ -6659,6 +6942,9 @@ export class App implements AppApi {
     this.planesLayer?.clearAll();
     this.sectionLayer?.clearAll();
     this.regionLayer?.clear();
+    this.contourLayer?.clear();
+    this.heightKey = '';
+    this.heightRangeUnits = null;
     this.upperLayer?.clear();
     this.borderLayer?.clear();
     this.partition = null;
@@ -7467,7 +7753,7 @@ export class App implements AppApi {
       /** A flake's frame and measurements (null for a core). */
       flake: () =>
         this.isFlake()
-          ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, reasons: this.flake?.reasons ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null }
+          ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, reasons: this.flake?.reasons ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null, bulb: this.flake?.construction.bulb ?? null, plane: this.flake?.construction.plane ?? null }
           : null,
       /** The profile panel: shown or not, where the section across is (share of the technical length), its width and thickness, and how many lines the ring on the model has. */
       sectionPanel: () => ({
@@ -7543,6 +7829,9 @@ export class App implements AppApi {
       },
       /** How many triangles a region's piece has (what its PLY holds). */
       regionFaceCount: async (id: string) => (await this.regionFaces(id))?.length ?? 0,
+      /** Shading by height: the mode, the plane in use and those there are, the range, and the lines of equal height drawn. */
+      heightShading: () => ({ shading: this.display.shading, reference: this.heightReference(), references: this.heightReferences(), range: this.heightRange(), contours: this.contourLayer?.counts() ?? null }),
+      setProfilePage: (p: 'section' | 'bulb') => this.setProfilePage(p),
       /** The ids hidden for the session (of the open model). */
       hidden: () => [...(this.hiddenBy.get(this.store.state.mesh?.sha256 ?? '') ?? [])],
       setHidden: (id: string, hidden: boolean) => this.setHidden(id, hidden),
@@ -7598,7 +7887,7 @@ export class App implements AppApi {
       measureHint: () => ({
         key: this.hintShown?.key ?? null,
         pinned: this.hintPinned,
-        prims: (this.hintShown?.hint ?? []).map((p) => ({ kind: p.kind, part: p.part, role: p.kind === 'faces' ? p.tint : p.role, label: p.kind === 'line' || p.kind === 'arc' ? (p.label ?? null) : null, points: p.kind === 'faces' ? null : p.points })),
+        prims: (this.hintShown?.hint ?? []).map((p) => ({ kind: p.kind, part: p.part, role: p.kind === 'faces' ? p.tint : p.kind === 'patch' ? 'current' : p.role, label: p.kind === 'line' || p.kind === 'arc' ? (p.label ?? null) : null, points: p.kind === 'faces' ? null : p.points })),
         drawn: this.hintLayer?.counts() ?? null,
         labels: [...document.querySelectorAll<HTMLElement>('.hint-label')].map((el) => el.textContent ?? ''),
       }),

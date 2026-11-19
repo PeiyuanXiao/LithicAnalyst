@@ -1,7 +1,8 @@
 import { fmtQuantity, quantityUnit, type Quantity } from '../core/format';
 import type { Vec3 } from '../core/types';
 import type { ConfigBox } from './configuration';
-import { angleDeg, EPA_DISTANCES_MM, type FlakeMeasure, type FlakeResult, type MorphConstruction, type ProfileConstruction, type TechConstruction } from './flake';
+import { onPlane } from './bulb';
+import { angleDeg, EPA_DISTANCES_MM, VI_MEASURES, type BulbConstruction, type FlakeMeasure, type FlakeResult, type MorphConstruction, type ProfileConstruction, type TechConstruction } from './flake';
 import type { SphereFit } from './sphere';
 import type { SplitParts } from './split';
 
@@ -74,7 +75,14 @@ export interface HintFaces {
   through: boolean;
 }
 
-export type HintPrim = HintLine | HintDots | HintArc | HintFaces;
+/** A flat piece of a plane, by its corners in order, tinted (the reference plane of the BSA). */
+export interface HintPatch {
+  kind: 'patch';
+  part: string;
+  points: Vec3[];
+}
+
+export type HintPrim = HintLine | HintDots | HintArc | HintFaces | HintPatch;
 export type MeasureHint = HintPrim[];
 
 const add = (a: Vec3, b: Vec3, s = 1): Vec3 => [a[0] + s * b[0], a[1] + s * b[1], a[2] + s * b[2]];
@@ -275,6 +283,74 @@ function ipaHint(p: ProfileConstruction, value: number): MeasureHint | null {
   ];
 }
 
+/** PSIA: the lines from P to the two platform ends, and the angle between them. */
+function psiaHint(c: { P: Vec3; ends: [Vec3, Vec3] }, value: number): MeasureHint {
+  const { P, ends } = c;
+  const radius = Math.min(size(sub(ends[0], P)), size(sub(ends[1], P))) * MEASURE_HINT_PARAMETERS.ARC_SHARE;
+  return [
+    { kind: 'line', part: 'to-end', role: 'current', points: [P, ends[0]] },
+    { kind: 'line', part: 'to-end', role: 'current', points: [P, ends[1]] },
+    angleArc('arc', 'current', P, unit3(sub(ends[0], P)), unit3(sub(ends[1], P)), radius, value),
+    { kind: 'dots', part: 'points', role: 'current', points: [P, ends[0], ends[1]] },
+  ];
+}
+
+/** The bulb angle at 1 mm on the section: the platform line, the line to Qv or the chord there, and the angle from the platform line's direction. */
+function bulbAngleHint(method: '3pt' | '2ln', p: ProfileConstruction, value: number): MeasureHint | null {
+  const { lineDir, platformLine, bulbAt: at, bulbQ: Q, bulbChord: chord } = p;
+  if (!lineDir || !platformLine || !Q) return null;
+  const side = size(sub(Q, at));
+  const radius = Math.min(side, size(sub(platformLine[0], platformLine[1]))) * MEASURE_HINT_PARAMETERS.ARC_SHARE * 1.5;
+  const out: MeasureHint = [sectionLine(p), { kind: 'line', part: 'platform-line', role: 'current', points: platformLine }];
+  if (method === '3pt') {
+    out.push({ kind: 'line', part: 'to-q', role: 'current', points: [at, Q] });
+    out.push(angleArc('arc', 'current', at, lineDir, unit3(sub(Q, at)), radius, value));
+  } else {
+    if (!chord) return null;
+    const dir = unit3(sub(chord[1], chord[0]));
+    out.push({ kind: 'line', part: 'chord', role: 'current', points: chord });
+    out.push({ kind: 'line', part: 'chord-direction', role: 'other', points: [at, add(at, dir, side)] });
+    out.push(angleArc('arc', 'current', at, lineDir, dir, radius, value));
+  }
+  out.push({ kind: 'dots', part: 'points', role: 'current', points: [p.P, p.E, Q] });
+  return out;
+}
+
+/**
+ * The BSA: a square of the reference plane round P (as wide as the bulb reaches from P), the bulb's outline at the level, the lines on
+ * the plane from P to the two ends and the angle between them; the ends on the surface as dots.
+ */
+function bsaHint(b: BulbConstruction, value: number): MeasureHint | null {
+  if (!b.ends || !b.extent) return null;
+  const { plane, P0 } = b;
+  const half = Math.max(Math.abs(b.extent.u0), Math.abs(b.extent.u1), Math.abs(b.extent.v0), Math.abs(b.extent.v1));
+  const corner = (su: number, sv: number) => add(add(P0, plane.x, su * half), plane.y, sv * half);
+  const e0 = onPlane(plane, b.ends[0]), e1 = onPlane(plane, b.ends[1]);
+  const radius = Math.min(size(sub(e0, P0)), size(sub(e1, P0))) * MEASURE_HINT_PARAMETERS.ARC_SHARE;
+  return [
+    { kind: 'patch', part: 'reference-plane', points: [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)] },
+    ...b.contour.map((c): HintLine => ({ kind: 'line', part: 'outline', role: 'other', points: c.points, closed: c.closed })),
+    { kind: 'line', part: 'to-end', role: 'current', points: [P0, e0] },
+    { kind: 'line', part: 'to-end', role: 'current', points: [P0, e1] },
+    angleArc('arc', 'current', P0, unit3(sub(e0, P0)), unit3(sub(e1, P0)), radius, value),
+    { kind: 'dots', part: 'ends', role: 'current', points: [b.ends[0], b.ends[1]] },
+    { kind: 'dots', part: 'points', role: 'other', points: [b.P] },
+  ];
+}
+
+/** A vertical interval: its strip on the plane, and where its highest and lowest samples lie on the surface. */
+function viHint(b: BulbConstruction, i: number, value: number, unit: string): MeasureHint | null {
+  const s = b.vi?.[i];
+  if (!s?.high || !s.low) return null;
+  return [
+    ...(b.vi ?? []).flatMap((x, k): HintLine[] => (k === i ? [] : [{ kind: 'line', part: 'other-strip', role: 'other', points: x.corners, closed: true }])),
+    { kind: 'line', part: 'strip', role: 'current', points: s.corners, closed: true, label: written('length', value, unit), labelAt: middle(s.corners[1], s.corners[2]) },
+    { kind: 'line', part: 'interval', role: 'current', points: [s.low, onPlane({ ...b.plane, point: s.high }, s.low)] },
+    { kind: 'dots', part: 'high-low', role: 'current', points: [s.high, s.low] },
+    { kind: 'dots', part: 'points', role: 'other', points: [b.P, ...(b.apex ? [b.apex] : [])] },
+  ];
+}
+
 const EPA_KEY = /^epa_(3pt|2ln)_(\d+)mm$/;
 
 /** The drawing of one of a flake's measures; null when it is empty, or what it was taken from is not known. */
@@ -311,6 +387,24 @@ export function flakeHint(key: FlakeMeasure, r: FlakeResult, unit: string): Meas
       return c.platformFaces ? [{ kind: 'faces', part: 'platform', tint: 'current', faces: c.platformFaces, through: true }] : null;
     case 'ipa':
       return c.profile ? ipaHint(c.profile, value) : null;
+    case 'psia':
+      return c.psia ? psiaHint(c.psia, value) : null;
+    case 'bulb_angle_3pt_1mm':
+    case 'bulb_angle_2ln_1mm':
+      return c.profile ? bulbAngleHint(key === 'bulb_angle_3pt_1mm' ? '3pt' : '2ln', c.profile, value) : null;
+    case 'bsa':
+      return c.bulb ? bsaHint(c.bulb, value) : null;
+    case 'vi_0_5mm':
+    case 'vi_1_0mm':
+    case 'vi_1_5mm':
+      return c.bulb ? viHint(c.bulb, VI_MEASURES.indexOf(key), value, unit) : null;
+    case 'pop_mesh_edge':
+      return c.popEdges
+        ? [
+            { kind: 'line', part: 'edges', role: 'current', points: c.popEdges.segments, segments: true },
+            { kind: 'dots', part: 'points', role: 'other', points: [c.popEdges.P] },
+          ]
+        : null;
     default: {
       const e = EPA_KEY.exec(key);
       if (!e || !c.profile) return null;

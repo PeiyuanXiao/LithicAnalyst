@@ -4,7 +4,7 @@ import { annotate, drawAxis, drawOutline, placeEnds } from './flakeSetup';
 import { curveClick, displayPanel, dragArrow, expect, exportFile, folderPaths, folderText, loadMesh, mockFolder, nextFrames, openApp, openMockFolder, openSection, parseCsv, specimenPanel, state, test, toScreen } from './helpers';
 
 const FLAKES_HEADER =
-  'specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth';
+  'specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth,psia,bulb_angle_3pt_1mm,bulb_angle_2ln_1mm,bsa,bsa_level_mm,bsa_ends_moved,vi_0_5mm,vi_1_0mm,vi_1_5mm,pop_mesh_edge';
 
 const flake = (page: Page) => page.evaluate(() => window.lithicanalyst.flake());
 const measures = async (page: Page) => (await flake(page))?.measures ?? null;
@@ -263,7 +263,8 @@ test('the type: stays with the project file, the next new model starts with it, 
   expect(file.flake.axis?.matrix?.length).toBe(16);
   await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.projectJson())).derived.flake?.measures.ipa ?? null).not.toBeNull();
   const again = await page.evaluate(() => window.lithicanalyst.projectJson());
-  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3 });
+  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3,
+    BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
 
   // a new model starts as a flake
   await loadMesh(page, { ...t1Ply(), name: 't1b.ply' });
@@ -324,7 +325,8 @@ test('a folder: the list shows and filters the type; the summary has flakes.csv 
   expect(row.frame_source).toBe('technical_axis');
   expect(Number(row.tech_length)).toBeCloseTo(60, 0);
   const manifest = JSON.parse((await folderText(page, (await find('manifest\\.json'))!))!);
-  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3 });
+  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3,
+    BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
 });
 
 test('the toolbar: the axis after Select, no tool for the platform ends; the automatic measurements are the flake\'s', async ({ page }) => {

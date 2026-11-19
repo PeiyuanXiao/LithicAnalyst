@@ -27,6 +27,9 @@ export interface DisplaySettings {
   /** Smoothing passes for the curvature map (0–100). */
   curvScale: number;
   curvContrast: number;
+  /** Shading by height: over which plane (`ventral`, or a fitted plane's id), and its range (±) in mm with a stated unit. */
+  heightRef: string;
+  heightRangeMm: number;
   /** Arrow display; `labels` and `showHidden` apply to curves too. */
   arrows: ArrowDisplay;
   /** What traced curves are drawn toward. */
@@ -51,7 +54,7 @@ export interface DisplaySettings {
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'retouch' | 'gm' | 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
+export type DisplayAspect = 'height' | 'retouch' | 'gm' | 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
 
 /** What can be picked in the configuration: a face of the box or a cone of the bicone. */
 export type ConfigPick = import('../core/fields').ConfigFace | import('../core/fields').BiconeCone;
@@ -271,6 +274,11 @@ export interface AppApi {
   focusWorkingEdge(id: string): void;
   /** The row picked (its id; null: none). */
   planEdge(): string | null;
+  /** What heights can be shown over (the ventral reference plane, the fitted planes), the one in use, and the range's slider. */
+  heightReferences(): Array<{ value: string; label: string }>;
+  heightReference(): string | null;
+  heightRange(): { value: number; min: number; max: number; step: number; unit: string };
+  setHeightRange(value: number): void;
   /** An annotation hidden for the session (view state: not drawn, not picked, not in figures; never in the file, never undone). */
   isHidden(id: string): boolean;
   setHidden(id: string, hidden: boolean): void;

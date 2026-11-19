@@ -35,13 +35,14 @@ import { emptyCorrections, hasFaceCorrections, joinKey } from '../compute/config
 import { orderSequences, relationInputs } from '../compute/relations';
 import type { RetouchStation } from '../compute/retouchAngle';
 import { clampFitLength } from '../compute/retouchIndex';
+import { BSA_LEVEL_DEFAULT_MM, bsaSettingsOf, clampBsaLevel } from '../compute/bulb';
 import { measuredLine, platformEndsOf } from '../compute/measuredLine';
 import { autoRetouchCurves } from '../compute/retouchBand';
 import { edgeAxis, refusalOf, retouchRunEdges, type WorkingEdgeRefusal } from '../compute/workingEdge';
 import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, measuresEdgeAngle, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
-import { retouchSettingsOf, type RetouchAxisChoice, type RetouchSettings } from './types';
+import { retouchSettingsOf, type BsaSettings, type RetouchAxisChoice, type RetouchSettings } from './types';
 import type { GmConfig, ImportRecord, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3, WorkingEdge } from './types';
 import { copy, distance } from './vec';
 
@@ -1129,6 +1130,28 @@ export function setRetouchAxis(store: ProjectStore, axis: RetouchAxisChoice): vo
 /** The longest axis the other way round. */
 export function setRetouchFlip(store: ProjectStore, flip: boolean): void {
   setRetouchSettings(store, { flip });
+}
+
+/** The BSA's settings; the default leaves the key out. `merge`: typing in a box, one step. */
+function setBsaSettings(store: ProjectStore, labelKey: string, change: Partial<BsaSettings>, merge: string | null = null): void {
+  const flake = store.state.flake;
+  const before = bsaSettingsOf(flake);
+  const after: BsaSettings = { ...before, ...change };
+  if (after.level === before.level && JSON.stringify(after.ends) === JSON.stringify(before.ends)) return;
+  const next = structuredClone(flake);
+  if (after.level === BSA_LEVEL_DEFAULT_MM && !after.ends) delete next.bsa;
+  else next.bsa = structuredClone(after);
+  store.history.execute(new SetFlakeCommand(labelKey, structuredClone(flake), next, merge));
+}
+
+/** The level of the bulb's outline over the ventral reference plane (mm): in range, to the step. */
+export function setBsaLevel(store: ProjectStore, level: number): void {
+  if (Number.isFinite(level)) setBsaSettings(store, 'cmd.bsaLevel', { level: clampBsaLevel(level) }, 'bsa-level');
+}
+
+/** The two ends of the BSA set by hand (original coordinates, on the surface); null: back to the outline's. */
+export function setBsaEnds(store: ProjectStore, ends: [Vec3, Vec3] | null): void {
+  setBsaSettings(store, ends ? 'cmd.bsaEnds' : 'cmd.bsaReset', { ends: ends ? [copy(ends[0]), copy(ends[1])] : null });
 }
 
 // ---------------------------------------------------------------- technical axis

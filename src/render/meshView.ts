@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { LoadedMesh } from '../io/loadMesh';
 
-export type ShadingMode = 'plain' | 'scan' | 'curvature';
+export type ShadingMode = 'plain' | 'scan' | 'curvature' | 'height';
 
 const STONE = new THREE.Color().setRGB(0.78, 0.77, 0.74, THREE.SRGBColorSpace);
 
@@ -11,6 +11,7 @@ export class MeshView {
   readonly material: THREE.MeshStandardMaterial;
   private mode: ShadingMode = 'plain';
   private curvatureColors: Float32Array | null = null;
+  private heightColors: Float32Array | null = null;
 
   constructor(readonly loaded: LoadedMesh) {
     this.material = new THREE.MeshStandardMaterial({
@@ -43,6 +44,12 @@ export class MeshView {
     if (this.mode === 'curvature') this.apply();
   }
 
+  /** The colours of the shading by height (null: none yet, the stone colour meanwhile). */
+  setHeightColors(colors: Float32Array | null): void {
+    this.heightColors = colors;
+    if (this.mode === 'height') this.apply();
+  }
+
   setShading(mode: ShadingMode): void {
     if (mode === 'scan' && !this.loaded.scanColors) mode = 'plain';
     this.mode = mode;
@@ -51,7 +58,7 @@ export class MeshView {
 
   private apply(): void {
     const g = this.loaded.geometry;
-    const data = this.mode === 'scan' ? this.loaded.scanColors : this.mode === 'curvature' ? this.curvatureColors : null;
+    const data = this.mode === 'scan' ? this.loaded.scanColors : this.mode === 'curvature' ? this.curvatureColors : this.mode === 'height' ? this.heightColors : null;
     if (data) {
       const attr = g.getAttribute('color') as THREE.BufferAttribute | undefined;
       if (attr && attr.array.length === data.length) {

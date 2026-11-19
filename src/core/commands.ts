@@ -659,7 +659,9 @@ export class SetFlakeCommand implements Command {
   constructor(
     readonly labelKey: string,
     private readonly before: FlakeData,
-    private readonly after: FlakeData,
+    private after: FlakeData,
+    /** Commands with the same mergeKey issued within a short window collapse into one undo step (typing a level). */
+    private readonly mergeKey: string | null = null,
   ) {}
   apply(store: ProjectStore): void {
     store._setFlake(structuredClone(this.after));
@@ -668,6 +670,13 @@ export class SetFlakeCommand implements Command {
   revert(store: ProjectStore): void {
     store._setFlake(structuredClone(this.before));
     store.notify({ kind: 'flake' });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetFlakeCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
   }
 }
 

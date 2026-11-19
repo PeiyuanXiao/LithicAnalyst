@@ -156,6 +156,19 @@ export class ProfilePanel {
       line(g.ventralLine, 'profile-fit', 'profile-ventral-fit');
       line(g.platformLine, 'profile-fit', 'profile-platform-line');
       g.epaPoints.forEach((q, i) => dot(q, 'profile-epa', null, `profile-epa-${i + 1}`));
+      // the bulb angle at 1 mm: from the platform line's end at P, to Qv on the ventral side, the chord there, and the angle
+      if (g.bulbAt && g.bulbQ && g.E) {
+        line([g.bulbAt, g.bulbQ], 'profile-bulb-line', 'profile-bulb-line');
+        line(g.bulbChord ?? null, 'profile-bulb-chord', 'profile-bulb-chord');
+        const at = local(g.bulbAt), q = local(g.bulbQ), e = local(g.E);
+        const a0 = Math.atan2(y(e[1]) - y(at[1]), x(e[2]) - x(at[2])), a1 = Math.atan2(y(q[1]) - y(at[1]), x(q[2]) - x(at[2]));
+        let sweep = a1 - a0;
+        while (sweep > Math.PI) sweep -= 2 * Math.PI;
+        while (sweep < -Math.PI) sweep += 2 * Math.PI;
+        const r = 12, cx = x(at[2]), cy = y(at[1]);
+        s.append(svg('path', { d: `M${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)}A${r} ${r} 0 0 ${sweep > 0 ? 1 : 0} ${cx + r * Math.cos(a0 + sweep)} ${cy + r * Math.sin(a0 + sweep)}`, class: 'profile-bulb-arc', id: 'profile-bulb-arc' }));
+        dot(g.bulbQ, 'profile-bulb', null, 'profile-bulb-q');
+      }
       dot(g.P, 'profile-point', 'P', 'profile-p');
       dot(g.E, 'profile-point', 'E', 'profile-e');
     }

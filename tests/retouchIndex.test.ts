@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { morphDimensions } from '../src/compute/flake';
+import { FLAKE_PROXIMAL_COLUMNS, morphDimensions } from '../src/compute/flake';
 import { buildEdges, meshTopology, signedVolume } from '../src/compute/meshGeometry';
 import { polylineEdges, regionsSteps } from '../src/compute/regions';
 import { retouchSections, type RetouchPiece } from '../src/compute/retouchAngle';
@@ -662,7 +662,9 @@ describe('the tables', () => {
   it('flakes.csv ends with the fifteen columns of the indices, in their order', () => {
     const [head, row] = flakesCsv(s.state, null, { excelBom: false }, r).trim().split('\n');
     const names = head.split(',');
-    expect(names.slice(-15)).toEqual(['retouch_axis', 'retouch_fit_length', 'removed_volume', 'erp', 'erp_filled_share', 'giur', 'giur_stations', 'invasiveness', 'invasiveness_continuous', 'retouch_perimeter', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral', 'edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth']);
+    // (the proximal measures come after them)
+    expect(names.slice(-10)).toEqual([...FLAKE_PROXIMAL_COLUMNS]);
+    expect(names.slice(-25, -10)).toEqual(['retouch_axis', 'retouch_fit_length', 'removed_volume', 'erp', 'erp_filled_share', 'giur', 'giur_stations', 'invasiveness', 'invasiveness_continuous', 'retouch_perimeter', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral', 'edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth']);
     expect(RETOUCH_FLAKE_COLUMNS.length).toBe(15);
     const cells = Object.fromEntries(names.map((n, i) => [n, row.split(',')[i]]));
     expect(cells.retouch_axis).toBe('technical');
@@ -672,7 +674,7 @@ describe('the tables', () => {
     // not computed yet: the columns, empty
     const empty = flakesCsv(s.state, null, { excelBom: false }, null).trim().split('\n');
     expect(empty[0]).toBe(head);
-    expect(empty[1].split(',').slice(-15)).toEqual(new Array(15).fill(''));
+    expect(empty[1].split(',').slice(-25, -10)).toEqual(new Array(15).fill(''));
   });
 
   it('retouch_sections.csv: a row per retouched station', () => {
@@ -712,7 +714,7 @@ describe('the tables', () => {
     };
     const files = batchOutputs([specimen('A', { retouchIndices: JSON.parse(JSON.stringify(r)) }), specimen('B', {})], { excelBom: false });
     const text = (name: string) => files.find((f) => f.suffix === name)!.text.trim().split('\n');
-    expect(text('flakes.csv').slice(1).map((l) => l.split(',').slice(-14, -13)[0])).toEqual(['5', '']);
+    expect(text('flakes.csv').slice(1).map((l) => l.split(',').slice(-24, -23)[0])).toEqual(['5', '']);
     expect(text('retouch_sections.csv').length).toBe(1 + 31);
     expect(text('retouch_segments.csv').length).toBe(2);
     expect(text('invasiveness.csv').length).toBe(1 + 16);

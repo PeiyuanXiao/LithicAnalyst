@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { platformSides, landmarkTable } from '../src/compute/landmarks';
-import { emptyFlakeMeasures, FLAKE_MEASURES } from '../src/compute/flake';
+import { emptyFlakeMeasures, FLAKE_MEASURES, FLAKE_PROXIMAL_COLUMNS } from '../src/compute/flake';
 import { addCurve, addLandmark, addScarVector, deleteCurve, deleteLandmark, deleteTechnicalAxis, moveLandmark, placePlatformEnd, renameLandmark, setCurveAttribute, setRegionType, setSpecimenType, setTechnicalAxis, updateSpecimen } from '../src/core/actions';
 import { keyedOptions, numberKeyField, offeredOptions, REGION_FIELDS } from '../src/core/fields';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
@@ -203,13 +203,15 @@ describe('the exports of a flake', () => {
     m.ipa = 101.25;
     setTechnicalAxis(s, axis);
     const [head, row] = flakesCsv(s.state, m, { excelBom: false }).trim().split('\n');
-    expect(head).toBe(`specimen_id,unit,frame_source,${FLAKE_MEASURES.join(',')}`);
-    expect(head.split(',').slice(3)).toEqual(['tech_length', 'tech_width', 'tech_thickness', 'morph_length', 'morph_width', 'morph_thickness', 'morph_tech_angle_deg', 'platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'platform_area', 'epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm', 'ipa']);
+    expect(head).toBe(`specimen_id,unit,frame_source,${FLAKE_MEASURES.join(',')},${FLAKE_PROXIMAL_COLUMNS.join(',')}`);
+    expect(head.split(',').slice(3, 22)).toEqual(['tech_length', 'tech_width', 'tech_thickness', 'morph_length', 'morph_width', 'morph_thickness', 'morph_tech_angle_deg', 'platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'platform_area', 'epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm', 'ipa']);
     expect(row.split(',')[0]).toBe('F1');
     expect(row.split(',')[1]).toBe('mm');
     expect(row.split(',')[2]).toBe('technical_axis');
     expect(row.split(',')[3]).toBe('60');
-    expect(row.split(',').at(-1)).toBe('101.25');
+    expect(row.split(',')[21]).toBe('101.25');
+    // then the proximal measures: empty here, but the BSA's level and whether its ends were moved
+    expect(row.split(',').slice(22)).toEqual(['', '', '', '', '0.1', 'false', '', '', '', '']);
     expect(row.split(',').length).toBe(head.split(',').length);
     expect(flakesCsv(new ProjectStore(emptyProject()).state, null, { excelBom: true }).charCodeAt(0)).toBe(0xfeff);
   });
