@@ -16,7 +16,7 @@ import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../cor
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { annotationStatus, type StatusKey } from '../core/annotationStatus';
 import { CURVE_FIELDS, GENERIC_REGION_TYPE, hasVolumeSplit, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
-import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject } from '../core/schema';
+import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject, type ProjectFile } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, retouchSettingsOf, scarsToCheck, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Section, type GmConfig, type MeshInfo, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
@@ -29,7 +29,8 @@ import { createMeasurer, type MeshMeasurer } from '../io/meshMeasurer';
 import type { IgesCheck } from '../io/meshJobs';
 import BatchWorker from '../io/batchWorker?worker&inline';
 import { zipStored } from '../io/zip';
-import { fileStem, initHostDownloads, saveFile, saveTextFile } from '../io/saveFile';
+import { fileStem, initHostDownloads, runningInHost, saveFile, saveTextFile } from '../io/saveFile';
+import { askToWrite, droppedHandle, isAbort, openFilePicker, saveFilePicker, writeHandle, type ProjectFileHandle } from '../io/fileHandle';
 import { ArrowLayer, arrowColor, arrowColorModeOf, ARROW_COLORS, DEFAULT_ARROW_DISPLAY, type ArrowColorMode } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
@@ -39,7 +40,7 @@ import { SectionTool } from '../tools/sectionTool';
 import { ClickTool } from '../tools/clickTool';
 import { REGION_COLORS, RegionLayer, regionColorOf } from '../render/regionLayer';
 import { checkRelations, harrisLayout, relationInputs, relationProblems, type HarrisLayout, type RelationChecks } from '../compute/relations';
-import { HARRIS_SCREEN, harrisSvg, type HarrisStyle } from '../render/harris';
+import { HARRIS_PRINT, HARRIS_SCREEN, harrisSvg, type HarrisPalette, type HarrisStyle } from '../render/harris';
 import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import { RelationTool, type ScarPick } from '../tools/relationTool';
 import { SequenceTool } from '../tools/sequenceTool';
@@ -95,7 +96,7 @@ import { assembleCurve, curveSegments } from '../core/curveGeometry';
 /** What "Complete loop" says when it cannot. */
 const COMPLETE_FAILURES: Record<CompleteFailure, string> = { short: 'toast.completeShort', edge: 'toast.completeEdge', loop: 'toast.completeLoop' };
 import { fitPlane } from '../compute/meshGeometry';
-import { DEFAULT_FIGURE, FigureError, figureLayout, FIGURE_VIEWS, renderFigure, viewAxes, type Figure, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
+import { DEFAULT_FIGURE, FigureError, figureBackgroundColor, figureLayout, FIGURE_BACKGROUNDS, FIGURE_VIEWS, renderFigure, viewAxes, type Figure, type FigureBackground, type FigureContext, type FigureLayout, type FigureSettings, type SectionDrawing } from '../render/figure';
 import { ConfigSketch } from '../render/configSketch';
 import { ViewCube } from '../render/viewCube';
 import { curveColor } from '../render/curveLayer';
@@ -226,6 +227,7 @@ function loadFigure(): FigureSettings {
     overlays: { ...DEFAULT_FIGURE.overlays, ...(saved.overlays ?? {}) },
     scale: [0.5, 1, 2].includes(saved.scale ?? 0) ? saved.scale! : DEFAULT_FIGURE.scale,
     dpi: [300, 600, 1200].includes(saved.dpi ?? 0) ? saved.dpi! : DEFAULT_FIGURE.dpi,
+    background: FIGURE_BACKGROUNDS.includes(saved.background as FigureBackground) ? saved.background! : DEFAULT_FIGURE.background,
   };
 }
 
@@ -407,6 +409,15 @@ export class App implements AppApi {
   private curvTimer = 0;
   private curvBusy = false;
   private pendingProject: ProjectState | null = null;
+  /**
+   * The file the open model's project is saved into: chosen in the save dialog, opened or dropped (File System Access
+   * API). It belongs to the model by its checksum; `granted`: may be written without asking first.
+   */
+  private projectHandle: { handle: ProjectFileHandle; sha256: string; granted: boolean } | null = null;
+  /** The handle of the project waiting in `pendingProject`: the model's once that model has opened. */
+  private pendingHandle: ProjectFileHandle | null = null;
+  /** This browser can only download project files: said with the first download of the session. */
+  private downloadNoted = false;
   private lastHover: SurfaceHit | null = null;
   private autosaveTimer = 0;
   private readonly autosaveOk = autosaveAvailable();
@@ -604,6 +615,7 @@ export class App implements AppApi {
   private readonly igesInput: HTMLInputElement;
   private importIgesItem: HTMLButtonElement | null = null;
   private importFolderItem: HTMLButtonElement | null = null;
+  private saveAsItem: HTMLButtonElement | null = null;
   private igesLayer: IgesLayer | null = null;
   /** The vectors of an IGES file being aligned (the "Align vectors" mode), or null. */
   private align: IgesAlign | null = null;
@@ -895,6 +907,9 @@ export class App implements AppApi {
     // scar vectors from another program: into the open model, or into each model of the folder
     this.importIgesItem = item('btn-import-iges', ICONS.file, t('header.importIges'), () => this.igesInput.click()) as HTMLButtonElement;
     this.importFolderItem = item('btn-import-folder-iges', ICONS.open, t('header.importFolderIges'), () => void this.importFolderIges()) as HTMLButtonElement;
+    // a copy, or the project into another file from now on
+    this.saveAsItem = item('btn-save-as', ICONS.save, t('header.saveAs'), () => this.saveProject(true)) as HTMLButtonElement;
+    this.saveAsItem.disabled = !this.hasMesh();
     menu.append(
       item('btn-open', ICONS.cube, t('header.openMesh'), () => this.meshInput.click()),
       item('btn-open-project', ICONS.project, t('header.openProject'), () => this.openProject()),
@@ -902,6 +917,8 @@ export class App implements AppApi {
       h('hr', { class: 'menu-sep', 'aria-hidden': 'true' }),
       this.importIgesItem,
       this.importFolderItem,
+      h('hr', { class: 'menu-sep', 'aria-hidden': 'true' }),
+      this.saveAsItem,
       h('hr', { class: 'menu-sep', 'aria-hidden': 'true' }),
       this.closeItem,
     );
@@ -1521,6 +1538,7 @@ export class App implements AppApi {
     this.paintSaveButton();
     // (the empty view closes too, back to the choice of module)
     if (this.closeItem) this.closeItem.disabled = !has && !!this.workspace;
+    if (this.saveAsItem) this.saveAsItem.disabled = !has;
     this.updateFileMenu();
     if (this.displayCtl) this.displayCtl.hidden = !has;
     this.updateSpecimenBar();
@@ -2471,7 +2489,8 @@ export class App implements AppApi {
       const lines = this.cuts.get(sec.id)?.lines;
       // drawn as seen from the side the section was drawn from: the viewer's side up
       const loops = lines ? sectionLoops2D(sec, lines).map((l) => l.map(([u, v]) => [u, -v] as [number, number])) : [];
-      return loops.length ? [{ label: sec.label, loops, fill: sec.fill }] : [];
+      // (and where it cuts the model, to mark on the views)
+      return loops.length && lines ? [{ label: sec.label, loops, fill: sec.fill, trace: { normal: sec.normal, lines } }] : [];
     });
   }
 
@@ -3846,8 +3865,9 @@ export class App implements AppApi {
     if (best) this.moveRetouchStation((best as { curveId: string }).curveId, (best as { k: number }).k);
   }
 
-  /** A preview for a publication: the light colours on white, to the figure's scale where the unit is stated. */
+  /** A preview for a publication: the light colours on the figures' background, to the figure's scale where the unit is stated. */
   private retouchPrint(kind: 'section' | 'plan'): { drawing: Drawing; name: string } | null {
+    const palette = { ...PRINT_PALETTE, background: figureBackgroundColor(this.figure.background) };
     const st = this.store.state;
     const mm = mmPerUnit(st.specimen.unit);
     const pxPerUnit = mm !== null ? mm * this.figure.scale * PX_PER_MM : undefined;
@@ -3860,10 +3880,10 @@ export class App implements AppApi {
       const curve = s ? this.store.curve(s.curveId) : null;
       if (!s || !model || !at || !curve) return null;
       const place = Math.round(at.position * (mm ?? 1) * 10) / 10;
-      return { drawing: sectionDrawing(model, { palette: PRINT_PALETTE, whole: this.sectionPanel?.whole ?? false, minWidth: 5 / (mm ?? 1), unit, width, height, pxPerUnit }), name: `${this.stem()}_retouch_section_${curve.label}_${place}` };
+      return { drawing: sectionDrawing(model, { palette, whole: this.sectionPanel?.whole ?? false, minWidth: 5 / (mm ?? 1), unit, width, height, pxPerUnit }), name: `${this.stem()}_retouch_section_${curve.label}_${place}` };
     }
     const c = this.planContent();
-    return c ? { drawing: planDrawing({ ...c, face: this.planFace, palette: PRINT_PALETTE, unit, width, height, pxPerUnit }), name: `${this.stem()}_retouch_plan_${this.planFace}` } : null;
+    return c ? { drawing: planDrawing({ ...c, face: this.planFace, palette, unit, width, height, pxPerUnit }), name: `${this.stem()}_retouch_plan_${this.planFace}` } : null;
   }
 
   private async exportRetouchFigure(kind: 'section' | 'plan', format: 'svg' | 'png'): Promise<void> {
@@ -4553,6 +4573,7 @@ export class App implements AppApi {
     if (this.lossOnLeaving() && !(await this.feedback.confirm(t('dlg.closeModel.title'), t('dlg.closeModel.notDownloaded'), t('dlg.closeModel.yes'), t('dlg.cancel')))) return;
     this.workspace = ws;
     this.wsIndex = -1;
+    this.projectHandle = null;
     this.updateStartPage();
     const { ids, duplicates } = specimenIds(ws.meshes);
     this.wsIds = ids;
@@ -4752,15 +4773,28 @@ export class App implements AppApi {
     const ws = this.workspace;
     const st = this.store.state;
     if (!ws?.writable || this.wsIndex < 0 || st.mesh?.fileName !== baseName(ws.meshes[this.wsIndex])) return;
-    const path = projectPathFor(ws.meshes[this.wsIndex]);
     const file = serializeProject(st, __APP_VERSION__, this.meshResults());
-    const savedAt = this.store.history.stateId;
+    await this.writeFolderProject(file, JSON.stringify(file, null, 2), this.store.history.stateId, false);
+  }
+
+  /** Write the open model's project into the writable folder; `asked`: Save asked for it (now, and it says where). */
+  private async writeFolderProject(file: ProjectFile, text: string, savedAt: number, asked: boolean): Promise<void> {
+    const ws = this.workspace;
+    if (!ws?.writable || this.wsIndex < 0) return;
+    // the same contents are not written again a moment later
+    if (asked) {
+      clearTimeout(this.folderSaveTimer);
+      this.folderSaveTimer = 0;
+    }
+    const path = projectPathFor(ws.meshes[this.wsIndex]);
+    const sha = this.store.state.mesh?.sha256;
     try {
-      await ws.write(path, JSON.stringify(file, null, 2));
+      await ws.write(path, text);
       // the folder's copy is the project file: saved (unless another model opened meanwhile)
-      if (this.store.state.mesh?.sha256 === st.mesh?.sha256) this.store.history.markSaved(savedAt);
+      if (this.store.state.mesh?.sha256 === sha) this.store.history.markSaved(savedAt);
       this.projectIndex?.add(path, structuredClone(file));
       this.sidebar.refresh('workspace');
+      if (asked) this.feedback.toast(t('toast.savedFolder', { path }));
     } catch (e) {
       this.feedback.toast(t('workspace.saveFailed', { msg: (e as Error).message }), 'error');
     }
@@ -6007,9 +6041,14 @@ export class App implements AppApi {
     this.selection.set(region?.id ?? id);
   }
 
+  /** The Harris matrix for a publication, on the figures' background. */
+  private harrisPrint(): HarrisPalette {
+    return { ...HARRIS_PRINT, background: figureBackgroundColor(this.figure.background) };
+  }
+
   exportHarrisSvg(): void {
     if (!this.hasMesh() || !this.store.state.scars.length) return;
-    void this.save(`${this.stem()}_harris.svg`, harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null)), 'image/svg+xml');
+    void this.save(`${this.stem()}_harris.svg`, harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null), this.harrisPrint()), 'image/svg+xml');
   }
 
   volumeSplit(): VolumeSplit | null {
@@ -6221,15 +6260,93 @@ export class App implements AppApi {
     this.refreshHint();
   }
 
-  saveProject(): void {
+  /**
+   * Save the project where it is kept: a writable folder's copy, at once; else the file it was opened from or
+   * first saved to; else (the first time) a file chosen in the browser's save dialog; where the browser has none
+   * of that (or in the artifact viewer, or a read-only folder), a download. `as`: ask for a file (in a folder: a copy).
+   * The dialog and the permission are asked for before anything is awaited: the browser grants them only to the
+   * click or key press itself.
+   */
+  saveProject(as = false): void {
     if (!this.hasMesh()) return;
+    const st = this.store.state;
     // agreement analysis tells observers apart by their name
-    if (!this.store.state.specimen.annotator.trim()) this.feedback.toast(t('toast.noAnnotator'), 'info', 5000);
-    const file = serializeProject(this.store.state, __APP_VERSION__, this.meshResults());
+    if (!st.specimen.annotator.trim()) this.feedback.toast(t('toast.noAnnotator'), 'info', 5000);
+    const file = serializeProject(st, __APP_VERSION__, this.meshResults());
+    const text = JSON.stringify(file, null, 2);
     // (what was saved is the state as it is now: edits made while the file is written stay unsaved)
     const savedAt = this.store.history.stateId;
-    void this.save(`${this.stem()}.lithicanalyst.json`, JSON.stringify(file, null, 2), 'application/json').then((outcome) => {
+    const sha = st.mesh!.sha256;
+    const name = `${this.stem()}.lithicanalyst.json`;
+    const ws = this.workspace;
+    const folder = ws && this.wsIndex >= 0 && st.mesh?.fileName === baseName(ws.meshes[this.wsIndex]) ? ws : null;
+    if (runningInHost() || (folder && !folder.writable)) {
+      this.downloadProject(name, text, savedAt, false);
+      return;
+    }
+    if (folder && !as) {
+      void this.writeFolderProject(file, text, savedAt, true);
+      return;
+    }
+    const bound = !as && this.projectHandle?.sha256 === sha ? this.projectHandle : null;
+    if (bound) {
+      void this.writeProjectHandle(bound, askToWrite(bound.handle, bound.granted), text, savedAt);
+      return;
+    }
+    const pick = saveFilePicker();
+    if (!pick) {
+      this.downloadProject(name, text, savedAt, !folder);
+      return;
+    }
+    const chosen = pick(name);
+    void (async () => {
+      let handle: ProjectFileHandle;
+      try {
+        handle = await chosen;
+      } catch (e) {
+        // closed without choosing: nothing; refused here: a download, as before
+        if (!isAbort(e)) this.downloadProject(name, text, savedAt, !folder);
+        return;
+      }
+      try {
+        await writeHandle(handle, text);
+      } catch (e) {
+        this.feedback.toast(t('toast.saveFailed', { name: handle.name, msg: (e as Error).message }), 'error');
+        return;
+      }
+      // in a folder the folder's copy stays the project: this was a copy
+      if (!folder && this.store.state.mesh?.sha256 === sha) {
+        this.projectHandle = { handle, sha256: sha, granted: true };
+        this.store.history.markSaved(savedAt);
+      }
+      this.feedback.toast(t('toast.saved', { name: handle.name }));
+    })();
+  }
+
+  /** Overwrite the file the project came from or was saved to; a failure leaves the changes unsaved (no download instead). */
+  private async writeProjectHandle(bound: NonNullable<App['projectHandle']>, permitted: Promise<boolean>, text: string, savedAt: number): Promise<void> {
+    const name = bound.handle.name;
+    try {
+      if (!(await permitted)) throw new Error(t('toast.notPermitted'));
+      bound.granted = true;
+      await writeHandle(bound.handle, text);
+    } catch (e) {
+      bound.granted = false;
+      this.feedback.toast(t('toast.saveFailed', { name, msg: (e as Error).message }), 'error');
+      return;
+    }
+    if (this.store.state.mesh?.sha256 === bound.sha256) this.store.history.markSaved(savedAt);
+    this.feedback.toast(t('toast.saved', { name }));
+  }
+
+  /** Download the project file; `note`: say (once a session) that this browser can only download. */
+  private downloadProject(name: string, text: string, savedAt: number, note: boolean): void {
+    const sha = this.store.state.mesh?.sha256;
+    const first = note && !this.downloadNoted;
+    void this.save(name, text, 'application/json', first ? t('toast.downloadOnly', { name }) : undefined).then((outcome) => {
       if (outcome !== 'saved') return;
+      if (first) this.downloadNoted = true;
+      if (this.store.state.mesh?.sha256 !== sha) return;
       this.store.history.markSaved(savedAt);
       // a read-only folder: this model's edits are downloaded now
       this.keepSessionProject();
@@ -6239,13 +6356,38 @@ export class App implements AppApi {
     });
   }
 
+  /** Open a project file: through the browser's open dialog where there is one (so that Save writes it again), else the file input. */
   openProject(): void {
-    this.projectInput.click();
+    const pick = openFilePicker();
+    if (!pick) {
+      this.projectInput.click();
+      return;
+    }
+    const chosen = pick();
+    void (async () => {
+      let handle: ProjectFileHandle;
+      try {
+        handle = await chosen;
+      } catch (e) {
+        // not allowed here: the file input instead
+        if (!isAbort(e)) this.projectInput.click();
+        return;
+      }
+      let file: File;
+      try {
+        file = await handle.getFile();
+      } catch (e) {
+        this.feedback.toast(t('error.project', { msg: (e as Error).message }), 'error');
+        return;
+      }
+      await this.openProjectFile(file, handle);
+    })();
   }
 
-  private async save(name: string, text: string, mime: string): Promise<Awaited<ReturnType<typeof saveTextFile>>> {
+  /** `savedText`: what the toast says once it is saved (instead of "Saved …"). */
+  private async save(name: string, text: string, mime: string, savedText?: string): Promise<Awaited<ReturnType<typeof saveTextFile>>> {
     const outcome = await saveTextFile(name, text, mime);
-    if (outcome === 'saved') this.feedback.toast(t('toast.saved', { name }));
+    if (outcome === 'saved') this.feedback.toast(savedText ?? t('toast.saved', { name }), 'info', savedText ? 6000 : undefined);
     else if (outcome === 'declined') this.feedback.toast(t('toast.declined'));
     else if (outcome === 'busy') this.feedback.toast(t('toast.busy'), 'warn');
     else this.feedback.showCopy(name, text);
@@ -6414,6 +6556,8 @@ export class App implements AppApi {
     this.tools?.cancel();
     this.flushAutosave();
     this.releaseMesh();
+    // the previous model's project file is not this one's
+    this.projectHandle = null;
     this.loaded = loaded;
     this.meshView = new MeshView(loaded);
     this.meshView.setRoughness(0.95 - 0.7 * GLOSS);
@@ -6494,6 +6638,8 @@ export class App implements AppApi {
     this.faceAreas = null;
     this.curvBusy = false;
     this.pendingProject = null;
+    this.pendingHandle = null;
+    this.projectHandle = null;
     this.lastHover = null;
     this.workspace = null;
     this.wsIndex = -1;
@@ -6556,9 +6702,13 @@ export class App implements AppApi {
 
   private async afterMeshLoaded(loaded: LoadedMesh, opts: { project?: ProjectState[]; quiet?: boolean } = {}): Promise<void> {
     const pending = this.pendingProject;
+    const pendingHandle = this.pendingHandle;
     this.pendingProject = null;
+    this.pendingHandle = null;
     if (pending && pending.mesh?.sha256 === loaded.info.sha256) {
       this.applyProject(pending);
+      // the project's file goes with it now that its model is open
+      if (pendingHandle) this.projectHandle = { handle: pendingHandle, sha256: loaded.info.sha256, granted: false };
       return;
     }
     // the first project file made on this very model (an old one next to it may belong to another)
@@ -6596,7 +6746,8 @@ export class App implements AppApi {
     this.feedback.toast(t('toast.restored', { what }));
   }
 
-  private async openProjectFile(file: File): Promise<void> {
+  /** `handle`: the file's (File System Access API), where it came from the open dialog or a drop; Save then writes it again. */
+  private async openProjectFile(file: File, handle: ProjectFileHandle | null = null): Promise<void> {
     let state: ProjectState;
     try {
       state = parseProjectFile(JSON.parse(await file.text()));
@@ -6614,18 +6765,23 @@ export class App implements AppApi {
       const choice = await this.feedback.choose(t('dlg.mismatch.title'), t('dlg.mismatch.body', { file: state.mesh.fileName }), buttons);
       if (choice === 'open') {
         this.pendingProject = state;
+        this.pendingHandle = handle;
         this.meshInput.click();
         return;
       }
       if (choice !== 'load') return;
+      // the file is another model's project: this model's is not saved over it
+      handle = null;
     }
     if (!cur) return;
     this.applyProject(state);
+    this.projectHandle = handle ? { handle, sha256: cur.sha256, granted: false } : null;
   }
 
-  private handleFile(file: File): void {
+  /** `handle`: a dropped project file's, asked for during the drop. */
+  private handleFile(file: File, handle: Promise<ProjectFileHandle | null> | null = null): void {
     const ext = extensionOf(file.name);
-    if (ext === 'json') void this.openProjectFile(file);
+    if (ext === 'json') void (async () => this.openProjectFile(file, handle ? await handle : null))();
     else if (['ply', 'stl', 'obj'].includes(ext)) void this.openMeshFile(file);
     else this.feedback.toast(t('error.unsupported'), 'error');
   }
@@ -6665,7 +6821,10 @@ export class App implements AppApi {
       const f = this.meshInput.files?.[0];
       this.meshInput.value = '';
       if (f) void this.openMeshFile(f);
-      else this.pendingProject = null;
+      else {
+        this.pendingProject = null;
+        this.pendingHandle = null;
+      }
     });
     this.projectInput.addEventListener('change', () => {
       const f = this.projectInput.files?.[0];
@@ -6693,7 +6852,9 @@ export class App implements AppApi {
       depth = 0;
       this.dropEl.hidden = true;
       const f = e.dataTransfer?.files?.[0];
-      if (f) this.handleFile(f);
+      // a project file's handle is asked for now: the dropped items are gone after this event
+      const handle = f && extensionOf(f.name) === 'json' ? droppedHandle(e.dataTransfer?.items?.[0]) : null;
+      if (f) this.handleFile(f, handle);
     });
   }
 
@@ -6709,9 +6870,10 @@ export class App implements AppApi {
       if (this.startShown()) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      // Ctrl+S saves, Ctrl+Shift+S asks for a file
       if (mod && key === 's') {
         e.preventDefault();
-        this.saveProject();
+        this.saveProject(e.shiftKey);
         return;
       }
       if (isTyping(e.target)) {
@@ -7010,6 +7172,7 @@ export class App implements AppApi {
         ['Delete', 'help.k.delete'],
         ['Ctrl+Z / Ctrl+Shift+Z', 'help.k.undo'],
         ['Ctrl+S', 'help.k.save'],
+        ['Ctrl+Shift+S', 'help.k.saveAs'],
         ['PageUp / PageDown', 'help.k.workspace'],
         ['Shift+PageDown', 'help.k.nextNew'],
       ]),
@@ -7266,7 +7429,7 @@ export class App implements AppApi {
       exportSeriesCsvText: () => seriesCsv(this.store.state, { excelBom: false }),
       relationChecks: () => this.relationChecks(),
       harris: () => this.harrisLayoutNow(),
-      harrisSvg: () => harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null)),
+      harrisSvg: () => harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null), this.harrisPrint()),
       /** Scars drawn highlighted (a selected relation's, or those of the opened problems). */
       highlighted: () => [...(this.emphasis()?.ids ?? [])],
       /** Scar clicked first with the relation tool (null when none). */
@@ -7302,6 +7465,8 @@ export class App implements AppApi {
       /** Whether anything in the view is still coming in. */
       tweening: () => this.viewer?.tweening ?? false,
       unsaved: () => this.store.history.dirty,
+      /** The folder's copy of the project is about to be written (the debounced save after a change). */
+      folderSavePending: () => this.folderSaveTimer !== 0,
       /** The busy overlay over the view, as loading shows it (null: gone). */
       busy: (text: string | null) => this.feedback.busy(text, this.viewportEl),
       /** Points of the measurement being taken (null when no measuring tool is active). */

@@ -2730,6 +2730,11 @@ input[type="checkbox"]:disabled {
   flex-wrap: wrap;
 }
 
+/* (a section's controls under its label box, laid out as the inspector's own) */
+.section-insp-body {
+  display: contents;
+}
+
 .insp-label {
   flex: 1 1 80px;
   max-width: 120px;

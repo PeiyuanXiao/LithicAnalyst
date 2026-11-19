@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, displayPanel, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, parseCsv, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
+import { counts, curveClick, displayPanel, download, dragArrow, expect, exportFile, fileMenu, loadMesh, openApp, openSection, parseCsv, state, test, toScreen, viewFromTop, waitForMesh } from './helpers';
 
 const pending = (page: Page) => page.evaluate(() => window.lithicanalyst.relationPending());
 const highlighted = async (page: Page) => (await page.evaluate(() => window.lithicanalyst.highlighted())).sort();
@@ -335,4 +335,10 @@ test('the Harris matrix is drawn in the colours of the theme, and exported in pr
   const svg = await page.evaluate(() => window.lithicanalyst.harrisSvg());
   expect(svg).not.toContain('var(--');
   expect(svg).toContain('fill="#ffffff"');
+  // on the figures' background: white, or nothing when they are transparent
+  expect(svg).toContain('<rect width="100%" height="100%" fill="#ffffff"/>');
+  await page.locator('#app-mode-present').click();
+  await openSection(page, 'figure');
+  await page.locator('#fig-background-transparent').click();
+  expect(await page.evaluate(() => window.lithicanalyst.harrisSvg())).not.toContain('<rect width="100%" height="100%"');
 });

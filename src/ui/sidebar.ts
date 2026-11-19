@@ -42,6 +42,7 @@ import {
   setPlaneMethod,
   setPlaneVisible,
   updateSection,
+  setSectionLabel,
   setCurveAttribute,
   setCurveLabel,
   setScarAttribute,
@@ -72,7 +73,7 @@ import { CURVE_COLORS, curveColor } from '../render/curveLayer';
 import { workingEdgeColor } from '../render/workingEdgeLayer';
 import { MEASURE_COLORS } from '../render/measureLayer';
 import { planeColor } from '../render/planeLayer';
-import { FIGURE_VIEWS } from '../render/figure';
+import { FIGURE_BACKGROUNDS, FIGURE_VIEWS, type FigureBackground, type FigureSettings } from '../render/figure';
 import { SECTION_COLORS } from '../render/sectionLayer';
 import { regionColorOf } from '../render/regionLayer';
 import { relationInputs, relationProblems, stratigraphy, type RelationProblem, type Stratigraphy } from '../compute/relations';
@@ -1652,19 +1653,19 @@ function figureSection(api: AppApi): Section {
     format: (v) => `${v}°`,
     onInput: (v) => api.setFigure((f) => (f.lightElevation = v)),
   });
-  const overlay = (id: string, key: 'arrows' | 'curves' | 'planes' | 'regions' | 'landmarks' | 'scaleBar', label: string) =>
+  const overlay = (id: string, key: keyof FigureSettings['overlays'], label: string) =>
     checkbox(id, label, api.figure.overlays[key], (on) => api.setFigure((f) => (f.overlays[key] = on)));
   const scaleBarEl = overlay('fig-scalebar', 'scaleBar', t('figure.scaleBar'));
-  const overlays = h(
-    'div',
-    { class: 'fig-views', role: 'group', 'aria-label': t('figure.overlays') },
+  const overlayEls = [
     overlay('fig-arrows', 'arrows', t('figure.arrows')),
     overlay('fig-curves', 'curves', t('figure.curves')),
     overlay('fig-planes', 'planes', t('figure.planes')),
     overlay('fig-regions', 'regions', t('figure.regions')),
     overlay('fig-landmarks', 'landmarks', t('figure.landmarks')),
-    scaleBarEl,
-  );
+    overlay('fig-sections', 'sections', t('figure.sections')),
+  ];
+  const overlays = h('div', { class: 'fig-views', role: 'group', 'aria-label': t('figure.overlays') }, ...overlayEls, scaleBarEl);
+  const OVERLAY_KEYS = ['arrows', 'curves', 'planes', 'regions', 'landmarks', 'sections'] as const;
   const scale = segmented('fig-scale', t('figure.scale'), [
     { value: '0.5', label: '1:2' },
     { value: '1', label: '1:1' },
@@ -1673,21 +1674,27 @@ function figureSection(api: AppApi): Section {
   const dpi = segmented('fig-dpi', t('figure.dpi'), [300, 600, 1200].map((d) => ({ value: String(d), label: `${d} dpi` })), String(api.figure.dpi), (v) =>
     api.setFigure((f) => (f.dpi = Number(v))),
   );
-  // scale and resolution each on a line of its own, the choices of equal width
-  for (const s of [scale, dpi]) s.el.querySelector('.seg')?.classList.add('seg-equal');
+  // under the exported drawing (the screen stays as it is)
+  const ground = segmented('fig-background', t('figure.background'), FIGURE_BACKGROUNDS.map((b) => ({ value: b, label: t(`figure.background.${b}`) })), api.figure.background, (v) =>
+    api.setFigure((f) => (f.background = v as FigureBackground)),
+  );
+  // scale, resolution and background each on a line of its own, the choices of equal width
+  for (const s of [scale, dpi, ground]) s.el.querySelector('.seg')?.classList.add('seg-equal');
   const sizeEl = h('dl', { class: 'meta' });
   const png = h('button', { type: 'button', class: 'btn', id: 'fig-png', onclick: () => api.exportFigure('png') }, 'PNG') as HTMLButtonElement;
   const svg = h('button', { type: 'button', class: 'btn', id: 'fig-svg', onclick: () => api.exportFigure('svg') }, 'SVG') as HTMLButtonElement;
   // with a folder open: one figure per model instead
   const all = checkbox('fig-folder', t('figure.folder'), api.figureFolder, (on) => (api.figureFolder = on));
-  body.append(views, light.el, overlays, scale.el, dpi.el, sizeEl, h('div', { class: 'btn-row' }, png, svg, all));
+  body.append(views, light.el, overlays, scale.el, dpi.el, ground.el, sizeEl, h('div', { class: 'btn-row' }, png, svg, all));
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'figure', 'specimen', 'sections', 'workspace'].includes(kind)) return;
     const f = api.figure;
     viewBoxes.forEach((b, i) => (b.checked = f.views.includes(FIGURE_VIEWS[i])));
+    overlayEls.forEach((el, i) => ((el.querySelector('input') as HTMLInputElement).checked = f.overlays[OVERLAY_KEYS[i]]));
     light.set(f.lightElevation);
     scale.set(String(f.scale));
     dpi.set(String(f.dpi));
+    ground.set(f.background);
     // without a stated unit there is no physical scale
     const unitStated = !!api.store.state.specimen.unit;
     (scaleBarEl.querySelector('input') as HTMLInputElement).disabled = !unitStated;
@@ -2686,6 +2693,11 @@ function sectionsSection(api: AppApi): Section {
   const list = h('ol', { class: 'arrow-list', id: 'section-list', role: 'listbox', 'aria-label': t('sec.sections') });
   const inspector = h('div', { class: 'inspector', id: 'section-inspector' });
   body.append(list, inspector);
+  // the label box stays while the same section is shown: typing in it changes the section, and so this panel
+  const head = h('div', { class: 'insp-head' });
+  const rest = h('div', { class: 'section-insp-body' });
+  let label: HTMLInputElement | null = null;
+  let builtFor = '';
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'sections', 'selection', 'mesh'].includes(kind)) return;
     const st = api.store.state;
@@ -2706,9 +2718,24 @@ function sectionsSection(api: AppApi): Section {
         ),
       );
     }
-    clear(inspector);
     const s = sel ? api.store.section(sel) : undefined;
-    if (!s) return;
+    if (!s) {
+      clear(inspector);
+      builtFor = '';
+      return;
+    }
+    if (builtFor !== s.id || !label || !inspector.contains(head)) {
+      builtFor = s.id;
+      clear(head);
+      const box = h('input', { id: 'section-insp-label', class: 'ctl-text mono insp-label', type: 'text', 'aria-label': t('arrows.label'), autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+      box.value = s.label;
+      box.addEventListener('input', () => setSectionLabel(api.store, s.id, box.value));
+      head.append(box);
+      label = box;
+      clear(inspector);
+      inspector.append(head, rest);
+    } else softSet(label, s.label);
+    clear(rest);
     const keep = segmented('section-keep', t('section.keep'), (['both', 'front', 'back'] as const).map((k) => ({ value: k, label: t(`section.keep.${k}`) })), s.keep, (v) =>
       updateSection(api.store, s.id, { keep: v as 'both' | 'front' | 'back' }),
     );
@@ -2716,7 +2743,7 @@ function sectionsSection(api: AppApi): Section {
       updateSection(api.store, s.id, { fill: v as 'solid' | 'hatch' }),
     );
     const inFigure = checkbox('section-in-figure', t('section.inFigure'), s.inFigure, (on) => updateSection(api.store, s.id, { inFigure: on }));
-    inspector.append(
+    rest.append(
       keep.el,
       fill.el,
       inFigure,

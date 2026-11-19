@@ -82,3 +82,79 @@ test('draws a section across the model, cuts it open, and exports the section dr
   const saved = await page.evaluate(() => window.lithicanalyst.projectJson());
   expect(saved.annotations.sections.map((s) => s.label)).toEqual(['X1', 'X2']);
 });
+
+/** The section marks of the figure's SVG: the dashed lines and end labels in a view, the labels over the drawings. */
+async function marks(page: Page) {
+  const fig = (await page.evaluate(() => window.lithicanalyst.figure('svg')))!;
+  const front = fig.layout.views.find((v) => v.view === 'front')!;
+  const seen = await page.evaluate((text) => {
+    const root = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+    const inView = (id: string) => {
+      const g = root.querySelector(`#view-${id}`)!;
+      return {
+        dashes: Array.from(g.querySelectorAll('polyline.section'), (p) => p.getAttribute('stroke-dasharray')),
+        ys: Array.from(g.querySelectorAll('polyline.section'), (p) => (p.getAttribute('points') ?? '').split(' ').map((q) => Number(q.split(',')[1]))).flat(),
+        ends: Array.from(g.querySelectorAll('g.section-labels text'), (t) => ({ text: t.textContent, x: Number(t.getAttribute('x')) })),
+      };
+    };
+    return { front: inView('front'), left: inView('left'), titles: Array.from(root.querySelectorAll('#section-titles text'), (t) => t.textContent) };
+  }, fig.data);
+  return { ...seen, layout: fig.layout, frontView: front };
+}
+
+test('marks a section where it cuts the model on the figure’s views, labelled at both ends, and labels its drawing', async ({ page }) => {
+  await openApp(page);
+  await loadMesh(page, boxPly());
+  await page.keyboard.press('m');
+  await page.keyboard.press('m');
+  await page.evaluate(() => window.lithicanalyst.view([0, 0, 1], [0, 1, 0]));
+  await nextFrames(page);
+  await page.locator('#frame-from-view').click();
+  await page.locator('#present-tool-section').click();
+  // a horizontal section of the specimen: seen edge-on from the front and from the left (the default views)
+  await drawSection(page, 0);
+  await openSection(page, 'figure');
+  await expect(page.locator('#fig-sections')).toBeChecked();
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.figure('svg').then((f) => f?.layout.sections.length ?? 0))).toBe(1);
+
+  let m = await marks(page);
+  // dashed, 1.5 mm drawn and 0.8 mm left out (600 dpi)
+  expect(m.front.dashes.length).toBeGreaterThan(0);
+  const [on, off] = m.front.dashes[0]!.split(' ').map(Number);
+  expect(on).toBeCloseTo((1.5 * 600) / 25.4, 1);
+  expect(off).toBeCloseTo((0.8 * 600) / 25.4, 1);
+  // across the middle of the box (y = 0 of its 20 mm)
+  for (const y of m.front.ys) expect(Math.abs(y - m.frontView.height / 2)).toBeLessThan(m.frontView.height * 0.03);
+  // its label beyond either end, outside the view
+  expect(m.front.ends.map((e) => e.text)).toEqual(['X1', 'X1']);
+  expect(m.front.ends[0].x).toBeLessThan(0);
+  expect(m.front.ends[1].x).toBeGreaterThan(m.frontView.width);
+  expect(m.left.ends.map((e) => e.text)).toEqual(['X1', 'X1']);
+  // the drawing has it above it
+  expect(m.titles).toEqual(['X1']);
+  expect(m.layout.sections[0].labelY).toBeLessThan(m.layout.sections[0].y);
+  // the PNG draws the same
+  expect((await page.evaluate(() => window.lithicanalyst.figure('png')))!.data.length).toBeGreaterThan(0);
+
+  // without the positions: no lines and no end labels; the drawing keeps its label
+  await page.locator('#fig-sections').uncheck();
+  m = await marks(page);
+  expect([m.front.dashes, m.front.ends, m.left.dashes, m.left.ends]).toEqual([[], [], [], []]);
+  expect(m.titles).toEqual(['X1']);
+  await page.locator('#fig-sections').check();
+
+  // a label of one's own: at both ends, over the drawing and in the list; undone, back
+  await page.locator('#section-list .section-row').first().click();
+  await page.locator('#section-insp-label').fill('a');
+  await expect.poll(async () => (await state(page)).sections[0].label).toBe('a');
+  await expect(page.locator('#section-list .section-row .arrow-id')).toHaveText(['a']);
+  m = await marks(page);
+  expect(m.front.ends.map((e) => e.text)).toEqual(['a', 'a']);
+  expect(m.titles).toEqual(['a']);
+  await page.locator('#btn-undo').click();
+  await expect.poll(async () => (await state(page)).sections[0].label).toBe('X1');
+  await expect(page.locator('#section-insp-label')).toHaveValue('X1');
+  m = await marks(page);
+  expect(m.front.ends.map((e) => e.text)).toEqual(['X1', 'X1']);
+  expect(m.titles).toEqual(['X1']);
+});

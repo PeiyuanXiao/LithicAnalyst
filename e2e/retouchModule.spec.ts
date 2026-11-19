@@ -377,6 +377,10 @@ test('the previews export: SVG and PNG, named as they should be, to scale, on wh
   await openSection(page, 'figure');
   await page.locator('#fig-dpi-300').click();
   await page.locator('#fig-scale-2').click();
+  // and the figures' background: on white so far, now transparent
+  const ground = /<path [^>]*fill="#ffffff"/;
+  expect(planText).toMatch(ground);
+  await page.locator('#fig-background-transparent').click();
   await page.locator('#app-mode-retouch').click();
   await expect(page.locator('#retouch-plan-panel')).toBeVisible();
   await expect.poll(async () => (await view(page)).plan).not.toBeNull();
@@ -384,6 +388,8 @@ test('the previews export: SVG and PNG, named as they should be, to scale, on wh
   expect(Math.round(pngDpi(new Uint8Array(again.bytes))!)).toBe(300);
   const twice = (await save('#retouch-plan-svg')).bytes.toString('utf8');
   expect(Number(/width="([\d.]+)mm"/.exec(twice)![1])).toBeCloseTo(2 * 60 * 1.16, 0);
+  expect(twice).not.toMatch(ground);
+  expect(twice).not.toContain('#ffffff');
 
   // no unit: the panel's size, no scale bar, and the indices that need stations say why
   await page.locator('#specimen-more').click();

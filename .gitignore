@@ -25,6 +25,7 @@ docs/roadmap.md
 docs/developing.md
 design/
 .claude/
+Claude outputs/
 
 # Editors
 .vscode/

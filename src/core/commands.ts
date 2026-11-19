@@ -443,6 +443,33 @@ export class UpdateSectionCommand implements Command {
   }
 }
 
+/** A section's label (shown in the list and on figures); typing merges into one step. */
+export class SetSectionLabelCommand implements Command {
+  readonly labelKey = 'cmd.renameSection';
+  readonly createdAt = Date.now();
+  private after: Section;
+  constructor(
+    private readonly before: Section,
+    after: Section,
+  ) {
+    this.after = structuredClone(after);
+  }
+  apply(store: ProjectStore): void {
+    store._putSection(structuredClone(this.after));
+    store.notify({ kind: 'sections', ids: [this.after.id] });
+  }
+  revert(store: ProjectStore): void {
+    store._putSection(structuredClone(this.before));
+    store.notify({ kind: 'sections', ids: [this.before.id] });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetSectionLabelCommand) || next.after.id !== this.after.id) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
+  }
+}
+
 /** Several commands as one undo step (e.g. a region and the scar created with it). */
 export class CompoundCommand implements Command {
   readonly createdAt = Date.now();

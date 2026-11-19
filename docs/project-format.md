@@ -36,7 +36,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.sequences` | array | removal sequences, earliest first (`{ id, label, scarIds, ordered }`), see below |
 | `annotations.landmarks` | array | fixed landmarks in export order (`{ id, name, point, code? }`) |
 | `annotations.semilandmarks` | array | curve semilandmark sets (`{ id, label, curveId, count, startLandmarkId, endLandmarkId }`), see below |
-| `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements |
+| `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements. `label` is `X{n}` when made and can be changed by the user (any text; figures write it) |
 | `split` | `{ source, id, upHint, swap }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal (set when the split is chosen: toward the side of the curve's plane with more scars by their ends, when even toward the viewer); `swap: true` exchanges upper and lower (files without it: `false`) |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
 | `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
@@ -1017,7 +1017,7 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app` (`name`, `version`, `author`: the authors, joined with commas, `license`, `repository`, `citation`: how to cite
   this version, APA style), `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options`, `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
+  (`tables` or `figures`), `options` (figures: `format` and `figure`, the figure settings: `views`, `lightElevation`, `overlays` — `arrows`, `curves`, `planes`, `regions`, `landmarks`, `scaleBar`, `sections` (where the sections cut the model, marked on the views) —, `scale`, `dpi` and `background`: `white` or `transparent`), `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
   = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 

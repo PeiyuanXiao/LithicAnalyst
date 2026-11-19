@@ -24,7 +24,7 @@ async function brightness(page: Page, selector: string, points: Array<{ fx: numb
 }
 
 /** Alpha of the top-left pixel of a PNG (base64). */
-async function cornerAlpha(page: Page, b64: string): Promise<number> {
+async function cornerPixel(page: Page, b64: string): Promise<number[]> {
   return page.evaluate(async (data) => {
     const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
     const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
@@ -33,7 +33,7 @@ async function cornerAlpha(page: Page, b64: string): Promise<number> {
     c.height = bmp.height;
     const g = c.getContext('2d')!;
     g.drawImage(bmp, 0, 0);
-    return g.getImageData(0, 0, 1, 1).data[3];
+    return Array.from(g.getImageData(0, 0, 1, 1).data);
   }, b64);
 }
 
@@ -67,7 +67,7 @@ test.describe('on a system in dark mode', () => {
   });
 });
 
-test('paints the view darker at the top in both themes; figures keep a transparent background', async ({ page }) => {
+test('paints the view darker at the top in both themes; figures keep their own white background', async ({ page }) => {
   await openApp(page);
   await loadMesh(page, boxPly());
   for (const theme of ['light', 'dark'] as const) {
@@ -83,9 +83,9 @@ test('paints the view darker at the top in both themes; figures keep a transpare
     expect(bottom - top, theme).toBeGreaterThan(4);
     expect(bottom - top, theme).toBeLessThan(25);
 
-    // the figure is rendered apart, on a transparent background as before
+    // the figure is rendered apart: on its own white, not the view's grey
     const fig = (await page.evaluate(() => window.lithicanalyst.figure('png')))!;
-    expect(await cornerAlpha(page, fig.data), theme).toBe(0);
+    expect(await cornerPixel(page, fig.data), theme).toEqual([255, 255, 255, 255]);
   }
 });
 

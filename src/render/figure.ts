@@ -17,14 +17,20 @@ import type { LightRig, LightSettings } from './lighting';
 export type FigureView = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 export const FIGURE_VIEWS: FigureView[] = ['front', 'back', 'left', 'right', 'top', 'bottom'];
 
+/** Under the drawing of an exported file (what is on screen is not affected). */
+export type FigureBackground = 'white' | 'transparent';
+export const FIGURE_BACKGROUNDS: FigureBackground[] = ['white', 'transparent'];
+
 export interface FigureSettings {
   views: FigureView[];
   /** Height of the raking light above the page (degrees); it comes from the upper left. */
   lightElevation: number;
-  overlays: { arrows: boolean; curves: boolean; planes: boolean; regions: boolean; landmarks: boolean; scaleBar: boolean };
+  /** `sections`: where the sections in the figure cut the model, marked on the views, with their labels at the ends. */
+  overlays: { arrows: boolean; curves: boolean; planes: boolean; regions: boolean; landmarks: boolean; scaleBar: boolean; sections: boolean };
   /** Paper size / real size. */
   scale: number;
   dpi: number;
+  background: FigureBackground;
 }
 
 /** A landmark's diameter on the paper, its outline included. */
@@ -33,16 +39,33 @@ export const FIGURE_LANDMARK_MM = 1.2;
 export const DEFAULT_FIGURE: FigureSettings = {
   views: ['front', 'left'],
   lightElevation: 35,
-  overlays: { arrows: true, curves: true, planes: false, regions: true, landmarks: true, scaleBar: true },
+  overlays: { arrows: true, curves: true, planes: false, regions: true, landmarks: true, scaleBar: true, sections: true },
   scale: 1,
   dpi: 600,
+  background: 'white',
 };
 
-/** A section drawing: closed loops in the section plane (x along the drawn line, y up), in model units. */
+/** The colour under an exported drawing, or none. */
+export const figureBackgroundColor = (b: FigureBackground): string | null => (b === 'white' ? '#ffffff' : null);
+
+/** A section's position is marked on the views whose line of sight lies within this angle of its plane. */
+export const SECTION_TRACE_MAX_DEG = 30;
+/** Section labels on the paper (mm): their size, and how far out of a marked position's ends they stand. */
+export const SECTION_LABEL_MM = 2.6;
+export const SECTION_LABEL_GAP_MM = 1.5;
+/** A marked position's dashes on the paper (mm): drawn, left out. */
+export const SECTION_DASH_MM: readonly [number, number] = [1.5, 0.8];
+const LABEL_FONT = 'Helvetica, Arial, sans-serif';
+
+/**
+ * A section drawing: closed loops in the section plane (x along the drawn line, y up), in model units; `trace`:
+ * where the section cuts the model (original coordinates) and its plane's normal, to mark it on the views.
+ */
 export interface SectionDrawing {
   label: string;
   loops: Array<Array<[number, number]>>;
   fill: 'solid' | 'hatch';
+  trace: { normal: Vec3; lines: Array<{ points: Vec3[]; closed: boolean }> } | null;
 }
 
 export interface FigureOverlays {
@@ -115,12 +138,14 @@ export interface FigureLayoutView {
   height: number;
 }
 
+/** A section drawing's place (pixels); its label above it, left-aligned, on the line `labelY` (none when the label is empty). */
 export interface FigureLayoutSection {
   label: string;
   x: number;
   y: number;
   width: number;
   height: number;
+  labelY: number;
 }
 
 export interface FigureLayout {
@@ -146,10 +171,33 @@ interface RenderedView extends FigureLayoutView {
   arrows: Array<{ runs: Array<Array<[number, number]>>; head: [number, number, number, number] | null; color: string }>;
   lines: Array<{ runs: Array<Array<[number, number]>>; color: string; kind: 'curve' | 'plane' }>;
   dots: Array<{ at: [number, number]; color: string; fixed: boolean }>;
+  /** Sections marked on this view: the seen runs of the cut, and where its label goes at either end (the centre of the text). */
+  traces: Array<{ runs: Array<Array<[number, number]>>; label: string; ends: Array<[number, number]> }>;
 }
 
 const vadd = (a: Vec3, b: Vec3, s = 1): Vec3 => [a[0] + s * b[0], a[1] + s * b[1], a[2] + s * b[2]];
 const vdot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vcross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+function traceViews(normal: Vec3, views: readonly FigureView[], axes: Record<Axis, Vec3>): FigureView[] {
+  const off = (v: FigureView) => Math.abs(vdot(normal, viewAxes(v, axes).toward));
+  const limit = Math.sin((SECTION_TRACE_MAX_DEG * Math.PI) / 180) + 1e-9;
+  const near = views.filter((v) => off(v) <= limit);
+  if (near.length || !views.length) return near;
+  return [views.reduce((a, b) => (off(b) < off(a) ? b : a))];
+}
+
+/**
+ * The views a section's position is marked on: those whose line of sight lies within SECTION_TRACE_MAX_DEG of the
+ * section plane (|n · toward| ≤ sin 30°, `normal` a unit vector); when none of `views` does, the one closest to it.
+ * `frame`: the specimen frame matrix.
+ */
+export function sectionTraceViews(normal: Vec3, views: readonly FigureView[], frame: readonly number[]): FigureView[] {
+  return traceViews(normal, views, frameAxes(frame));
+}
+
+/** A label's width on the paper, about (pixels, for a font of `font` pixels). */
+const labelWidth = (label: string, font: number) => 0.6 * font * label.length;
 
 /** A round scale-bar length, about a third of `span`, and its divisions. */
 export function scaleBarLength(span: number): { length: number; step: number } {
@@ -207,8 +255,12 @@ function planFigure(ctx: FigureContext, frame: number[], unit: string, settings:
   const pxPerMm = settings.dpi / 25.4;
   const pxPerUnit = mm ? mm * settings.scale * pxPerMm : 1500 / Math.max(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z, 1e-9);
   const mmToPx = (v: number) => (mm ? v * pxPerMm : (v * 1500) / 100);
-  const gap = Math.round(mmToPx(6));
-  const margin = Math.round(mmToPx(3));
+  // the labels at the ends of the marked sections reach out of their view: room for them around and between the views
+  const font = mmToPx(SECTION_LABEL_MM);
+  const traced = settings.overlays.sections && views.length > 0 && sections.some((d) => d.trace && d.label);
+  const reach = traced ? mmToPx(SECTION_LABEL_GAP_MM) + Math.max(font, ...sections.map((d) => labelWidth(d.label, font))) : 0;
+  const gap = Math.round(Math.max(mmToPx(6), 2 * reach + mmToPx(1)));
+  const margin = Math.round(Math.max(mmToPx(3), reach + mmToPx(0.5)));
 
   // column widths and row heights from the views that are shown
   const colW = [0, 0, 0, 0];
@@ -238,7 +290,7 @@ function planFigure(ctx: FigureContext, frame: number[], unit: string, settings:
   }
   const bar = settings.overlays.scaleBar && mm ? scaleBarLength((hi.x - lo.x) || 1) : null;
   const barSpace = bar ? Math.round(mmToPx(9)) : 0;
-  // section drawings: a column to the right of the views, top-aligned with the front row
+  // section drawings: a column to the right of the views, top-aligned with the front row, each under its label
   const layoutSections: FigureLayoutSection[] = [];
   let sx = x;
   let sy = rowY[1];
@@ -247,9 +299,10 @@ function planFigure(ctx: FigureContext, frame: number[], unit: string, settings:
     const b = loopsBounds(d.loops);
     const w = Math.max(1, Math.ceil((b.x1 - b.x0) * pxPerUnit));
     const h = Math.max(1, Math.ceil((b.y1 - b.y0) * pxPerUnit));
-    layoutSections.push({ label: d.label, x: sx, y: sy, width: w, height: h });
-    sy += h + gap;
-    colWidth = Math.max(colWidth, w);
+    const title = d.label ? Math.round(font * 1.4) : 0;
+    layoutSections.push({ label: d.label, x: sx, y: sy + title, width: w, height: h, labelY: sy + font });
+    sy += title + h + gap;
+    colWidth = Math.max(colWidth, w, d.label ? Math.ceil(labelWidth(d.label, font)) : 0);
   }
   if (sections.length) x = sx + colWidth + gap;
   const width = Math.max(x - gap + margin, 2 * margin + 1);
@@ -276,6 +329,8 @@ type Plan = ReturnType<typeof planFigure> & { layoutViews: FigureLayoutView[] };
 
 function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: FigureOverlays, plan: Plan): Figure {
   const { layout, layoutViews, size, axes, axis, lo, hi, pxPerUnit, mm, mmToPx } = plan;
+  const viewNames = layoutViews.map((v) => v.view);
+  const labelFont = mmToPx(SECTION_LABEL_MM);
   // ------------------------------------------------------------ render the views
   const rendered: RenderedView[] = layoutViews.map((lv) => {
     const d = VIEWS[lv.view];
@@ -351,19 +406,55 @@ function drawFigure(ctx: FigureContext, settings: FigureSettings, overlays: Figu
     if (settings.overlays.planes) for (const pl of overlays.planes) for (const l of pl.lines) lines.push({ runs: runs(l.points, l.closed), color: pl.color, kind: 'plane' });
     const dots = settings.overlays.landmarks ? overlays.landmarks.filter((l) => visible(l.point)).map((l) => ({ at: toPx(l.point), color: l.color, fixed: l.fixed })) : [];
 
+    // the sections' positions, on the views that look along them, with the label beyond either end
+    const traces: RenderedView['traces'] = [];
+    if (settings.overlays.sections)
+      for (const sec of overlays.sections) {
+        if (!sec.trace || !traceViews(sec.trace.normal, viewNames, axes).includes(lv.view)) continue;
+        const all = sec.trace.lines.flatMap((l) => l.points);
+        if (!all.length) continue;
+        // its ends along the plane, across the line of sight (seen edge-on, the line it is drawn as)
+        let along = vcross(sec.trace.normal, toward);
+        if (Math.hypot(...along) < 1e-9) along = right;
+        const a2: [number, number] = [vdot(along, right), -vdot(along, up)];
+        const len = Math.hypot(a2[0], a2[1]) || 1;
+        const dir: [number, number] = [a2[0] / len, a2[1] / len];
+        let lo = all[0], hi = all[0];
+        for (const q of all) {
+          if (vdot(q, along) < vdot(lo, along)) lo = q;
+          if (vdot(q, along) > vdot(hi, along)) hi = q;
+        }
+        // the text's centre: the gap, then half the text, out from the end
+        const out = mmToPx(SECTION_LABEL_GAP_MM) + Math.abs(dir[0]) * (labelWidth(sec.label, labelFont) / 2) + Math.abs(dir[1]) * labelFont * 0.36;
+        const end = (q: Vec3, sign: number): [number, number] => {
+          const p = toPx(q);
+          return [p[0] + sign * dir[0] * out, p[1] + sign * dir[1] * out];
+        };
+        traces.push({ runs: sec.trace.lines.flatMap((l) => runs(l.points, l.closed)), label: sec.label, ends: sec.label ? [end(lo, -1), end(hi, 1)] : [] });
+      }
+
     // outline from the coverage of the rendered model
     const alpha = new Uint8Array(s.w * s.h);
     for (let i = 0; i < alpha.length; i++) alpha[i] = image.data[4 * i + 3];
     const outline = traceOutlines(alpha, s.w, s.h).map((l) => simplifyLoop(l, 0.35));
-    return { ...lv, image, outline, arrows, lines, dots };
+    return { ...lv, image, outline, arrows, lines, dots, traces };
   });
 
-  const stroke = { arrow: mmToPx(0.35), line: mmToPx(0.3), outline: mmToPx(0.25), head: mmToPx(2.2), dot: mmToPx(FIGURE_LANDMARK_MM / 2) };
+  const stroke: Strokes = {
+    arrow: mmToPx(0.35),
+    line: mmToPx(0.3),
+    outline: mmToPx(0.25),
+    head: mmToPx(2.2),
+    dot: mmToPx(FIGURE_LANDMARK_MM / 2),
+    dash: [mmToPx(SECTION_DASH_MM[0]), mmToPx(SECTION_DASH_MM[1])],
+    label: labelFont,
+  };
   const drawn = sectionsInPixels(overlays.sections, layout, pxPerUnit);
+  const background = figureBackgroundColor(settings.background);
   return {
     layout,
-    png: () => composePng(rendered, drawn, layout, stroke, settings.dpi, !!mm),
-    svg: () => composeSvg(rendered, drawn, layout, stroke, mmToPx),
+    png: () => composePng(rendered, drawn, layout, stroke, settings.dpi, !!mm, background),
+    svg: () => composeSvg(rendered, drawn, layout, stroke, mmToPx, background),
   };
 }
 
@@ -474,6 +565,10 @@ interface Strokes {
   head: number;
   /** Radius of a fixed landmark to the outside of its outline (semilandmarks are smaller). */
   dot: number;
+  /** A marked section position's dashes: drawn, left out. */
+  dash: [number, number];
+  /** Font size of the section labels. */
+  label: number;
 }
 
 const dotOutline = (stroke: Strokes) => stroke.outline * 0.8;
@@ -548,6 +643,41 @@ function drawOverlays(g: CanvasRenderingContext2D, v: RenderedView, stroke: Stro
   g.restore();
 }
 
+/** The sections' positions (dashed) and their labels at either end. */
+function drawTraces(g: CanvasRenderingContext2D, v: RenderedView, stroke: Strokes): void {
+  if (!v.traces.length) return;
+  g.save();
+  g.translate(v.x, v.y);
+  g.strokeStyle = g.fillStyle = '#000';
+  g.lineWidth = stroke.line;
+  g.lineJoin = 'round';
+  g.lineCap = 'butt';
+  g.setLineDash(stroke.dash);
+  for (const tr of v.traces)
+    for (const run of tr.runs) {
+      g.beginPath();
+      run.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py)));
+      g.stroke();
+    }
+  g.setLineDash([]);
+  g.font = `${stroke.label}px ${LABEL_FONT}`;
+  g.textAlign = 'center';
+  g.textBaseline = 'alphabetic';
+  for (const tr of v.traces) for (const [px, py] of tr.ends) g.fillText(tr.label, px, py + stroke.label * 0.36);
+  g.restore();
+}
+
+/** Each section drawing's label, above it on the left. */
+function drawSectionLabels(g: CanvasRenderingContext2D, layout: FigureLayout, stroke: Strokes): void {
+  g.save();
+  g.fillStyle = '#000';
+  g.font = `${stroke.label}px ${LABEL_FONT}`;
+  g.textAlign = 'left';
+  g.textBaseline = 'alphabetic';
+  for (const s of layout.sections) if (s.label) g.fillText(s.label, s.x, s.labelY);
+  g.restore();
+}
+
 function drawScaleBar(g: CanvasRenderingContext2D, layout: FigureLayout, stroke: Strokes, font: number): void {
   const bar = layout.scaleBar;
   if (!bar) return;
@@ -569,11 +699,16 @@ function drawScaleBar(g: CanvasRenderingContext2D, layout: FigureLayout, stroke:
   g.restore();
 }
 
-async function composePng(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, dpi: number, physical: boolean): Promise<Uint8Array> {
+async function composePng(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, dpi: number, physical: boolean, background: string | null): Promise<Uint8Array> {
   const canvas = document.createElement('canvas');
   canvas.width = layout.width;
   canvas.height = layout.height;
   const g = canvas.getContext('2d')!;
+  // (the ground goes under the views here: their outlines come from the renders' own coverage)
+  if (background) {
+    g.fillStyle = background;
+    g.fillRect(0, 0, layout.width, layout.height);
+  }
   for (const v of views) {
     const tile = document.createElement('canvas');
     tile.width = v.width;
@@ -582,7 +717,9 @@ async function composePng(views: RenderedView[], sections: DrawnSection[], layou
     g.drawImage(tile, v.x, v.y);
   }
   for (const v of views) drawOverlays(g, v, stroke);
+  for (const v of views) drawTraces(g, v, stroke);
   drawSections(g, sections, stroke, layout.mmPerPx ? 1.2 / layout.mmPerPx : 12);
+  drawSectionLabels(g, layout, stroke);
   drawScaleBar(g, layout, stroke, layout.mmPerPx ? 2.6 / layout.mmPerPx : 24);
   const png = await canvasPng(canvas);
   return physical ? pngWithDpi(png, dpi) : png;
@@ -592,12 +729,14 @@ const f2 = (v: number) => (Math.round(v * 100) / 100).toString();
 const pts = (run: Array<[number, number]>) => run.map(([px, py]) => `${f2(px)},${f2(py)}`).join(' ');
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
-async function composeSvg(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, mmToPx: (v: number) => number): Promise<string> {
+async function composeSvg(views: RenderedView[], sections: DrawnSection[], layout: FigureLayout, stroke: Strokes, mmToPx: (v: number) => number, background: string | null): Promise<string> {
   const out: string[] = [];
   const mmPerPx = layout.mmPerPx;
   const size = mmPerPx ? `width="${f2(layout.width * mmPerPx)}mm" height="${f2(layout.height * mmPerPx)}mm"` : `width="${layout.width}" height="${layout.height}"`;
   out.push('<?xml version="1.0" encoding="UTF-8"?>');
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" ${size} viewBox="0 0 ${layout.width} ${layout.height}">`);
+  if (background) out.push(`<rect width="100%" height="100%" fill="${background}"/>`);
+  const text = `font-family="${LABEL_FONT}" font-size="${f2(stroke.label)}" fill="#000" stroke="none"`;
   for (const v of views) {
     const tile = document.createElement('canvas');
     tile.width = v.width;
@@ -623,6 +762,15 @@ async function composeSvg(views: RenderedView[], sections: DrawnSection[], layou
       for (const d of v.dots) out.push(`<circle class="${d.fixed ? 'fixed' : 'curve'}" cx="${f2(d.at[0])}" cy="${f2(d.at[1])}" r="${f2(dotRadius(d, stroke))}" fill="${esc(d.color)}"/>`);
       out.push('</g>');
     }
+    if (v.traces.length) {
+      out.push(`<g class="sections" fill="none" stroke="#000" stroke-width="${f2(stroke.line)}" stroke-linejoin="round">`);
+      const dash = `${f2(stroke.dash[0])} ${f2(stroke.dash[1])}`;
+      for (const tr of v.traces) for (const run of tr.runs) out.push(`<polyline class="section" stroke-dasharray="${dash}" points="${pts(run)}"/>`);
+      out.push('</g>');
+      out.push(`<g class="section-labels" text-anchor="middle" ${text}>`);
+      for (const tr of v.traces) for (const [px, py] of tr.ends) out.push(`<text x="${f2(px)}" y="${f2(py + stroke.label * 0.36)}">${esc(tr.label)}</text>`);
+      out.push('</g>');
+    }
     out.push('</g>');
   }
   if (sections.length) {
@@ -633,6 +781,9 @@ async function composeSvg(views: RenderedView[], sections: DrawnSection[], layou
       const d = s.loops.map((l) => `M${pts(l).replace(/ /g, ' L')} Z`).join(' ');
       out.push(`<path id="section-${esc(layout.sections[i].label)}" d="${d}" fill="${s.fill === 'hatch' ? 'url(#hatch)' : SECTION_FILL}" fill-rule="evenodd" stroke-width="${f2(stroke.outline)}"/>`);
     });
+    out.push('</g>');
+    out.push(`<g id="section-titles" text-anchor="start" ${text}>`);
+    for (const s of layout.sections) if (s.label) out.push(`<text x="${f2(s.x)}" y="${f2(s.labelY)}">${esc(s.label)}</text>`);
     out.push('</g>');
   }
   const bar = layout.scaleBar;

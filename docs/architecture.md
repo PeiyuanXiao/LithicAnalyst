@@ -9,7 +9,7 @@ tools/    interaction tools: select, draw arrow, draw curve, relation, sequence 
 render/   three.js viewer, raking light, mesh shading, arrow and curve layers
 core/     data model, fields, commands + undo history, project format   (no DOM, no three.js)
 compute/  pure geometry on typed arrays: curvature, surface paths, vertex welding, hashing
-io/       PLY / STL / OBJ import, IGES vectors, CSV and project export, autosave, file saving
+io/       PLY / STL / OBJ import, IGES vectors, CSV and project export, autosave, file saving and file handles
 ──────────────────────────── project file (docs/project-format.md) ────────────────────────
 analysis  outside this repository (R, Python, …) reads the CSV or the project file
 ```
@@ -299,6 +299,24 @@ each view as 2D polylines; a point counts as hidden when a ray from it toward th
 mesh. Arrows are drawn only in views their surface faces. The outline comes from the coverage of
 the rendered image (`compute/contour.ts`, marching squares + simplification). PNG files get a
 pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
+
+* **Background** (`FigureSettings.background`, `white` by default, or `transparent`): only the
+  exported files have it, never the screen. It goes in when the figure is put together — the PNG
+  canvas is filled first, the SVG starts with `<rect width="100%" height="100%" fill="#ffffff"/>` —,
+  so the views are still rendered on a clear ground and the outlines still come from their coverage.
+  The same setting is the ground of a section drawing exported alone, of the folder's figures, of the
+  Harris matrix SVG (`App.harrisPrint`) and of the retouch mode's previews (the print palette's
+  `background`: `#ffffff` or `null`).
+* **Section positions** (overlay `sections`): every section in the figure is marked where it cuts the
+  model (`App.cuts`, the same lines as its drawing) on the views whose line of sight lies within
+  `SECTION_TRACE_MAX_DEG` (30°) of its plane, or else on the one nearest to that
+  (`sectionTraceViews`, a pure function). Only the seen runs are drawn, as plane sections are,
+  dashed black (`SECTION_DASH_MM`, `class="section"` in the SVG). Its label stands beyond either end
+  of the cut as seen in the view — the extremes along the plane's direction across the line of sight,
+  which is the drawn line in the view it was drawn in —, `SECTION_LABEL_GAP_MM` out. With such
+  labels the margin and the gaps between views grow to hold them (`planFigure`). Each section
+  drawing has its label above it on the left (`FigureLayoutSection.labelY`), with or without the
+  marks; an empty label is left out with its room.
 
 ## Surface regions
 
@@ -608,7 +626,8 @@ stored coordinates never do, and each import is recorded in the project (`Projec
   `specimenIds` names the models (file name; path where names are shared), `timeStamp` /
   `freshFolder` name export folders that never overwrite one.
 * The app's files go into `LithicAnalyst/`: the open model's project is written to
-  `projects/<model path>.lithicanalyst.json` (debounced like the autosave); when a model opens,
+  `projects/<model path>.lithicanalyst.json` (debounced like the autosave, and at once on Save: see
+  "Saving the project"); when a model opens,
   its project is the first of: this session's copy (read-only folder), the new place, the old
   place next to the model — the first made on this very model (checksum). The browser's autosave
   still wins when it holds later edits. In a read-only folder the edited projects are kept in
@@ -680,7 +699,9 @@ A `Section` (display only) is the plane through a line drawn on screen and the e
 the planes) and, in the present mode only, clips the mesh material to the kept side
 (`SectionLayer.clipPlanes`); `render/sectionLayer.ts` draws the outline and the cut face (loops
 nested and triangulated in the plane, solid or hatched). Figures render the views without
-clipping and add the section drawings (`sectionLoops2D`) to the right of the views.
+clipping and add the section drawings (`sectionLoops2D`) to the right of the views, and mark the
+sections on the views (see "Figures"). The label ("X1", …) can be changed in the section's details
+(`setSectionLabel`, one undo step while typing).
 
 ## Fitted planes
 
@@ -729,6 +750,32 @@ pointer event ─▶ ToolController ─▶ active Tool ─▶ core/actions ─�
   pending saves, asks only when edits would be lost (`unsaved` in a read-only folder — edits since
   the project file was last downloaded —, or `autosaveFailed`), then releases the model, clears the
   view (`Viewer.clearMesh`), leaves the folder and resets the store (which clears the history); the start page shows again.
+
+## Saving the project
+
+`App.saveProject` (Save, Ctrl+S; `as` for File ▸ Save as…, Ctrl+Shift+S) writes the project where it
+is kept, and downloads only where nothing else can be done. Other files (tables, figures, the
+Harris matrix) are downloads as before (`io/saveFile.ts`).
+
+| Where | Save | Save as |
+|---|---|---|
+| a writable folder, the open model one of its own | its `LithicAnalyst/projects/…` file, now (`writeFolderProject`; the pending folder save is cancelled), changed or not | the save dialog: a copy; the folder's file stays the project |
+| a model or project on its own, `showSaveFilePicker` there, not in a frame | the first time the save dialog; then the file chosen, without asking | the save dialog; the new file from then on |
+| a project opened through `showOpenFilePicker`, or dropped with a handle (`getAsFileSystemHandle`) | that file, after `requestPermission({ mode: 'readwrite' })` the first time | as above |
+| a read-only folder; the artifact viewer | a download, as before | a download |
+| no such API, a frame, or a dialog that fails other than by being closed | a download; the first of the session says that this browser can only download | a download |
+
+* The handle (`App.projectHandle`, `io/fileHandle.ts`) belongs to the open model by its checksum:
+  opening a model (`installMesh`), closing it and opening a folder drop it; a project opened for
+  another model waits with `pendingProject` (`pendingHandle`) and is the model's once that model
+  opens; a project of another model loaded onto the open one keeps no handle (its file is that
+  model's). A handle whose checksum is not the open model's is not used.
+* The dialog and the permission are asked for in the click or key press itself, before anything is
+  awaited, or the browser refuses them. Closing the dialog does nothing; a write that fails or is not
+  allowed says so and leaves the changes unsaved (Save as is the way out): it never falls back to a
+  download, which would make another copy.
+* What is written is the state when Save was pressed (`history.stateId`); `markSaved` clears the dot
+  on the button when the write has gone through, unless another model is open by then.
 
 ## Performance notes
 

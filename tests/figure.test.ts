@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { nestLoops, signedArea, simplifyLoop, traceOutlines } from '../src/compute/contour';
 import { crc32, pngDpi, pngWithDpi } from '../src/io/png';
+import { DEFAULT_FIGURE, FIGURE_VIEWS, figureLayout, SECTION_LABEL_GAP_MM, SECTION_LABEL_MM, sectionTraceViews, type FigureContext, type FigureSettings, type SectionDrawing } from '../src/render/figure';
 
 const area = (loop: Array<[number, number]>) => Math.abs(loop.reduce((s, p, i) => s + p[0] * loop[(i + 1) % loop.length][1] - loop[(i + 1) % loop.length][0] * p[1], 0) / 2);
 
@@ -50,5 +51,69 @@ describe('section loops', () => {
       [16, []],
       [4, []],
     ]);
+  });
+});
+
+describe('section positions on the views', () => {
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const s45 = Math.SQRT1_2;
+
+  it('are marked on the views that look along the section plane, within 30°', () => {
+    // a horizontal section: seen edge-on from the four sides, face-on from above and below
+    expect(sectionTraceViews([0, 1, 0], FIGURE_VIEWS, I)).toEqual(['front', 'back', 'left', 'right']);
+    // 45° between the plane and the front, back, left and right lines of sight: only from above and below
+    expect(sectionTraceViews([s45, 0, s45], FIGURE_VIEWS, I)).toEqual(['top', 'bottom']);
+    // the limit itself counts (30° from the top and bottom lines of sight), 31° does not
+    const deg = (d: number): [number, number, number] => [0, Math.sin((d * Math.PI) / 180), Math.cos((d * Math.PI) / 180)];
+    expect(sectionTraceViews(deg(30), FIGURE_VIEWS, I)).toEqual(['left', 'right', 'top', 'bottom']);
+    expect(sectionTraceViews(deg(31), FIGURE_VIEWS, I)).toEqual(['left', 'right']);
+  });
+
+  it('fall back to the view nearest to edge-on when none of the chosen ones is', () => {
+    expect(sectionTraceViews([s45, 0, s45], ['front'], I)).toEqual(['front']);
+    expect(sectionTraceViews([0, 0, 1], ['front', 'back'], I)).toEqual(['front']);
+    expect(sectionTraceViews([0, 0.3, 0.954], ['front', 'top'], I)).toEqual(['top']);
+    expect(sectionTraceViews([0, 1, 0], [], I)).toEqual([]);
+  });
+
+  it('follow the specimen frame, not the file axes', () => {
+    // specimen Y along the file's Z
+    const frame = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1];
+    expect(sectionTraceViews([0, 0, 1], FIGURE_VIEWS, frame)).toEqual(['front', 'back', 'left', 'right']);
+  });
+});
+
+describe('figure layout', () => {
+  // a 20 mm cube around the origin, in millimetres, at 1:1 and 600 dpi
+  const cube: number[] = [];
+  for (const x of [-10, 10]) for (const y of [-10, 10]) for (const z of [-10, 10]) cube.push(x, y, z);
+  const ctx = { positions: cube, offset: [0, 0, 0] } as unknown as FigureContext;
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const px = (mm: number) => (mm * 600) / 25.4;
+  const square: Array<[number, number]> = [[-10, -10], [10, -10], [10, 10], [-10, 10]];
+  const drawing = (label: string, trace: SectionDrawing['trace'] = null): SectionDrawing => ({ label, loops: [square], fill: 'hatch', trace });
+  const settings = (o: Partial<FigureSettings> = {}): FigureSettings => ({ ...DEFAULT_FIGURE, views: ['front'], ...o, overlays: { ...DEFAULT_FIGURE.overlays, ...(o.overlays ?? {}) } });
+
+  it('puts each section drawing under its label', () => {
+    const plain = figureLayout(ctx, I, 'mm', settings(), [drawing('')]);
+    const named = figureLayout(ctx, I, 'mm', settings(), [drawing('X1')]);
+    const title = Math.round(px(SECTION_LABEL_MM) * 1.4);
+    expect(named.sections[0].y - plain.sections[0].y).toBe(title);
+    expect(named.sections[0].labelY).toBeCloseTo(plain.sections[0].y + px(SECTION_LABEL_MM), 6);
+    expect(named.height - plain.height).toBe(title);
+    // the front view does not move
+    expect(named.views[0]).toEqual(plain.views[0]);
+  });
+
+  it('makes room around the views for the labels at the ends of a marked section', () => {
+    const trace = { normal: [0, 1, 0] as [number, number, number], lines: [{ points: [[-10, 0, -10], [10, 0, -10], [10, 0, 10], [-10, 0, 10]] as Array<[number, number, number]>, closed: true }] };
+    const off = figureLayout(ctx, I, 'mm', settings({ overlays: { ...DEFAULT_FIGURE.overlays, sections: false } }), [drawing('X1', trace)]);
+    const on = figureLayout(ctx, I, 'mm', settings(), [drawing('X1', trace)]);
+    // without marks: the usual 3 mm margin
+    expect(off.views[0].x).toBe(Math.round(px(3)));
+    // with them: the gap and the label's width beyond the view's edge
+    const reach = px(SECTION_LABEL_GAP_MM) + 0.6 * px(SECTION_LABEL_MM) * 2;
+    expect(on.views[0].x).toBe(Math.round(reach + px(0.5)));
+    expect(on.sections[0].x - (on.views[0].x + on.views[0].width)).toBe(Math.round(2 * reach + px(1)));
   });
 });

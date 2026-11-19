@@ -21,7 +21,7 @@ async function scanRow(page: Page, b64: string, y: number) {
         alpha.push(row[4 * x + 3]);
         dark.push(row[4 * x + 3] > 128 && row[4 * x] < 80 && row[4 * x + 1] < 80 && row[4 * x + 2] < 80);
       }
-      return { width: bmp.width, height: bmp.height, alpha, dark, corner: g.getImageData(0, 0, 1, 1).data[3] };
+      return { width: bmp.width, height: bmp.height, alpha, dark, corner: g.getImageData(0, 0, 1, 1).data[3], cornerRgba: Array.from(g.getImageData(0, 0, 1, 1).data) };
     },
     { b64, y },
   );
@@ -48,10 +48,16 @@ test.beforeEach(async ({ page }) => {
   await page.locator('#frame-from-view').click();
 });
 
-test('exports a PNG at the stated physical scale with a transparent background and a true scale bar', async ({ page }) => {
+test('exports a PNG at the stated physical scale, on white or transparent, with a true scale bar', async ({ page }) => {
   await page.locator('#fig-view-top').check();
   await page.locator('#fig-dpi-300').click();
   await page.locator('#fig-scale-1').click();
+  // white by default: any viewer shows the black outline and scale bar
+  await expect(page.locator('#fig-background-white')).toHaveAttribute('aria-checked', 'true');
+  const white = (await page.evaluate(() => window.lithicanalyst.figure('png')))!;
+  expect((await scanRow(page, white.data, 0)).cornerRgba).toEqual([255, 255, 255, 255]);
+  // transparent: what the model covers can be told from the rest
+  await page.locator('#fig-background-transparent').click();
   const px = 300 / 25.4; // pixels per mm at 1:1
   await expect(page.locator('#fig-size')).toContainText(' mm · ');
 
@@ -108,8 +114,11 @@ test('exports an SVG in millimetres with the shading as images and the rest as v
       arrows: root.querySelectorAll('g.arrows polygon').length,
       groups: Array.from(root.querySelectorAll('g[id^="view-"]'), (g) => g.id),
       bar: root.querySelectorAll('#scale-bar path').length,
+      ground: ((r) => (r ? [r.nodeName, r.getAttribute('width'), r.getAttribute('height'), r.getAttribute('fill')] : null))(root.firstElementChild),
     };
   }, fig.data);
+  // on white: a white rectangle under everything
+  expect(info.ground).toEqual(['rect', '100%', '100%', '#ffffff']);
   expect(info.error).toBe(0);
   expect(info.name).toBe('svg');
   expect(info.width).toBe(`${Math.round(fig.layout.width * fig.layout.mmPerPx! * 100) / 100}mm`);
@@ -135,6 +144,11 @@ test('exports an SVG in millimetres with the shading as images and the rest as v
     return img.naturalWidth;
   }, fig.data);
   expect(drawn).toBeGreaterThan(0);
+  // transparent: nothing under the views
+  await page.locator('#fig-background-transparent').click();
+  const clear = (await page.evaluate(() => window.lithicanalyst.figure('svg')))!;
+  expect(clear.data).not.toContain('<rect width="100%" height="100%"');
+  expect(await page.evaluate((text) => new DOMParser().parseFromString(text, 'image/svg+xml').documentElement.firstElementChild?.nodeName, clear.data)).toBe('g');
 
   const file = await download(page, () => page.locator('#fig-svg').click());
   expect(file.name).toBe('box_figure.svg');

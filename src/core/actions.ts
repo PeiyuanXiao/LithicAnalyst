@@ -21,6 +21,7 @@ import {
   SetSequencesCommand,
   SetSplitCommand,
   SetSpecimenCommand,
+  SetSectionLabelCommand,
   SetWorkingEdgesCommand,
   UpdateCurveCommand,
   UpdatePlaneCommand,
@@ -589,6 +590,13 @@ export function addSection(store: ProjectStore, input: { point: Vec3; normal: Ve
 export function deleteSection(store: ProjectStore, id: string): void {
   if (!store.section(id)) return;
   store.history.execute(new DeleteSectionCommand(id));
+}
+
+/** Rename a section ("X1" by default; the figures write it too); typing merges into one undo step. */
+export function setSectionLabel(store: ProjectStore, id: string, label: string): void {
+  const before = store.section(id);
+  if (!before || before.label === label) return;
+  store.history.execute(new SetSectionLabelCommand(structuredClone(before), { ...structuredClone(before), label, modifiedAt: nowIso() }));
 }
 
 export function updateSection(store: ProjectStore, id: string, patch: Partial<Pick<Section, 'keep' | 'fill' | 'inFigure'>>): void {

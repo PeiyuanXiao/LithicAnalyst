@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addCurve,
   addScarVector,
+  addSection,
   deleteCurve,
   deleteScar,
   moveEndpoint,
@@ -10,6 +11,7 @@ import {
   setCurveShape,
   setScarAttribute,
   setScarLabel,
+  setSectionLabel,
   updateSpecimen,
 } from '../src/core/actions';
 import { assembleCurve, curveLength, curveSegments, isValidShape, midPointIndex } from '../src/core/curveGeometry';
@@ -356,5 +358,25 @@ describe('curves in the project', () => {
     setCurveAttribute(s, s.state.curves[1].id, 'type', 'retouch, inverse');
     expect(curveCsv(s.state, { excelBom: false }).split('\n')[7]).toBe('LB-1023,C2,0,0,0,0,0,true,true,8,"retouch, inverse",,mm');
     expect(curveCsv(s.state, { excelBom: true }).charCodeAt(0)).toBe(0xfeff);
+  });
+});
+
+describe('sections', () => {
+  it('rename through one undo step while typing, and back', () => {
+    const s = new ProjectStore(emptyProject());
+    const sec = addSection(s, { point: [0, 0, 0], normal: [0, 1, 0], across: [1, 0, 0] });
+    expect(sec.label).toBe('X1');
+    setSectionLabel(s, sec.id, 'a');
+    setSectionLabel(s, sec.id, 'ab');
+    expect(s.section(sec.id)!.label).toBe('ab');
+    expect(s.history.undoLabelKey).toBe('cmd.renameSection');
+    s.history.undo();
+    expect(s.section(sec.id)!.label).toBe('X1');
+    s.history.redo();
+    expect(s.section(sec.id)!.label).toBe('ab');
+    // the same label again changes nothing
+    setSectionLabel(s, sec.id, 'ab');
+    s.history.undo();
+    expect(s.section(sec.id)!.label).toBe('X1');
   });
 });

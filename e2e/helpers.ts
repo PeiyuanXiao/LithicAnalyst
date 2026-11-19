@@ -89,6 +89,7 @@ export interface LithicApi {
   landmarkDiameter(id: string): number | null;
   tweening(): boolean;
   unsaved(): boolean;
+  folderSavePending(): boolean;
   busy(text: string | null): void;
   selectForTest(id: string | null): void;
   exportCurvesCsvText(): string;
@@ -195,6 +196,11 @@ export { expect };
 
 /** Open the built app and wait until it has started with a working WebGL view: it is on its start page. */
 export async function openStart(page: Page): Promise<void> {
+  // the save and open dialogs of the File System Access API stay away, so that saving downloads (unless the test has mockFilePickers)
+  await page.addInitScript(() => {
+    if ((window as unknown as { __pickers?: unknown }).__pickers) return;
+    for (const name of ['showSaveFilePicker', 'showOpenFilePicker']) Object.defineProperty(window, name, { value: undefined, configurable: true });
+  });
   await page.goto(APP_URL);
   await page.waitForFunction(() => !!window.lithicanalyst);
   await expect(page.locator('.vp-error')).toHaveCount(0);
@@ -417,8 +423,9 @@ export async function mockFolder(page: Page, name: string, files: Record<string,
   await page.addInitScript(
     ([folderName, init]: [string, Record<string, string>]) => {
       const files = new Map<string, Uint8Array>(Object.entries(init).map(([p, b]) => [p, Uint8Array.from(atob(b), (c) => c.charCodeAt(0))]));
-      const w = window as unknown as { __folder: Map<string, Uint8Array>; __folderRoot: unknown };
+      const w = window as unknown as { __folder: Map<string, Uint8Array>; __folderRoot: unknown; __folderWrites: Record<string, number> };
       w.__folder = files;
+      w.__folderWrites = {};
       const fileHandle = (path: string) => ({
         kind: 'file' as const,
         name: path.split('/').pop()!,
@@ -432,6 +439,7 @@ export async function mockFolder(page: Page, name: string, files: Record<string,
               let o = 0;
               for (const p of parts) out.set(p, (o += p.length) - p.length);
               files.set(path, out);
+              w.__folderWrites[path] = (w.__folderWrites[path] ?? 0) + 1;
             },
           };
         },
@@ -468,10 +476,91 @@ export async function mockFolder(page: Page, name: string, files: Record<string,
   );
 }
 
+/** What the dialogs of mockFilePickers saw: dialogs shown, permissions asked, files written, and the files by name. */
+export interface PickerLog {
+  save: number;
+  open: number;
+  permission: number;
+  writes: number;
+  files: Record<string, string>;
+}
+
+/**
+ * The File System Access API's save and open dialogs, in memory, set up before the page loads (call it
+ * before openApp). Files by name. The save dialog gives a handle that may be written, named `saveName` or the
+ * suggested name; the open dialog gives `openName`'s, which needs a permission first. `cancel`: both
+ * are closed without choosing. Set these with setPickers; read with pickerLog.
+ */
+export async function mockFilePickers(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const files = new Map<string, string>();
+    const log = { save: 0, open: 0, permission: 0, writes: 0, saveName: null as string | null, openName: '', cancel: false, files };
+    (window as unknown as { __pickers: typeof log }).__pickers = log;
+    const handle = (name: string, writable: boolean) => ({
+      kind: 'file' as const,
+      name,
+      getFile: async () => new File([files.get(name) ?? ''], name, { type: 'application/json' }),
+      createWritable: async () => {
+        if (!writable) throw new DOMException('Not allowed to write the file.', 'NotAllowedError');
+        let text = '';
+        return {
+          write: async (d: string) => void (text += d),
+          close: async () => {
+            files.set(name, text);
+            log.writes++;
+          },
+        };
+      },
+      queryPermission: async () => (writable ? 'granted' : 'prompt'),
+      requestPermission: async () => {
+        log.permission++;
+        writable = true;
+        return 'granted';
+      },
+    });
+    const aborted = () => new DOMException('The user aborted a request.', 'AbortError');
+    Object.defineProperty(window, 'showSaveFilePicker', {
+      configurable: true,
+      value: async (o: { suggestedName: string }) => {
+        log.save++;
+        if (log.cancel) throw aborted();
+        return handle(log.saveName ?? o.suggestedName, true);
+      },
+    });
+    Object.defineProperty(window, 'showOpenFilePicker', {
+      configurable: true,
+      value: async () => {
+        log.open++;
+        if (log.cancel) throw aborted();
+        return [handle(log.openName, false)];
+      },
+    });
+  });
+}
+
+/** Change what the dialogs of mockFilePickers do next; `files`: put files in. */
+export const setPickers = (page: Page, o: { saveName?: string | null; openName?: string; cancel?: boolean; files?: Record<string, string> }): Promise<void> =>
+  page.evaluate((opts) => {
+    const log = (window as unknown as { __pickers: { saveName: string | null; openName: string; cancel: boolean; files: Map<string, string> } }).__pickers;
+    if (opts.saveName !== undefined) log.saveName = opts.saveName;
+    if (opts.openName !== undefined) log.openName = opts.openName;
+    if (opts.cancel !== undefined) log.cancel = opts.cancel;
+    for (const [n, text] of Object.entries(opts.files ?? {})) log.files.set(n, text);
+  }, o);
+
+export const pickerLog = (page: Page): Promise<PickerLog> =>
+  page.evaluate(() => {
+    const l = (window as unknown as { __pickers: PickerLog & { files: Map<string, string> } }).__pickers;
+    return { save: l.save, open: l.open, permission: l.permission, writes: l.writes, files: Object.fromEntries(l.files) };
+  });
+
 /** Open the folder set up by mockFolder (the app gets its handle through window.lithicanalyst). */
 export async function openMockFolder(page: Page): Promise<void> {
   await page.evaluate(() => window.lithicanalyst.openFolderHandle((window as unknown as { __folderRoot: never }).__folderRoot));
 }
+
+/** How often the app has written a file of the mock folder. */
+export const folderWrites = (page: Page, path: string): Promise<number> => page.evaluate((p) => (window as unknown as { __folderWrites: Record<string, number> }).__folderWrites[p] ?? 0, path);
 
 /** The paths of the mock folder, sorted, and one file's text (null when missing). */
 export const folderPaths = (page: Page): Promise<string[]> => page.evaluate(() => [...(window as unknown as { __folder: Map<string, Uint8Array> }).__folder.keys()].sort());
