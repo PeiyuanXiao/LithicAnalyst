@@ -119,6 +119,8 @@ export interface AppApi {
   setRegionType(id: string, type: string): void;
   /** Whether a region has triangles to export (its seed on the mesh). */
   regionHasFaces(id: string): boolean;
+  /** Whether a back ridge parts a back from the dorsal face (null: not known yet, or no back follows it). */
+  backCut(curveId: string): boolean | null;
   /** A region as a PLY mesh of its own (a download). */
   exportRegionPly(id: string): void;
   volumeSplit(): import('../compute/split').VolumeSplit | null;

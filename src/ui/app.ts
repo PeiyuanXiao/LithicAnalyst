@@ -15,7 +15,7 @@ import type { AutoMeasurements, GmDerived, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { annotationStatus, type StatusKey } from '../core/annotationStatus';
-import { CURVE_FIELDS, GENERIC_REGION_TYPE, hasVolumeSplit, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
+import { backRidges, keyIndex, CURVE_FIELDS, GENERIC_REGION_TYPE, hasVolumeSplit, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject, type ProjectFile } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, retouchSettingsOf, scarsToCheck, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Scar, type Section, type GmConfig, type MeshInfo, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
@@ -67,7 +67,7 @@ import { StationTool } from '../tools/stationTool';
 import { WorkingEdgeTool, type EdgePlace } from '../tools/workingEdgeTool';
 import { clampedEnd, curveStretch, edgeAxis, edgeLabels, ownerAt, placedEdges, pointOnCurve, workingEdgeDetails, WORKING_EDGE_MIN_MM, WORKING_EDGE_PARAMETERS, type WorkingEdgeDetail, type WorkingEdgeRefusal } from '../compute/workingEdge';
 import { drawingPng, RetouchPlanPanel, RetouchSectionPanel, type PlanFace, type SectionReading } from './retouchPanels';
-import { FACE_DORSAL, FACE_PLATFORM, FACE_VENTRAL, faceOfTrianglesSteps, onPlan, removedVolumeCurveSteps, RETOUCH_INDEX_PARAMETERS, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps, stationFaces, type RetouchCurve, type RetouchIndexInput, type RetouchIndexResult, type RetouchStationDetail, type RetouchStationRow, type SegmentFrameResult, type SegmentOutline } from '../compute/retouchIndex';
+import { faceCodeOf, faceOfTrianglesSteps, onPlan, removedVolumeCurveSteps, RETOUCH_INDEX_PARAMETERS, retouchIndexSteps, segmentFrameSteps, segmentOutlineSteps, stationFaces, type RetouchCurve, type RetouchIndexInput, type RetouchIndexResult, type RetouchStationDetail, type RetouchStationRow, type SegmentFrameResult, type SegmentOutline } from '../compute/retouchIndex';
 import { ruleValues, SHARP_EDGE_PARAMETERS, sharpOfCurve, suggestThreshold, type SharpResult } from '../compute/sharpEdge';
 import { EDGE_ANGLE_FLAT_DEG, EDGE_ANGLE_RAMP, EdgeAngleLayer, rampPaint, SHARP_COLORS, sharpPaint } from '../render/edgeAngleLayer';
 import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
@@ -91,7 +91,7 @@ import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLa
 import { uuid } from '../core/ids';
 import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
-import { facesOfPiecesSteps, overPiecesSteps, pieceSeedSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
+import { facesOfPiecesSteps, overPiecesSteps, pieceSeedSteps, piecesBesideSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
 import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type SplitResult, type VolumeSplit } from '../compute/split';
 import { boxHint, flakeHint, MEASURE_HINT_PARAMETERS, noduleHint, sharpHint, splitHint, stationsHint, wholeModelHint, type MeasureHint } from '../compute/measureHint';
@@ -345,7 +345,8 @@ export class App implements AppApi {
   /** The piece of the lower layer holding each region's seed (−1: none, or an upper region). */
   private seedComponent: number[] = [];
   /** The upper layer: pieces between the boundary curves, the upper piece of each lower piece, and the piece of each upper region (−1: none, or a lower region). */
-  private upper: { key: string; partition: Partition; over: Int32Array } | null = null;
+  /** The upper layer: its partition, the upper piece of each lower piece, and the pieces beside each back ridge (by its curve's id). */
+  private upper: { key: string; partition: Partition; over: Int32Array; ridges: Map<string, Set<number>> } | null = null;
   private upperComponent: number[] = [];
   /** The lower layer as the curves cut it, before each retouch band is made one piece. */
   private rawLower: { partition: Partition; over: Int32Array } | null = null;
@@ -2794,7 +2795,7 @@ export class App implements AppApi {
     const r = this.store.region(id);
     if (!r) return;
     // a region that followed other annotations stays where it is, the user's from now on
-    const seed = r.auto ? (r.curveId ? this.bandSeed(this.store.state.regions.indexOf(r)) : this.autoRegionSeed(this.store.state.regions.indexOf(r))) : undefined;
+    const seed = r.auto ? (r.curveId && r.type === 'retouch' ? this.bandSeed(this.store.state.regions.indexOf(r)) : this.autoRegionSeed(this.store.state.regions.indexOf(r))) : undefined;
     setRegionType(this.store, id, type, type === 'scar' ? this.scarStartingIn(this.componentAt(seed ?? r.seed)) : null, seed);
   }
 
@@ -2842,10 +2843,11 @@ export class App implements AppApi {
       const upperPart = this.upper?.key === key ? this.upper.partition : await runSliced(regionsSteps(pos, idx, base.edges, boundary));
       const over = await runSliced(overPiecesSteps(part, upperPart));
       const bands = await this.bandsOf(st, chains, part, boundary, this.retouchSides);
+      const ridges = await this.ridgePieces(st, chains, upperPart);
       if (token !== this.partitionToken || this.loaded !== loaded) return;
       this.partition = part;
       this.partitionVersion++;
-      this.upper = { key, partition: upperPart, over };
+      this.upper = { key, partition: upperPart, over, ridges };
       this.rawLower = { partition: part, over };
       this.retouchBands = bands;
       this.bandKey = '';
@@ -2853,6 +2855,23 @@ export class App implements AppApi {
       if (token !== this.partitionToken) return;
       this.resolveRegionsNow();
     })();
+  }
+
+  /** The pieces of an upper layer beside each of a flake's back ridges (in slices), by the ridge's id. */
+  private async ridgePieces(st: Readonly<ProjectState>, chains: readonly number[][], upper: Partition): Promise<Map<string, Set<number>>> {
+    const out = new Map<string, Set<number>>();
+    const base = this.measureBase;
+    if (!base) return out;
+    for (const c of backRidges(st, st.curves)) out.set(c.id, await runSliced(piecesBesideSteps(upper, base.edges, chains[st.curves.indexOf(c)])));
+    return out;
+  }
+
+  /** Whether a back ridge parts a back from the dorsal face: its back found beside it (null: not known yet, or no back follows it). */
+  backCut(curveId: string): boolean | null {
+    const st = this.store.state;
+    if (!this.upper || st.specimen.type !== 'flake') return null;
+    const i = st.regions.findIndex((r) => r.auto && r.type === 'back' && r.curveId === curveId);
+    return i < 0 ? null : (this.upperComponent[i] ?? -1) >= 0;
   }
 
   /** Where the bands of a project's retouch curves lie among the pieces `part` of its lower layer (in slices). `known`: what is kept while the curves stay. */
@@ -2864,7 +2883,7 @@ export class App implements AppApi {
     const pos = g.getAttribute('position').array as Float32Array;
     const idx = g.index!.array as Uint32Array;
     for (const r of st.regions) {
-      const i = r.auto && r.curveId ? st.curves.findIndex((c) => c.id === r.curveId) : -1;
+      const i = r.auto && r.curveId && r.type === 'retouch' ? st.curves.findIndex((c) => c.id === r.curveId) : -1;
       if (i < 0) continue;
       const c = st.curves[i];
       const which = c.retouchSide === 'larger' ? 'larger' : 'smaller';
@@ -2951,8 +2970,8 @@ export class App implements AppApi {
   }
 
   /** The piece of each upper region of a project (−1: none, or a lower region): by its seed, or, one that follows other annotations, as they say, unless a region the user typed is there. */
-  private upperComponents(st: Readonly<ProjectState>, part: Partition, platformSeed: Vec3 | null): number[] {
-    return upperComponentsOf(st, part, platformSeed, (q, p) => this.pieceAt(q, p));
+  private upperComponents(st: Readonly<ProjectState>, part: Partition, platformSeed: Vec3 | null, ridges: ReadonlyMap<string, ReadonlySet<number>> = this.upper?.ridges ?? new Map()): number[] {
+    return upperComponentsOf(st, part, platformSeed, (q, p) => this.pieceAt(q, p), ridges);
   }
 
   facesOpen(): boolean {
@@ -3609,7 +3628,8 @@ export class App implements AppApi {
       const c = this.seedComponent[i];
       if (r.type === 'retouch' && c >= 0 && !pieces.has(c)) pieces.set(c, { region: r.id, layer: r.retouchLayer ?? 1 });
       const u = this.upperComponent[i];
-      const code = r.type === 'dorsal' ? FACE_DORSAL : r.type === 'ventral' ? FACE_VENTRAL : r.type === 'platform' ? FACE_PLATFORM : 0;
+      // a core-edge flake's back is of the dorsal side
+      const code = faceCodeOf(r.type);
       if (code && u >= 0 && !faceOfPiece.has(u)) faceOfPiece.set(u, code);
     });
     const measured = st.curves.filter((c) => measuresEdgeAngle(c, st.specimen.type));
@@ -5947,7 +5967,7 @@ export class App implements AppApi {
     if (st.regions.some((r) => isUpperRegion(r.type, st.specimen.type))) {
       const above = await this.partitionFor(st.curves.filter((c) => isBoundaryCurve(c.attributes.type, st.specimen.type)), st.specimen.type);
       const outline = st.specimen.type === 'flake' ? st.curves.find((c) => c.attributes.type === PLATFORM_OUTLINE && c.closed) : undefined;
-      if (above) upper = label(above, this.upperComponents(st, above, outline ? await this.outlineSeed(outline) : null));
+      if (above) upper = label(above, this.upperComponents(st, above, outline ? await this.outlineSeed(outline) : null, await this.ridgePieces(st, chains, above)));
     }
     o.faces = { key, labels, upper };
     return o.faces;
@@ -7527,9 +7547,10 @@ export class App implements AppApi {
         this.showHelp('shortcuts');
         return;
       }
-      const digit = /^Digit([1-9])$/.exec(e.code) ?? /^Numpad([1-9])$/.exec(e.code);
+      // 1–9, and 0 for the tenth choice
+      const digit = /^Digit([0-9])$/.exec(e.code) ?? /^Numpad([0-9])$/.exec(e.code);
       // the sequence tool: 1–9 choose the current sequence
-      if (digit && !e.shiftKey && this.sequencing()) {
+      if (digit && digit[1] !== '0' && !e.shiftKey && this.sequencing()) {
         const q = this.store.state.sequences[Number(digit[1]) - 1];
         if (q) this.setCurrentSequence(q.id);
         return;
@@ -7547,14 +7568,14 @@ export class App implements AppApi {
             return;
           }
           const f = shiftNumberKeyField(SCAR_FIELDS);
-          const opt = f?.options?.[Number(digit[1]) - 1];
+          const opt = f?.options?.[keyIndex(digit[1])];
           if (f && opt && this.store.scar(sel)) setScarAttribute(this.store, sel, f.key, opt.value);
           return;
         }
         const specimenType = this.store.state.specimen.type;
         if (this.store.region(sel)) {
           const field = numberKeyField(REGION_FIELDS);
-          const opt = field ? keyedOptions(field, specimenType)[Number(digit[1]) - 1] : undefined;
+          const opt = field ? keyedOptions(field, specimenType)[keyIndex(digit[1])] : undefined;
           if (opt === 'custom') {
             // not typed into the box it opens
             e.preventDefault();
@@ -7566,7 +7587,7 @@ export class App implements AppApi {
         const isCurve = !!this.store.curve(sel);
         const f = numberKeyField(isCurve ? CURVE_FIELDS : SCAR_FIELDS);
         if (!f) return;
-        const opt = keyedOptions(f, specimenType)[Number(digit[1]) - 1];
+        const opt = keyedOptions(f, specimenType)[keyIndex(digit[1])];
         // "custom": the user's own text
         if (opt === 'custom') {
           // not typed into the box it opens
@@ -7685,7 +7706,8 @@ export class App implements AppApi {
           : ([
               ['1 / 2 / 3 · Delete', 'help.k.relationPick'],
               ['1 – 9 / N', 'help.k.sequencePick'],
-              [`1 – ${count}`, 'help.k.complete'],
+              // the tenth choice takes 0
+              [count > 9 ? '1 – 9 · 0' : `1 – ${count}`, 'help.k.complete'],
               [`Shift+1 – ${shiftNumberKeyField(SCAR_FIELDS)?.options?.length ?? 5}`, 'help.k.termination'],
             ] as Row[])),
         ['S', 'help.k.snap'],

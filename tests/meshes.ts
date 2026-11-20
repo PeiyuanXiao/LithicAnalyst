@@ -638,3 +638,48 @@ export function facesFacing(m: Mesh, dir: Vec3, minCos = 0.5): Uint32Array {
   }
   return Uint32Array.from(out);
 }
+
+/**
+ * T9, a core-edge (débordant) flake, as a tetrahedron so that every face is flat and its area exact: the platform ABC (y = 0), the
+ * ventral face ABF (z = 0), the back BCF (the plane x = 10, square to the ventral face, from the platform to the distal end) and the
+ * dorsal face ACF; the back ridge C–F between the back and the dorsal face, from the platform's corner C to the distal end F, where the
+ * edges A–F and B–F of the ventral face meet. Each face cut into n² triangles; `T9_AREAS` its faces' areas.
+ */
+export const T9 = { L: 40, A: [-15, 0, 0] as Vec3, B: [10, 0, 0] as Vec3, C: [10, 0, 6] as Vec3, F: [10, 40, 0] as Vec3 };
+const triArea = (a: Vec3, b: Vec3, c: Vec3): number => {
+  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  return Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]) / 2;
+};
+export const T9_AREAS = { platform: triArea(T9.A, T9.B, T9.C), ventral: triArea(T9.A, T9.B, T9.F), back: triArea(T9.B, T9.C, T9.F), dorsal: triArea(T9.A, T9.C, T9.F) };
+
+export function flakeT9(n = 24): Mesh & { platform: Uint32Array; ventral: Uint32Array; back: Uint32Array; dorsal: Uint32Array } {
+  const { A, B, C, F } = T9;
+  const centre: Vec3 = [(A[0] + B[0] + C[0] + F[0]) / 4, (A[1] + B[1] + C[1] + F[1]) / 4, (A[2] + B[2] + C[2] + F[2]) / 4];
+  const soup: number[] = [];
+  const parts: string[] = [];
+  // the same point the same way from either face: on a grid of 1e-6
+  const snap = (x: number) => Math.round(x * 1e6) / 1e6;
+  const point = (p: Vec3, q: Vec3, r: Vec3, i: number, j: number): Vec3 => [0, 1, 2].map((k) => snap(p[k] + (i / n) * (q[k] - p[k]) + (j / n) * (r[k] - p[k]))) as Vec3;
+  const face = (p: Vec3, q: Vec3, r: Vec3, name: string) => {
+    // wound outward: away from the centre
+    const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+    const nrm = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const out = nrm[0] * (p[0] - centre[0]) + nrm[1] * (p[1] - centre[1]) + nrm[2] * (p[2] - centre[2]) > 0;
+    const tri = (a: Vec3, b: Vec3, c: Vec3) => {
+      soup.push(...a, ...(out ? b : c), ...(out ? c : b));
+      parts.push(name);
+    };
+    for (let i = 0; i < n; i++)
+      for (let j = 0; i + j < n; j++) {
+        tri(point(p, q, r, i, j), point(p, q, r, i + 1, j), point(p, q, r, i, j + 1));
+        if (i + j + 1 < n) tri(point(p, q, r, i + 1, j), point(p, q, r, i + 1, j + 1), point(p, q, r, i, j + 1));
+      }
+  };
+  face(A, B, C, 'platform');
+  face(A, B, F, 'ventral');
+  face(B, C, F, 'back');
+  face(A, C, F, 'dorsal');
+  const m = weldExact(new Float32Array(soup));
+  const of = (name: string) => Uint32Array.from(parts.flatMap((x, t) => (x === name ? [t] : [])));
+  return { ...m, platform: of('platform'), ventral: of('ventral'), back: of('back'), dorsal: of('dorsal') };
+}

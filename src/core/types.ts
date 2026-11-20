@@ -204,7 +204,7 @@ export interface Section {
   modifiedAt: string;
 }
 
-export type RegionCode = 'scar' | 'cortex' | 'joint' | 'damage' | 'flaking_surface' | 'platform' | 'ventral' | 'dorsal' | 'retouch';
+export type RegionCode = 'scar' | 'cortex' | 'joint' | 'damage' | 'flaking_surface' | 'platform' | 'ventral' | 'dorsal' | 'back' | 'retouch';
 /** One of the codes, or the user's own text. */
 export type RegionType = RegionCode | (string & {});
 

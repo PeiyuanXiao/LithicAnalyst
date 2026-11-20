@@ -5,7 +5,7 @@
  * traced curve that stays on the ridge shows that snapping worked.
  */
 
-import { bicone, ellipsoid, flakeT1, flakeT2, flakeT6, flakeT8, heightAt, steppedTool, T1, T6, t6Dorsal, t6Ventral, t6Zv, T8, t8Arcs, t8Bulb, t8Dorsal, t8Rings, type T8Variant } from '../../tests/meshes';
+import { bicone, ellipsoid, flakeT1, flakeT2, flakeT6, flakeT8, flakeT9, heightAt, steppedTool, T1, T6, t6Dorsal, t6Ventral, t6Zv, T8, t8Arcs, t8Bulb, t8Dorsal, t8Rings, type T8Variant } from '../../tests/meshes';
 
 export { heightAt, T1, T6, t6Dorsal, t6Ventral, t6Zv, T8, t8Arcs, t8Bulb, t8Dorsal, t8Rings };
 
@@ -289,3 +289,7 @@ export const biconePly = (open = false): MeshFile => ({ name: open ? 'bicone-ope
 /** T8, the bulb (tests/meshes.ts), coarse: about 38 000 triangles; or one of its variants. */
 export const t8Mesh = (variant: T8Variant = {}) => flakeT8(false, null, variant);
 export const t8Ply = (variant: T8Variant = {}): MeshFile => ({ name: 't8.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(t8Mesh(variant)) });
+
+/** T9, the core-edge flake (tests/meshes.ts): a tetrahedron, its back the plane x = 10; about 2 300 triangles. */
+export { T9, T9_AREAS } from '../../tests/meshes';
+export const t9Ply = (): MeshFile => ({ name: 't9.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(flakeT9()) });

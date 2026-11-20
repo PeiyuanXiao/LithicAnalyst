@@ -52,7 +52,7 @@ import {
 import { curveLength } from '../core/curveGeometry';
 import { measuredLine } from '../compute/measuredLine';
 import { planeMethodsOf } from '../compute/planes';
-import { BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, hasEdgeAngles, hasVolumeSplit, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
+import { BACK_RIDGE, BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, hasEdgeAngles, hasVolumeSplit, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, optionKey, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, UPPER_REGION_TYPES, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
 import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMean, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
@@ -297,7 +297,10 @@ function arrowsSection(api: AppApi): Section {
     };
     if (f.type === 'enum' && f.options && (f.numberKeys || f.shiftNumberKeys)) {
       // number keys (or Shift + number keys) set it; a field that follows another is locked meanwhile
-      const key = (i: number) => (i < 9 ? `${f.shiftNumberKeys ? '⇧' : ''}${i + 1}` : undefined);
+      const key = (i: number) => {
+        const k = optionKey(i);
+        return k === undefined ? undefined : `${f.shiftNumberKeys ? '⇧' : ''}${k}`;
+      };
       const ctl = optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: key(i) })), String(current), onPick);
       const set = (x: Scar) => {
         ctl.set(String(x.attributes[f.key]));
@@ -442,7 +445,7 @@ function curvesSection(api: AppApi): Section {
     if (f.type === 'enum' && f.options && f.allowCustom) return customField(api, f, id, String(current ?? ''), api.store.state.specimen.type, onPick);
     if (f.type === 'enum' && f.options) {
       const ctl = f.numberKeys
-        ? optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: i < 9 ? String(i + 1) : undefined })), String(current), onPick)
+        ? optionList(id, tl(f.label), f.options.map((o, i) => ({ value: o.value, label: tl(o.label), key: optionKey(i) })), String(current), onPick)
         : segmented(id, tl(f.label), f.options.map((o) => ({ value: o.value, label: tl(o.label) })), String(current), onPick);
       return { el: h('div', { class: 'field' }, ctl.el), set: (x) => ctl.set(String(x.attributes[f.key])) };
     }
@@ -512,6 +515,8 @@ function curvesSection(api: AppApi): Section {
     refs.meta.append(...numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), ...textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
     // the platform outline must be closed before it means anything
     if (c.attributes.type === PLATFORM_OUTLINE && !c.closed) refs.meta.append(h('dt', {}), h('dd', { class: 'text', id: 'curve-outline-open' }, h('span', { class: 'pill pill-warn' }, t('curves.notClosed'))));
+    // a back ridge that parts no back from the dorsal face (its ends not on the edge or the outline)
+    if (c.attributes.type === BACK_RIDGE && st.specimen.type === 'flake' && api.backCut(c.id) === false) refs.meta.append(h('dt', {}), h('dd', { class: 'text', id: 'curve-back-uncut' }, h('span', { class: 'pill pill-warn' }, t('curves.noBack'))));
     // what runs along the platform is not measured as edge: say how much is
     const line = measuredLine(c, st);
     if (line.points !== c.points) refs.meta.append(...numRow(t('curves.measuredLength'), ...quantity('length', curveLength(line), u), 'curve-measured-length'));
@@ -661,10 +666,10 @@ function customField(api: AppApi, f: FieldDef, id: string, current: string, spec
     id,
     tl(f.label),
     [
-      ...offered.map((o, i) => ({ value: o.value, label: tl(o.label), key: String(i + 1) })),
+      ...offered.map((o, i) => ({ value: o.value, label: tl(o.label), key: optionKey(i) })),
       ...(legacy ? [{ value: legacy.value, label: tl(legacy.label) }] : []),
-      // always the last choice
-      { value: CUSTOM, label: t('field.custom'), key: String(offered.length + 1) },
+      // always the last choice (the tenth takes 0)
+      { value: CUSTOM, label: t('field.custom'), key: optionKey(offered.length) },
     ],
     shown(current),
     (v) => {
@@ -1907,7 +1912,9 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     const sel = api.selection.id;
     const seq = arrowColorModeOf(api.display.arrows.colorMode, st.specimen.type) === 'sequence' ? sequenceColors(st.sequences) : null;
     // the parts of the specimen first, then what lies in them
-    for (const r of [...shownRegions.filter(upperRegion), ...shownRegions.filter((x) => !upperRegion(x))]) {
+    // (the parts in their order: platform, ventral, dorsal, back)
+    const rank = (x: { type: string }) => UPPER_REGION_TYPES.indexOf(x.type);
+    for (const r of [...shownRegions.filter(upperRegion).sort((a, b) => rank(a) - rank(b)), ...shownRegions.filter((x) => !upperRegion(x))]) {
       const res = info?.results.find((x) => x.id === r.id);
       const scar = r.scarId ? st.scars.find((s) => s.id === r.scarId)?.label ?? null : null;
       const isSel = r.id === sel;
@@ -1951,7 +1958,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
         const id = r.id;
         plyButton = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'region-ply', onclick: () => api.exportRegionPly(id) }, 'PLY') as HTMLButtonElement;
         // one that follows a retouch curve may lie on the wrong side of it
-        inspector.append(h('div', { class: 'btn-row' }, plyButton, r.curveId ? iconButton(ICONS.swap, t('region.otherSide'), () => otherRetouchSide(api.store, r.id), { id: 'region-other-side' }) : null, deleteButton('region-delete', () => deleteRegion(api.store, r.id))));
+        inspector.append(h('div', { class: 'btn-row' }, plyButton, r.curveId && r.type === 'retouch' ? iconButton(ICONS.swap, t('region.otherSide'), () => otherRetouchSide(api.store, r.id), { id: 'region-other-side' }) : null, deleteButton('region-delete', () => deleteRegion(api.store, r.id))));
       }
     }
     if (r && noteInput) softSet(noteInput, r.note);
@@ -1961,7 +1968,7 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     // (by the preset types: free text has no totals)
     totals.hidden = !info || shownRegions.length === 0 || generic;
     if (info && shownRegions.length && !generic) {
-      for (const k of ['scar', 'cortex', 'joint', 'damage', 'retouch', 'flaking_surface', 'platform', 'ventral', 'dorsal'] as const) if (info.totals[k] > 0) totals.append(...numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
+      for (const k of ['scar', 'cortex', 'joint', 'damage', 'retouch', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'back'] as const) if (info.totals[k] > 0) totals.append(...numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
       if (info.totals.cortex > 0) totals.append(...numRow(t('region.cortexRatio'), fmtQuantity('ratio', info.totals.cortexRatio), '', 'region-cortex-ratio'));
       totals.hidden = !totals.childElementCount;
     }

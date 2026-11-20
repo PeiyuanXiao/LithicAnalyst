@@ -80,8 +80,8 @@ Requires Node.js ≥ 20.
 | Tool | Key | Description |
 |:-----------------------|:-----------------------|:-----------------------|
 | Draw arrow | A | Direction of a flake scar, from the point of percussion to the termination; completeness and termination type |
-| Draw curve | P | Polyline on the surface that follows ridges and valleys: scar outlines, edges, platform outlines |
-| Region | R | Surfaces bounded by curves: scar, cortex, joint, damage, retouch; a flake’s platform, ventral and dorsal faces; each can be exported as a PLY mesh |
+| Draw curve | P | Polyline on the surface that follows ridges and valleys: scar outlines, edges, platform outlines, back ridges |
+| Region | R | Surfaces bounded by curves: scar, cortex, joint, damage, retouch; a flake’s platform, ventral and dorsal faces and back; each can be exported as a PLY mesh |
 | Relation, Sequence | B, Q | Which scar cuts which, and removal sequences, with a live Harris matrix |
 | Landmark | K | Named fixed landmarks; curve semilandmarks along curves |
 | Technological axis | T | A flake’s axis from the point of percussion, which sets its coordinate system |

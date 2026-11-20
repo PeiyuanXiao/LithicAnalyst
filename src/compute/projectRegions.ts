@@ -1,10 +1,10 @@
-import { isBoundaryCurve, isUpperRegion, layerCurves, PLATFORM_OUTLINE } from '../core/fields';
+import { backRidges, isBoundaryCurve, isUpperRegion, layerCurves, PLATFORM_OUTLINE } from '../core/fields';
 import type { Curve, ProjectState, Vec3 } from '../core/types';
 import { buildAdjacency } from './curvature';
 import { gmSteps, type GmRegionSource, type GmResult } from './gm';
 import { buildEdgesSteps } from './meshGeometry';
 import { assignBands, bandPiecesSteps, mergePieces, retouchSideSteps } from './retouchBand';
-import { facesOfPiecesSteps, flakeFacePieces, joinOpenEndsSteps, JOIN_REACH_EDGES, overPiecesSteps, polylineEdgesSteps, regionsSteps, smallerPieceSteps, type Partition } from './regions';
+import { backPiece, facesOfPiecesSteps, flakeFacePieces, joinOpenEndsSteps, JOIN_REACH_EDGES, overPiecesSteps, piecesBesideSteps, polylineEdgesSteps, regionsSteps, smallerPieceSteps, type Partition } from './regions';
 import { runSync, type Steps } from './steps';
 import { PathSearch } from './surfacePath';
 import { triangleBvhSteps, type TriangleBvh } from './triangleBvh';
@@ -19,20 +19,30 @@ type RegionInput = Pick<ProjectState, 'specimen' | 'regions' | 'curves' | 'flake
 /** Whether a region lies in the lower layer of a project: not the upper layer's, nor on another type of specimen one left over that followed a flake's annotations. */
 export const inLowerLayer = (st: Pick<ProjectState, 'specimen'>, r: ProjectState['regions'][number]): boolean => !isUpperRegion(r.type, st.specimen.type) && !(st.specimen.type !== 'flake' && r.auto);
 
-/** The piece of each upper region of a project (−1: none, or a lower region): by its seed, or, one that follows other annotations, as they say, unless a region the user typed is there. */
-export function upperComponentsOf(st: RegionInput, part: Partition, platformSeed: Vec3 | null, pieceAt: (part: Partition, p: Vec3) => number): number[] {
+/**
+ * The piece of each upper region of a project (−1: none, or a lower region): by its seed, or, one that follows other annotations, as they
+ * say, unless a region the user typed is there. `ridges`: the pieces beside each back ridge (by its curve's id), for the backs that follow
+ * them: of those, the one that is none of the platform, ventral and dorsal faces.
+ */
+export function upperComponentsOf(st: RegionInput, part: Partition, platformSeed: Vec3 | null, pieceAt: (part: Partition, p: Vec3) => number, ridges: ReadonlyMap<string, ReadonlySet<number>> = new Map()): number[] {
   const out = st.regions.map((r) => (isUpperRegion(r.type, st.specimen.type) && !r.auto ? pieceAt(part, r.seed) : -1));
   if (st.specimen.type !== 'flake') return out;
   const platform = platformSeed ? pieceAt(part, platformSeed) : -1;
   const hint = st.flake.axis?.matrix ? pieceAt(part, st.flake.axis.end) : -1;
   const faces = flakeFacePieces(part, platform, hint);
   st.regions.forEach((r, i) => {
-    if (!r.auto) return;
+    if (!r.auto || r.type === 'back') return;
     const c = r.type === 'platform' ? platform : r.type === 'ventral' ? faces.ventral : r.type === 'dorsal' ? faces.dorsal : -1;
     if (c >= 0 && !out.includes(c)) out[i] = c;
   });
+  // each back beside its ridge, once the other faces are known
+  st.regions.forEach((r, i) => {
+    if (!r.auto || r.type !== 'back' || !r.curveId) return;
+    out[i] = backPiece(ridges.get(r.curveId), [platform, faces.ventral, faces.dorsal], out);
+  });
   return out;
 }
+
 
 /** Each retouch band's pieces (those a region of its own holds stay that region's), by the id of the region following its curve. */
 export function bandGroupsOf(st: Pick<ProjectState, 'specimen' | 'regions'>, part: Partition, bands: ReadonlyMap<string, { pieces: number[]; area: number }>, pieceAt: (part: Partition, p: Vec3) => number): Map<string, number[]> {
@@ -57,20 +67,24 @@ export function regionSourceOf(st: Pick<ProjectState, 'regions' | 'specimen'>, l
     find(type) {
       const up = isUpperRegion(type, st.specimen.type);
       const part = up ? layers.upper : layers.lower;
-      const pieces = new Set<number>();
+      // a flake's dorsal face takes its backs with it: the same points whether a back is told apart or not
+      const along = type === 'dorsal' && st.specimen.type === 'flake' ? 'back' : null;
+      const pieces = new Set<number>(), withIt = new Set<number>();
       st.regions.forEach((r, i) => {
-        if (r.type !== type) return;
+        if (r.type !== type && r.type !== along) return;
         const c = up ? layers.upperComponent[i] : layers.lowerComponent[i];
-        if (c >= 0) pieces.add(c);
+        if (c >= 0) (r.type === type ? pieces : withIt).add(c);
       });
       if (!part || !pieces.size) return { reason: 'region_missing' };
       if (pieces.size > 1) return { reason: 'region_ambiguous' };
-      const piece = [...pieces][0];
-      const faces = runSync(facesOfPiecesSteps(part, pieces));
-      const key = `${up ? 'u' : 'l'}${piece}`;
+      const all = new Set([...pieces, ...withIt]);
+      const faces = runSync(facesOfPiecesSteps(part, all));
+      const key = `${up ? 'u' : 'l'}${[...all].sort((a, b) => a - b).join('+')}`;
+      let area = 0;
+      for (const c of all) area += part.areas[c];
       return {
         faces,
-        area: part.areas[piece],
+        area,
         bvh: function* () {
           let tree = trees.get(key);
           if (!tree) {
@@ -147,7 +161,7 @@ export function* projectLayersSteps(st: RegionInput, mesh: RegionMesh): Steps<Re
   const bands = new Map<string, { pieces: number[]; area: number }>();
   if (type === 'flake') {
     for (const r of st.regions) {
-      const i = r.auto && r.curveId ? st.curves.findIndex((c) => c.id === r.curveId) : -1;
+      const i = r.auto && r.curveId && r.type === 'retouch' ? st.curves.findIndex((c) => c.id === r.curveId) : -1;
       if (i < 0) continue;
       const c = st.curves[i];
       const side = yield* retouchSideSteps(pos, idx, edges, boundary, chains[i], c.retouchSide === 'larger' ? 'larger' : 'smaller');
@@ -166,11 +180,14 @@ export function* projectLayersSteps(st: RegionInput, mesh: RegionMesh): Steps<Re
     const found = yield* smallerPieceSteps(pos, idx, edges, barrier, part);
     if (found) platformSeed = [found.seed[0] + o[0], found.seed[1] + o[1], found.seed[2] + o[2]];
   }
+  // the pieces beside each back ridge
+  const ridges = new Map<string, Set<number>>();
+  for (const c of backRidges(st, st.curves)) ridges.set(c.id, yield* piecesBesideSteps(upper, edges, chains[st.curves.indexOf(c)]));
   return {
     lower,
     upper,
     lowerComponent: st.regions.map((r) => (!inLowerLayer(st, r) ? -1 : r.curveId ? (bandPiece.get(r.id) ?? -1) : pieceAt(lower, r.seed))),
-    upperComponent: upperComponentsOf(st, upper, platformSeed, pieceAt),
+    upperComponent: upperComponentsOf(st, upper, platformSeed, pieceAt, ridges),
   };
 }
 

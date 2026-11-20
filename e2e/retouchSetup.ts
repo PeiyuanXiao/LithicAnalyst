@@ -57,8 +57,9 @@ export async function annotatedTool(page: Page, file: MeshFile = toolPly(), inve
   await drawLoop(page, around(8).map((d) => onTool(12, d)), '6', [0, 0, 8]);
   await look(page, [0, 0, 1], [0, 1, 0]);
   await page.keyboard.press('r');
-  const first = await regionAt(page, onTool(27, 45), '8');
-  const second = await regionAt(page, onTool(18, 45), '8');
+  // retouch: key 9 on a flake (8 is the back)
+  const first = await regionAt(page, onTool(27, 45), '9');
+  const second = await regionAt(page, onTool(18, 45), '9');
   await page.keyboard.press('Shift+Digit2');
   await expect.poll(async () => (await state(page)).regions[1].retouchLayer).toBe(2);
   // the two faces, by hand: there is no technical axis to tell them

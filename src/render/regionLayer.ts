@@ -11,6 +11,8 @@ export const REGION_COLORS: Record<Exclude<RegionCode, 'scar'>, string> = {
   platform: '#3f8f8a',
   ventral: '#6a86c9',
   dorsal: '#a97ab5',
+  // a core-edge flake's back: a leaf green, apart from the platform's teal, the ventral blue and the dorsal mauve
+  back: '#5c9e3c',
   retouch: '#cf4488',
 };
 

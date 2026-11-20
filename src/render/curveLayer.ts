@@ -21,6 +21,8 @@ export const CURVE_COLORS = {
     edge: '#ff5b4f',
     platform_outline: '#2fb5a8',
     retouch: '#e0559b',
+    // the back's ridge: a lime, the back's green made bright
+    back_ridge: '#8fcf3c',
     ridge: '#36c26a',
     other: '#f2f5f3',
   } as Record<string, string>,

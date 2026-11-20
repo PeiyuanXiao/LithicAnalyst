@@ -207,7 +207,7 @@ export function curveDistance(a: { points: readonly Vec3[]; closed: boolean }, b
 // ---------------------------------------------------------------- comparison
 
 /** Region type codes of the triangles in FaceLabels. */
-export const FACE_TYPES: readonly string[] = ['', 'scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'retouch'];
+export const FACE_TYPES: readonly string[] = ['', 'scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'back', 'retouch'];
 
 export interface FaceLabels {
   /** Region type of each triangle (index into the comparison's `faceTypes`; 0 = none). */

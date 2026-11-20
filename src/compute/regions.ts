@@ -201,6 +201,29 @@ export function flakeFacePieces(part: Partition, platform: number, ventral: numb
   return dorsal >= 0 && part.areas[dorsal] >= 0.05 * total ? { ventral, dorsal } : none;
 }
 
+/** The pieces on either side of a curve: those of the triangles with a side on its mesh edges (`chain`, edge indices). */
+export function* piecesBesideSteps(part: Partition, edges: EdgeTable, chain: readonly number[]): Steps<Set<number>> {
+  const on = new Set(chain);
+  const out = new Set<number>();
+  if (!on.size) return out;
+  for (let t = 0; t < part.region.length; t++) {
+    if (t % YIELD_EVERY === 0) yield;
+    if (on.has(edges.ofSide[3 * t]) || on.has(edges.ofSide[3 * t + 1]) || on.has(edges.ofSide[3 * t + 2])) out.add(part.region[t]);
+  }
+  return out;
+}
+
+/**
+ * The back of a core-edge flake beside a back ridge: of the pieces on either side of the ridge (`beside`), the one that is none of the
+ * flake's other faces (platform, ventral, dorsal) nor taken already; −1 when the ridge parts nothing from them (it does not reach the
+ * edge or the outline at both ends, so both its sides are the dorsal face).
+ */
+export function backPiece(beside: ReadonlySet<number> | undefined, faces: readonly number[], taken: readonly number[]): number {
+  if (!beside) return -1;
+  for (const p of beside) if (!faces.includes(p) && !taken.includes(p)) return p;
+  return -1;
+}
+
 /** The triangles of these pieces. */
 export function* facesOfPiecesSteps(partition: Partition, pieces: ReadonlySet<number>): Steps<Uint32Array> {
   const out: number[] = [];
@@ -235,6 +258,7 @@ export interface RegionTotals {
   platform: number;
   ventral: number;
   dorsal: number;
+  back: number;
   retouch: number;
   /** Cortex area / total surface area. */
   cortexRatio: number;
@@ -279,7 +303,7 @@ export function resolveRegions(regions: readonly Region[], component: readonly n
       retouchLayer: r.type === 'retouch' ? r.retouchLayer ?? 1 : null,
     };
   });
-  const totals: RegionTotals = { scar: 0, cortex: 0, joint: 0, damage: 0, flaking_surface: 0, platform: 0, ventral: 0, dorsal: 0, retouch: 0, cortexRatio: 0 };
+  const totals: RegionTotals = { scar: 0, cortex: 0, joint: 0, damage: 0, flaking_surface: 0, platform: 0, ventral: 0, dorsal: 0, back: 0, retouch: 0, cortexRatio: 0 };
   const add = (type: string, area: number) => {
     if (type in totals && type !== 'cortexRatio') totals[type as Exclude<keyof RegionTotals, 'cortexRatio'>] += area;
   };

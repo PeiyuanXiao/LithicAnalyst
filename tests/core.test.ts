@@ -295,7 +295,7 @@ describe('curves in the project', () => {
     expect(offeredOptions(type).map((o) => o.value)).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint', 'retouch']);
     expect(type.options!.filter((o) => o.legacy).map((o) => o.value)).toEqual(['ridge', 'other']);
     // a flake's: the edge and the platform outline; the user's own text is always the last
-    expect(keyedOptions(type, 'flake').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'edge', 'cortex', 'joint', 'platform_outline', 'retouch', 'custom']);
+    expect(keyedOptions(type, 'flake').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'edge', 'cortex', 'joint', 'platform_outline', 'retouch', 'back_ridge', 'custom']);
     expect(keyedOptions(type, 'core').map((o) => (o === 'custom' ? o : o.value))).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint', 'retouch', 'custom']);
     expect(type.allowCustom).toBe(true);
     expect(addCurve(s, lineShape()).attributes.type).toBe('');

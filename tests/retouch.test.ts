@@ -238,9 +238,9 @@ describe('retouch in the project', () => {
 
   it('is offered on both kinds of specimen, with the user\'s own type still last', () => {
     const codes = (f: typeof REGION_FIELDS, type: 'core' | 'flake') => keyedOptions(numberKeyField(f)!, type).map((o) => (o === 'custom' ? o : o.value));
-    expect(codes(CURVE_FIELDS, 'flake')).toEqual(['scar_boundary', 'edge', 'cortex', 'joint', 'platform_outline', 'retouch', 'custom']);
+    expect(codes(CURVE_FIELDS, 'flake')).toEqual(['scar_boundary', 'edge', 'cortex', 'joint', 'platform_outline', 'retouch', 'back_ridge', 'custom']);
     expect(codes(CURVE_FIELDS, 'core')).toEqual(['scar_boundary', 'core_edge', 'cortex', 'joint', 'retouch', 'custom']);
-    expect(codes(REGION_FIELDS, 'flake')).toEqual(['scar', 'cortex', 'joint', 'damage', 'platform', 'ventral', 'dorsal', 'retouch', 'custom']);
+    expect(codes(REGION_FIELDS, 'flake')).toEqual(['scar', 'cortex', 'joint', 'damage', 'platform', 'ventral', 'dorsal', 'back', 'retouch', 'custom']);
     expect(codes(REGION_FIELDS, 'core')).toEqual(['scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'retouch', 'custom']);
   });
 

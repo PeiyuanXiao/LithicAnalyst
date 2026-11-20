@@ -354,6 +354,14 @@ the type deletes nothing: the other type's data stay in the file and come back w
 * The faces: with an `edge` curve and a technical frame, the regions of type `ventral` and `dorsal` with `auto: true`: among the pieces of the
   upper layer, the one under the axis's end, and the largest other than it and the platform (at least 5 % of the surface; else the edge and
   the platform outline leave a way round, and neither is assigned). So the edge is open with its ends on a platform outline, and closed where there is none.
+* The back (33): a core-edge (débordant) flake's back, the face of the former core's edge, beside a curve of type `back_ridge` (open,
+  on the ridge between the back and the dorsal face, its ends on the edge or the platform outline; one or more). Each back ridge has a
+  region that follows it: `type: "back"`, `auto: true`, `curveId`: the ridge; its piece is the one beside the ridge (of the triangles
+  with a side on it) that is none of the platform, ventral and dorsal faces. The dorsal face stays the largest piece but those two, so the
+  back is the smaller side of a ridge. A ridge that parts nothing (its ends not on a boundary curve, so both its sides are the dorsal face)
+  has no back; its details say so. Given another type by hand (or deleted), the region becomes the user's and the ridge gets
+  `retouchSide: "off"` (a curve with no region following it), as a retouch curve does. Any upper region may also be typed `back` by
+  hand. Lower regions on the back (cortex, scars, joints) have it as their `parent_region`.
 * A region with `auto: true` follows those annotations, and its `seed` says nothing. Given another type by hand it becomes an ordinary region
   at that place; a region the user has typed in that piece stands instead. These regions are the flake's: a core neither shows nor exports them.
 * `bsa`: the settings of the bulb surface angle. `level` (mm, −1 to 1 in steps of 0.01; default `BSA_LEVEL_DEFAULT_MM` 0.1): the level
@@ -503,7 +511,7 @@ Lengths are in the coordinate unit, millimetre parameters converted by `specimen
 
 **At a station.** The curves are those with edge angles, the stations theirs (one every 1 mm). A station is retouched when a layer lies on either side of it. A weight goes with each: the spacing; the two ends of an open curve half of it, so that 30 mm have 31 stations and weigh 30.
 
-* A triangle's part of the flake: the type of the upper region it lies in (`dorsal`, `ventral`, `platform` or none). A side's part: where it first runs, stretches shorter than 2 mean edge lengths not counting (region borders follow mesh edges and the curve need not). One side must be dorsal and the other ventral, else the part is not told (`no_faces`).
+* A triangle's part of the flake: the type of the upper region it lies in (`dorsal`, `ventral`, `platform` or none; a `back` counts as `dorsal`, the side it is on). A side's part: where it first runs, stretches shorter than 2 mean edge lengths not counting (region borders follow mesh edges and the curve need not). One side must be dorsal and the other ventral, else the part is not told (`no_faces`).
 * D: on a side, from the edge along the section to the outer end of its deepest layer, R; without retouch D = 0 and R = A.
 
 **The original surface** (after Morales et al. 2015). On each side a line is fitted to the section from arc length D on, up to w further, stopping earlier where the side leaves its part, where other retouch begins (stretches of less than 2 mean edge lengths do not count) or at the end of the section. Then again, the stretch ending at the side's ridge as well: of the points of the side within its part, the one furthest from the other side's first line; peaks of that distance within a mean edge length of the highest are as high, and the last along the section is taken. A stretch shorter than `ORIGINAL_FIT_MIN_SHARE` × w gives no line (`no_original_surface`; so does a ridge before R). Lines: resampled to `FIT_RESAMPLE_COUNT` points, total least squares.
@@ -626,7 +634,7 @@ The points, in their order. None can be moved on its own; a change of the config
    * `platform_left_pop`, `platform_pop_right` (the inner rim), `platform_right_left` (the outer rim): the closed platform outline, parted at the points nearest the three landmarks; each part ends on its landmark.
    * Then the user's own sets of semilandmarks.
 3. **Surfaces**, row by row:
-   * `ventral`, `dorsal`: in the technical frame. The polygon of the edge and the inner rim (a point platform: the edge alone) in the XY plane. Row i of R at Y = Ymin + i/(R+1) × (Ymax − Ymin); between the row's leftmost and rightmost crossings of the polygon, column j of C at i/(C+1). A line along Z there: the lowest crossing of the mesh for the ventral face, the highest for the dorsal.
+   * `ventral`, `dorsal`: in the technical frame (the lines are cast at the whole mesh, so a back, told apart or not, gives the dorsal face the same points). The polygon of the edge and the inner rim (a point platform: the edge alone) in the XY plane. Row i of R at Y = Ymin + i/(R+1) × (Ymax − Ymin); between the row's leftmost and rightmost crossings of the polygon, column j of C at i/(C+1). A line along Z there: the lowest crossing of the mesh for the ventral face, the highest for the dorsal.
    * `platform`: the plane fitted to the platform region's vertices, weighted by area, its normal n away from the flake's middle; u the direction from the left end to the right in it, v = n × u from the inner rim to the outer. Column j of C at j/(C+1) between the two ends' u; row i of R at i/(R+1) from the inner rim to the outer along v; down n onto the region's triangles.
 
 **By a template** (a core, a general specimen, a flake by `template`): the fixed and curve points as above, or as the lists say, then the patches. A flake's anchors are its fixed landmarks and the curve points of the edge and the outline.
@@ -635,6 +643,7 @@ The points, in their order. None can be moved on its own; a change of the config
 * **Passing on**, to any other specimen: with at least 4 anchors, a similarity (Kabsch and one scale, never a mirror image) takes the template's anchors and points onto the specimen's; a thin-plate spline fits what is left at the anchors (the displacements; kernel `U(r) = r`; the affine part the least-norm solution by the pseudo-inverse, relative cutoff `1e-8`, so anchors in a plane leave what lies across it to the similarity); then each point goes to the nearest place on the triangles of its region. Pairs repeating an anchor count once. Parameters: `TPS_PARAMETERS`.
 * **The check**: a point is flagged when it moved further than `0.5 × s` onto the region, or lies nearer another of its patch than `0.25 × s` (`s` by the region on this specimen). It is neither moved nor left out.
 * The template's own points are those laid. Every specimen has the same rows; what it lacks has `missing: true` and no coordinates (`null` in the file, `NA` in the exports).
+* A flake's patch of type `dorsal` takes its backs with it: the dorsal region and every `back` region, laid on and projected onto together.
 
 **Derived** (`derived.gm`): `config` (as above, of `template` only `file`, `sha256`, `seed`, the two hashes and `points`, how many), `complete`, `missing` (codes, below), `rows` (`{ index, name, kind, setId, point }`, original coordinates; `kind`: `fixed`, `curve` or `surface`), `curves` (`[before, slide, after]` by point number from 1), `surfaces` (point numbers). A result saved before the lists has in `config` the grid's fields alone. By a template also: `method: "template"`, `details` (`{ code, name }`: which landmark, curve or region a code is about), `flagged` (point numbers), `key` (a hash of what the points are made from: the template's points and anchors, the specimen's anchors, regions and mesh, the configuration's version; while it is the same a summary uses them), and in `rows` `setIndex` (the number within its curve), `flagged` and `missing`. By the grid `method: "grid"`.
 
@@ -651,9 +660,12 @@ The points, in their order. None can be moved on its own; a change of the config
 * The curves split the surface into pieces: each curve is turned into mesh edges (each point to
   its nearest vertex, gaps joined by shortest paths over mesh edges), and triangles are grouped
   across all other edges. A region is the piece that holds its `seed` (the clicked surface point).
-* `type`, in two layers. **Lower** (the pieces between all the curves): `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`, `retouch` (see "Retouch layers"); **a value that is none of the codes is the annotator's own text**, a type of the lower layer. **Upper** (the pieces between the boundary curves alone): `flaking_surface` and `platform` on a core, whose boundary curves are its `core_edge` curves; `platform`, `ventral` and `dorsal` on a flake, whose boundary curves are its `edge` and `platform_outline` curves. The lower layer is cut along every curve the upper one is, so a lower region lies wholly in one upper piece; a scar crossing a boundary is two pieces (two regions, which may name the same `scarId`). Two regions in one piece of the same layer are a conflict; a region and the part it lies in are not. A scar region links
+* `type`, in two layers. **Lower** (the pieces between all the curves): `scar` (worked), `cortex`, `joint` (unworked surfaces), `damage`, `retouch` (see "Retouch layers"); **a value that is none of the codes is the annotator's own text**, a type of the lower layer. **Upper** (the pieces between the boundary curves alone): `flaking_surface` and `platform` on a core, whose boundary curves are its `core_edge` curves; `platform`, `ventral`, `dorsal` and `back` on a flake, whose boundary curves are its `edge`, `platform_outline` and `back_ridge` curves. The lower layer is cut along every curve the upper one is, so a lower region lies wholly in one upper piece; a scar crossing a boundary is two pieces (two regions, which may name the same `scarId`). Two regions in one piece of the same layer are a conflict; a region and the part it lies in are not. A scar region links
   to a scar (`scarId`): the one whose arrow starts in it, or a scar without a direction created
   with the region.
+* The interface offers the types in this order, a number key each: 1 to 9, then 0 for a tenth; the annotator's own text is always the
+  last. A flake's regions: 1 `scar`, 2 `cortex`, 3 `joint`, 4 `damage`, 5 `platform`, 6 `ventral`, 7 `dorsal`, 8 `back`, 9 `retouch`,
+  0 own text; its curves: 1 `scar_boundary`, 2 `edge`, 3 `cortex`, 4 `joint`, 5 `platform_outline`, 6 `retouch`, 7 `back_ridge`, 8 own text.
 
 ## Relation and sequence
 
@@ -853,7 +865,7 @@ Defined in `src/core/fields.ts`.
 
 | key | values |
 |---|---|
-| `type` | `scar_boundary` 片疤轮廓 / Scar outline · `core_edge` 石核边缘 / Core edge (offered for cores; bounds the upper layer of regions) · `edge` 边缘 / Edge (flakes; bounds it too) · `cortex` 石皮 / Cortex · `joint` 节理面 / Joint surface · `platform_outline` 台面轮廓 / Platform outline (flakes; closed, one per flake; bounds it too) · `retouch` 修理 / Retouch; empty: not filled in (new curves). Older codes `ridge` 棱脊 and `other` 其他 are read and written as they are but no longer offered; a code of the other type of specimen is shown but not offered. **A value that is none of these codes is the annotator's own text** (a custom type) |
+| `type` | `scar_boundary` 片疤轮廓 / Scar outline · `core_edge` 石核边缘 / Core edge (offered for cores; bounds the upper layer of regions) · `edge` 边缘 / Edge (flakes; bounds it too) · `cortex` 石皮 / Cortex · `joint` 节理面 / Joint surface · `platform_outline` 台面轮廓 / Platform outline (flakes; closed, one per flake; bounds it too) · `retouch` 修理 / Retouch · `back_ridge` 核缘棱线 / Back ridge (flakes; open, between a back and the dorsal face; bounds it too); empty: not filled in (new curves). Older codes `ridge` 棱脊 and `other` 其他 are read and written as they are but no longer offered; a code of the other type of specimen is shown but not offered. **A value that is none of these codes is the annotator's own text** (a custom type) |
 | `note` | free text |
 
 `edgeAngle` (optional, on the curve): whether its edge angles are measured; without it, as its type says (see "Edge angles").

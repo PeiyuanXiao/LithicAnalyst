@@ -81,8 +81,9 @@ describe('types offered', () => {
   it('curve types and keys by the type of specimen', () => {
     const f = numberKeyField(REGION_FIELDS)!;
     expect(offeredOptions(f, 'core').map((o) => o.value)).toEqual(['scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'retouch']);
-    expect(offeredOptions(f, 'flake').map((o) => o.value)).toEqual(['scar', 'cortex', 'joint', 'damage', 'platform', 'ventral', 'dorsal', 'retouch']);
-    expect(keyedOptions(f, 'flake').length).toBe(9);
+    expect(offeredOptions(f, 'flake').map((o) => o.value)).toEqual(['scar', 'cortex', 'joint', 'damage', 'platform', 'ventral', 'dorsal', 'back', 'retouch']);
+    // ten: the tenth (the user's own) takes 0
+    expect(keyedOptions(f, 'flake').length).toBe(10);
   });
 });
 

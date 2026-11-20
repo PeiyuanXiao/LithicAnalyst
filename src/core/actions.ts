@@ -39,7 +39,7 @@ import { BSA_LEVEL_DEFAULT_MM, bsaSettingsOf, clampBsaLevel } from '../compute/b
 import { measuredLine, platformEndsOf } from '../compute/measuredLine';
 import { autoRetouchCurves } from '../compute/retouchBand';
 import { edgeAxis, refusalOf, retouchRunEdges, type WorkingEdgeRefusal } from '../compute/workingEdge';
-import { curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, measuresEdgeAngle, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
+import { backRidges, curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, measuresEdgeAngle, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, type LandmarkData, type ProjectStore } from './store';
 import { retouchSettingsOf, type BsaSettings, type RetouchAxisChoice, type RetouchSettings } from './types';
@@ -238,7 +238,7 @@ export function addCurveOfType(store: ProjectStore, input: NewCurveInput, type: 
 /**
  * The commands that bring a flake's regions that follow other annotations in line with `after`: the platform comes with a
  * platform outline, the ventral and dorsal faces with an edge and a technical frame, a retouch region with a retouch curve that has
- * both ends on an edge. `seed`: any point, for those that are new (their pieces are worked out from what they follow).
+ * both ends on an edge, a back with each back ridge. `seed`: any point, for those that are new (their pieces are worked out from what they follow).
  */
 function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[]; axis: TechnicalAxis | null }, seed: Vec3): Command[] {
   const st = store.state;
@@ -248,7 +248,10 @@ function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[
     if (after.axis?.matrix && after.curves.some((c) => c.attributes.type === 'edge')) wanted.push('ventral', 'dorsal');
   }
   const bands = st.specimen.type === 'flake' ? autoRetouchCurves(after.curves) : [];
-  const parts: Command[] = st.regions.filter((r) => r.auto && (r.curveId ? !bands.some((c) => c.id === r.curveId) : !wanted.includes(r.type))).map((r) => new DeleteRegionCommand(r.id));
+  const ridges = backRidges(st, after.curves);
+  /** A region following a curve stays while its curve is still one of that kind. */
+  const followed = (r: Region) => (r.type === 'back' ? ridges : bands).some((c) => c.id === r.curveId);
+  const parts: Command[] = st.regions.filter((r) => r.auto && (r.curveId ? !followed(r) : !wanted.includes(r.type))).map((r) => new DeleteRegionCommand(r.id));
   let n = st.nextRegionNumber;
   const t = nowIso();
   for (const type of wanted) {
@@ -257,8 +260,13 @@ function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[
     n++;
   }
   for (const c of bands) {
-    if (st.regions.some((r) => r.auto && r.curveId === c.id)) continue;
+    if (st.regions.some((r) => r.auto && r.type === 'retouch' && r.curveId === c.id)) continue;
     parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(c.points[0]), type: 'retouch', scarId: null, retouchLayer: 1, auto: true, curveId: c.id, note: '', createdAt: t, modifiedAt: t }, n));
+    n++;
+  }
+  for (const c of ridges) {
+    if (st.regions.some((r) => r.auto && r.type === 'back' && r.curveId === c.id)) continue;
+    parts.push(new AddRegionCommand({ id: uuid(), label: `R${n}`, seed: copy(c.points[0]), type: 'back', scarId: null, auto: true, curveId: c.id, note: '', createdAt: t, modifiedAt: t }, n));
     n++;
   }
   return parts;
@@ -651,7 +659,7 @@ export function addRegion(store: ProjectStore, seed: Vec3, type: RegionType, sca
 /** A region that has a scar: on a generic specimen "scar" would be the user's own word, with no scar to it. */
 const isScarRegion = (store: ProjectStore, type: RegionType): boolean => type === 'scar' && store.state.specimen.type !== 'generic';
 
-/** A region that follows a retouch curve, given up by the user: the curve has none from now on. */
+/** A region that follows a retouch curve or a back ridge, given up by the user: the curve has none from now on. */
 function bandGivenUp(store: ProjectStore, region: Region): Command[] {
   const c = region.auto && region.curveId ? store.curve(region.curveId) : undefined;
   if (!c) return [];

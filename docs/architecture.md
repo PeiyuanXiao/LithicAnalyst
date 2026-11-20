@@ -27,7 +27,7 @@ analysis  outside this repository (R, Python, …) reads the CSV or the project 
 4. **Fields live in one list** (`core/fields.ts`). The inspector, list summaries, colour modes
    and CSV columns are generated from it; adding a field there carries it through the app.
    `numberKeys` / `shiftNumberKeys` give a field the number keys (or Shift + number keys) of the
-   selected item. A field that follows another is set through `withAttribute` (the termination
+   selected item: 1 to 9, then 0 for a tenth choice (`optionKey`, `keyIndex`; the help shows "1 – 9 · 0"). A field that follows another is set through `withAttribute` (the termination
    is `na` and locked, `fieldLocked`, while the completeness says it is missing), which
    `setScarAttribute` applies in one undo step. An option marked `legacy` is read and shown but
    no longer offered (`offeredOptions`); a field with `allowCustom` also takes the user's own
@@ -376,6 +376,15 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   so the paint, the areas, the retouch stations and the exports all see one piece, and a scar's outline across a band does not undercount the retouch. `rawLower` keeps the partition as cut.
   The compare mode does the same for each observer (`observerFaces`). The curve's `retouchSide` is the file's record of a band given up (`off`, by `bandGivenUp`) or flipped (`larger`, `otherRetouchSide`);
   `withRetouchCurvesKept` marks the curves of an older file `off` as it opens, so it gains none.
+* A flake's back ridges (`back_ridge`, 33) are boundary curves: the upper layer is cut along them too. Each has an auto region of type
+  `back` with its `curveId` (`backRidges`: those not `off`). `App.updatePartition` finds the upper pieces beside each ridge
+  (`ridgePieces` → `piecesBesideSteps`: the triangles with a side on its chain, by `EdgeTable.ofSide`), kept in `App.upper.ridges`;
+  `upperComponentsOf` gives the platform, ventral and dorsal faces their pieces first (the dorsal still the largest of the rest), then
+  each back the piece beside its ridge that is none of them (`backPiece`). A ridge with no such piece has no back, and
+  `App.backCut` says so to the curve's details. The batch (`projectLayersSteps`) and the compare mode (`observerFaces`) do the same.
+  Code that took any auto region with a `curveId` for a retouch band asks for `type === 'retouch'`. The back is of the dorsal side
+  where a side counts (`faceCodeOf` for the retouch indices and plan); a template's `dorsal` patch takes the backs with it
+  (`regionSourceOf`); the grid needs no regions, so its points do not change with a back.
 * `addRegion` / `setRegionType` create a scar without a direction in the same undo step when a
   scar region has no arrow, and remove it again when it is no longer used (`CompoundCommand`).
 * **Notes**: regions, fixed landmarks and working edges have a `note` (`setRegionNote`, `setLandmarkNote`, `setWorkingEdgeNote`;

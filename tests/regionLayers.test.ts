@@ -145,7 +145,7 @@ describe('region types', () => {
     const f = numberKeyField(REGION_FIELDS)!;
     const codes = (type: 'core' | 'flake') => keyedOptions(f, type).map((o) => (o === 'custom' ? o : o.value));
     expect(codes('core')).toEqual(['scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'retouch', 'custom']);
-    expect(codes('flake')).toEqual(['scar', 'cortex', 'joint', 'damage', 'platform', 'ventral', 'dorsal', 'retouch', 'custom']);
+    expect(codes('flake')).toEqual(['scar', 'cortex', 'joint', 'damage', 'platform', 'ventral', 'dorsal', 'back', 'retouch', 'custom']);
     expect(customValue(f, ' Dorsal face ', 'flake')).toBe('dorsal');
     expect(customValue(f, 'Dorsal face', 'core')).toBe('Dorsal face');
     expect(customValue(f, ' 石皮 ', 'core')).toBe('cortex');

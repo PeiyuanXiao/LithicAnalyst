@@ -59,6 +59,9 @@ export const FACE_DORSAL = 1;
 export const FACE_VENTRAL = 2;
 export const FACE_PLATFORM = 3;
 
+/** The side of a flake a triangle of an upper region of this type is on: a core-edge flake's back counts as its dorsal side. */
+export const faceCodeOf = (type: string): number => (type === 'dorsal' || type === 'back' ? FACE_DORSAL : type === 'ventral' ? FACE_VENTRAL : type === 'platform' ? FACE_PLATFORM : FACE_NONE);
+
 /** A fitted length as a specimen may have it: within the range, in its steps. */
 export const clampFitLength = (mm: number): number => Math.min(FIT_LENGTH_RANGE_MM[1], Math.max(FIT_LENGTH_RANGE_MM[0], Math.round(mm / FIT_LENGTH_STEP_MM) * FIT_LENGTH_STEP_MM));
 

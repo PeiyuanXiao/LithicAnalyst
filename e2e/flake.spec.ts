@@ -411,8 +411,8 @@ test('a flake\'s faces follow from the edge and the axis; a scar on the dorsal f
   expect(scar.area!).toBeGreaterThan(80);
   expect(scar.area!).toBeLessThan(160);
   await expect(page.locator('#region-scar')).toBeVisible();
-  // the user's own type is the last key
-  await page.keyboard.press('9');
+  // the user's own type is the last key: on a flake the tenth, 0
+  await page.keyboard.press('0');
   await expect(page.locator('#region-type-text')).toBeVisible();
   await page.locator('#region-type-text').fill('retouch, fine');
   await page.keyboard.press('Enter');

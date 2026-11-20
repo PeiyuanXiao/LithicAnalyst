@@ -135,6 +135,7 @@ export const CURVE_FIELDS: FieldDef[] = [
       { value: 'joint', label: { zh: '节理面', en: 'Joint surface', it: 'Superficie di diaclasi', fr: 'Surface de diaclase', de: 'Kluftfläche', es: 'Superficie de diaclasa', vi: 'Mặt nứt tự nhiên' } },
       { value: 'platform_outline', label: { zh: '台面轮廓', en: 'Platform outline', it: 'Contorno del tallone', fr: 'Contour du talon', de: 'Schlagflächenumriss', es: 'Contorno del talón', vi: 'Đường viền diện ghè' }, types: ['flake'] },
       { value: 'retouch', label: { zh: '修理', en: 'Retouch', it: 'Ritocco', fr: 'Retouche', de: 'Retusche', es: 'Retoque', vi: 'Tu chỉnh' } },
+      { value: 'back_ridge', label: { zh: '核缘棱线', en: 'Back ridge' }, types: ['flake'] },
       // older codes: read and written as they are
       { value: 'ridge', label: { zh: '棱脊', en: 'Ridge', it: 'Nervatura', fr: 'Nervure', de: 'Grat', es: 'Arista', vi: 'Gờ' }, legacy: true },
       { value: 'other', label: { zh: '其他', en: 'Other', it: 'Altro', fr: 'Autre', de: 'Andere', es: 'Otro', vi: 'Khác' }, legacy: true },
@@ -151,9 +152,22 @@ export const CURVE_FIELDS: FieldDef[] = [
 /** The curve that outlines a flake's platform (one per flake, closed). */
 export const PLATFORM_OUTLINE = 'platform_outline';
 
-/** Whether a curve of this type bounds the upper layer of regions: a flake's edge and platform outline, a core's edges; a generic specimen has no upper layer. */
+/** The ridge between a core-edge flake's back and its dorsal face (open, its ends on the edge or the platform outline; one or more). */
+export const BACK_RIDGE = 'back_ridge';
+
+/** Whether a curve of this type bounds the upper layer of regions: a flake's edge, platform outline and back ridges, a core's edges; a generic specimen has no upper layer. */
 export const isBoundaryCurve = (type: AttributeValue | undefined, specimen: SpecimenType): boolean =>
-  specimen === 'flake' ? type === 'edge' || type === PLATFORM_OUTLINE : specimen === 'core' && type === 'core_edge';
+  specimen === 'flake' ? type === 'edge' || type === PLATFORM_OUTLINE || type === BACK_RIDGE : specimen === 'core' && type === 'core_edge';
+
+/** The back ridges of a flake whose backs follow them: those not given up (`retouchSide: 'off'` marks a curve with no region following it). */
+export const backRidges = <T extends { attributes: Readonly<Record<string, AttributeValue>>; retouchSide?: string }>(st: { specimen: { type: SpecimenType } }, curves: readonly T[]): T[] =>
+  st.specimen.type === 'flake' ? curves.filter((c) => c.attributes.type === BACK_RIDGE && c.retouchSide !== 'off') : [];
+
+/** The number key of the i-th choice (from 0): 1 to 9, then 0 for the tenth; none after that. */
+export const optionKey = (i: number): string | undefined => (i < 9 ? String(i + 1) : i === 9 ? '0' : undefined);
+
+/** Which choice (from 0) a number key picks: 1 to 9, and 0 the tenth. */
+export const keyIndex = (digit: string): number => (digit === '0' ? 9 : Number(digit) - 1);
 
 /** Which curves cut each layer of regions: the lower layer along all of them, the upper along the boundary curves alone. */
 export const layerCurves = <T extends { attributes: Readonly<Record<string, AttributeValue>> }>(curves: readonly T[], specimen: SpecimenType): { lower: T[]; upper: T[] } => ({
@@ -164,7 +178,7 @@ export const layerCurves = <T extends { attributes: Readonly<Record<string, Attr
 /**
  * Surface region types. The lower layer: scar (worked), cortex and joint surfaces (unworked), damage, retouch, or the
  * user's own text. The upper layer, parts of the specimen that lower regions lie in: a core's flaking surfaces
- * and platforms; a flake's platform, ventral and dorsal faces. The user's own text is always the last choice.
+ * and platforms; a flake's platform, ventral and dorsal faces and back. The user's own text is always the last choice.
  */
 export const REGION_FIELDS: FieldDef[] = [
   {
@@ -184,12 +198,13 @@ export const REGION_FIELDS: FieldDef[] = [
       { value: 'platform', label: { zh: '台面', en: 'Platform', it: 'Piano di percussione / tallone', fr: 'Plan de frappe / talon', de: 'Schlagfläche', es: 'Plataforma / talón', vi: 'Diện ghè' } },
       { value: 'ventral', label: { zh: '腹面', en: 'Ventral face', it: 'Faccia ventrale', fr: 'Face ventrale', de: 'Ventralfläche', es: 'Cara ventral', vi: 'Mặt bụng' }, types: ['flake'] },
       { value: 'dorsal', label: { zh: '背面', en: 'Dorsal face', it: 'Faccia dorsale', fr: 'Face dorsale', de: 'Dorsalfläche', es: 'Cara dorsal', vi: 'Mặt lưng' }, types: ['flake'] },
+      { value: 'back', label: { zh: '核缘面', en: 'Back' }, types: ['flake'] },
       { value: 'retouch', label: { zh: '修理', en: 'Retouch', it: 'Ritocco', fr: 'Retouche', de: 'Retusche', es: 'Retoque', vi: 'Tu chỉnh' } },
     ],
   },
 ];
 
-export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'retouch'] as const;
+export const REGION_TYPES = ['scar', 'cortex', 'joint', 'damage', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'back', 'retouch'] as const;
 
 /** What a new region of a generic specimen is until the user says: free text like any other, since a region has a type. */
 export const GENERIC_REGION_TYPE = 'region';
@@ -198,7 +213,7 @@ export const GENERIC_REGION_TYPE = 'region';
 export const RETOUCH_LAYERS = [1, 2, 3, 4, 5] as const;
 
 /** The region types of the upper layer (bounded by the boundary curves alone, so lower regions lie inside them). */
-export const UPPER_REGION_TYPES: readonly string[] = ['flaking_surface', 'platform', 'ventral', 'dorsal'];
+export const UPPER_REGION_TYPES: readonly string[] = ['flaking_surface', 'platform', 'ventral', 'dorsal', 'back'];
 export const isUpperRegion = (type: string, specimen: SpecimenType = 'core'): boolean => specimen !== 'generic' && UPPER_REGION_TYPES.includes(type);
 
 /** Edge angles and working edges belong to flakes. On another type their data stay in the file and nothing of them shows or is computed. */
