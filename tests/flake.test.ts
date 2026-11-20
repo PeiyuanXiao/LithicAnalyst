@@ -481,6 +481,87 @@ describe('T6, a flake of realistic shape', () => {
     expect(volume).toBeCloseTo(5799.3, 0);
   });
 
+  it('the proximal end (32b), each checked from T6\'s own surface', () => {
+    const m = flakeT6(14);
+    const P: Vec3 = [0, 0, t6Zv(0, 0)], A: Vec3 = [0, 40, t6Zv(0, 40)];
+    const edge = meanEdge(m);
+    const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
+    if (!fr.ok) throw new Error('no frame');
+    const ends: Vec3[] = [[-T6.w0, 0, t6Zv(-T6.w0, 0)], [T6.w0, 0, t6Zv(T6.w0, 0)]];
+    const plat = platformOfT6(m);
+    const result = flakeMeasures({ positions: m.positions, index: m.index, matrix: fr.matrix, P, ends, platformFaces: plat.faces, platformArea: plat.area, unit: 'mm', meanEdge: edge, morph: null, ventralFaces: ventralOf(m) });
+    const r = result.measures;
+    const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    const angle = (u: Vec3, v: Vec3) => deg(Math.acos((u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (Math.hypot(...u) * Math.hypot(...v))));
+    // PSIA: at P between the lines to the ends
+    closeTo(r.psia, angle(sub3(ends[0], P), sub3(ends[1], P)), 0.01);
+    // the depth from S: P is on the platform's edge, so S is P; E the dorsal edge above it
+    const E = t6Dorsal(0, 0);
+    expect(Math.hypot(...sub3(result.construction.depth!.S, P))).toBeLessThan(0.01);
+    closeTo(r.platform_depth_chord, Math.hypot(...sub3(E, P)), 0.01);
+    // the bulb angle at 1 mm: along the section's ventral side x = 0, from S, against the platform line S→E
+    const profile = (s: number): Vec3 => {
+      let y = 0, len = 0;
+      const dy = 1e-4;
+      for (;;) {
+        const step = Math.hypot(dy, t6Zv(0, y + dy) - t6Zv(0, y));
+        if (len + step >= s) {
+          const f = (s - len) / step;
+          return [0, y + f * dy, t6Zv(0, y) + f * (t6Zv(0, y + dy) - t6Zv(0, y))];
+        }
+        len += step;
+        y += dy;
+      }
+    };
+    const line = sub3(E, P);
+    closeTo(r.bulb_angle_3pt_1mm, angle(line, sub3(profile(1), P)), 1);
+    closeTo(r.bulb_angle_2ln_1mm, angle(line, sub3(profile(1.25), profile(0.75))), 1);
+    // the BSA's plane, fitted again here from the surface sampled densely within 10 mm of P, by the same rule (each sample by its area):
+    // T6's bump is broad (about 13 mm across), so it fills most of that disc, the noise comes out large and the top is under 3 of it: no bulb
+    const near: Vec3[] = [], w: number[] = [];
+    for (let s = -1 + 1 / 96; s < 1; s += 1 / 48)
+      for (let y = 0.5 * (T6.L / 90); y < 12; y += T6.L / 90) {
+        const p = t6Ventral(s, y);
+        if (Math.hypot(...sub3(p, P)) > 10) continue;
+        const e = 1e-5, ps = sub3(t6Ventral(s + e, y), t6Ventral(s - e, y)), py = sub3(t6Ventral(s, y + e), t6Ventral(s, y - e));
+        near.push(p);
+        w.push(Math.hypot(ps[1] * py[2] - ps[2] * py[1], ps[2] * py[0] - ps[0] * py[2], ps[0] * py[1] - ps[1] * py[0]));
+      }
+    const fit = (keep: boolean[]) => {
+      let W = 0;
+      const c: Vec3 = [0, 0, 0];
+      near.forEach((p, i) => keep[i] && ((W += w[i]), [0, 1, 2].forEach((k) => (c[k] += w[i] * p[k]))));
+      const cc: Vec3 = [c[0] / W, c[1] / W, c[2] / W];
+      const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+      near.forEach((p, i) => keep[i] && [0, 1, 2].forEach((a) => [0, 1, 2].forEach((b) => (C[3 * a + b] += w[i] * (p[a] - cc[a]) * (p[b] - cc[b])))));
+      const { values, vectors } = symmetricEigen3(C);
+      const k = values.indexOf(Math.min(...values));
+      const n: Vec3 = [vectors[k][0], vectors[k][1], vectors[k][2]];
+      return { c: cc, n: n[2] > 0 ? ([-n[0], -n[1], -n[2]] as Vec3) : n };
+    };
+    // the median by area, as the fit: sorted, the value where half the area is passed
+    const med = (a: number[]) => {
+      const order = a.map((_, i) => i).sort((i, j) => a[i] - a[j]);
+      const half = w.reduce((s, x) => s + x, 0) / 2;
+      let run = 0;
+      for (const i of order) if ((run += w[i]) >= half) return a[i];
+      return a[order[order.length - 1]];
+    };
+    let plane = fit(near.map(() => true)), sigma = 0, heights: number[] = [];
+    for (let it = 0; it < 3; it++) {
+      heights = near.map((p) => (p[0] - plane.c[0]) * plane.n[0] + (p[1] - plane.c[1]) * plane.n[1] + (p[2] - plane.c[2]) * plane.n[2]);
+      const mid = med(heights);
+      sigma = 1.4826 * med(heights.map((h) => Math.abs(h - mid)));
+      plane = fit(heights.map((h) => !(h - mid > 2 * sigma) && !(Math.abs(h - mid) > 3 * sigma)));
+    }
+    const top = Math.max(...near.map((p) => (p[0] - plane.c[0]) * plane.n[0] + (p[1] - plane.c[1]) * plane.n[1] + (p[2] - plane.c[2]) * plane.n[2]));
+    expect(top).toBeLessThan(3 * sigma);
+    expect(result.reasons.bsa).toBe('no_bulb');
+    expect(Math.abs(result.bsaReference!.noise - sigma) / sigma).toBeLessThan(0.25);
+    // so IPA's band starts at 0.25 of the length
+    expect(result.ipaBand!.fallback).toBe(true);
+  });
+
   it.each([14, 1])('K = %i: the platform measures, with one row of triangles as with many', (K) => {
     const m = flakeT6(K);
     const P: Vec3 = [0, 0, t6Zv(0, 0)], A: Vec3 = [0, 40, t6Zv(0, 40)];
@@ -510,7 +591,7 @@ describe('T6, a flake of realistic shape', () => {
     for (const k of ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const) closeTo(r[k], EPA, 0.5);
     closeTo(r.platform_depth_chord, Math.sqrt(104), 0.01);
     closeTo(r.platform_width_chord, 30, 0.01);
-    expect(FLAKE_PARAMETERS).toMatchObject({ MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3 });
+    expect(FLAKE_PARAMETERS).toMatchObject({ MIN_FIT_POINTS: 2, PLATFORM_REACH_MM: 1, PLATFORM_REACH_EDGES: 5 });
   });
 });
 
@@ -567,9 +648,10 @@ describe('why a measure is empty', () => {
     expect(r.reasons.platform_depth_chord).toBeUndefined();
   });
 
-  it('the axis starts on the ventral face, away from the platform: everything of the platform', () => {
+  it('the axis starts on the ventral face, away from the platform: nothing taken on the section (pop_off_platform); the area and width stand', () => {
     const r = run({ P: [0, 5, 0] });
-    for (const k of PLATFORM_KEYS) expect(r.reasons[k]).toBe('section_misses_platform');
+    for (const k of PLATFORM_KEYS.filter((x) => !['platform_area', 'platform_width_chord', 'platform_width_path'].includes(x))) expect(r.reasons[k], k).toBe('pop_off_platform');
+    for (const k of ['platform_area', 'platform_width_chord', 'platform_width_path'] as const) expect(r.measures[k], k).not.toBeNull();
   });
 
   it('no axis: the technical dimensions, not the morphological ones', () => {

@@ -1,5 +1,6 @@
 import type { BsaSettings, Vec3 } from '../core/types';
 import { symmetricEigen3 } from './linalg';
+import { MAD_TO_SIGMA, weightedMedian } from './robust';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /**
@@ -22,6 +23,19 @@ export const VI_WIDTHS_MM = [0.5, 1.0, 1.5] as const;
 export const VI_SAMPLE_MM = 0.02;
 /** The mesh's edges within this distance of P give its mean edge length there (mm). */
 export const POP_MESH_RADIUS_MM = 2;
+/**
+ * The BSA's reference: the plane of the ventral face within this distance of P (mm; at most half the technical length), fitted robustly:
+ * at most BSA_REF_ITERATIONS times, those more than BSA_REF_TRIM_UP robust deviations above the median (the bulb), or more than
+ * BSA_REF_TRIM deviations off it either way, left out.
+ */
+export const BSA_REF_RADIUS_MM = 10;
+export const BSA_REF_ITERATIONS = 3;
+export const BSA_REF_TRIM_UP = 2;
+const BSA_REF_TRIM = 3;
+/** A bulb whose top is lower than this many of the surface's robust deviations is no bulb. */
+export const BSA_MIN_PROMINENCE = 3;
+/** A bulb reaching the ventral face's border farther than this from P (mm) is not closed at the sides. */
+export const BSA_OPEN_REACH_MM = 2;
 
 /** Shading by height: its range (±) in mm with a stated unit, and without one a share of the model's diagonal; lines of equal height every this share of the range. */
 export const HEIGHT_RANGE_MM = { default: 0.25, min: 0.05, max: 5, step: 0.05 } as const;
@@ -117,6 +131,81 @@ export function* referencePlaneSteps(positions: ArrayLike<number>, index: ArrayL
 export const referencePlane = (positions: ArrayLike<number>, index: ArrayLike<number>, faces: ArrayLike<number>, outward: Vec3, along: Vec3): BulbPlane | null =>
   runSync(referencePlaneSteps(positions, index, faces, outward, along));
 
+/** The proximal ventral plane: the plane, the surface's robust deviation from it (its noise), the triangles it was fitted to at last. */
+export interface ProximalPlane {
+  plane: BulbPlane;
+  noise: number;
+  fitted: Uint32Array;
+}
+
+/**
+ * The ventral face's plane near P: the triangles of `faces` whose centroid lies within `radius` of P, but those `leftOut` (retouch,
+ * damage), fitted by area (`referencePlaneSteps`); then, at most BSA_REF_ITERATIONS times, each centroid's signed distance r over the
+ * plane (outward), their median m and robust deviation σ̂ (each triangle by its area, as in the fit, so a mesh finer in one place does not
+ * weigh more there); the triangles with r − m > BSA_REF_TRIM_UP σ̂ (the bulb) or |r − m| > 3 σ̂ left out, and the rest fitted again, until
+ * the rest stays the same. The noise is σ̂ as last taken. Null without triangles near P.
+ */
+export function* proximalPlaneSteps(positions: ArrayLike<number>, index: ArrayLike<number>, faces: ArrayLike<number>, leftOut: ArrayLike<number> | null, P: Vec3, radius: number, outward: Vec3, along: Vec3): Steps<ProximalPlane | null> {
+  const left = new Set<number>();
+  if (leftOut) for (let k = 0; k < leftOut.length; k++) left.add(leftOut[k]);
+  const r2 = radius * radius;
+  const near: number[] = [];
+  const centre: number[] = [];
+  const area: number[] = [];
+  for (let k = 0; k < faces.length; k++) {
+    if (k % YIELD_EVERY === 0) yield;
+    const t = faces[k];
+    if (left.has(t)) continue;
+    let cx = 0, cy = 0, cz = 0;
+    for (let j = 0; j < 3; j++) {
+      const v = 3 * index[3 * t + j];
+      cx += positions[v] / 3;
+      cy += positions[v + 1] / 3;
+      cz += positions[v + 2] / 3;
+    }
+    if ((cx - P[0]) ** 2 + (cy - P[1]) ** 2 + (cz - P[2]) ** 2 > r2) continue;
+    near.push(t);
+    centre.push(cx, cy, cz);
+    const a = 3 * index[3 * t], b = 3 * index[3 * t + 1], c = 3 * index[3 * t + 2];
+    const u: Vec3 = [positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]];
+    const w: Vec3 = [positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]];
+    area.push(len(cross(u, w)) / 2);
+  }
+  const weights = Float64Array.from(area);
+  if (!near.length) return null;
+  const all = Uint32Array.from(near);
+  let fitted = all;
+  let plane = yield* referencePlaneSteps(positions, index, fitted, outward, along);
+  if (!plane) return null;
+  let noise = 0;
+  const r = new Float64Array(near.length);
+  for (let it = 0; it < BSA_REF_ITERATIONS; it++) {
+    for (let k = 0; k < near.length; k++) {
+      if (k % YIELD_EVERY === 0) yield;
+      r[k] = (centre[3 * k] - plane.point[0]) * plane.normal[0] + (centre[3 * k + 1] - plane.point[1]) * plane.normal[1] + (centre[3 * k + 2] - plane.point[2]) * plane.normal[2];
+    }
+    // the median, then the deviation from it: each a pass of its own
+    const m = weightedMedian(r, weights);
+    yield;
+    const sigma = MAD_TO_SIGMA * weightedMedian(Float64Array.from(r, (x) => Math.abs(x - m)), weights);
+    noise = sigma;
+    yield;
+    const kept: number[] = [];
+    for (let k = 0; k < near.length; k++) if (!(r[k] - m > BSA_REF_TRIM_UP * sigma) && !(Math.abs(r[k] - m) > BSA_REF_TRIM * sigma)) kept.push(near[k]);
+    // the same as before: done
+    if (kept.length === fitted.length && kept.every((t, i) => t === fitted[i])) break;
+    if (!kept.length) break;
+    const next = yield* referencePlaneSteps(positions, index, kept, outward, along);
+    if (!next) break;
+    fitted = Uint32Array.from(kept);
+    plane = next;
+  }
+  return { plane, noise, fitted };
+}
+
+export const proximalPlane = (positions: ArrayLike<number>, index: ArrayLike<number>, faces: ArrayLike<number>, leftOut: ArrayLike<number> | null, P: Vec3, radius: number, outward: Vec3, along: Vec3): ProximalPlane | null =>
+  runSync(proximalPlaneSteps(positions, index, faces, leftOut, P, radius, outward, along));
+
 /** Every vertex's height above a plane (`point`, unit `normal`), as shading by height takes it. */
 export function* heightsSteps(positions: ArrayLike<number>, point: Vec3, normal: Vec3): Steps<Float32Array> {
   const n = Math.floor(positions.length / 3);
@@ -189,6 +278,8 @@ export interface BulbInput {
   level: number;
   /** The two ends set by hand, or null: the outline's. */
   ends: readonly [Vec3, Vec3] | null;
+  /** The surface's noise over the plane (its robust deviation, coordinate units): a top lower than BSA_MIN_PROMINENCE of it is no bulb. */
+  noise: number;
 }
 
 /** A strip of the vertical interval: its corners on the plane, its value, and where its highest and lowest samples lie (on the surface). */
@@ -200,7 +291,7 @@ export interface ViStrip {
   low: Vec3 | null;
 }
 
-export type BulbEmpty = 'no_bulb' | 'bulb_one_side';
+export type BulbEmpty = 'no_bulb' | 'bulb_one_side' | 'bulb_open';
 
 export interface BulbResult {
   plane: BulbPlane;
@@ -221,7 +312,7 @@ export interface BulbResult {
   vi: ViStrip[] | null;
   /** The bulb with P, on the plane: u (across, along `x`) and v (along `y`) ranges from P on the plane, coordinate units. */
   extent: { u0: number; u1: number; v0: number; v1: number } | null;
-  /** The main bulb's vertices (where IPA's band starts from); null when there is none. */
+  /** The main bulb's vertices (where IPA's band starts from): only of a bulb that is one (above the noise, closed at the sides); else null. */
   region: Uint32Array | null;
 }
 
@@ -271,6 +362,9 @@ function barycentricHeight(a: readonly number[], b: readonly number[], c: readon
  * points farthest round from the technical axis (+Y laid on the plane, as seen from P on the plane) each way; BSA is the angle at P
  * between the lines to them, on the plane. The vertical interval of a strip from P to the bulb's top (its highest vertex), `w` wide:
  * the range of the heights of the surface over it, sampled every VI_SAMPLE_MM.
+ * No bulb (none near P, no outline, or a top below BSA_MIN_PROMINENCE × the noise): no BSA and no VI, whatever the ends. A bulb reaching
+ * the ventral face's border farther than BSA_OPEN_REACH_MM from P is not closed at the sides: no BSA and no VI either, unless the ends
+ * were set by hand.
  */
 export function* bulbSteps(input: BulbInput): Steps<BulbResult> {
   const { positions, index, faces, plane, P, mm } = input;
@@ -281,10 +375,22 @@ export function* bulbSteps(input: BulbInput): Steps<BulbResult> {
   const pos = (v: number): Vec3 => [positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]];
   const out: BulbResult = { plane, P0, contour: [], autoEnds: null, ends: input.ends ? [input.ends[0], input.ends[1]] : null, bsa: null, bsaEmpty: null, apex: null, vi: null, extent: null, region: null };
   const angleAt = (ends: readonly [Vec3, Vec3]) => angleDeg(sub(onPlane(plane, ends[0]), P0), sub(onPlane(plane, ends[1]), P0));
+  /** The main bulb's vertices, kept for IPA when it proves a bulb. */
+  let region: Uint32Array | null = null;
   const finish = (empty: BulbEmpty | null): BulbResult => {
+    // no bulb: nothing, whatever the ends (the index is of a bulb)
+    if (empty === 'no_bulb') {
+      out.vi = null;
+      out.bsaEmpty = empty;
+      return out;
+    }
     // ends set by hand stand whatever the outline does
-    if (out.ends) out.bsa = angleAt(out.ends);
-    else out.bsaEmpty = empty;
+    if (input.ends) out.bsa = angleAt(input.ends);
+    else if (empty) {
+      out.bsaEmpty = empty;
+      if (empty === 'bulb_open') out.vi = null;
+    } else if (out.ends) out.bsa = angleAt(out.ends);
+    if (empty !== 'bulb_open') out.region = region;
     return out;
   };
 
@@ -358,18 +464,40 @@ export function* bulbSteps(input: BulbInput): Steps<BulbResult> {
     v1 = Math.max(v1, v);
   };
   extend(P);
-  const region: number[] = [];
+  const inRegion: number[] = [];
   for (let k = 0; k < verts.length; k++) {
     if (k % YIELD_EVERY === 0) yield;
     const v = verts[k];
     if (!inMain(v)) continue;
-    region.push(v);
+    inRegion.push(v);
     if (top < 0 || h[v] > h[top]) top = v;
     extend(pos(v));
   }
-  out.region = Uint32Array.from(region);
+  region = Uint32Array.from(inRegion);
   out.apex = pos(top);
   out.extent = { u0, u1, v0, v1 };
+  // no higher than the surface's noise: no bulb
+  if (h[top] < BSA_MIN_PROMINENCE * input.noise) return finish('no_bulb');
+
+  // closed at the sides: none of it on the ventral face's border farther than BSA_OPEN_REACH_MM from P (its border: the edges of one triangle only)
+  const reach = BSA_OPEN_REACH_MM / mm;
+  const edgeUses = new Map<number, number>();
+  for (let k = 0; k < faces.length; k++) {
+    if (k % YIELD_EVERY === 0) yield;
+    const t = faces[k];
+    const a = index[3 * t], b = index[3 * t + 1], c = index[3 * t + 2];
+    if (!inMain(a) && !inMain(b) && !inMain(c)) continue;
+    for (const [u, w] of [[a, b], [b, c], [c, a]]) {
+      const key = u < w ? u * n + w : w * n + u;
+      edgeUses.set(key, (edgeUses.get(key) ?? 0) + 1);
+    }
+  }
+  let open = false;
+  for (const [key, uses] of edgeUses) {
+    if (uses !== 1) continue;
+    const u = Math.floor(key / n), w = key - u * n;
+    if ((inMain(u) && len(sub(pos(u), P)) > reach) || (inMain(w) && len(sub(pos(w), P)) > reach)) open = true;
+  }
 
   // the outline: where the triangles round the bulb cross the level, joined into lines
   const key = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
@@ -418,7 +546,8 @@ export function* bulbSteps(input: BulbInput): Steps<BulbResult> {
     if (closed) chain.pop();
     out.contour.push({ points: chain.map((k) => pointOf.get(k)!), closed });
   }
-  if (!out.contour.length) return finish('no_bulb');
+  // no outline: no bulb, unless it runs out at the sides (then it is open, and ends set by hand still give the angle)
+  if (!out.contour.length && !open) return finish('no_bulb');
 
   // the ends: the outline's points farthest round from +Y each way, as seen from P on the plane
   let lo: Vec3 | null = null, hi: Vec3 | null = null, aLo = Infinity, aHi = -Infinity;
@@ -493,7 +622,7 @@ export function* bulbSteps(input: BulbInput): Steps<BulbResult> {
       return { width: w, corners, value: maxV - minV, high: surface(maxAt, maxV), low: surface(minAt, minV) };
     });
   }
-  return finish(out.autoEnds ? null : 'bulb_one_side');
+  return finish(open ? 'bulb_open' : !out.autoEnds ? 'bulb_one_side' : null);
 }
 
 export const bulb = (input: BulbInput): BulbResult => runSync(bulbSteps(input));

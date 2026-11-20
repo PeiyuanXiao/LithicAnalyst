@@ -4474,7 +4474,8 @@ export class App implements AppApi {
     const level = bsaSettingsOf(st.flake).level;
     const content = {
       bulb: found,
-      reason: found ? null : why ? t(`flake.empty.${why}`) : null,
+      // why the BSA is empty, over the drawing when there is one (an open bulb's ends can still be set by hand)
+      reason: r.measures.bsa === null && why ? t(`flake.empty.${why}`) : null,
       contours: [] as Array<{ level: number; segments: Vec3[] }>,
       range: this.heightRangeUnitsNow(),
       levelUnits: mm ? level / mm : 0,

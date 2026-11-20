@@ -79,7 +79,7 @@ test('shading by height: over the ventral reference plane, then a fitted plane; 
   await expect.poll(async () => (await shading(page)).contours?.thin ?? 0).toBeGreaterThan(0);
   expect((await shading(page)).contours?.thick).toBeGreaterThan(0);
   await expect(page.locator('#height-group')).toBeVisible();
-  await expect(page.locator('#height-ref option')).toHaveText(['Ventral reference plane']);
+  await expect(page.locator('#height-ref option')).toHaveText(['Proximal ventral']);
   expect((await shading(page)).range).toMatchObject({ value: 0.25, unit: 'mm' });
   // a wider range: other lines (every 0.4 of it)
   const before = (await shading(page)).contours!.thin;
@@ -119,6 +119,14 @@ test('the bulb page: the level moves the BSA; an end dragged moves it and can be
   await expect.poll(() => page.locator('#bulb-drawing .bulb-contour').count()).toBeGreaterThan(3);
   await expect(page.locator('#bulb-drawing .bulb-contour.is-level')).toHaveCount(1);
   await expect(page.locator('#bulb-drawing .bulb-strip')).toHaveCount(3);
+  // where the plane was fitted: a faint circle round P, out to min(10 mm, half the length): on T8 half its 20 mm, just under 10
+  await expect(page.locator('#bulb-reference')).toBeAttached();
+  const reach = (await flake(page))!.bulb!.radius;
+  expect(reach).toBeCloseTo(10, 2);
+  const pr = (await page.locator('#bulb-p').boundingBox())!;
+  const ref = page.locator('#bulb-reference');
+  expect(Number(await ref.getAttribute('cx'))).toBeGreaterThan(0);
+  expect(Number(await ref.getAttribute('r'))).toBeGreaterThan(pr.width);
   await expect(page.locator('#bulb-reset')).toBeHidden();
 
   // the level: another outline, another BSA
@@ -192,5 +200,22 @@ test('the compare mode: another observer\'s flake measures, from its own annotat
   // named as the measure list names them
   await expect(page.locator('#sec-agreement')).toContainText('PSIA');
   await expect(page.locator('#sec-agreement')).toContainText('BSA');
+  expect(pageErrors).toEqual([]);
+});
+
+test('the platform\'s depth from S (32b): P a little onto the ventral face, the depth and its drawing still from the platform\'s edge', async ({ page, pageErrors }) => {
+  // P 0.5 mm onto the ventral face, within 1 mm of the platform: S, where the section meets the platform's edge, stays at (0, 0, 0)
+  await openT8(page, { P: [0, 0.5, -t8Bulb(0.5, 0)] });
+  await expect.poll(async () => (await flake(page))?.measures?.platform_depth_chord ?? null, { timeout: 30_000 }).not.toBeNull();
+  // from S to E, the dorsal edge above it: T8's thickness at P, 8 mm
+  expect((await flake(page))!.measures!.platform_depth_chord).toBeCloseTo(8, 2);
+  await page.locator('#app-mode-measure').click();
+  await openSection(page, 'flake');
+  await page.locator('#flake-platform_depth_chord').hover();
+  await expect.poll(async () => (await hint(page)).key).toBe('flake:platform_depth_chord');
+  const ends = (await hint(page)).prims.find((p) => p.kind === 'dots' && p.part === 'ends')!.points!;
+  expect(Math.hypot(...ends[0])).toBeLessThan(0.01);
+  expect(Math.hypot(ends[1][0], ends[1][1], ends[1][2] - 8)).toBeLessThan(0.01);
+  await page.mouse.move(0, 0);
   expect(pageErrors).toEqual([]);
 });

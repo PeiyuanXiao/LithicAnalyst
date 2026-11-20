@@ -5,6 +5,7 @@ import { frameMatrix } from '../src/core/frame';
 import { serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import { T8, t8Arcs, t8Dorsal, t8Mesh, t8Ply, t8Rings, type Vec3 } from './fixtures/meshes';
+import type { T8Variant } from '../tests/meshes';
 import { expect, fileMenu, loadMesh, openApp } from './helpers';
 
 /** T8 annotated as a flake, as a project file of t8.ply: its platform outline, its edge, the technical axis and two platform ends by hand. */
@@ -12,9 +13,9 @@ import { expect, fileMenu, loadMesh, openApp } from './helpers';
 /** The platform ends, 6 mm either side on the platform's dorsal edge. */
 export const T8_ENDS: [Vec3, Vec3] = [[-6, 0, t8Dorsal(6)], [6, 0, t8Dorsal(6)]];
 
-export function t8Project(annotator: string, o: { P?: Vec3; ends?: [Vec3, Vec3]; unit?: string } = {}): { name: string; text: string } {
-  const ply = t8Ply().buffer;
-  const m = t8Mesh();
+export function t8Project(annotator: string, o: { P?: Vec3; ends?: [Vec3, Vec3]; unit?: string; variant?: T8Variant } = {}): { name: string; text: string } {
+  const ply = t8Ply(o.variant).buffer;
+  const m = t8Mesh(o.variant);
   const rings = t8Rings(false), arcs = t8Arcs(false), R = T8.R;
   const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < m.positions.length; i++) {
@@ -54,7 +55,7 @@ export function t8Project(annotator: string, o: { P?: Vec3; ends?: [Vec3, Vec3];
 /** T8 open as a flake, its project applied, measured. */
 export async function openT8(page: Page, o: Parameters<typeof t8Project>[1] = {}): Promise<void> {
   await openApp(page, 'flake');
-  await loadMesh(page, t8Ply());
+  await loadMesh(page, t8Ply(o.variant));
   const file = t8Project('A', o);
   const chooser = page.waitForEvent('filechooser');
   await fileMenu(page, '#btn-open-project');

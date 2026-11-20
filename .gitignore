@@ -26,6 +26,7 @@ docs/developing.md
 design/
 .claude/
 Claude outputs/
+test-data/
 
 # Editors
 .vscode/

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BSA_LEVEL_DEFAULT_MM, bsaSettingsOf, bulb, planeCoords, referencePlane, surfaceOver } from '../src/compute/bulb';
+import { BSA_LEVEL_DEFAULT_MM, BSA_MIN_PROMINENCE, bsaSettingsOf, bulb, planeCoords, proximalPlane, referencePlane, surfaceOver } from '../src/compute/bulb';
 import { compareObservers } from '../src/compute/agreement';
 import { batchSpecimen, iccCsv, type BatchProject } from '../src/io/batch';
 import { AGREEMENT_FLAKE_MEASURES, emptyFlakeMeasures, flakeMeasures, FLAKE_PROXIMAL_COLUMNS, type FlakeInput, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
@@ -11,7 +11,7 @@ import { flakesCsv } from '../src/io/csv';
 import { buildEdges, meshTopology, signedVolume } from '../src/compute/meshGeometry';
 import { frameMatrix } from '../src/core/frame';
 import type { Vec3 } from '../src/core/types';
-import { flakeT8, T8, t8Bulb, t8Dorsal, T8_RETOUCH } from './meshes';
+import { flakeT8, T8, t8Bulb, t8Dorsal, T8_RETOUCH, type Mesh } from './meshes';
 import { IPA_BAND_END, IPA_BAND_FALLBACK_START } from '../src/compute/ipa';
 
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -64,28 +64,11 @@ function run(o: Partial<FlakeInput> = {}): FlakeResult {
 /** The ventral surface's height (z) at (x, y). */
 const surfaceZ = (x: number, y: number) => -t8Bulb(Math.hypot(x, y), deg(Math.atan2(x, y)));
 
-/** The least-squares plane of the ventral face, by dense sampling over the half disc (each sample by its area on the surface): z = αx + βy + γ. */
-const PLANE = (() => {
-  const dr = 0.02, dphi = 0.25;
-  const S = new Float64Array(9), Z = new Float64Array(3);
-  for (let r = dr / 2; r < T8.R; r += dr)
-    for (let p = -90 + dphi / 2; p < 90; p += dphi) {
-      const f = (p * Math.PI) / 180;
-      const x = r * Math.sin(f), y = r * Math.cos(f), e = 1e-4;
-      const zx = (surfaceZ(x + e, y) - surfaceZ(x - e, y)) / (2 * e), zy = (surfaceZ(x, y + e) - surfaceZ(x, y - e)) / (2 * e);
-      const w = r * Math.sqrt(1 + zx * zx + zy * zy);
-      const row = [x, y, 1], z = surfaceZ(x, y);
-      for (let i = 0; i < 3; i++) {
-        Z[i] += w * row[i] * z;
-        for (let j = 0; j < 3; j++) S[3 * i + j] += w * row[i] * row[j];
-      }
-    }
-  // Cramer's rule
-  const det3 = (a: ArrayLike<number>) => a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
-  const d = det3(S);
-  const col = (k: number) => Array.from(S, (v, i) => (i % 3 === k ? Z[Math.floor(i / 3)] : v));
-  return { alpha: det3(col(0)) / d, beta: det3(col(1)) / d, gamma: det3(col(2)) / d };
-})();
+/**
+ * The BSA's reference near P (32b): the plane its robust fit within 10 mm of P comes to once the bulb is left out, the flat ventral face
+ * under the bulb, z = 0 (z = αx + βy + γ, all three nought).
+ */
+const PLANE = { alpha: 0, beta: 0, gamma: 0 };
 const NORM = Math.hypot(PLANE.alpha, PLANE.beta, 1);
 /** The height over that plane, outward (away from the dorsal face). */
 const heightAt = (x: number, y: number) => (PLANE.alpha * x + PLANE.beta * y + PLANE.gamma - surfaceZ(x, y)) / NORM;
@@ -195,10 +178,14 @@ describe('T8, the bulb', () => {
     expect(r.geometry.bulbChord).not.toBeNull();
   });
 
-  it('the reference plane: the ventral face\'s, its normal away from the dorsal side', () => {
+  it('the reference plane: the ventral face\'s near P, the bulb left out (z = 0), its normal away from the dorsal side', () => {
     const p = r.construction.plane!;
     const want: Vec3 = [PLANE.alpha / NORM, PLANE.beta / NORM, -1 / NORM];
     expect(angleOf(p.normal, want)).toBeLessThan(0.05);
+    expect(Math.abs(p.point[2])).toBeLessThan(0.01);
+    // fitted within min(10 mm, half the length) of P; the face is smooth: its noise is small (the bulb's faint foot), far under the bulb
+    expect(r.bsaReference!.radius).toBeCloseTo(Math.min(10, 0.5 * r.measures.tech_length!), 9);
+    expect(r.bsaReference!.noise).toBeLessThan(0.01);
     expect(p.normal[2]).toBeLessThan(0);
     // +Y laid on it, and X across
     expect(angleOf(p.y, [0, 1, 0])).toBeLessThan(0.5);
@@ -295,17 +282,22 @@ describe('T8, the bulb', () => {
     expect(b.construction.bulb!.ends).toEqual(moved);
     // without them, the level moves the ends too
     expect(run({ bsa: { level: 0.2, ends: null } }).measures.bsa).not.toBeCloseTo(r.measures.bsa!, 3);
-    // a level above the top: the angle still stands, the strips do not
+    // a level above the top: no bulb, so nothing, ends or no ends (32b: the index is of a bulb)
     const c = run({ bsa: { level: 0.95, ends: moved } });
-    expect(c.measures.bsa).toBeCloseTo(a.measures.bsa!, 9);
+    expect(c.measures.bsa).toBeNull();
+    expect(c.reasons.bsa).toBe('no_bulb');
     expect(c.measures.vi_1_0mm).toBeNull();
     expect(c.construction.bulb!.apex).toBeNull();
   });
 
   it('the reference plane alone, and the bulb with it', () => {
-    const p = referencePlane(m.positions, m.index, m.ventral, [0, 0, -1], [0, 1, 0])!;
-    const b = bulb({ positions: m.positions, index: m.index, faces: m.ventral, plane: p, P: [0, 0, 0], mm: 1, level: 0.1, ends: null });
+    const near = proximalPlane(m.positions, m.index, m.ventral, null, [0, 0, 0], 10, [0, 0, -1], [0, 1, 0])!;
+    const b = bulb({ positions: m.positions, index: m.index, faces: m.ventral, plane: near.plane, P: [0, 0, 0], mm: 1, level: 0.1, ends: null, noise: near.noise });
     expect(b.bsa).toBeCloseTo(r.measures.bsa!, 9);
+    // the bulb was left out of the fit: none of its triangles near the top are among those fitted
+    const fitted = new Set(near.fitted);
+    const top = b.apex!;
+    expect(Array.from(m.ventral).filter((t) => fitted.has(t)).every((t) => [0, 1, 2].some((k) => Math.hypot(m.positions[3 * m.index[3 * t + k]] - top[0], m.positions[3 * m.index[3 * t + k] + 1] - top[1]) > 0.5))).toBe(true);
     // from P on the plane: the bulb runs distally from it, on both sides of the axis
     expect(b.extent!.v0).toBeLessThan(0.01);
     expect(b.extent!.v1).toBeGreaterThan(5);
@@ -471,12 +463,20 @@ describe('IPA on T8: the plane of a band of the ventral face (32a)', () => {
     expect(Math.abs(x.measures.ipa! - 90)).toBeLessThan(0.2);
   });
 
-  it('a level that takes the bulb past 0.75 of the length: too little band (band_too_small)', () => {
-    const x = run({ bsa: { level: -0.2, ends: null } });
-    expect(x.ipaBand!.from).toBeGreaterThan(IPA_BAND_END * x.measures.tech_length!);
+  it('a band all retouch: too little of it (band_too_small)', () => {
+    const x = run({ leftOutFaces: m.ventral });
     expect(x.measures.ipa).toBeNull();
     expect(x.reasons.ipa).toBe('band_too_small');
+    expect(x.ipaBand!.area).toBe(0);
     expect(x.construction.ipa).toBeNull();
+  });
+
+  it('a level that leaves the bulb open (32b): no bulb to start from, the band from 0.25 of the length', () => {
+    const x = run({ bsa: { level: -0.01, ends: null } });
+    expect(x.reasons.bsa).toBe('bulb_open');
+    expect(x.ipaBand!.fallback).toBe(true);
+    expect(x.ipaBand!.from).toBeCloseTo(IPA_BAND_FALLBACK_START * x.measures.tech_length!, 9);
+    expect(Math.abs(x.measures.ipa! - 90)).toBeLessThan(0.2);
   });
 
   it('no ventral face: none (no_ventral)', () => {
@@ -484,6 +484,135 @@ describe('IPA on T8: the plane of a band of the ventral face (32a)', () => {
     expect(x.measures.ipa).toBeNull();
     expect(x.reasons.ipa).toBe('no_ventral');
     expect(x.ipaBand).toBeNull();
+  });
+});
+
+describe('the proximal measures made robust (32b)', () => {
+  const r = run();
+  /** A square grid, `step` apart, `half` either side: z = f(x, y), seen as a ventral face from below (outward −Z). */
+  function grid(half: number, step: number, f: (x: number, y: number) => number): Mesh & { faces: Uint32Array } {
+    const n = Math.round((2 * half) / step);
+    const pos: number[] = [], idx: number[] = [];
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++) {
+        const x = -half + j * step, y = -half + i * step;
+        pos.push(x, y, f(x, y));
+      }
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        const a = i * (n + 1) + j, b = a + 1, c = a + n + 1, d = c + 1;
+        // wound so the normal is −Z
+        idx.push(a, c, b, b, c, d);
+      }
+    return { positions: new Float32Array(pos), index: new Uint32Array(idx), faces: Uint32Array.from({ length: idx.length / 3 }, (_, t) => t) };
+  }
+
+  it('the robust fit: a tilted plane with a bump 0.3 mm high and noise; its normal within 0.2°', () => {
+    // the plane z = 0.1 x − 0.05 y; the bump 3 mm across, 0.3 mm outward (−z); noise ±0.02 mm, the same each time
+    const noise = (x: number, y: number) => {
+      const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+      return 0.02 * (2 * (s - Math.floor(s)) - 1);
+    };
+    const g = grid(10, 0.25, (x, y) => 0.1 * x - 0.05 * y - 0.3 * Math.exp(-((x - 2) ** 2 + (y - 3) ** 2) / (2 * 1.5 ** 2)) + noise(x, y));
+    const want: Vec3 = [0.1, -0.05, -1];
+    const near = proximalPlane(g.positions, g.index, g.faces, null, [0, 0, 0], 10, [0, 0, -1], [0, 1, 0])!;
+    expect(angleOf(near.plane.normal, want)).toBeLessThan(0.2);
+    // fitted by area alone, the bump would tilt it farther
+    const plain = referencePlane(g.positions, g.index, g.faces, [0, 0, -1], [0, 1, 0])!;
+    expect(angleOf(plain.normal, want)).toBeGreaterThan(angleOf(near.plane.normal, want));
+    // the noise: about the noise's (uniform ±0.02: σ ≈ 0.0115), not the bump's
+    expect(near.noise).toBeGreaterThan(0.008);
+    expect(near.noise).toBeLessThan(0.02);
+  });
+
+  it('a ventral face bent and twisted beyond 10 mm: the BSA and VI as without (±2°, ±0.01 mm)', () => {
+    const bent = flakeT8(true, null, { bend: true });
+    const x = runOn(bent);
+    // the whole face's plane is far off the proximal one; the proximal one is not
+    const whole = referencePlane(bent.positions, bent.index, bent.ventral, [0, 0, -1], [0, 1, 0])!;
+    expect(angleOf(whole.normal, [0, 0, -1])).toBeGreaterThan(2);
+    expect(angleOf(x.construction.plane!.normal, [0, 0, -1])).toBeLessThan(0.05);
+    const spread = bulbSpread(0.1);
+    expect(Math.abs(x.measures.bsa! - (spread.right - spread.left))).toBeLessThan(2);
+    [0.5, 1, 1.5].forEach((w, i) => expect(Math.abs([x.measures.vi_0_5mm, x.measures.vi_1_0mm, x.measures.vi_1_5mm][i]! - viOf(w))).toBeLessThan(0.01));
+  });
+
+  // a narrow platform (|x| ≤ 3 mm), its ends at its corners on the dorsal edge, P on the ventral face away from the platform's edge
+  const narrow = flakeT8(true, null, { platformHalfWidth: 3 });
+  const corners: [Vec3, Vec3] = [[-3, 0, t8Dorsal(3)], [3, 0, t8Dorsal(3)]];
+  const offPlatform = (d: number) => runOn(narrow, { P: [0, d, -t8Bulb(d, 0)], ends: corners, platformArea: 1 });
+
+  it('a narrow platform, P 0.8 mm from it: everything, the depth from S at the platform\'s edge', () => {
+    const x = offPlatform(0.8);
+    for (const k of ['platform_area', 'platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'epa_3pt_1mm', 'epa_2ln_1mm', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'ipa'] as const) expect(x.measures[k], k).not.toBeNull();
+    // S: where the section meets the platform's edge, (0, 0, 0); E the dorsal edge above it: the depth T8.D
+    expect(Math.hypot(...x.construction.depth!.S)).toBeLessThan(1e-6);
+    expect(x.measures.platform_depth_chord).toBeCloseTo(T8.D, 6);
+    expect(Math.abs(x.measures.platform_depth_path! - T8.D)).toBeLessThan(0.01);
+    expect(x.measures.platform_width_chord).toBeCloseTo(6, 6);
+    // the bulb angle's vertex is S as well
+    expect(x.construction.profile!.bulbAt).toEqual(x.construction.depth!.S);
+  });
+
+  it('P 1.5 mm from it: nothing taken on the section (pop_off_platform); the area and width stand', () => {
+    const x = offPlatform(1.5);
+    for (const k of ['platform_depth_chord', 'platform_depth_path', 'epa_3pt_1mm', 'epa_2ln_3mm', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'ipa'] as const) {
+      expect(x.measures[k], k).toBeNull();
+      expect(x.reasons[k], k).toBe('pop_off_platform');
+    }
+    expect(x.measures.platform_area).not.toBeNull();
+    expect(x.measures.platform_width_chord).toBeCloseTo(6, 6);
+    expect(x.measures.platform_width_path).not.toBeNull();
+  });
+
+  it('a flat ventral face with noise-level relief: no bulb (no_bulb), also where the level lets the noise through; the bulb angle and IPA stand, its band from 0.25', () => {
+    const flat = flakeT8(true, null, { flat: true, noise: 0.02 });
+    for (const level of [BSA_LEVEL_DEFAULT_MM, 0.01]) {
+      const x = runOn(flat, { bsa: { level, ends: null } });
+      for (const k of ['bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm'] as const) {
+        expect(x.measures[k], k).toBeNull();
+        expect(x.reasons[k], k).toBe('no_bulb');
+      }
+      expect(x.measures.bulb_angle_3pt_1mm).not.toBeNull();
+      expect(x.measures.bulb_angle_2ln_1mm).not.toBeNull();
+      expect(Math.abs(x.measures.ipa! - 90)).toBeLessThan(0.5);
+      expect(x.ipaBand!.fallback).toBe(true);
+      expect(x.ipaBand!.from).toBeCloseTo(IPA_BAND_FALLBACK_START * x.measures.tech_length!, 9);
+      // the noise as measured: about that of a uniform ±0.02 (σ ≈ 0.0115); the outline at 0.01 lies within it
+      expect(x.bsaReference!.noise).toBeGreaterThan(0.005);
+      expect(x.bsaReference!.noise * BSA_MIN_PROMINENCE).toBeGreaterThan(0.02);
+    }
+  });
+
+  it('a bulb joined to a lip along the platform\'s edge: not closed at the sides (bulb_open), though it has an outline and ends; ends set by hand give the angle', () => {
+    const t = flakeT8(true, null, { open: true });
+    const x = runOn(t);
+    expect(x.measures.bsa).toBeNull();
+    expect(x.reasons.bsa).toBe('bulb_open');
+    expect(x.reasons.vi_1_0mm).toBe('bulb_open');
+    // its ends, from the outline, lie far round toward the platform's edge (the angle would be near 180°): there to be moved
+    const b = x.construction.bulb!;
+    expect(b.autoEnds).not.toBeNull();
+    const flat = (q: Vec3): Vec3 => [q[0], q[1], 0];
+    expect(angleOf(flat(b.autoEnds![0]), flat(b.autoEnds![1]))).toBeGreaterThan(150);
+    // not a bulb for IPA either: its band from 0.25
+    expect(x.ipaBand!.fallback).toBe(true);
+    // (−4, 3) and (4, 3) lie off the bulb and the lip: on the flat face, z = 0
+    const set = runOn(t, { bsa: { level: BSA_LEVEL_DEFAULT_MM, ends: [[-4, 3, 0], [4, 3, 0]] } });
+    expect(set.measures.bsa).toBeCloseTo(angleOf([-4, 3, 0], [4, 3, 0]), 1);
+    expect(set.measures.vi_1_0mm).not.toBeNull();
+  });
+
+  it('a level that leaves the bulb open at the sides: no BSA (bulb_open); ends set by hand give it back', () => {
+    const open = run({ bsa: { level: -0.01, ends: null } });
+    for (const k of ['bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm'] as const) {
+      expect(open.measures[k], k).toBeNull();
+      expect(open.reasons[k], k).toBe('bulb_open');
+    }
+    const ends = r.construction.bulb!.autoEnds!;
+    const set = run({ bsa: { level: -0.01, ends } });
+    expect(set.measures.bsa).toBeCloseTo(r.measures.bsa!, 9);
+    expect(set.measures.vi_1_0mm).not.toBeNull();
   });
 });
 
@@ -500,10 +629,15 @@ describe('the hints of the proximal measures', () => {
     }
   });
 
-  it('the BSA: a piece of the reference plane round P, the outline, the ends', () => {
+  it('the BSA: the reference plane as a disc round P as far as it was fitted, the outline, the ends', () => {
     const h = flakeHint('bsa', r, 'mm')!;
     const patch = h.find((p) => p.kind === 'patch')!;
-    expect(patch.kind === 'patch' && patch.points.length).toBe(4);
+    const b = r.construction.bulb!;
+    expect(patch.kind === 'patch' && patch.points.length).toBe(64);
+    for (const q of patch.kind === 'patch' ? patch.points : []) {
+      expect(Math.hypot(q[0] - b.P0[0], q[1] - b.P0[1], q[2] - b.P0[2])).toBeCloseTo(b.radius, 6);
+      expect(Math.abs(planeCoords(b.plane, q)[2])).toBeLessThan(1e-6);
+    }
     expect(h.filter((p) => p.part === 'outline').length).toBe(r.construction.bulb!.contour.length);
     const ends = h.find((p) => p.part === 'ends');
     expect(ends?.kind === 'dots' && ends.points).toEqual(r.construction.bulb!.ends);

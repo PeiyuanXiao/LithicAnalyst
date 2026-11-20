@@ -2,12 +2,12 @@ import { frameAxes, type FrameAxes } from '../core/frame';
 import { mmPerUnit } from '../core/format';
 import type { Vec3 } from '../core/types';
 import { convexHullSteps } from './convexHull';
-import { BSA_LEVEL_DEFAULT_MM, BSA_LEVEL_RANGE_MM, BSA_NEAR_POP_MM, BULB_ANGLE_DISTANCE_MM, bulbSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, referencePlaneSteps, VI_SAMPLE_MM, VI_WIDTHS_MM, type BulbPlane, type ViStrip } from './bulb';
+import { BSA_LEVEL_DEFAULT_MM, BSA_LEVEL_RANGE_MM, BSA_MIN_PROMINENCE, BSA_NEAR_POP_MM, BSA_OPEN_REACH_MM, BSA_REF_ITERATIONS, BSA_REF_RADIUS_MM, BSA_REF_TRIM_UP, BULB_ANGLE_DISTANCE_MM, bulbSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, proximalPlaneSteps, VI_SAMPLE_MM, VI_WIDTHS_MM, type BulbPlane, type ViStrip } from './bulb';
 import { IPA_BAND_END, IPA_BAND_FALLBACK_START, IPA_MIN_BAND_SHARE, IPA_TRIM_SIGMA, ipaSteps, type IpaBand } from './ipa';
 import { arcLengths, pointAtArc } from './landmarks';
 import { symmetricEigen3 } from './linalg';
 import { inFrame, lineNear, sectionByPlane, type PlaneCandidates, type SectionLine } from './meshSection';
-import { regionPathSteps } from './regionPath';
+import { closestOnTriangle, regionPathSteps } from './regionPath';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
 import { STRIP_HALF_WIDTH_RATIO, STRIP_NORMAL_OUTLIER_DEG } from './technicalFrame';
 
@@ -19,8 +19,12 @@ export const EPA_DISTANCES_MM = [1, 2, 3] as const;
 export const TWO_LINES_LENGTH_MM = 0.5;
 /** Fewer points than this before resampling: no line. */
 export const MIN_FIT_POINTS = 2;
-/** The platform stretch of the section starts at most this many mean edge lengths from P. */
-export const PLATFORM_START_EDGES = 3;
+/**
+ * How near P must lie to the platform region, and the platform's stretch of the section start (mm); without a stated unit, this many
+ * mean edge lengths.
+ */
+export const PLATFORM_REACH_MM = 1.0;
+export const PLATFORM_REACH_EDGES = 5;
 
 /** The parameters of the flake measurements, as stored with the results and in the manifest. */
 export const FLAKE_PARAMETERS = {
@@ -34,11 +38,17 @@ export const FLAKE_PARAMETERS = {
   IPA_TRIM_SIGMA,
   IPA_MIN_BAND_SHARE,
   MIN_FIT_POINTS,
-  PLATFORM_START_EDGES,
+  PLATFORM_REACH_MM,
+  PLATFORM_REACH_EDGES,
   BULB_ANGLE_DISTANCE_MM,
   BSA_LEVEL_DEFAULT_MM,
   BSA_LEVEL_RANGE_MM: [...BSA_LEVEL_RANGE_MM],
   BSA_NEAR_POP_MM,
+  BSA_REF_RADIUS_MM,
+  BSA_REF_ITERATIONS,
+  BSA_REF_TRIM_UP,
+  BSA_MIN_PROMINENCE,
+  BSA_OPEN_REACH_MM,
   VI_WIDTHS_MM: [...VI_WIDTHS_MM],
   VI_SAMPLE_MM,
   POP_MESH_RADIUS_MM,
@@ -81,13 +91,15 @@ export const AGREEMENT_FLAKE_MEASURES: readonly FlakeMeasure[] = [...FLAKE_MEASU
 export const VI_MEASURES = ['vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm'] as const;
 
 /** Why a measure is empty, in the order they are looked for: for the screen, neither stored nor exported. */
-export const FLAKE_EMPTY_REASONS = ['no_hull', 'no_axis', 'frame_failed', 'along_z', 'no_platform', 'section_misses_platform', 'no_ends', 'no_path', 'no_unit', 'section_ends', 'no_ventral', 'no_bulb', 'bulb_one_side', 'band_too_small'] as const;
+export const FLAKE_EMPTY_REASONS = ['no_hull', 'no_axis', 'frame_failed', 'along_z', 'no_platform', 'section_misses_platform', 'no_ends', 'no_path', 'no_unit', 'section_ends', 'no_ventral', 'no_bulb', 'bulb_one_side', 'band_too_small', 'pop_off_platform', 'bulb_open'] as const;
 export type FlakeEmptyReason = (typeof FLAKE_EMPTY_REASONS)[number];
 
 const EPA_MEASURES = ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const;
 const BULB_ANGLE_MEASURES = ['bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm'] as const;
 const BSA_MEASURES: readonly FlakeMeasure[] = ['bsa', ...VI_MEASURES];
 const PLATFORM_MEASURES: readonly FlakeMeasure[] = ['platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'platform_area', ...EPA_MEASURES, 'ipa', ...BULB_ANGLE_MEASURES];
+/** What is taken on the longitudinal section: from the platform's edge there (S). */
+const SECTION_MEASURES: readonly FlakeMeasure[] = ['platform_depth_chord', 'platform_depth_path', ...EPA_MEASURES, 'ipa', ...BULB_ANGLE_MEASURES];
 const AXIS_MEASURES: readonly FlakeMeasure[] = ['tech_length', 'tech_width', 'tech_thickness', 'morph_tech_angle_deg', ...PLATFORM_MEASURES, ...BSA_MEASURES, 'psia', 'pop_mesh_edge'];
 
 export const emptyFlakeMeasures = (): FlakeMeasures => Object.fromEntries(ALL_FLAKE_MEASURES.map((k) => [k, null])) as FlakeMeasures;
@@ -445,9 +457,9 @@ export interface PlatformProfile {
 /**
  * The platform's measurements on the longitudinal section `line`. `mm`: millimetres per
  * coordinate unit (null: not stated, so no EPA). Null when the section has no stretch on
- * the platform that starts near P.
+ * the platform that starts within `reach` of P.
  */
-export function platformProfile(line: SectionLine, P: Vec3, inPlatform: (face: number) => boolean, meanEdge: number, mm: number | null): PlatformProfile | null {
+export function platformProfile(line: SectionLine, P: Vec3, inPlatform: (face: number) => boolean, reach: number, mm: number | null): PlatformProfile | null {
   const { points: pts, faces, closed } = line;
   const n = pts.length;
   const segs = closed ? n : n - 1;
@@ -471,7 +483,7 @@ export function platformProfile(line: SectionLine, P: Vec3, inPlatform: (face: n
   const a = run.first, b = (run.first + run.length) % n;
   const dir = dist(pts[b], P) < dist(pts[a], P) ? -1 : 1;
   const start = dir > 0 ? a : b, far = dir > 0 ? b : a;
-  if (dist(pts[start], P) > PLATFORM_START_EDGES * meanEdge) return null;
+  if (dist(pts[start], P) > reach) return null;
   const stretch = runPoints(run);
   if (dir < 0) stretch.reverse();
   const E = pts[far];
@@ -615,6 +627,9 @@ export interface BulbConstruction {
   ends: [Vec3, Vec3] | null;
   /** The ends were set by hand. */
   moved: boolean;
+  /** The plane's reach round P (coordinate units) and the surface's robust deviation from it there. */
+  radius: number;
+  noise: number;
   apex: Vec3 | null;
   vi: ViStrip[] | null;
   extent: { u0: number; u1: number; v0: number; v1: number } | null;
@@ -631,8 +646,8 @@ export interface FlakeConstruction {
   angle: { origin: Vec3; tech: Vec3; morph: Vec3; reach: number } | null;
   /** The platform's width: its two ends, and the way between them over the platform. */
   width: { ends: [Vec3, Vec3]; path: Vec3[] | null } | null;
-  /** The platform's depth: P to E, and the way between them over the platform. */
-  depth: { P: Vec3; E: Vec3; path: Vec3[] | null } | null;
+  /** The platform's depth: from S (where the section's platform stretch starts, at the platform's edge) to E, and the way between them over the platform. */
+  depth: { S: Vec3; E: Vec3; path: Vec3[] | null } | null;
   /** The triangles of the platform. */
   platformFaces: ArrayLike<number> | null;
   /** What was taken on the longitudinal section. */
@@ -692,6 +707,20 @@ export interface FlakeResult {
   construction: FlakeConstruction;
   /** IPA's band as fitted (stored with the results), or null when there was none to fit. */
   ipaBand: IpaBand | null;
+  /** The BSA's reference as fitted (stored with the results): its reach round P and the surface's noise over it (coordinate units); null: none. */
+  bsaReference: { radius: number; noise: number } | null;
+}
+
+/** How far a point lies from a set of triangles (Infinity: none). */
+function* distanceToFacesSteps(positions: ArrayLike<number>, index: ArrayLike<number>, faces: ArrayLike<number>, q: Vec3): Steps<number> {
+  const pos = (v: number): Vec3 => [positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]];
+  let best = Infinity;
+  for (let k = 0; k < faces.length; k++) {
+    if (k % YIELD_EVERY === 0) yield;
+    const t = faces[k];
+    best = Math.min(best, dist(q, closestOnTriangle(q, pos(index[3 * t]), pos(index[3 * t + 1]), pos(index[3 * t + 2]))));
+  }
+  return best;
 }
 
 /** Every measurement of a flake from its annotations. */
@@ -701,6 +730,7 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   const m = emptyFlakeMeasures();
   const geometry: FlakeGeometry = { P, E: null, platformLine: null, epaPoints: [], ipaFrom: null, ipaTo: null, ipaLine: null };
   let ipaBand: IpaBand | null = null;
+  let bsaReference: FlakeResult['bsaReference'] = null;
   const reasons: FlakeResult['reasons'] = {};
   const toLocal = (p: Vec3): Vec3 => [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
   const toOriginal = (p: Vec3): Vec3 => [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
@@ -731,7 +761,7 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   } else why('no_hull', ['morph_length', 'morph_width', 'morph_thickness']);
   if (!matrix || !P) {
     why(P ? 'frame_failed' : 'no_axis', AXIS_MEASURES);
-    return { measures: m, reasons, geometry, section: null, construction, ipaBand };
+    return { measures: m, reasons, geometry, section: null, construction, ipaBand, bsaReference };
   }
   const axes = frameAxes(matrix);
   const frame: FrameAxes = { ...axes, origin: toLocal(axes.origin) };
@@ -748,23 +778,29 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
     why('along_z', ['morph_tech_angle_deg']);
   } else why('no_hull', ['morph_tech_angle_deg']);
   const localP = toLocal(P);
-  // the ventral reference plane, and the bulb on it
+  // the proximal ventral plane (robust, within R of P, retouch and damage left out), and the bulb on it
   const ventral = input.ventralFaces?.length ? input.ventralFaces : null;
-  const plane = ventral ? yield* referencePlaneSteps(positions, index, ventral, [-frame.z[0], -frame.z[1], -frame.z[2]], frame.y) : null;
+  const leftOut = input.leftOutFaces ?? null;
+  const radius = Math.min(mm !== null ? BSA_REF_RADIUS_MM / mm : Infinity, 0.5 * tech.tech_length);
+  const near = ventral && radius > 0 ? yield* proximalPlaneSteps(positions, index, ventral, leftOut, localP, radius, [-frame.z[0], -frame.z[1], -frame.z[2]], frame.y) : null;
+  const plane = near?.plane ?? null;
   const planeOriginal = (p: BulbPlane): BulbPlane => ({ ...p, point: toOriginal(p.point) });
-  if (plane) construction.plane = planeOriginal(plane);
-  /** The main bulb's vertices (IPA's band starts at its far end). */
+  if (near) {
+    construction.plane = planeOriginal(near.plane);
+    bsaReference = { radius, noise: near.noise };
+  }
+  /** The main bulb's vertices, when it is a bulb (IPA's band starts at its far end). */
   let bulbRegion: Uint32Array | null = null;
   if (!plane) why('no_ventral', BSA_MEASURES);
   else if (mm === null) why('no_unit', BSA_MEASURES);
   else {
     const settings = input.bsa ?? { level: BSA_LEVEL_DEFAULT_MM, ends: null };
-    const r = yield* bulbSteps({ positions, index, faces: ventral!, plane, P: localP, mm, level: settings.level, ends: settings.ends ? [toLocal(settings.ends[0]), toLocal(settings.ends[1])] : null });
+    const r = yield* bulbSteps({ positions, index, faces: ventral!, plane, P: localP, mm, level: settings.level, ends: settings.ends ? [toLocal(settings.ends[0]), toLocal(settings.ends[1])] : null, noise: near!.noise });
     m.bsa = r.bsa;
     bulbRegion = r.region;
     VI_MEASURES.forEach((k, i) => (m[k] = r.vi?.[i]?.value ?? null));
     why(r.bsaEmpty ?? 'no_bulb', ['bsa']);
-    why('no_bulb', VI_MEASURES);
+    why(r.bsaEmpty === 'bulb_open' ? 'bulb_open' : 'no_bulb', VI_MEASURES);
     const pairOf = (x: [Vec3, Vec3] | null): [Vec3, Vec3] | null => (x ? [toOriginal(x[0]), toOriginal(x[1])] : null);
     construction.bulb = {
       plane: planeOriginal(plane),
@@ -776,6 +812,8 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
       autoEnds: pairOf(r.autoEnds),
       ends: pairOf(r.ends),
       moved: !!settings.ends,
+      radius,
+      noise: near!.noise,
       apex: r.apex ? toOriginal(r.apex) : null,
       vi: r.vi ? r.vi.map((s) => ({ ...s, corners: s.corners.map(toOriginal) as ViStrip['corners'], high: s.high ? toOriginal(s.high) : null, low: s.low ? toOriginal(s.low) : null })) : null,
       extent: r.extent,
@@ -783,28 +821,14 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   }
   const section = input.section !== undefined ? input.section : lineNear(sectionByPlane(positions, index, frame.origin, frame.x, input.candidates ?? null), localP);
   yield;
+  const done = (): FlakeResult => ({ measures: m, reasons, geometry, section, construction, ipaBand, bsaReference });
   if (!platformFaces?.length) {
     why('no_platform', PLATFORM_MEASURES);
-    return { measures: m, reasons, geometry, section, construction, ipaBand };
+    return done();
   }
-  if (!section) {
-    why('section_misses_platform', PLATFORM_MEASURES);
-    return { measures: m, reasons, geometry, section, construction, ipaBand };
-  }
-  const mask = new Uint8Array(Math.floor(index.length / 3));
-  for (let i = 0; i < platformFaces.length; i++) mask[platformFaces[i]] = 1;
-  const profile = platformProfile(section, localP, (f) => mask[f] === 1, meanEdge, mmPerUnit(unit));
-  if (!profile) {
-    why('section_misses_platform', PLATFORM_MEASURES);
-    return { measures: m, reasons, geometry, section, construction, ipaBand };
-  }
+  // the platform's area and width: from the region and the ends, no section needed
   m.platform_area = platformArea;
   why('no_platform', ['platform_area']);
-  m.platform_depth_chord = dist(localP, profile.E);
-  const depth = yield* regionPathSteps(positions, index, platformFaces, localP, profile.E);
-  m.platform_depth_path = depth?.length ?? null;
-  why('no_path', ['platform_depth_path']);
-  construction.depth = { P, E: toOriginal(profile.E), path: depth ? depth.points.map(toOriginal) : null };
   if (ends.length >= 2) {
     const a = toLocal(ends[0]), b = toLocal(ends[1]);
     m.platform_width_chord = dist(a, b);
@@ -813,6 +837,31 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
     why('no_path', ['platform_width_path']);
     construction.width = { ends: [ends[0], ends[1]], path: width ? width.points.map(toOriginal) : null };
   } else why('no_ends', ['platform_width_chord', 'platform_width_path']);
+  // what is taken on the section: P must lie near the platform, and the section's platform stretch start near P (at S)
+  const reach = mm !== null ? PLATFORM_REACH_MM / mm : PLATFORM_REACH_EDGES * meanEdge;
+  const off = yield* distanceToFacesSteps(positions, index, platformFaces, localP);
+  if (off > reach) {
+    why('pop_off_platform', SECTION_MEASURES);
+    return done();
+  }
+  if (!section) {
+    why('section_misses_platform', SECTION_MEASURES);
+    return done();
+  }
+  const mask = new Uint8Array(Math.floor(index.length / 3));
+  for (let i = 0; i < platformFaces.length; i++) mask[platformFaces[i]] = 1;
+  const profile = platformProfile(section, localP, (f) => mask[f] === 1, reach, mm);
+  if (!profile) {
+    why('section_misses_platform', SECTION_MEASURES);
+    return done();
+  }
+  // the depth: from S, where the platform's stretch starts at its edge (the vertex of EPA and the bulb angle too)
+  const S = profile.stretch[0];
+  m.platform_depth_chord = dist(S, profile.E);
+  const depth = yield* regionPathSteps(positions, index, platformFaces, S, profile.E);
+  m.platform_depth_path = depth?.length ?? null;
+  why('no_path', ['platform_depth_path']);
+  construction.depth = { S: toOriginal(S), E: toOriginal(profile.E), path: depth ? depth.points.map(toOriginal) : null };
   m.epa_3pt_1mm = profile.epa3[0];
   m.epa_3pt_2mm = profile.epa3[1];
   m.epa_3pt_3mm = profile.epa3[2];
@@ -869,7 +918,7 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
     bulbQ: geometry.bulbQ,
     bulbChord: geometry.bulbChord,
   };
-  return { measures: m, reasons, geometry, section, construction, ipaBand };
+  return done();
 }
 
 export const flakeMeasures = (input: FlakeInput): FlakeResult => runSync(flakeMeasuresSteps(input));

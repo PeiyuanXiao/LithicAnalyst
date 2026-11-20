@@ -1,6 +1,7 @@
 import type { FrameAxes } from '../core/frame';
 import type { Vec3 } from '../core/types';
 import { referencePlaneSteps, type BulbPlane } from './bulb';
+import { medianAndSigma } from './robust';
 import { YIELD_EVERY, type Steps } from './steps';
 
 /**
@@ -20,8 +21,6 @@ export const IPA_BAND_FALLBACK_START = 0.25;
 export const IPA_TRIM_SIGMA = 3;
 /** Less of the band than this share of the ventral face's area left to fit: no IPA. */
 export const IPA_MIN_BAND_SHARE = 0.05;
-/** The median absolute deviation of a normal distribution, times this, is its standard deviation. */
-const MAD_TO_SIGMA = 1.4826;
 
 /** The band as fitted (stored with the flake's results): technical Y from and to (coordinate units), the area fitted, whether it started at the fallback, the triangles trimmed. */
 export interface IpaBand {
@@ -74,43 +73,6 @@ function angleDeg(u: Vec3, v: Vec3): number | null {
   const l = len(u) * len(v);
   if (!(l > 0)) return null;
   return (Math.acos(Math.max(-1, Math.min(1, dot(u, v) / l))) * 180) / Math.PI;
-}
-
-/** The k-th smallest of `a` (0-based), moving its values about. */
-function select(a: Float64Array, k: number): number {
-  let lo = 0, hi = a.length - 1;
-  while (lo < hi) {
-    const pivot = a[(lo + hi) >> 1];
-    let i = lo, j = hi;
-    while (i <= j) {
-      while (a[i] < pivot) i++;
-      while (a[j] > pivot) j--;
-      if (i <= j) {
-        const t = a[i];
-        a[i] = a[j];
-        a[j] = t;
-        i++;
-        j--;
-      }
-    }
-    if (k <= j) hi = j;
-    else if (k >= i) lo = i;
-    else return a[k];
-  }
-  return a[k];
-}
-
-/** The median (of an even count, the mean of the middle two); `a` is reordered. */
-export function median(a: Float64Array): number {
-  const n = a.length;
-  if (!n) return NaN;
-  const k = (n - 1) >> 1;
-  const lower = select(a, k);
-  if (n % 2) return lower;
-  // the next one up: the least of what select left above k
-  let upper = Infinity;
-  for (let i = k + 1; i < n; i++) if (a[i] < upper) upper = a[i];
-  return (lower + upper) / 2;
 }
 
 export function* ipaSteps(input: IpaInput): Steps<IpaResult> {
@@ -186,10 +148,7 @@ export function* ipaSteps(input: IpaInput): Steps<IpaResult> {
     if (k % YIELD_EVERY === 0) yield;
     residual[k] = dot(sub(centroid(band[k]), first.point), first.normal);
   }
-  const m = median(Float64Array.from(residual));
-  yield;
-  const deviation = Float64Array.from(residual, (r) => Math.abs(r - m));
-  const sigma = MAD_TO_SIGMA * median(deviation);
+  const { median: m, sigma } = medianAndSigma(residual);
   yield;
   const kept: number[] = [];
   let area = 0;

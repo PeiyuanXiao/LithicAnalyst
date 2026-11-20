@@ -484,11 +484,44 @@ export const T8_RIPPLE = { amplitude: 0.02, wavelength: 2, from: 8 };
 export const T8_SPIKES: Array<[number, number]> = [[-6, 9], [5, 10.5], [-3, 13], [8, 13.5]];
 const T8_SPIKE = { height: 0.6, sigma: 0.25 };
 
+/**
+ * T8's variants for the proximal measures' robustness (32b): `bend`, the ventral face bent and twisted away from the dorsal face beyond
+ * y = 10 (outside the BSA's reach of P, so the plane there stays z = 0), eased to nothing at the sharp edge; `flat`, no bulb;
+ * `noise`, a relief of that amplitude (mm) at every vertex, the same each time; `platformHalfWidth`, the platform region only as far as
+ * that either side of the axis; `open`, a lip `T8_LIP` high along the platform's edge (y up to `T8_LIP.width`, eased out over half a mm),
+ * joined to the bulb near P: the bulb at its level runs out to the edge far from P, not closed at the sides.
+ */
+export const T8_LIP = { height: 0.15, width: 0.6 };
+export const T8_BEND = { from: 10, bend: 0.12, twist: 0.04 };
+
+/** A number in [0, 1) that comes the same for the same point. */
+const hash01 = (x: number, y: number): number => {
+  const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return s - Math.floor(s);
+};
+
 const ease = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
+export interface T8Variant {
+  retouch?: boolean;
+  ripple?: boolean;
+  bend?: boolean;
+  flat?: boolean;
+  noise?: number;
+  platformHalfWidth?: number;
+  open?: boolean;
+}
+
 /** What a variant adds to the ventral face's z at (x, y) (+z: toward the dorsal face). */
-export function t8Extra(x: number, y: number, o: { retouch?: boolean; ripple?: boolean }): number {
+export function t8Extra(x: number, y: number, o: T8Variant): number {
   let z = 0;
+  if (o.bend) {
+    const { from, bend, twist } = T8_BEND;
+    const d = Math.max(0, y - from);
+    z -= (bend * d * d + twist * x * d) * Math.max(0, 1 - (x * x + y * y) / (T8.R * T8.R));
+  }
+  if (o.noise) z += o.noise * (2 * hash01(x, y) - 1);
+  if (o.open) z -= T8_LIP.height * (1 - ease((y - T8_LIP.width) / 0.5));
   if (o.retouch) {
     const { x0, x1, y0, y1, rise } = T8_RETOUCH;
     const along = y <= y0 ? 0 : y <= y1 ? (y - y0) / (y1 - y0) : Math.max(0, 1 - (y - y1));
@@ -506,7 +539,7 @@ export function t8Extra(x: number, y: number, o: { retouch?: boolean; ripple?: b
 /** Whether a point is in T8's retouch patch (its eased sides and its far slope down included). */
 export const inT8Retouch = (x: number, y: number): boolean => x >= T8_RETOUCH.x0 - 1 && x <= T8_RETOUCH.x1 + 1 && y >= T8_RETOUCH.y0 && y <= T8_RETOUCH.y1 + 1;
 
-export function flakeT8(fine = true, dense: { step: number; arcs: number } | null = null, variant: { retouch?: boolean; ripple?: boolean } = {}): Mesh & { ventral: Uint32Array; platform: Uint32Array; dorsal: Uint32Array; retouch: Uint32Array } {
+export function flakeT8(fine = true, dense: { step: number; arcs: number } | null = null, variant: T8Variant = {}): Mesh & { ventral: Uint32Array; platform: Uint32Array; dorsal: Uint32Array; retouch: Uint32Array } {
   // `dense` (the bench): rings `step` apart all the way out, `arcs` steps of the half circle
   const rings = dense ? Array.from({ length: Math.round(T8.R / dense.step) }, (_, i) => Math.round((i + 1) * dense.step * 1e6) / 1e6) : t8Rings(fine);
   const arcs = dense ? dense.arcs : t8Arcs(fine);
@@ -528,7 +561,7 @@ export function flakeT8(fine = true, dense: { step: number; arcs: number } | nul
   const P = add([0, 0, 0]);
   const ventralAt = (r: number, j: number): Vec3 => {
     const p = at(r, j, 0);
-    return [p[0], p[1], -t8Bulb(r, phiOf(j)) + t8Extra(p[0], p[1], variant)];
+    return [p[0], p[1], -(variant.flat ? 0 : t8Bulb(r, phiOf(j))) + t8Extra(p[0], p[1], variant)];
   };
   // (the last ring is the sharp edge, shared with the dorsal face: the variants keep off it)
   const V: number[][] = rings.map((r) => Array.from({ length: arcs + 1 }, (_, j) => add(ventralAt(r, j))));
@@ -586,7 +619,10 @@ export function flakeT8(fine = true, dense: { step: number; arcs: number } | nul
         return inT8Retouch(c[0], c[1]);
       }))
     : new Uint32Array(0);
-  return { positions: new Float32Array(pos), index: new Uint32Array(tris), ventral, platform: of('platform'), dorsal: of('dorsal'), retouch };
+  // a narrow platform: only its triangles near the axis
+  const half = variant.platformHalfWidth;
+  const platform = half === undefined ? of('platform') : Uint32Array.from(Array.from(of('platform')).filter((t) => Math.abs((pos[3 * tris[3 * t]] + pos[3 * tris[3 * t + 1]] + pos[3 * tris[3 * t + 2]]) / 3) <= half));
+  return { positions: new Float32Array(pos), index: new Uint32Array(tris), ventral, platform, dorsal: of('dorsal'), retouch };
 }
 
 /** The triangles whose outward normal lies within 60° (`minCos`) of `dir`: a flat face of a test body, as its region would give it. */

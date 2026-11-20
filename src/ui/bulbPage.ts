@@ -117,7 +117,7 @@ export class BulbPage {
     const c = this.content;
     this.reason.hidden = !c?.reason;
     this.reason.textContent = c?.reason ?? '';
-    const shown = !!c?.bulb && !c.reason;
+    const shown = !!c?.bulb;
     s.style.display = shown ? '' : 'none';
     (this.level.parentElement as HTMLElement).hidden = !c || (!!c.reason && !c.bulb);
     if (document.activeElement !== this.level && c) this.level.value = fmtNum(c.levelMm, 2);
@@ -134,6 +134,9 @@ export class BulbPage {
     const win = bulbWindow(b.extent ?? { u0: 0, u1: 0, v0: 0, v1: 0 }, c.mm);
     const side = win.u1 - win.u0;
     this.view = { s: (SIZE - 2 * MARGIN) / side, u0: win.u0, v1: win.v1 };
+    // where the plane was fitted: within R of P (beyond the window, cut off by it)
+    const [px0, py0] = this.px(0, 0);
+    s.append(svg('circle', { cx: px0, cy: py0, r: b.radius * this.view.s, class: 'bulb-reference', id: 'bulb-reference' }));
     // the lines of equal height, coloured by height; the level's thicker
     for (const l of c.contours) {
       if (!l.segments.length) continue;

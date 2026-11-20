@@ -319,15 +319,21 @@ function bulbAngleHint(method: '3pt' | '2ln', p: ProfileConstruction, value: num
  * The BSA: a square of the reference plane round P (as wide as the bulb reaches from P), the bulb's outline at the level, the lines on
  * the plane from P to the two ends and the angle between them; the ends on the surface as dots.
  */
+/** Corners of the disc that stands for a plane round a point: so many round. */
+const DISC_CORNERS = 64;
+
 function bsaHint(b: BulbConstruction, value: number): MeasureHint | null {
   if (!b.ends || !b.extent) return null;
   const { plane, P0 } = b;
-  const half = Math.max(Math.abs(b.extent.u0), Math.abs(b.extent.u1), Math.abs(b.extent.v0), Math.abs(b.extent.v1));
-  const corner = (su: number, sv: number) => add(add(P0, plane.x, su * half), plane.y, sv * half);
+  // the reference plane: a disc round P, as far as it was fitted
+  const disc = Array.from({ length: DISC_CORNERS }, (_, i) => {
+    const a = (2 * Math.PI * i) / DISC_CORNERS;
+    return add(add(P0, plane.x, b.radius * Math.cos(a)), plane.y, b.radius * Math.sin(a));
+  });
   const e0 = onPlane(plane, b.ends[0]), e1 = onPlane(plane, b.ends[1]);
   const radius = Math.min(size(sub(e0, P0)), size(sub(e1, P0))) * MEASURE_HINT_PARAMETERS.ARC_SHARE;
   return [
-    { kind: 'patch', part: 'reference-plane', points: [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)] },
+    { kind: 'patch', part: 'reference-plane', points: disc },
     ...b.contour.map((c): HintLine => ({ kind: 'line', part: 'outline', role: 'other', points: c.points, closed: c.closed })),
     { kind: 'line', part: 'to-end', role: 'current', points: [P0, e0] },
     { kind: 'line', part: 'to-end', role: 'current', points: [P0, e1] },
@@ -381,7 +387,7 @@ export function flakeHint(key: FlakeMeasure, r: FlakeResult, unit: string): Meas
       return c.width ? chordAndPath(key.endsWith('chord') ? 'chord' : 'path', c.width.ends[0], c.width.ends[1], c.width.path, m.platform_width_chord, m.platform_width_path, unit) : null;
     case 'platform_depth_chord':
     case 'platform_depth_path':
-      return c.depth ? chordAndPath(key.endsWith('chord') ? 'chord' : 'path', c.depth.P, c.depth.E, c.depth.path, m.platform_depth_chord, m.platform_depth_path, unit) : null;
+      return c.depth ? chordAndPath(key.endsWith('chord') ? 'chord' : 'path', c.depth.S, c.depth.E, c.depth.path, m.platform_depth_chord, m.platform_depth_path, unit) : null;
     case 'platform_area':
       return c.platformFaces ? [{ kind: 'faces', part: 'platform', tint: 'current', faces: c.platformFaces, through: true }] : null;
     case 'ipa':

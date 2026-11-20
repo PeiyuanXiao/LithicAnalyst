@@ -36,7 +36,7 @@ import { emptyProject } from '../src/core/store';
 import { defaultRetouchSettings, type Curve, type ProjectState, type Scar, type Vec3 } from '../src/core/types';
 import { buildLoadedMesh } from '../src/io/loadMesh';
 import { SurfaceSnap } from '../src/tools/surfaceSnap';
-import { BSA_LEVEL_DEFAULT_MM, bulbSteps, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, referencePlaneSteps, surfaceOverSteps, windowContoursSteps } from '../src/compute/bulb';
+import { BSA_LEVEL_DEFAULT_MM, bulbSteps, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, proximalPlaneSteps, surfaceOverSteps, windowContoursSteps } from '../src/compute/bulb';
 import { heightColors } from '../src/compute/colormap';
 import { ipaSteps } from '../src/compute/ipa';
 import { buildEdgesSteps } from '../src/compute/meshGeometry';
@@ -361,9 +361,11 @@ function benchProximal(triangles: number): void {
   const { positions: pos, index: idx, ventral } = t8;
   console.log(`T8: ${idx.length / 3} triangles, ${ventral.length} of them ventral`);
   const P: Vec3 = [0, 0, 0];
-  const plane = steps('12a the ventral reference plane', referencePlaneSteps(pos, idx, ventral, [0, 0, -1], [0, 1, 0]));
-  if (!plane) throw new Error('no ventral plane');
-  const bulb = steps('12b the bulb: outline, ends, BSA, VI', bulbSteps({ positions: pos, index: idx, faces: ventral, plane, P, mm: 1, level: BSA_LEVEL_DEFAULT_MM, ends: null }));
+  // the BSA's reference: robust, within 10 mm of P (half T8's length)
+  const near = steps('12a the proximal ventral plane (robust, within 10 mm)', proximalPlaneSteps(pos, idx, ventral, null, P, 10, [0, 0, -1], [0, 1, 0]));
+  if (!near) throw new Error('no ventral plane');
+  const { plane } = near;
+  const bulb = steps('12b the bulb: outline, ends, BSA, VI', bulbSteps({ positions: pos, index: idx, faces: ventral, plane, P, mm: 1, level: BSA_LEVEL_DEFAULT_MM, ends: null, noise: near.noise }));
   console.log(`BSA ${bulb.bsa?.toFixed(2)}°, VI ${bulb.vi?.map((s) => s.value?.toFixed(3)).join(' / ')} mm`);
   // IPA: the band from the bulb's far end to 0.75 of the length (T8's frame is the model's, P at its origin, 20 long; the platform line +Z)
   const ipa = steps('12j IPA: the band, its fit, the trim, the fit again', ipaSteps({ positions: pos, index: idx, ventral, leftOut: null, bulb: bulb.region, frame: { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], origin: P }, techLength: 20, lineDir: [0, 0, 1] }));

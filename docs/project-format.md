@@ -364,7 +364,7 @@ the type deletes nothing: the other type's data stay in the file and come back w
 
 **Derived** (`derived.flake`): `parameters`, `frameSource`, `measures`, `geometry` (points of the measures, for the
 profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ipaFrom`, `ipaTo`, `ipaLine`,
-`bulbAt`, `bulbQ`, `bulbChord`) and `ipaBand`.
+`bulbAt`, `bulbQ`, `bulbChord`), `ipaBand` and `bsaReference`.
 
 * `geometry.ipaFrom`, `ipaTo`: where S's ventral side reaches the band's two ends (technical Y `from`, `to`); `ipaLine`: where the band's
   plane meets the plane of S, from Y `from` to `to`; null while IPA is empty. Files from before 32a have `ventral` and `ventralLine` (the
@@ -372,6 +372,8 @@ profile panel and external readers, original coordinates: `P`, `E`, `platformLin
 * `ipaBand` (null when no band was fitted): `{ from, to, area, fallback, trimmed }` — the band's technical Y range (coordinate units), the
   area of the triangles the plane was fitted to at last (unit²), `true` when it started at `IPA_BAND_FALLBACK_START` for want of a bulb, and
   how many triangles the trim left out. It is not in the CSV.
+* `bsaReference` (null without a ventral region near P): `{ radius, noise }` — how far round P the BSA's reference plane was fitted, and the
+  surface's robust deviation from it there (σ̂ as last taken; coordinate units). It is not in the CSV.
 
 Lengths are in the coordinate unit. Millimetre parameters are converted by `specimen.unit`; without a stated unit
 what needs them is not measured.
@@ -385,7 +387,7 @@ what needs them is not measured.
 | `morph_thickness` | the range perpendicular to both |
 | `morph_tech_angle_deg` | the `morph_length` direction projected onto the technical XY plane: its angle with the Y axis, 0–90° |
 | `platform_width_chord`, `platform_width_path` | between the two ends: the straight distance; the shortest path along the surface within the platform region |
-| `platform_depth_chord`, `platform_depth_path` | between P and E: the same |
+| `platform_depth_chord`, `platform_depth_path` | between S₀ (where the platform stretch starts, at the platform's edge) and E: the same |
 | `platform_area` | the area of the platform region's triangles |
 | `epa_3pt_1mm`, `_2mm`, `_3mm` | EPA, three points: between E→P along the platform line and E→Q_d |
 | `epa_2ln_1mm`, `_2mm`, `_3mm` | EPA, two lines: between E→P along the platform line and the tangent at Q_d, away from E |
@@ -393,47 +395,63 @@ what needs them is not measured.
 | `psia` | platform surface interior angle, PSIA (McPherron et al. 2020): the angle at P between the lines to the two platform ends, in 3D; no unit needed |
 | `bulb_angle_3pt_1mm` | bulb angle, three points (Li et al. 2022): at the platform stretch's near end, between the platform line (P→E) and the line to Q_v |
 | `bulb_angle_2ln_1mm` | bulb angle, two lines: between the platform line (P→E) and the tangent at Q_v, away from the platform |
-| `bsa` | bulb surface angle (Nagai 2026): the angle at P, on the ventral reference plane, between the lines to the bulb outline's two ends |
+| `bsa` | bulb surface angle (Nagai 2026): the angle at P, on the proximal ventral plane, between the lines to the bulb outline's two ends |
 | `vi_0_5mm`, `vi_1_0mm`, `vi_1_5mm` | vertical interval (Nagai 2026): the range of the ventral surface's heights over the reference plane in a strip 0.5, 1.0, 1.5 mm wide from P to the bulb's top |
 | `pop_mesh_edge` | the mean length of the mesh's edges with both ends within `POP_MESH_RADIUS_MM` of P (how fine the mesh is where the bulb is measured) |
 
 * **S**, the longitudinal section: where the plane X = 0 cuts the mesh, the line nearest P.
-* **The platform stretch**: the part of S on the platform region nearest P; its end nearer P must be within
-  `PLATFORM_START_EDGES` (3) mean edge lengths of P, else there is none and no platform measure at all (nor
-  without a platform region or an axis). **E**: its far end. **The platform line**: the stretch resampled
-  to `FIT_RESAMPLE_COUNT` equally spaced points, total least squares, directed P→E.
+* **What needs S** (from 32b): the platform depth, EPA, the bulb angle and IPA. The platform area needs the platform region only, the two
+  widths the region and two ends: they are measured whatever S does. **The reach**: `PLATFORM_REACH_MM` (1.0), or without a stated unit
+  `PLATFORM_REACH_EDGES` (5) mean edge lengths. When P lies farther than that from the platform region (its nearest point on the region's
+  triangles), what needs S is empty (`pop_off_platform`).
+* **The platform stretch**: the part of S on the platform region nearest P; its end nearer P, **S₀**, must be within the reach of P, else
+  there is none and what needs S is empty (`section_misses_platform`). S₀ is where the section meets the platform's edge on the ventral side:
+  the platform depth is measured from it, and it is the vertex of EPA's platform line and of the bulb angle. P is a vertex only in PSIA.
+  **E**: its far end. **The platform line**: the stretch resampled to `FIT_RESAMPLE_COUNT` equally spaced points, total least squares,
+  directed S₀→E (written P→E below, as before).
 * **Q_d**: from E along S away from the stretch (the dorsal side), arc length d in `EPA_DISTANCES_MM`. **The tangent** at Q_d:
   the chord between the points `TWO_LINES_LENGTH_MM` / 2 before and after it along S. Empty when S ends first.
 * A line takes `MIN_FIT_POINTS` (2) points before resampling: a platform stretch always gives one. Fewer than two ends: the two widths are empty.
 * **IPA's band** (from 32a): the triangles of the ventral region whose centroid has technical Y from `from` to `to` = `IPA_BAND_END` (0.75)
-  × `tech_length`. `from` is the largest technical Y of the main bulb's vertices (the bulb as the BSA takes it, at the specimen's level, so
-  changing the level moves it); without a bulb (`no_bulb`) or without a unit, `IPA_BAND_FALLBACK_START` (0.25) × `tech_length`. Left out:
-  the triangles with a vertex in the main bulb, and those of the lower layer's `retouch` and `damage` regions (other types, custom ones
-  included, stay in). **Its plane**: those triangles' least-squares plane, each by its area (as the ventral reference plane), its normal away
+  × `tech_length`. `from` is the largest technical Y of the main bulb's vertices when it is a bulb (found, above the noise, closed at the
+  sides; the bulb as the BSA takes it, at the specimen's level, so changing the level moves it); otherwise, or without a unit,
+  `IPA_BAND_FALLBACK_START` (0.25) × `tech_length`. Left out: the triangles with a vertex in the main bulb (only when it is a bulb), and
+  those of the lower layer's `retouch` and `damage` regions (other types, custom ones included, stay in). IPA needs the platform line and
+  the ventral region, not a BSA. **Its plane**: those triangles' least-squares plane, each by its area (as the BSA's plane), its normal away
   from the dorsal face; then, once, each triangle's centroid's signed distance to it, their median m and σ̂ = 1.4826 × the median of
   |distance − m|; the triangles farther than `IPA_TRIM_SIGMA` (3) × σ̂ from m left out, and the plane fitted again. **IPA**: the angle between
   the platform line (P→E) and normalize(normal × X), the line where the plane meets S's plane, directed +Y.
 * IPA is empty without a ventral region (`no_ventral`), and when the triangles fitted at last cover less than `IPA_MIN_BAND_SHARE` (0.05) of
-  the ventral region's area (`band_too_small`: a bulb reaching past 0.75 of the length, or a band all retouch).
+  the ventral region's area (`band_too_small`: a band all retouch, say).
 * **Q_v**: from the platform stretch's near end along S away from it (the ventral side), arc length `BULB_ANGLE_DISTANCE_MM` (1.0);
   the tangent there as for Q_d. Empty when S ends first.
-* **The ventral reference plane**: the least-squares plane of the ventral region's surface (each triangle by its area and its own second
-  moments), normal away from the dorsal face. **Height**: the distance above it, outward positive.
+* **The proximal ventral plane** (the BSA's reference, from 32b; also "Proximal ventral" in shading by height): the triangles of the
+  ventral region whose centroid lies within R = min(`BSA_REF_RADIUS_MM` (10), 0.5 × `tech_length`) of P (without a unit: 0.5 ×
+  `tech_length`), less the lower layer's `retouch` and `damage` triangles; their least-squares plane (each triangle by its area and its own
+  second moments), normal away from the dorsal face; then at most `BSA_REF_ITERATIONS` (3) times: each centroid's signed distance r over
+  it (outward positive), their median m and σ̂ = 1.4826 × the median of |r − m| (both weighted by the triangles' areas); left out those
+  with r − m > `BSA_REF_TRIM_UP` (2) × σ̂ (the bulb) or |r − m| > 3 × σ̂; the rest fitted again; stopping when the rest stays the same. The
+  last σ̂ is the surface's noise there (`bsaReference.noise`). **Height**: the distance above that plane, outward positive.
 * **The main bulb**: the ventral vertices at or above the level (`bsa.level`) joined along the triangles' edges into parts; the part that
   comes nearest P, within `BSA_NEAR_POP_MM` (2) (of two as near, the larger). **Its outline**: where the triangles round it cross the level.
   **Its ends**: seen from P laid onto the plane, the outline's points farthest round from the technical +Y (laid onto the plane) each way;
   both must lie on their own side of +Y. **Its top**: its highest vertex.
+* **A bulb**: the main bulb is no bulb when its top is lower than `BSA_MIN_PROMINENCE` (3) × the noise. It is **not closed at the sides**
+  when one of its vertices lies on the ventral region's border (an edge of one ventral triangle only) farther than `BSA_OPEN_REACH_MM` (2)
+  from P.
 * **VI's strips**: on the plane, from P to the top, `VI_WIDTHS_MM` [0.5, 1.0, 1.5] wide, sampled every `VI_SAMPLE_MM` (0.02) (where
   several layers of the surface lie over a sample, the outermost).
-* Empty: without a unit, the bulb angle, BSA, VI and `pop_mesh_edge` (`no_unit`); without a ventral region, BSA and VI (`no_ventral`); with
-  no part near P, or no outline, BSA and VI (`no_bulb`); with both ends on one side, BSA (`bulb_one_side`). Ends set by hand give a BSA
-  whatever the outline.
+* Empty: without a unit, the bulb angle, BSA, VI and `pop_mesh_edge` (`no_unit`); without a ventral region near P, BSA and VI
+  (`no_ventral`); with no part near P, no outline or a top under the noise, BSA and VI (`no_bulb`, whatever the ends: the index is of a
+  bulb); not closed at the sides, BSA and VI (`bulb_open`) unless the ends were set by hand; with both ends on one side, BSA
+  (`bulb_one_side`) unless the ends were set by hand.
 * **Paths** run on the region's triangles only: the shortest way over its mesh edges; then, on the triangles that way passes
   through, over 3 points on each side, those crossings pulled taut.
 * `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `FIT_RESAMPLE_COUNT` 200,
   `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND_END` 0.75, `IPA_BAND_FALLBACK_START` 0.25, `IPA_TRIM_SIGMA` 3,
-  `IPA_MIN_BAND_SHARE` 0.05, `MIN_FIT_POINTS` 2, `PLATFORM_START_EDGES` 3,
-  `BULB_ANGLE_DISTANCE_MM` 1, `BSA_LEVEL_DEFAULT_MM` 0.1, `BSA_LEVEL_RANGE_MM` [−1, 1], `BSA_NEAR_POP_MM` 2, `VI_WIDTHS_MM` [0.5, 1, 1.5],
+  `IPA_MIN_BAND_SHARE` 0.05, `MIN_FIT_POINTS` 2, `PLATFORM_REACH_MM` 1, `PLATFORM_REACH_EDGES` 5,
+  `BULB_ANGLE_DISTANCE_MM` 1, `BSA_LEVEL_DEFAULT_MM` 0.1, `BSA_LEVEL_RANGE_MM` [−1, 1], `BSA_NEAR_POP_MM` 2, `BSA_REF_RADIUS_MM` 10,
+  `BSA_REF_ITERATIONS` 3, `BSA_REF_TRIM_UP` 2, `BSA_MIN_PROMINENCE` 3, `BSA_OPEN_REACH_MM` 2, `VI_WIDTHS_MM` [0.5, 1, 1.5],
   `VI_SAMPLE_MM` 0.02, `POP_MESH_RADIUS_MM` 2.
 
 ## Edge angles

@@ -150,7 +150,7 @@ describe('what the hints draw comes back to the numbers', () => {
   });
 
   it('the platform\'s width and depth: the straight line and the way over the surface, the ends as dots', () => {
-    for (const [chord, path, a, b] of [['platform_width_chord', 'platform_width_path', ...r.construction.width!.ends], ['platform_depth_chord', 'platform_depth_path', r.construction.depth!.P, r.construction.depth!.E]] as Array<[FlakeMeasure, FlakeMeasure, Vec3, Vec3]>) {
+    for (const [chord, path, a, b] of [['platform_width_chord', 'platform_width_path', ...r.construction.width!.ends], ['platform_depth_chord', 'platform_depth_path', r.construction.depth!.S, r.construction.depth!.E]] as Array<[FlakeMeasure, FlakeMeasure, Vec3, Vec3]>) {
       const h = hint(chord);
       close(lengthOf(line(h, 'chord')), v[chord]!);
       close(lengthOf(line(h, 'path')), v[path]!);
@@ -217,7 +217,8 @@ describe('what the hints draw comes back to the numbers', () => {
     for (let i = 0; i < m.positions.length; i += 3) best = Math.min(best, size(sub([m.positions[i], m.positions[i + 1], m.positions[i + 2]], at)));
     expect(best).toBeLessThan(1e-4);
     expect(size(offset)).toBeGreaterThan(0);
-    close(size(sub(r.construction.depth!.P, r.geometry.P!)), 0);
+    // the depth from S, where the section's platform stretch starts: the bulb angle's vertex too
+    close(size(sub(r.construction.depth!.S, r.construction.profile!.bulbAt)), 0);
   });
 
   it('an empty value draws nothing', () => {

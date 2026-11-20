@@ -4700,6 +4700,15 @@ input[type="checkbox"]:disabled {
   stroke-width: 2.6;
 }
 
+/* where the BSA's plane was fitted: faint */
+.bulb-reference {
+  fill: var(--ink-3);
+  fill-opacity: 0.06;
+  stroke: var(--ink-3);
+  stroke-opacity: 0.5;
+  stroke-width: 1;
+}
+
 .bulb-strip {
   fill: none;
   stroke: var(--ink-2);
