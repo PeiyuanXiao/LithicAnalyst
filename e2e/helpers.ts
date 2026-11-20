@@ -45,6 +45,8 @@ export interface LithicApi {
     /** The bulb as last measured (its level, ends, outline, strips), and the ventral reference plane. */
     bulb: import('../src/compute/flake').BulbConstruction | null;
     plane: import('../src/compute/bulb').BulbPlane | null;
+    /** IPA's band as fitted (as stored), or null. */
+    ipaBand: import('../src/compute/ipa').IpaBand | null;
   } | null;
   sectionPanel(): { shown: boolean; at: number; width: number | null; thickness: number | null; ring: number };
   exportFlakesCsvText(): string;

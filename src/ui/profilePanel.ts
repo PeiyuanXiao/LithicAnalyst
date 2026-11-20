@@ -36,6 +36,8 @@ const WIDTH = 440;
 const HEIGHT = 230;
 const MARGIN = 10;
 const GAP = 16;
+/** Half the length of the marks of IPA's band across the section (px). */
+const TICK_PX = 6;
 
 /**
  * The two sections of a flake, to one scale: on the left the longitudinal one (X = 0 of the
@@ -151,22 +153,37 @@ export class ProfilePanel {
         s.append(text);
       }
     };
+    /** An arc at `at` from the direction to `a` to the direction of `from`→`to`, `r` px out. */
+    const arc = (at: Vec3, a: Vec3, from: Vec3, to: Vec3, r: number, cls: string, id: string) => {
+      const p = local(at), q = local(a), f = local(from), t = local(to);
+      const a0 = Math.atan2(y(q[1]) - y(p[1]), x(q[2]) - x(p[2])), a1 = Math.atan2(y(t[1]) - y(f[1]), x(t[2]) - x(f[2]));
+      let sweep = a1 - a0;
+      while (sweep > Math.PI) sweep -= 2 * Math.PI;
+      while (sweep < -Math.PI) sweep += 2 * Math.PI;
+      const cx = x(p[2]), cy = y(p[1]);
+      s.append(svg('path', { d: `M${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)}A${r} ${r} 0 0 ${sweep > 0 ? 1 : 0} ${cx + r * Math.cos(a0 + sweep)} ${cy + r * Math.sin(a0 + sweep)}`, class: cls, id }));
+    };
+    /** A short mark across the section at a point, level with it (its technical Y). */
+    const tick = (p: Vec3 | null | undefined, id: string) => {
+      if (!p) return;
+      const q = local(p);
+      s.append(svg('line', { x1: x(q[2]) - TICK_PX, y1: y(q[1]), x2: x(q[2]) + TICK_PX, y2: y(q[1]), class: 'profile-ipa-tick', id }));
+    };
     if (g) {
-      line(g.ventral, 'profile-ventral', 'profile-ventral');
-      line(g.ventralLine, 'profile-fit', 'profile-ventral-fit');
+      // IPA: the band's two ends on the ventral side, where its plane meets the section over it, and the angle at P
+      tick(g.ipaFrom, 'profile-ipa-from');
+      tick(g.ipaTo, 'profile-ipa-to');
+      if (g.ipaLine) {
+        line(g.ipaLine, 'profile-fit', 'profile-ipa-line');
+        if (g.P && g.E) arc(g.P, g.E, g.ipaLine[0], g.ipaLine[1], 16, 'profile-ipa-arc', 'profile-ipa-arc');
+      }
       line(g.platformLine, 'profile-fit', 'profile-platform-line');
       g.epaPoints.forEach((q, i) => dot(q, 'profile-epa', null, `profile-epa-${i + 1}`));
       // the bulb angle at 1 mm: from the platform line's end at P, to Qv on the ventral side, the chord there, and the angle
       if (g.bulbAt && g.bulbQ && g.E) {
         line([g.bulbAt, g.bulbQ], 'profile-bulb-line', 'profile-bulb-line');
         line(g.bulbChord ?? null, 'profile-bulb-chord', 'profile-bulb-chord');
-        const at = local(g.bulbAt), q = local(g.bulbQ), e = local(g.E);
-        const a0 = Math.atan2(y(e[1]) - y(at[1]), x(e[2]) - x(at[2])), a1 = Math.atan2(y(q[1]) - y(at[1]), x(q[2]) - x(at[2]));
-        let sweep = a1 - a0;
-        while (sweep > Math.PI) sweep -= 2 * Math.PI;
-        while (sweep < -Math.PI) sweep += 2 * Math.PI;
-        const r = 12, cx = x(at[2]), cy = y(at[1]);
-        s.append(svg('path', { d: `M${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)}A${r} ${r} 0 0 ${sweep > 0 ? 1 : 0} ${cx + r * Math.cos(a0 + sweep)} ${cy + r * Math.sin(a0 + sweep)}`, class: 'profile-bulb-arc', id: 'profile-bulb-arc' }));
+        arc(g.bulbAt, g.E, g.bulbAt, g.bulbQ, 12, 'profile-bulb-arc', 'profile-bulb-arc');
         dot(g.bulbQ, 'profile-bulb', null, 'profile-bulb-q');
       }
       dot(g.P, 'profile-point', 'P', 'profile-p');

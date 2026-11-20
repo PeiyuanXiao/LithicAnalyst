@@ -56,6 +56,21 @@ export async function placeEnds(page: Page): Promise<void> {
   expect((await state(page)).landmarks.filter((l) => l.code === 'platform_end')).toHaveLength(2);
 }
 
+/** Along the boundary of T1's ventral face, from one platform end round to the other, typed an edge (key 2): it gives the ventral and dorsal faces. */
+export async function drawEdge(page: Page): Promise<void> {
+  // the flake lying across the view, nothing over its corners
+  if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
+  await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [-1, 0, 0]));
+  await nextFrames(page);
+  await page.keyboard.press('p');
+  for (const p of [[-14.7, 0.3, 0], [-14.7, 59.7, 0], [14.7, 59.7, 0], [14.7, 0.3, 0]] as Vec3[]) await curveClick(page, await toScreen(page, p), { shift: true });
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await state(page)).curves.length).toBe(2);
+  await page.keyboard.press('v');
+  await page.keyboard.press('2');
+  await expect.poll(async () => (await state(page)).curves[1].attributes.type).toBe('edge');
+}
+
 export async function annotate(page: Page): Promise<void> {
   await drawAxis(page);
   await drawOutline(page);

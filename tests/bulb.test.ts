@@ -11,7 +11,8 @@ import { flakesCsv } from '../src/io/csv';
 import { buildEdges, meshTopology, signedVolume } from '../src/compute/meshGeometry';
 import { frameMatrix } from '../src/core/frame';
 import type { Vec3 } from '../src/core/types';
-import { flakeT8, T8, t8Bulb, t8Dorsal } from './meshes';
+import { flakeT8, T8, t8Bulb, t8Dorsal, T8_RETOUCH } from './meshes';
+import { IPA_BAND_END, IPA_BAND_FALLBACK_START } from '../src/compute/ipa';
 
 const deg = (r: number) => (r * 180) / Math.PI;
 const m = flakeT8(true);
@@ -380,6 +381,109 @@ describe('the BSA\'s settings', () => {
     expect(csv()).toMatchObject({ bsa_level_mm: '0.15', bsa_ends_moved: 'true' });
     // a file from before the proximal measures: the columns, empty
     expect(flakesCsv(s.state, { tech_length: 3 } as Partial<FlakeMeasures>, { excelBom: false }).trim().split('\n')[1].split(',').slice(-10)).toEqual(['', '', '', '', '0.15', 'true', '', '', '', '']);
+  });
+});
+
+/** The bulb's far end at a level: the largest y where the height over the plane reaches it (the bump is one piece). */
+function bulbEnd(level: number): number {
+  let far = 0;
+  for (let r = 0.0025; r < T8.Rb; r += 0.0025)
+    for (let p = -T8.phi2; p <= T8.phi2; p += 0.05) if (heightPolar(r, p) >= level) far = Math.max(far, r * Math.cos((p * Math.PI) / 180));
+  return far;
+}
+
+/** Another T8 measured as T8 is (the frame, P, the ends, its platform and ventral face). */
+function runOn(mesh: ReturnType<typeof flakeT8>, o: Partial<FlakeInput> = {}): FlakeResult {
+  return run({ positions: mesh.positions, index: mesh.index, platformFaces: mesh.platform, ventralFaces: mesh.ventral, edges: buildEdges(mesh.index, mesh.positions.length / 3), ...o });
+}
+
+describe('IPA on T8: the plane of a band of the ventral face (32a)', () => {
+  // the platform is the plane y = 0 (its line P→E is +Z), the ventral face below the bulb z = 0 (+Y): 90° between them
+  const r = run();
+
+  it('the angle between the platform and the flat ventral face (±0.2°)', () => {
+    expect(Math.abs(r.measures.ipa! - 90)).toBeLessThan(0.2);
+    expect(r.reasons.ipa).toBeUndefined();
+  });
+
+  it('the band: from the bulb\'s far end (within a ring, 0.2 mm, of where the height falls below the level) to 0.75 of the length', () => {
+    const band = r.ipaBand!;
+    expect(band.fallback).toBe(false);
+    const end = bulbEnd(BSA_LEVEL_DEFAULT_MM);
+    // the far end is a vertex, on a ring inside the outline
+    expect(band.from).toBeLessThanOrEqual(end + 1e-6);
+    expect(end - band.from).toBeLessThan(0.2 + 0.01);
+    expect(band.to).toBeCloseTo(IPA_BAND_END * r.measures.tech_length!, 9);
+    expect(band.area).toBeGreaterThan(0);
+    // what was fitted and what left out: the bulb's triangles among the latter
+    const c = r.construction.ipa!;
+    expect(c.fitted.length).toBeGreaterThan(0);
+    const bulbFaces = Array.from(c.excluded).filter((t) => [0, 1, 2].every((k) => Math.hypot(m.positions[3 * m.index[3 * t + k]], m.positions[3 * m.index[3 * t + k] + 1]) < 1));
+    expect(bulbFaces.length).toBeGreaterThan(0);
+    // the line on the section: in the plane x = 0, along +Y, over the band
+    expect(Math.abs(c.line[0][0]) + Math.abs(c.line[1][0])).toBeLessThan(1e-9);
+    expect(c.line[0][1]).toBeCloseTo(band.from, 6);
+    expect(c.line[1][1]).toBeCloseTo(band.to, 6);
+    expect(angleOf(c.dir, [0, 1, 0])).toBeLessThan(0.2);
+    // the profile panel's marks: on the section's ventral side, at the band's two ends
+    expect(r.geometry.ipaFrom![1]).toBeCloseTo(band.from, 6);
+    expect(r.geometry.ipaTo![1]).toBeCloseTo(band.to, 6);
+    expect(r.geometry.ipaLine).toEqual(c.line);
+  });
+
+  it('a raised level moves the band\'s start with the bulb\'s end', () => {
+    const higher = run({ bsa: { level: 0.3, ends: null } });
+    expect(higher.ipaBand!.from).toBeLessThan(r.ipaBand!.from);
+    expect(bulbEnd(0.3) - higher.ipaBand!.from).toBeLessThan(0.2 + 0.01);
+    expect(Math.abs(higher.measures.ipa! - 90)).toBeLessThan(0.2);
+  });
+
+  it('retouch in the band, slanted: left out, the angle stands (±0.2°); taken in, it does not', () => {
+    const t = flakeT8(true, null, { retouch: true });
+    expect(t.retouch.length).toBeGreaterThan(100);
+    const left = runOn(t, { leftOutFaces: t.retouch });
+    expect(Math.abs(left.measures.ipa! - 90)).toBeLessThan(0.2);
+    // every retouched triangle in the band is among those left out
+    const excluded = new Set(left.construction.ipa!.excluded);
+    const inBand = Array.from(t.retouch).filter((f) => {
+      const y = [0, 1, 2].reduce((s, k) => s + t.positions[3 * t.index[3 * f + k] + 1], 0) / 3;
+      return y >= left.ipaBand!.from && y <= left.ipaBand!.to;
+    });
+    expect(inBand.length).toBeGreaterThan(0);
+    for (const f of inBand) expect(excluded.has(f)).toBe(true);
+    // the control: the same with the patch taken in
+    const taken = runOn(t);
+    expect(Math.abs(taken.measures.ipa! - 90)).toBeGreaterThan(1);
+    expect(T8_RETOUCH.y1).toBeLessThanOrEqual(IPA_BAND_END * T8.R);
+  });
+
+  it('a ripple and a few sharp bumps in the band: the angle stands (±0.3°), and the bumps are trimmed', () => {
+    const t = flakeT8(true, null, { ripple: true });
+    const x = runOn(t);
+    expect(Math.abs(x.measures.ipa! - 90)).toBeLessThan(0.3);
+    expect(x.ipaBand!.trimmed).toBeGreaterThan(0);
+  });
+
+  it('no unit: no bulb, so the band starts at 0.25 of the length, and says so', () => {
+    const x = run({ unit: '' });
+    expect(x.ipaBand!.fallback).toBe(true);
+    expect(x.ipaBand!.from).toBeCloseTo(IPA_BAND_FALLBACK_START * x.measures.tech_length!, 9);
+    expect(Math.abs(x.measures.ipa! - 90)).toBeLessThan(0.2);
+  });
+
+  it('a level that takes the bulb past 0.75 of the length: too little band (band_too_small)', () => {
+    const x = run({ bsa: { level: -0.2, ends: null } });
+    expect(x.ipaBand!.from).toBeGreaterThan(IPA_BAND_END * x.measures.tech_length!);
+    expect(x.measures.ipa).toBeNull();
+    expect(x.reasons.ipa).toBe('band_too_small');
+    expect(x.construction.ipa).toBeNull();
+  });
+
+  it('no ventral face: none (no_ventral)', () => {
+    const x = run({ ventralFaces: null });
+    expect(x.measures.ipa).toBeNull();
+    expect(x.reasons.ipa).toBe('no_ventral');
+    expect(x.ipaBand).toBeNull();
   });
 });
 

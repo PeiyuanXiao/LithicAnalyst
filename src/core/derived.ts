@@ -1,3 +1,4 @@
+import type { IpaBand } from '../compute/ipa';
 import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
 import type { ConfigBox } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
@@ -48,6 +49,8 @@ export interface FlakeDerived {
   frameSource: string;
   measures: FlakeMeasures;
   geometry: FlakeGeometry;
+  /** IPA's band as fitted: technical Y from and to (coordinate units), the area fitted, whether it started at the fallback, the triangles trimmed; null: none was fitted. */
+  ipaBand: IpaBand | null;
 }
 
 /** One curve's edge angles. */
@@ -174,7 +177,7 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     relations: relationResults(state),
     landmarks: landmarkTable(state),
     configuration: state.specimen.type === 'core' ? coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null) : null,
-    flake: state.specimen.type === 'flake' && mesh?.flake ? { parameters: FLAKE_PARAMETERS, frameSource: frameSource(state), measures: mesh.flake.measures, geometry: mesh.flake.geometry } : null,
+    flake: state.specimen.type === 'flake' && mesh?.flake ? { parameters: FLAKE_PARAMETERS, frameSource: frameSource(state), measures: mesh.flake.measures, geometry: mesh.flake.geometry, ipaBand: mesh.flake.ipaBand } : null,
     edgeAngles: mesh?.edgeAngles?.length ? { parameters: EDGE_ANGLE_PARAMETERS, curves: [...mesh.edgeAngles] } : null,
     retouchAngles: mesh?.retouchAngles?.length ? { curves: [...mesh.retouchAngles] } : null,
     ...(state.specimen.type === 'flake' && mesh?.retouchIndices ? { retouchIndices: mesh.retouchIndices } : {}),

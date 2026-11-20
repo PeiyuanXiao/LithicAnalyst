@@ -4642,10 +4642,16 @@ input[type="checkbox"]:disabled {
   stroke-width: 1.4;
 }
 
-.profile-ventral {
-  stroke: #c8611f;
-  stroke-width: 3;
-  stroke-opacity: 0.45;
+/* IPA's band: its ends marked across the section, the angle at P */
+.profile-ipa-tick {
+  stroke: #3a7fd5;
+  stroke-width: 1.6;
+}
+
+.profile-ipa-arc {
+  fill: none;
+  stroke: #3a7fd5;
+  stroke-width: 1.2;
 }
 
 .profile-scale {

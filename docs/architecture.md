@@ -550,7 +550,7 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
 ## The proximal end
 
 PSIA, the bulb angle, BSA, VI and the mesh's edge at P are flake measures like the rest: `flakeMeasuresSteps` computes them with the others,
-each with its construction, `FLAKE_EMPTY_REASONS` (now also `no_ventral`, `no_bulb`, `bulb_one_side`) says why one is empty, and
+each with its construction, `FLAKE_EMPTY_REASONS` (now also `no_ventral`, `no_bulb`, `bulb_one_side`, `band_too_small`) says why one is empty, and
 `derived.flake.measures` keeps the latest. The bulb's own work is in `compute/bulb.ts` (pure, in steps); its named constants go into
 `FLAKE_PARAMETERS`.
 
@@ -571,6 +571,18 @@ each with its construction, `FLAKE_EMPTY_REASONS` (now also `no_ventral`, `no_bu
 * **VI**: for each of `VI_WIDTHS_MM`, the strip `w` wide along `y` from P to the bulb's top (its highest vertex); the ventral triangles over
   the strip are rasterised onto samples `VI_SAMPLE_MM` apart (the outermost surface where several lie over a sample), and VI is the range of
   the heights. Each strip returns its corners and its highest and lowest samples, for the hint and the bulb page.
+* **IPA** (`compute/ipa.ts`, `ipaSteps`; from 32a): computed after the bulb, since its band starts where the bulb ends, and after the
+  profile, since it takes the platform line from it. The band: the ventral triangles whose centroid's technical Y lies from the main bulb's
+  farthest vertex (`BulbResult.region`; without a bulb or a unit, `IPA_BAND_FALLBACK_START` of the technical length) to `IPA_BAND_END` of
+  it. Left out: the triangles touching the bulb, and those of the lower layer's retouch and damage regions (`FlakeInput.leftOutFaces`:
+  `App.updateFlake` gathers their pieces with `facesOfPiecesSteps`, as it does the upper layer's; the compare mode takes them from an
+  observer's face labels). The rest are fitted by `referencePlaneSteps`; the residuals of their centroids give a median and a MAD (by
+  quickselect, so no sort blocks), those beyond `IPA_TRIM_SIGMA` robust deviations go, and the rest are fitted again; under
+  `IPA_MIN_BAND_SHARE` of the ventral area, `band_too_small`. The plane meets the section's plane along normal × X; IPA is its angle with
+  the platform line. `ipaSteps` returns the triangles fitted and left out, the line over the band and the plane's patch across it
+  (`FlakeConstruction.ipa`, for the hint: `faces` prims in the current tint and the fainter `excluded` one, a `patch`, the lines, the arc
+  at P); `FlakeGeometry.ipaFrom`, `ipaTo` and `ipaLine` (where the section's ventral side reaches the band's ends, `reachingY`) are the
+  profile panel's marks and line. `FlakeResult.ipaBand` goes into `derived.flake.ipaBand`.
 * **Mesh at P** (`meshEdgeNearSteps`): the mean length of the mesh's edges with both ends within `POP_MESH_RADIUS_MM` of P, from the edge table
   built once a model. It says how far the bulb's numbers can be trusted; the list shows it receding.
 * **Settings**: `setBsaLevel` (clamped to `BSA_LEVEL_RANGE_MM`, `BSA_LEVEL_STEP_MM`) and `setBsaEnds` are `SetFlakeCommand`s; changes of the
@@ -578,8 +590,8 @@ each with its construction, `FLAKE_EMPTY_REASONS` (now also `no_ventral`, `no_bu
 * **Measure list**: the flake's groups are technical axis, morphology, whole, proximal end; the proximal end lists platform width and depth,
   platform area, EPA, IPA, PSIA, the bulb angle (a table: three points, two lines), BSA with its level before it, VI (a table: 0.5, 1.0,
   1.5 mm) and the mesh's edge at P. Each cell's hint draws only the returned geometry: PSIA's lines and arc; the bulb angle's points, chord and
-  arc; BSA's plane (a `patch` prim), outline, ends, lines and arc; VI's strip, its top and its highest and lowest samples; the mesh's edges
-  round P.
+  arc; BSA's plane (a `patch` prim), outline, ends, lines and arc; VI's strip, its top and its highest and lowest samples; IPA's band (above);
+  the mesh's edges round P.
 
 ### Shading by height
 
@@ -898,7 +910,7 @@ Harris matrix) are downloads as before (`io/saveFile.ts`).
   its own copy.
 * `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
-  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The proximal end (reference plane, bulb, BSA, VI, the mesh at P, shading by height and the bulb page's lines) is timed on T8 (`tests/meshes.ts`) made as dense (rings 0.02 mm apart). The longest stretch is what
+  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The proximal end (reference plane, bulb, BSA, VI, IPA's band, the mesh at P, shading by height and the bulb page's lines) is timed on T8 (`tests/meshes.ts`) made as dense (rings 0.02 mm apart). The longest stretch is what
   design principle 10 limits to about 100 ms.
 
 ## Interface text

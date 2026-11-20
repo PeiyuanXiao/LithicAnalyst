@@ -38,6 +38,7 @@ import { buildLoadedMesh } from '../src/io/loadMesh';
 import { SurfaceSnap } from '../src/tools/surfaceSnap';
 import { BSA_LEVEL_DEFAULT_MM, bulbSteps, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, referencePlaneSteps, surfaceOverSteps, windowContoursSteps } from '../src/compute/bulb';
 import { heightColors } from '../src/compute/colormap';
+import { ipaSteps } from '../src/compute/ipa';
 import { buildEdgesSteps } from '../src/compute/meshGeometry';
 import { flakeT8 } from '../tests/meshes';
 
@@ -351,7 +352,7 @@ async function benchGenerated(triangles: number): Promise<void> {
 
 /**
  * ⑫ The proximal end, on T8 (tests/meshes.ts: a flake with a bulb, in mm) made as dense as the model above: the ventral reference plane,
- * the bulb (its outline, BSA, VI), the mesh round P, shading by height (heights, colours, lines) and the bulb page's lines.
+ * the bulb (its outline, BSA, VI), IPA's band, the mesh round P, shading by height (heights, colours, lines) and the bulb page's lines.
  */
 function benchProximal(triangles: number): void {
   // ventral + dorsal ≈ 4 × rings × arcs triangles, rings 0.02 mm apart over T8's 20 mm
@@ -364,6 +365,9 @@ function benchProximal(triangles: number): void {
   if (!plane) throw new Error('no ventral plane');
   const bulb = steps('12b the bulb: outline, ends, BSA, VI', bulbSteps({ positions: pos, index: idx, faces: ventral, plane, P, mm: 1, level: BSA_LEVEL_DEFAULT_MM, ends: null }));
   console.log(`BSA ${bulb.bsa?.toFixed(2)}°, VI ${bulb.vi?.map((s) => s.value?.toFixed(3)).join(' / ')} mm`);
+  // IPA: the band from the bulb's far end to 0.75 of the length (T8's frame is the model's, P at its origin, 20 long; the platform line +Z)
+  const ipa = steps('12j IPA: the band, its fit, the trim, the fit again', ipaSteps({ positions: pos, index: idx, ventral, leftOut: null, bulb: bulb.region, frame: { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], origin: P }, techLength: 20, lineDir: [0, 0, 1] }));
+  console.log(`IPA ${ipa.ipa?.toFixed(2)}°, band ${ipa.band.from.toFixed(2)}–${ipa.band.to.toFixed(2)}, ${ipa.fitted.length} triangles fitted, ${ipa.band.trimmed} trimmed`);
   const edges = steps("12c the mesh's edges (once a model)", buildEdgesSteps(idx, pos.length / 3));
   steps(`12d mean edge within ${POP_MESH_RADIUS_MM} mm of P`, meshEdgeNearSteps(pos, idx, P, POP_MESH_RADIUS_MM, edges));
   steps('12e an end let go off the outline (Shift): the surface over it', surfaceOverSteps(pos, idx, ventral, plane, 1, 2));

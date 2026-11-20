@@ -474,7 +474,39 @@ export function t8Rings(fine: boolean): number[] {
 /** The steps of T8's half circle (an odd number), fine or coarse. */
 export const t8Arcs = (fine: boolean): number => (fine ? 241 : 145);
 
-export function flakeT8(fine = true, dense: { step: number; arcs: number } | null = null): Mesh & { ventral: Uint32Array; platform: Uint32Array; dorsal: Uint32Array } {
+/**
+ * T8's variants for IPA's band (32a), on the ventral face between the bulb and 0.75 of the technical length (y = 15):
+ * `retouch`, a patch (`T8_RETOUCH`) slanted up toward the dorsal face along +Y, by `rise` at its far side and back down beyond it, its
+ * sides eased in over 1 mm; `ripple`, a small wave over the face beyond y = 8 and a few sharp bumps outward (`T8_SPIKES`).
+ */
+export const T8_RETOUCH = { x0: -10, x1: 10, y0: 11, y1: 15, rise: 0.4 };
+export const T8_RIPPLE = { amplitude: 0.02, wavelength: 2, from: 8 };
+export const T8_SPIKES: Array<[number, number]> = [[-6, 9], [5, 10.5], [-3, 13], [8, 13.5]];
+const T8_SPIKE = { height: 0.6, sigma: 0.25 };
+
+const ease = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+
+/** What a variant adds to the ventral face's z at (x, y) (+z: toward the dorsal face). */
+export function t8Extra(x: number, y: number, o: { retouch?: boolean; ripple?: boolean }): number {
+  let z = 0;
+  if (o.retouch) {
+    const { x0, x1, y0, y1, rise } = T8_RETOUCH;
+    const along = y <= y0 ? 0 : y <= y1 ? (y - y0) / (y1 - y0) : Math.max(0, 1 - (y - y1));
+    const across = Math.min(ease(x - x0 + 1), ease(x1 + 1 - x));
+    z += rise * along * across;
+  }
+  if (o.ripple) {
+    const { amplitude, wavelength, from } = T8_RIPPLE;
+    z += amplitude * ease(y - (from - 1)) * Math.sin((2 * Math.PI * x) / wavelength) * Math.sin((2 * Math.PI * y) / wavelength);
+    for (const [sx, sy] of T8_SPIKES) z -= T8_SPIKE.height * Math.exp(-((x - sx) ** 2 + (y - sy) ** 2) / (2 * T8_SPIKE.sigma ** 2));
+  }
+  return z;
+}
+
+/** Whether a point is in T8's retouch patch (its eased sides and its far slope down included). */
+export const inT8Retouch = (x: number, y: number): boolean => x >= T8_RETOUCH.x0 - 1 && x <= T8_RETOUCH.x1 + 1 && y >= T8_RETOUCH.y0 && y <= T8_RETOUCH.y1 + 1;
+
+export function flakeT8(fine = true, dense: { step: number; arcs: number } | null = null, variant: { retouch?: boolean; ripple?: boolean } = {}): Mesh & { ventral: Uint32Array; platform: Uint32Array; dorsal: Uint32Array; retouch: Uint32Array } {
   // `dense` (the bench): rings `step` apart all the way out, `arcs` steps of the half circle
   const rings = dense ? Array.from({ length: Math.round(T8.R / dense.step) }, (_, i) => Math.round((i + 1) * dense.step * 1e6) / 1e6) : t8Rings(fine);
   const arcs = dense ? dense.arcs : t8Arcs(fine);
@@ -494,7 +526,12 @@ export function flakeT8(fine = true, dense: { step: number; arcs: number } | nul
     return [r * Math.sin(f), r * Math.cos(f), h];
   };
   const P = add([0, 0, 0]);
-  const V: number[][] = rings.map((r) => Array.from({ length: arcs + 1 }, (_, j) => add(at(r, j, -t8Bulb(r, phiOf(j))))));
+  const ventralAt = (r: number, j: number): Vec3 => {
+    const p = at(r, j, 0);
+    return [p[0], p[1], -t8Bulb(r, phiOf(j)) + t8Extra(p[0], p[1], variant)];
+  };
+  // (the last ring is the sharp edge, shared with the dorsal face: the variants keep off it)
+  const V: number[][] = rings.map((r) => Array.from({ length: arcs + 1 }, (_, j) => add(ventralAt(r, j))));
   const E = add([0, 0, T8.D]);
   // the dorsal rings but the last, which is the ventral one (the sharp edge)
   const D: number[][] = rings.map((r, i) => (i === N - 1 ? V[N - 1] : Array.from({ length: arcs + 1 }, (_, j) => add(at(r, j, t8Dorsal(r))))));
@@ -541,5 +578,27 @@ export function flakeT8(fine = true, dense: { step: number; arcs: number } | nul
       }
   }
   const of = (p: string) => Uint32Array.from(parts.flatMap((x, t) => (x === p ? [t] : [])));
-  return { positions: new Float32Array(pos), index: new Uint32Array(tris), ventral: of('ventral'), platform: of('platform'), dorsal: of('dorsal') };
+  const ventral = of('ventral');
+  // the retouch patch's triangles: those of the ventral face with their centroid in it
+  const retouch = variant.retouch
+    ? Uint32Array.from(Array.from(ventral).filter((t) => {
+        const c = [0, 1].map((k) => (pos[3 * tris[3 * t] + k] + pos[3 * tris[3 * t + 1] + k] + pos[3 * tris[3 * t + 2] + k]) / 3);
+        return inT8Retouch(c[0], c[1]);
+      }))
+    : new Uint32Array(0);
+  return { positions: new Float32Array(pos), index: new Uint32Array(tris), ventral, platform: of('platform'), dorsal: of('dorsal'), retouch };
+}
+
+/** The triangles whose outward normal lies within 60° (`minCos`) of `dir`: a flat face of a test body, as its region would give it. */
+export function facesFacing(m: Mesh, dir: Vec3, minCos = 0.5): Uint32Array {
+  const l = Math.hypot(...dir);
+  const out: number[] = [];
+  for (let t = 0; t < m.index.length / 3; t++) {
+    const p = [0, 1, 2].map((k) => [0, 1, 2].map((j) => m.positions[3 * m.index[3 * t + k] + j]));
+    const u = p[1].map((x, j) => x - p[0][j]), w = p[2].map((x, j) => x - p[0][j]);
+    const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const s = Math.hypot(n[0], n[1], n[2]);
+    if (s > 0 && (n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2]) / (s * l) >= minCos) out.push(t);
+  }
+  return Uint32Array.from(out);
 }

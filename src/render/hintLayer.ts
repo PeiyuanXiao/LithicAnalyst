@@ -19,7 +19,8 @@ const HALO = '#141a18';
 const HALO_OPACITY = 0.55;
 /** The grey's edge is fainter: it should read as grey, not as the edge. */
 const OTHER_HALO_OPACITY = 0.45;
-const FACE_OPACITY = { current: 0.36, upper: 0.3, lower: 0.4 };
+/** What a fit left out is fainter than what it took. */
+const FACE_OPACITY = { current: 0.36, upper: 0.3, lower: 0.4, excluded: 0.22 };
 /** A piece of a plane: fainter than a piece of the surface, so the surface shows through it. */
 const PATCH_OPACITY = 0.22;
 /** The lower side of a split: a light slate beside the accent. */
@@ -200,7 +201,7 @@ export class HintLayer {
       g.setIndex(new THREE.BufferAttribute(idx, 1));
     }
     const material = new THREE.MeshBasicMaterial({
-      color: prim.tint === 'lower' ? LOWER_TINT : colors.current,
+      color: prim.tint === 'lower' ? LOWER_TINT : prim.tint === 'excluded' ? colors.other : colors.current,
       transparent: true,
       opacity: FACE_OPACITY[prim.tint],
       depthWrite: false,

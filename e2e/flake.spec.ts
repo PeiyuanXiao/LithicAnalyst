@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { boxPly, t1Ply, type Vec3 } from './fixtures/meshes';
-import { annotate, drawAxis, drawOutline, placeEnds } from './flakeSetup';
+import { annotate, drawAxis, drawEdge, drawOutline, placeEnds } from './flakeSetup';
 import { curveClick, displayPanel, dragArrow, expect, exportFile, folderPaths, folderText, loadMesh, mockFolder, nextFrames, openApp, openMockFolder, openSection, parseCsv, specimenPanel, state, test, toScreen } from './helpers';
 
 const FLAKES_HEADER =
@@ -16,20 +16,6 @@ async function setType(page: Page, type: 'core' | 'flake'): Promise<void> {
   await page.keyboard.press('Escape');
 }
 
-/** Along the boundary of the ventral face, from one platform end round to the other; the type by its key. */
-async function drawEdge(page: Page): Promise<void> {
-  // the flake lying across the view, nothing over its corners
-  if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
-  await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [-1, 0, 0]));
-  await nextFrames(page);
-  await page.keyboard.press('p');
-  for (const p of [[-14.7, 0.3, 0], [-14.7, 59.7, 0], [14.7, 59.7, 0], [14.7, 0.3, 0]] as Vec3[]) await curveClick(page, await toScreen(page, p), { shift: true });
-  await page.keyboard.press('Enter');
-  await expect.poll(async () => (await state(page)).curves.length).toBe(2);
-  await page.keyboard.press('v');
-  await page.keyboard.press('2');
-  await expect.poll(async () => (await state(page)).curves[1].attributes.type).toBe('edge');
-}
 
 const regionsOf = (page: Page) => page.evaluate(() => window.lithicanalyst.regions());
 
@@ -87,7 +73,9 @@ test('a flake: technical axis, platform outline and ends give the measurements; 
   expect(Math.abs(r.platform_depth_path! - Math.sqrt(104))).toBeLessThan(0.5);
   expect(Math.abs(r.platform_area! - 30 * Math.sqrt(104))).toBeLessThan(6);
   for (const k of ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const) expect(Math.abs(r[k]! - 69.53)).toBeLessThan(1);
-  expect(Math.abs(r.ipa! - 101.31)).toBeLessThan(1);
+  // (no edge yet, so no ventral face: no IPA)
+  expect(r.ipa).toBeNull();
+  expect((await page.evaluate(() => window.lithicanalyst.flake()))!.reasons!.ipa).toBe('no_ventral');
 
   // the profile panel: the slider moves the section across; a click on the longitudinal section too
   await page.locator('#profile-slider').fill('25');
@@ -101,7 +89,17 @@ test('a flake: technical axis, platform outline and ends give the measurements; 
   const box = (await page.locator('#profile-long').boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.25);
   await expect.poll(async () => (await panel(page)).at).toBeGreaterThan(0.6);
-  for (const id of ['#profile-long-line', '#profile-cross-line', '#profile-p', '#profile-e', '#profile-platform-line', '#profile-ventral-fit', '#profile-scale', '#profile-epa-1']) await expect(page.locator(id)).toBeAttached();
+  for (const id of ['#profile-long-line', '#profile-cross-line', '#profile-p', '#profile-e', '#profile-platform-line', '#profile-scale', '#profile-epa-1']) await expect(page.locator(id)).toBeAttached();
+
+  // the edge gives the ventral face, and IPA: T1's ventral face is flat (no bulb), so the band from 0.25 to 0.75 of the length; on the profile its marks, its line and the angle
+  await drawEdge(page);
+  await expect.poll(async () => (await measures(page))?.platform_width_path ?? null).not.toBeNull();
+  expect(Math.abs((await measures(page))!.ipa! - 101.31)).toBeLessThan(1);
+  expect((await page.evaluate(() => window.lithicanalyst.flake()))!.ipaBand).toMatchObject({ fallback: true, from: expect.closeTo(15, 0), to: expect.closeTo(45, 0) });
+  await displayPanel(page);
+  await page.locator('#profile-show').check();
+  await page.keyboard.press('Escape');
+  for (const id of ['#profile-ipa-from', '#profile-ipa-to', '#profile-ipa-line', '#profile-ipa-arc']) await expect(page.locator(id)).toBeAttached();
 
   // the export dialog: a flake has flakes.csv and no configuration
   await page.locator('#app-mode-measure').click();
@@ -119,7 +117,7 @@ test('a flake: technical axis, platform outline and ends give the measurements; 
 test('switching to a core and back: nothing lost, each shows its own', async ({ page }) => {
   await setType(page, 'flake');
   await annotate(page);
-  await expect.poll(async () => (await measures(page))?.ipa ?? null).not.toBeNull();
+  await expect.poll(async () => (await measures(page))?.platform_width_path ?? null).not.toBeNull();
   // an arrow of a scar: the frame's angle goes into its CSV
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
   await nextFrames(page);
@@ -168,7 +166,7 @@ test('switching to a core and back: nothing lost, each shows its own', async ({ 
   const back = await state(page);
   expect(back.specimen.frame?.source).toBe('technical_axis');
   expect(back.specimen.frame).toEqual(before.specimen.frame);
-  await expect.poll(async () => (await measures(page))?.ipa ?? null).not.toBeNull();
+  await expect.poll(async () => (await measures(page))?.platform_width_path ?? null).not.toBeNull();
   await expect.poll(async () => (await panel(page)).shown).toBe(true);
 
   // the whole switch is one undo step
@@ -261,9 +259,9 @@ test('the type: stays with the project file, the next new model starts with it, 
   const file = await page.evaluate(() => window.lithicanalyst.projectJson());
   expect(file.specimen.type).toBe('flake');
   expect(file.flake.axis?.matrix?.length).toBe(16);
-  await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.projectJson())).derived.flake?.measures.ipa ?? null).not.toBeNull();
+  await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.projectJson())).derived.flake?.measures.platform_depth_chord ?? null).not.toBeNull();
   const again = await page.evaluate(() => window.lithicanalyst.projectJson());
-  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3,
+  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND_END: 0.75, IPA_BAND_FALLBACK_START: 0.25, IPA_TRIM_SIGMA: 3, IPA_MIN_BAND_SHARE: 0.05, MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3,
     BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
 
   // a new model starts as a flake
@@ -325,7 +323,7 @@ test('a folder: the list shows and filters the type; the summary has flakes.csv 
   expect(row.frame_source).toBe('technical_axis');
   expect(Number(row.tech_length)).toBeCloseTo(60, 0);
   const manifest = JSON.parse((await folderText(page, (await find('manifest\\.json'))!))!);
-  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND: [0.25, 0.75], MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3,
+  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND_END: 0.75, IPA_BAND_FALLBACK_START: 0.25, IPA_TRIM_SIGMA: 3, IPA_MIN_BAND_SHARE: 0.05, MIN_FIT_POINTS: 2, PLATFORM_START_EDGES: 3,
     BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
 });
 

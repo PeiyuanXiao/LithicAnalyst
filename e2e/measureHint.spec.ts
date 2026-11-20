@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { boxPly, boxPoint, t1Ply, type Vec3 } from './fixtures/meshes';
-import { annotate } from './flakeSetup';
+import { annotate, drawEdge } from './flakeSetup';
 import { expect, fileMenu, loadMesh, nextFrames, openApp, openSection, state, test, viewFromTop } from './helpers';
 
 const SHOTS = 'test-results/23';
@@ -25,8 +25,11 @@ async function flakeInMeasureMode(page: Page): Promise<void> {
   await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
   await annotate(page);
+  // the edge: the ventral face, for IPA
+  await drawEdge(page);
   await page.locator('#app-mode-measure').click();
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.flake()?.measures?.platform_width_path ?? null)).not.toBeNull();
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.flake()?.measures?.ipa ?? null)).not.toBeNull();
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.flake()?.measures?.epa_3pt_2mm ?? null)).not.toBeNull();
   await openSection(page, 'flake');
   // a three-quarter view, the panel out of the way
@@ -169,7 +172,7 @@ test('every measure of a flake draws its own; a pinned one goes with the mode an
 
   await hover(page, 'flake-ipa');
   await expect.poll(() => shown(page)).toBe('flake:ipa');
-  expect(await parts(page)).toEqual(expect.arrayContaining(['line:platform-line', 'line:ventral-line', 'arc:arc']));
+  expect(await parts(page)).toEqual(expect.arrayContaining(['faces:band', 'patch:band-plane', 'line:platform-line', 'line:band-line', 'arc:arc']));
 
   await hover(page, 'flake-area');
   await expect.poll(() => shown(page)).toBe('flake:area');

@@ -3140,6 +3140,12 @@ export class App implements AppApi {
     // the ventral face: the reference plane of the BSA and the shading by height
     const vent = this.platformPieces('ventral');
     const ventralFaces = vent ? await runSliced(facesOfPiecesSteps(this.upper!.partition, vent.pieces)) : null;
+    // retouch and damage (lower layer): left out of IPA's band
+    const leftPieces = new Set<number>();
+    st.regions.forEach((r, i) => {
+      if ((r.type === 'retouch' || r.type === 'damage') && (this.seedComponent[i] ?? -1) >= 0) leftPieces.add(this.seedComponent[i]);
+    });
+    const leftOutFaces = leftPieces.size && this.partition ? await runSliced(facesOfPiecesSteps(this.partition, leftPieces)) : null;
     if (token !== this.flakeToken) return;
     this.ventralFaces = ventralFaces;
     const bsa = bsaSettingsOf(st.flake);
@@ -3163,6 +3169,7 @@ export class App implements AppApi {
         candidates: bvhPlaneCandidates(g),
         section: known,
         ventralFaces,
+        leftOutFaces,
         bsa: { level: bsa.level, ends: bsa.ends },
         edges: base.edges,
       }),
@@ -5854,21 +5861,23 @@ export class App implements AppApi {
    * An observer's flake measures: those its file stored when it has them all, else computed from its own annotations (its axis, platform
    * ends, platform and ventral faces as its regions cut them, its unit and BSA settings), in slices, kept while they stay the same.
    */
-  private async observerFlake(o: Observer, st: Readonly<ProjectState>, upper: FaceLabels | null): Promise<Partial<FlakeMeasures> | null> {
+  private async observerFlake(o: Observer, st: Readonly<ProjectState>, layers: { labels: FaceLabels | null; upper: FaceLabels | null } | null): Promise<Partial<FlakeMeasures> | null> {
     if (o.stored && AGREEMENT_FLAKE_MEASURES.every((k) => k in o.stored!)) return o.stored;
     const base = this.measureBase, loaded = this.loaded;
     if (!base || !loaded) return null;
-    const of = (type: string): Uint32Array | null => {
-      if (!upper) return null;
-      const want = this.faceTypes.indexOf(type);
+    const upper = layers?.upper ?? null, lower = layers?.labels ?? null;
+    /** The triangles of these types in one of its layers. */
+    const of = (labels: FaceLabels | null, ...types: string[]): Uint32Array | null => {
+      if (!labels) return null;
+      const want = new Set(types.map((x) => this.faceTypes.indexOf(x)));
       const out: number[] = [];
-      for (let f = 0; f < upper.type.length; f++) if (upper.type[f] === want) out.push(f);
+      for (let f = 0; f < labels.type.length; f++) if (want.has(labels.type[f])) out.push(f);
       return out.length ? Uint32Array.from(out) : null;
     };
-    const platform = of('platform'), ventral = of('ventral');
+    const platform = of(upper, 'platform'), ventral = of(upper, 'ventral'), leftOut = of(lower, 'retouch', 'damage');
     const ends = st.landmarks.filter((l) => l.code === 'platform_end').map((l) => l.point);
     const bsa = bsaSettingsOf(st.flake);
-    const key = JSON.stringify([st.flake.axis?.matrix, st.flake.axis?.start, ends, st.specimen.unit, bsa, platform?.length, ventral?.length, upper ? Array.from(upper.type.subarray(0, 64)) : null]);
+    const key = JSON.stringify([st.flake.axis?.matrix, st.flake.axis?.start, ends, st.specimen.unit, bsa, platform?.length, ventral?.length, leftOut?.length, upper ? Array.from(upper.type.subarray(0, 64)) : null]);
     if (o.flake?.key === key) return o.flake.measures;
     const morph = await this.morphOf(loaded);
     const areas = this.triangleAreas();
@@ -5890,6 +5899,7 @@ export class App implements AppApi {
         morph,
         candidates: bvhPlaneCandidates(g),
         ventralFaces: ventral,
+        leftOutFaces: leftOut,
         bsa: { level: bsa.level, ends: bsa.ends },
         edges: base.edges,
       }),
@@ -5996,7 +6006,7 @@ export class App implements AppApi {
       }
       // a flake's own measures: the open project's as measured, another's as its file stored them, else from its annotations
       if (st.specimen.type === 'flake') {
-        const flake = o.state ? await this.observerFlake(o, st, layers?.upper ?? null) : this.flake?.measures ?? null;
+        const flake = o.state ? await this.observerFlake(o, st, layers) : this.flake?.measures ?? null;
         if (token !== this.agreementToken) return;
         for (const k of AGREEMENT_FLAKE_MEASURES) measures[k] = flake?.[k] ?? null;
       }
@@ -7753,7 +7763,7 @@ export class App implements AppApi {
       /** A flake's frame and measurements (null for a core). */
       flake: () =>
         this.isFlake()
-          ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, reasons: this.flake?.reasons ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null, bulb: this.flake?.construction.bulb ?? null, plane: this.flake?.construction.plane ?? null }
+          ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, reasons: this.flake?.reasons ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null, bulb: this.flake?.construction.bulb ?? null, plane: this.flake?.construction.plane ?? null, ipaBand: this.flake?.ipaBand ?? null }
           : null,
       /** The profile panel: shown or not, where the section across is (share of the technical length), its width and thickness, and how many lines the ring on the model has. */
       sectionPanel: () => ({

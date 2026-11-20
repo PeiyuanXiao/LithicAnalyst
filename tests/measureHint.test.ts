@@ -7,7 +7,7 @@ import { splitByLoopSteps, splitByPlaneSteps, type SplitParts } from '../src/com
 import { runSync } from '../src/compute/steps';
 import { technicalFrame } from '../src/compute/technicalFrame';
 import type { SpecimenFrame, Vec3 } from '../src/core/types';
-import { box, flakeT1, mapped, rigid, sphere, T1, type Mesh } from './meshes';
+import { box, facesFacing, flakeT1, mapped, rigid, sphere, T1, type Mesh } from './meshes';
 
 const TOLERANCE = 1e-9;
 const close = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(TOLERANCE);
@@ -69,7 +69,9 @@ function measured(): { r: FlakeResult; m: Mesh; offset: Vec3 } {
   const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, f(T1.P), f(T1.A));
   if (!fr.ok) throw new Error('no frame');
   const plat = platformOf(m, f);
-  const r = flakeMeasures({ positions: local.positions, index: local.index, offset, matrix: fr.matrix, P: f(T1.P), ends: T1.ends.map(f), platformFaces: plat.faces, platformArea: plat.area, unit: 'mm', meanEdge: edge, morph: morphDimensions(local.positions) });
+  // the ventral face: facing −Z, turned with the mesh
+  const ventral = facesFacing(m, sub(f([0, 0, -1]), f([0, 0, 0])));
+  const r = flakeMeasures({ positions: local.positions, index: local.index, offset, matrix: fr.matrix, P: f(T1.P), ends: T1.ends.map(f), platformFaces: plat.faces, platformArea: plat.area, unit: 'mm', meanEdge: edge, morph: morphDimensions(local.positions), ventralFaces: ventral });
   return { r, m, offset };
 }
 
@@ -190,16 +192,22 @@ describe('what the hints draw comes back to the numbers', () => {
     });
   });
 
-  it('IPA: the platform line, the line of the ventral face, the arc', () => {
+  it('IPA: the band\'s triangles and its plane, its line on the section, the platform line, the arc at P', () => {
     const h = hint('ipa');
+    const c = r.construction.ipa!;
     close(arcAngle(arcOf(h))!, v.ipa!);
-    const p = r.construction.profile!;
-    expect(line(h, 'ventral').points).toBe(p.ventral);
-    // the arc's sides run along the two lines
+    expect(arcOf(h).at).toBe(c.P);
+    // what the plane was fitted to, and the plane over the band, as returned
+    const band = h.find((x) => x.kind === 'faces' && x.part === 'band') as HintFaces;
+    expect(band.faces).toBe(c.fitted);
+    expect(band.tint).toBe('current');
+    expect((h.find((x) => x.kind === 'patch') as { points: Vec3[] }).points).toBe(c.patch);
+    expect(line(h, 'band-line').points).toBe(c.line);
+    // the arc's sides run along the platform line and the band's line
     const onPlatform = sub(line(h, 'platform-line').points[1], line(h, 'platform-line').points[0]);
-    const onVentral = sub(line(h, 'ventral-line').points[1], line(h, 'ventral-line').points[0]);
+    const onBand = sub(line(h, 'band-line').points[1], line(h, 'band-line').points[0]);
     expect(Math.abs(dot(onPlatform, arcOf(h).from)) / size(onPlatform)).toBeCloseTo(1, 9);
-    expect(Math.abs(dot(onVentral, arcOf(h).to)) / size(onVentral)).toBeCloseTo(1, 9);
+    expect(Math.abs(dot(onBand, arcOf(h).to)) / size(onBand)).toBeCloseTo(1, 9);
   });
 
   it('positions relative to an offset: all in original coordinates', () => {

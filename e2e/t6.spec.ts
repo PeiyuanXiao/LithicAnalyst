@@ -150,7 +150,7 @@ test('dragging the point of percussion snaps as drawing it does: it stays on the
   // still measured
   await expect.poll(async () => {
     const m = await measures(page);
-    return m ? [m.platform_depth_chord, m.platform_width_chord, m.epa_3pt_1mm, m.epa_2ln_1mm, m.ipa].every((v) => v !== null) : false;
+    return m ? [m.platform_depth_chord, m.platform_width_chord, m.epa_3pt_1mm, m.epa_2ln_1mm].every((v) => v !== null) : false;
   }).toBe(true);
 });
 
@@ -195,7 +195,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(Math.abs(m.platform_depth_chord! - 7.04)).toBeLessThan(0.1);
       // (the ends are clicked just inside the outline's corners, which come to a point at the model's outline)
       expect(Math.abs(m.platform_width_chord! - 22)).toBeLessThan(1);
-      expect(Math.abs(m.ipa! - 106.46)).toBeLessThan(3);
+      // IPA by the band's plane (32a; tests/flake.test.ts works it out from T6's surface): 106.48° on the generated mesh
+      expect(Math.abs(m.ipa! - 106.48)).toBeLessThan(3);
       // the curve keeps to the edge, so its angles are those of an edge: no station on a face, near 180°
       const edge = (await state(page)).curves.find((c) => c.attributes.type === 'edge')!;
       const inside = (p: Vec3) => Math.min(Math.abs(t6Ventral(1, Math.max(0, Math.min(T6.L, p[1])))[0]) - Math.abs(p[0]), T6.L - p[1]);

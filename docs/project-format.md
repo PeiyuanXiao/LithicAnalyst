@@ -362,9 +362,16 @@ the type deletes nothing: the other type's data stay in the file and come back w
   whatever the level or the outline does. Absent (files from before, or a flake left at the defaults): `{ "level": 0.1, "ends": null }`.
   Saving writes it always.
 
-**Derived** (`derived.flake`): `parameters`, `frameSource`, `measures` and `geometry` (points of the measures, for the
-profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ventral`, `ventralLine`,
-`bulbAt`, `bulbQ`, `bulbChord`; the last three absent in files from before).
+**Derived** (`derived.flake`): `parameters`, `frameSource`, `measures`, `geometry` (points of the measures, for the
+profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ipaFrom`, `ipaTo`, `ipaLine`,
+`bulbAt`, `bulbQ`, `bulbChord`) and `ipaBand`.
+
+* `geometry.ipaFrom`, `ipaTo`: where S's ventral side reaches the band's two ends (technical Y `from`, `to`); `ipaLine`: where the band's
+  plane meets the plane of S, from Y `from` to `to`; null while IPA is empty. Files from before 32a have `ventral` and `ventralLine` (the
+  old IPA's line) in their place; they are not read.
+* `ipaBand` (null when no band was fitted): `{ from, to, area, fallback, trimmed }` — the band's technical Y range (coordinate units), the
+  area of the triangles the plane was fitted to at last (unit²), `true` when it started at `IPA_BAND_FALLBACK_START` for want of a bulb, and
+  how many triangles the trim left out. It is not in the CSV.
 
 Lengths are in the coordinate unit. Millimetre parameters are converted by `specimen.unit`; without a stated unit
 what needs them is not measured.
@@ -382,7 +389,7 @@ what needs them is not measured.
 | `platform_area` | the area of the platform region's triangles |
 | `epa_3pt_1mm`, `_2mm`, `_3mm` | EPA, three points: between E→P along the platform line and E→Q_d |
 | `epa_2ln_1mm`, `_2mm`, `_3mm` | EPA, two lines: between E→P along the platform line and the tangent at Q_d, away from E |
-| `ipa` | between the platform line (P→E) and the line fitted to the ventral profile |
+| `ipa` | between the platform line (P→E) and the line where the plane of the ventral band meets S's plane, toward +Y |
 | `psia` | platform surface interior angle, PSIA (McPherron et al. 2020): the angle at P between the lines to the two platform ends, in 3D; no unit needed |
 | `bulb_angle_3pt_1mm` | bulb angle, three points (Li et al. 2022): at the platform stretch's near end, between the platform line (P→E) and the line to Q_v |
 | `bulb_angle_2ln_1mm` | bulb angle, two lines: between the platform line (P→E) and the tangent at Q_v, away from the platform |
@@ -397,9 +404,17 @@ what needs them is not measured.
   to `FIT_RESAMPLE_COUNT` equally spaced points, total least squares, directed P→E.
 * **Q_d**: from E along S away from the stretch (the dorsal side), arc length d in `EPA_DISTANCES_MM`. **The tangent** at Q_d:
   the chord between the points `TWO_LINES_LENGTH_MM` / 2 before and after it along S. Empty when S ends first.
-* **IPA's line**: from the stretch's near end along S away from it (the ventral side), up to S's largest Y, the part with
-  Y in `IPA_BAND` × `tech_length`, resampled and fitted the same way, directed +Y. It keeps off the bulb and the distal curve.
-* A line takes `MIN_FIT_POINTS` (2) points before resampling: a platform stretch always gives one, as does any part of the ventral side within the band (with the points where the band begins and ends). No such part: no IPA. Fewer than two ends: the two widths are empty.
+* A line takes `MIN_FIT_POINTS` (2) points before resampling: a platform stretch always gives one. Fewer than two ends: the two widths are empty.
+* **IPA's band** (from 32a): the triangles of the ventral region whose centroid has technical Y from `from` to `to` = `IPA_BAND_END` (0.75)
+  × `tech_length`. `from` is the largest technical Y of the main bulb's vertices (the bulb as the BSA takes it, at the specimen's level, so
+  changing the level moves it); without a bulb (`no_bulb`) or without a unit, `IPA_BAND_FALLBACK_START` (0.25) × `tech_length`. Left out:
+  the triangles with a vertex in the main bulb, and those of the lower layer's `retouch` and `damage` regions (other types, custom ones
+  included, stay in). **Its plane**: those triangles' least-squares plane, each by its area (as the ventral reference plane), its normal away
+  from the dorsal face; then, once, each triangle's centroid's signed distance to it, their median m and σ̂ = 1.4826 × the median of
+  |distance − m|; the triangles farther than `IPA_TRIM_SIGMA` (3) × σ̂ from m left out, and the plane fitted again. **IPA**: the angle between
+  the platform line (P→E) and normalize(normal × X), the line where the plane meets S's plane, directed +Y.
+* IPA is empty without a ventral region (`no_ventral`), and when the triangles fitted at last cover less than `IPA_MIN_BAND_SHARE` (0.05) of
+  the ventral region's area (`band_too_small`: a bulb reaching past 0.75 of the length, or a band all retouch).
 * **Q_v**: from the platform stretch's near end along S away from it (the ventral side), arc length `BULB_ANGLE_DISTANCE_MM` (1.0);
   the tangent there as for Q_d. Empty when S ends first.
 * **The ventral reference plane**: the least-squares plane of the ventral region's surface (each triangle by its area and its own second
@@ -416,7 +431,8 @@ what needs them is not measured.
 * **Paths** run on the region's triangles only: the shortest way over its mesh edges; then, on the triangles that way passes
   through, over 3 points on each side, those crossings pulled taut.
 * `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `FIT_RESAMPLE_COUNT` 200,
-  `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND` [0.25, 0.75], `MIN_FIT_POINTS` 2, `PLATFORM_START_EDGES` 3,
+  `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND_END` 0.75, `IPA_BAND_FALLBACK_START` 0.25, `IPA_TRIM_SIGMA` 3,
+  `IPA_MIN_BAND_SHARE` 0.05, `MIN_FIT_POINTS` 2, `PLATFORM_START_EDGES` 3,
   `BULB_ANGLE_DISTANCE_MM` 1, `BSA_LEVEL_DEFAULT_MM` 0.1, `BSA_LEVEL_RANGE_MM` [−1, 1], `BSA_NEAR_POP_MM` 2, `VI_WIDTHS_MM` [0.5, 1, 1.5],
   `VI_SAMPLE_MM` 0.02, `POP_MESH_RADIUS_MM` 2.
 

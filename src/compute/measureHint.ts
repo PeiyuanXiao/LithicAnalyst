@@ -2,7 +2,7 @@ import { fmtQuantity, quantityUnit, type Quantity } from '../core/format';
 import type { Vec3 } from '../core/types';
 import type { ConfigBox } from './configuration';
 import { onPlane } from './bulb';
-import { angleDeg, EPA_DISTANCES_MM, VI_MEASURES, type BulbConstruction, type FlakeMeasure, type FlakeResult, type MorphConstruction, type ProfileConstruction, type TechConstruction } from './flake';
+import { angleDeg, EPA_DISTANCES_MM, VI_MEASURES, type BulbConstruction, type FlakeMeasure, type FlakeResult, type IpaConstruction, type MorphConstruction, type ProfileConstruction, type TechConstruction } from './flake';
 import type { SphereFit } from './sphere';
 import type { SplitParts } from './split';
 
@@ -70,7 +70,8 @@ export interface HintArc {
 export interface HintFaces {
   kind: 'faces';
   part: string;
-  tint: 'current' | 'upper' | 'lower';
+  /** `excluded`: what was left out of a fit, fainter. */
+  tint: 'current' | 'upper' | 'lower' | 'excluded';
   faces: 'all' | ArrayLike<number>;
   through: boolean;
 }
@@ -258,28 +259,26 @@ function epaHint(method: '3pt' | '2ln', i: number, p: ProfileConstruction, value
   return out;
 }
 
-/** Where two lines come closest; null when they are as good as parallel. */
-function meeting(a: Vec3, u: Vec3, b: Vec3, v: Vec3): Vec3 | null {
-  const c = dot(u, v);
-  const den = 1 - c * c;
-  if (den < 1e-9) return null;
-  const w = sub(a, b);
-  const s = (c * dot(v, w) - dot(u, w)) / den;
-  return add(a, u, s);
-}
-
-function ipaHint(p: ProfileConstruction, value: number): MeasureHint | null {
-  const { lineDir, ventralDir, platformLine, ventralLine } = p;
-  if (!lineDir || !ventralDir || !platformLine || !ventralLine) return null;
-  const at = meeting(platformLine[0], lineDir, ventralLine[0], ventralDir) ?? p.P;
-  const side = Math.min(size(sub(platformLine[1], at)), size(sub(ventralLine[1], at)));
+/**
+ * IPA: the triangles of the band its plane was fitted to, and those left out (the bulb's, retouch and damage, the trimmed), fainter; the
+ * plane over the band; where it meets the section, and that direction carried to P; the platform line; the angle at P.
+ */
+function ipaHint(c: IpaConstruction, p: ProfileConstruction | null, value: number): MeasureHint {
+  const { P, E, lineDir, dir, line } = c;
+  const start = dot(sub(line[0], P), dir);
+  const radius = Math.min(size(sub(E, P)), Math.max(start, 0) || Infinity) * MEASURE_HINT_PARAMETERS.ARC_SHARE;
+  const ends = [c.from, c.to].filter((x): x is Vec3 => !!x);
   return [
-    sectionLine(p),
-    ...(p.ventral ? [{ kind: 'line', part: 'ventral', role: 'other', points: p.ventral } as HintLine] : []),
-    { kind: 'line', part: 'platform-line', role: 'current', points: [at, platformLine[1]] },
-    { kind: 'line', part: 'ventral-line', role: 'current', points: [at, ventralLine[1]] },
-    angleArc('arc', 'current', at, lineDir, ventralDir, side * MEASURE_HINT_PARAMETERS.ARC_SHARE, value),
-    { kind: 'dots', part: 'points', role: 'other', points: [p.P, p.E] },
+    ...(p ? [sectionLine(p)] : []),
+    { kind: 'faces', part: 'band', tint: 'current', faces: c.fitted, through: false },
+    ...(c.excluded.length ? [{ kind: 'faces', part: 'left-out', tint: 'excluded', faces: c.excluded, through: false } as HintFaces] : []),
+    { kind: 'patch', part: 'band-plane', points: c.patch },
+    { kind: 'line', part: 'platform-line', role: 'current', points: c.platformLine ?? [P, E] },
+    { kind: 'line', part: 'band-line', role: 'current', points: line },
+    { kind: 'line', part: 'band-direction', role: 'other', points: [P, add(P, dir, start)] },
+    angleArc('arc', 'current', P, lineDir, dir, radius, value),
+    ...(ends.length ? [{ kind: 'dots', part: 'band-ends', role: 'other', points: ends } as HintDots] : []),
+    { kind: 'dots', part: 'points', role: 'other', points: [P, E] },
   ];
 }
 
@@ -386,7 +385,7 @@ export function flakeHint(key: FlakeMeasure, r: FlakeResult, unit: string): Meas
     case 'platform_area':
       return c.platformFaces ? [{ kind: 'faces', part: 'platform', tint: 'current', faces: c.platformFaces, through: true }] : null;
     case 'ipa':
-      return c.profile ? ipaHint(c.profile, value) : null;
+      return c.ipa ? ipaHint(c.ipa, c.profile, value) : null;
     case 'psia':
       return c.psia ? psiaHint(c.psia, value) : null;
     case 'bulb_angle_3pt_1mm':

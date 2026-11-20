@@ -10,7 +10,8 @@ import { runSync } from '../src/compute/steps';
 import { techAngleDeg, technicalFrame, MIN_AXIS_EDGES } from '../src/compute/technicalFrame';
 import { frameAxes, frameMatrix, type FrameAxes } from '../src/core/frame';
 import type { Vec3 } from '../src/core/types';
-import { box, cylinderPatch, ellipsoid, flakeT1, flakeT2, flakeT6, mapped, rigid, T1, T6, t6Zv, type Mesh } from './meshes';
+import { symmetricEigen3 } from '../src/compute/linalg';
+import { box, cylinderPatch, ellipsoid, facesFacing, flakeT1, flakeT2, flakeT6, mapped, rigid, T1, T6, t6Dorsal, t6Ventral, t6Zv, type Mesh } from './meshes';
 
 const deg = (r: number) => (r * 180) / Math.PI;
 const IPA = 180 - deg(Math.atan(10 / 2));
@@ -52,6 +53,12 @@ function platformOf(m: Mesh, f: (p: Vec3) => Vec3 = (p) => p): { faces: Uint32Ar
   return { faces: Uint32Array.from(faces), area };
 }
 
+/** The ventral face of T1, T2 or T6, moved with the mesh: the triangles facing −Z (as its region would give it). */
+function ventralOf(m: Mesh, f: (p: Vec3) => Vec3 = (p) => p): Uint32Array {
+  const a = f([0, 0, 0]), b = f([0, 0, -1]);
+  return facesFacing(m, [b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+}
+
 function measure(m: Mesh, opts: { f?: (p: Vec3) => Vec3; unit?: string; platform?: boolean; ends?: boolean } = {}): FlakeMeasures {
   const f = opts.f ?? ((p: Vec3) => p);
   const edge = meanEdge(m);
@@ -71,6 +78,7 @@ function measure(m: Mesh, opts: { f?: (p: Vec3) => Vec3; unit?: string; platform
     unit: opts.unit ?? 'mm',
     meanEdge: edge,
     morph: morphDimensions(m.positions),
+    ventralFaces: ventralOf(m, f),
   }).measures;
 }
 
@@ -363,6 +371,64 @@ describe('a rigid movement changes nothing', () => {
   });
 });
 
+/**
+ * T6's IPA worked out from its surface alone, not by the code under test: the ventral face sampled densely over (s, y), each sample by
+ * its area; those with technical Y in the band (0.25 to 0.75 of the technical length: P is on the platform's edge, 1 mm above where the
+ * bump rises past the level, so there is no bulb to start from) fitted with a plane (area-weighted total least squares), trimmed once by
+ * the method's rule (3 × 1.4826 × MAD of the residuals from their median), fitted again; where that plane meets the section x = 0,
+ * toward +Y, against the platform line P→E (E: the dorsal edge above P; the platform is straight in the section).
+ */
+function t6Ipa(frame: FrameAxes, techLength: number): number {
+  const P: Vec3 = [0, 0, t6Zv(0, 0)], E = t6Dorsal(0, 0);
+  const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const from = 0.25 * techLength, to = 0.75 * techLength;
+  const ds = 1 / 300, dy = 0.02, e = 1e-5;
+  const pts: Vec3[] = [], w: number[] = [];
+  for (let s = -1 + ds / 2; s < 1; s += ds)
+    for (let y = dy / 2; y < T6.L; y += dy) {
+      const p = t6Ventral(s, y);
+      const Y = dot3(sub3(p, P), frame.y);
+      if (Y < from || Y > to) continue;
+      const ps = sub3(t6Ventral(s + e, y), t6Ventral(s - e, y)), py = sub3(t6Ventral(s, y + e), t6Ventral(s, y - e));
+      pts.push(p);
+      w.push((Math.hypot(...cross3(ps, py)) / (4 * e * e)) * ds * dy);
+    }
+  const fit = (keep: boolean[]): { c: Vec3; n: Vec3 } => {
+    let W = 0;
+    const c: Vec3 = [0, 0, 0];
+    pts.forEach((p, i) => {
+      if (!keep[i]) return;
+      W += w[i];
+      for (let k = 0; k < 3; k++) c[k] += w[i] * p[k];
+    });
+    for (let k = 0; k < 3; k++) c[k] /= W;
+    const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    pts.forEach((p, i) => {
+      if (!keep[i]) return;
+      const d = sub3(p, c);
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) C[3 * a + b] += w[i] * d[a] * d[b];
+    });
+    const { values, vectors } = symmetricEigen3(C);
+    const k = values.indexOf(Math.min(...values));
+    return { c, n: [vectors[k][0], vectors[k][1], vectors[k][2]] };
+  };
+  const median = (a: number[]) => {
+    const s = [...a].sort((x, y) => x - y);
+    return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  };
+  const first = fit(pts.map(() => true));
+  const r = pts.map((p) => dot3(sub3(p, first.c), first.n));
+  const m = median(r);
+  const sigma = 1.4826 * median(r.map((x) => Math.abs(x - m)));
+  const { n } = fit(r.map((x) => Math.abs(x - m) <= 3 * sigma));
+  let d = cross3(n, frame.x);
+  if (dot3(d, frame.y) < 0) d = [-d[0], -d[1], -d[2]];
+  const line = sub3(E, P);
+  return deg(Math.acos(dot3(line, d) / (Math.hypot(...line) * Math.hypot(...d))));
+}
+
 describe('T6, a flake of realistic shape', () => {
   const faceNormal = (m: Mesh, t: number): Vec3 => {
     const p = (k: number): Vec3 => {
@@ -426,11 +492,16 @@ describe('T6, a flake of realistic shape', () => {
     // two to a quad, one at each end of a row, where it comes to a point
     expect(plat.faces.length).toBe(K * (2 * T6.ns - 2));
     const ends: Vec3[] = [[-T6.w0, 0, t6Zv(-T6.w0, 0)], [T6.w0, 0, t6Zv(T6.w0, 0)]];
-    const r = flakeMeasures({ positions: m.positions, index: m.index, matrix: fr.matrix, P, ends, platformFaces: plat.faces, platformArea: plat.area, unit: 'mm', meanEdge: edge, morph: morphDimensions(m.positions) }).measures;
+    const result = flakeMeasures({ positions: m.positions, index: m.index, matrix: fr.matrix, P, ends, platformFaces: plat.faces, platformArea: plat.area, unit: 'mm', meanEdge: edge, morph: morphDimensions(m.positions), ventralFaces: ventralOf(m) });
+    const r = result.measures;
     const within = (v: number | null, want: number) => closeTo(v, want, 0.01 * want);
     within(r.platform_depth_chord, 7.04);
     within(r.platform_width_chord, 22.0);
-    for (const [key, want] of [['epa_3pt_1mm', 59.83], ['epa_3pt_2mm', 59.59], ['epa_3pt_3mm', 59.98], ['epa_2ln_1mm', 59.32], ['epa_2ln_2mm', 59.73], ['epa_2ln_3mm', 62.23], ['ipa', 106.46]] as Array<[FlakeMeasure, number]>) closeTo(r[key], want, 1);
+    for (const [key, want] of [['epa_3pt_1mm', 59.83], ['epa_3pt_2mm', 59.59], ['epa_3pt_3mm', 59.98], ['epa_2ln_1mm', 59.32], ['epa_2ln_2mm', 59.73], ['epa_2ln_3mm', 62.23]] as Array<[FlakeMeasure, number]>) closeTo(r[key], want, 1);
+    // IPA (32a): no bulb near P, so the band starts at 0.25 of the length; the angle as T6's own surface gives it (it was 106.46° by the section's line)
+    expect(result.reasons.bsa).toBe('no_bulb');
+    expect(result.ipaBand!.fallback).toBe(true);
+    closeTo(r.ipa, t6Ipa(frameAxes(fr.matrix), r.tech_length!), 0.3);
   });
 
   it('T1 measures the same as before', () => {
@@ -464,13 +535,14 @@ describe('why a measure is empty', () => {
       unit: opts.unit ?? 'mm',
       meanEdge: edge,
       morph: morphDimensions(m.positions),
+      ventralFaces: ventralOf(m),
     });
   }
 
   it('nothing is empty on a flake annotated in full', () => {
     const r = run();
-    // (T1 is given no ventral face here: the bulb's measures are T8's, in tests/bulb.test.ts)
-    expect(r.reasons).toEqual({ bsa: 'no_ventral', vi_0_5mm: 'no_ventral', vi_1_0mm: 'no_ventral', vi_1_5mm: 'no_ventral' });
+    // (T1's ventral face is flat: it has no bulb; the bulb's measures are T8's, in tests/bulb.test.ts)
+    expect(r.reasons).toEqual({ bsa: 'no_bulb', vi_0_5mm: 'no_bulb', vi_1_0mm: 'no_bulb', vi_1_5mm: 'no_bulb' });
     for (const k of FLAKE_MEASURES) expect(r.measures[k]).not.toBeNull();
     for (const k of ['psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'pop_mesh_edge'] as const) expect(r.measures[k]).not.toBeNull();
   });

@@ -221,6 +221,8 @@ export interface BulbResult {
   vi: ViStrip[] | null;
   /** The bulb with P, on the plane: u (across, along `x`) and v (along `y`) ranges from P on the plane, coordinate units. */
   extent: { u0: number; u1: number; v0: number; v1: number } | null;
+  /** The main bulb's vertices (where IPA's band starts from); null when there is none. */
+  region: Uint32Array | null;
 }
 
 /** The point of the ventral surface over (`u`, `v`) of the plane: the outermost where several lie over it (null: none). In steps. */
@@ -277,7 +279,7 @@ export function* bulbSteps(input: BulbInput): Steps<BulbResult> {
   const near = BSA_NEAR_POP_MM / mm;
   const P0 = onPlane(plane, P);
   const pos = (v: number): Vec3 => [positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]];
-  const out: BulbResult = { plane, P0, contour: [], autoEnds: null, ends: input.ends ? [input.ends[0], input.ends[1]] : null, bsa: null, bsaEmpty: null, apex: null, vi: null, extent: null };
+  const out: BulbResult = { plane, P0, contour: [], autoEnds: null, ends: input.ends ? [input.ends[0], input.ends[1]] : null, bsa: null, bsaEmpty: null, apex: null, vi: null, extent: null, region: null };
   const angleAt = (ends: readonly [Vec3, Vec3]) => angleDeg(sub(onPlane(plane, ends[0]), P0), sub(onPlane(plane, ends[1]), P0));
   const finish = (empty: BulbEmpty | null): BulbResult => {
     // ends set by hand stand whatever the outline does
@@ -356,12 +358,16 @@ export function* bulbSteps(input: BulbInput): Steps<BulbResult> {
     v1 = Math.max(v1, v);
   };
   extend(P);
+  const region: number[] = [];
   for (let k = 0; k < verts.length; k++) {
+    if (k % YIELD_EVERY === 0) yield;
     const v = verts[k];
     if (!inMain(v)) continue;
+    region.push(v);
     if (top < 0 || h[v] > h[top]) top = v;
     extend(pos(v));
   }
+  out.region = Uint32Array.from(region);
   out.apex = pos(top);
   out.extent = { u0, u1, v0, v1 };
 
