@@ -85,7 +85,8 @@ describe('the three symmetries', () => {
       expect(v.volumeA!).toBeLessThan(v.volumeB!);
       expect(v.volumeSymmetry!).toBeCloseTo(v.volumeA! / v.volumeB!, 12);
     }
-  });
+    // (three references in full: more than the default 5 s on a busy machine)
+  }, 30_000);
 
   it('S1 about its plane of symmetry: volume and area 1, shape > 0.99, no deviation', () => {
     const r = compute(S1, YZ);

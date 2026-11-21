@@ -66,6 +66,8 @@ export class Viewer {
   private transition: { start: number; from: CameraPose; to: CameraPose & { position: THREE.Vector3; up: THREE.Vector3 } } | null = null;
   /** Animations of what is drawn; frames are drawn every frame only while one runs. */
   private tweens = new Set<Tween>();
+  /** A button is held down on the view (it is being dragged, or about to be). */
+  private held = false;
 
   constructor(readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
@@ -100,11 +102,15 @@ export class Viewer {
       'pointerdown',
       (e) => {
         if ((e.target as Element | null)?.closest?.('.viewport-ui')) return;
+        this.held = true;
         this.stopTransition();
         this.finishTweens();
       },
       { capture: true },
     );
+    const release = () => (this.held = false);
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -155,6 +161,11 @@ export class Viewer {
 
   get tweening(): boolean {
     return this.tweens.size > 0;
+  }
+
+  /** Whether a button is held down on the view: what would fade is shown as it ends. */
+  get pressed(): boolean {
+    return this.held;
   }
 
   private stepTweens(now: number): void {

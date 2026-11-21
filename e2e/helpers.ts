@@ -108,6 +108,8 @@ export interface LithicApi {
   curveDraft(): Vec3[] | null;
   measureDraft(): Vec3[] | null;
   planes(): import('../src/compute/planes').PlaneResult[];
+  /** How a fitted plane (by its id) or a symmetry reference's plane (by the reference's id, while its row is pointed at) is drawn now; null: not drawn. */
+  planeStyle(id: string): import('../src/render/planeLayer').PlaneStyleInfo | null;
   planeSectionCount(id: string): number | null;
   exportPlanesCsvText(): string;
   towardViewer(): Vec3 | null;

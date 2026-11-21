@@ -246,6 +246,8 @@ the workspace but loading, and the 3D view asks for frames only while a tween ru
   the view is one card (`--surface-pop`, a `--line` border, `--shadow`). Solid amber is the mode's
   block and a panel's one main action; what is selected is `--accent-soft` with an `--accent-line`;
   check boxes and slider thumbs are ink. `--ease` is the one easing.
+* **Fitted planes** (`render/planeLayer.ts`, see "Fitted planes"): a rounded rectangle fitted to the plane's section, a thin
+  outline, a translucent fill; the selected plane shows a sparse grid and a slim normal.
 * **Unsaved changes** (`core/commands.ts`): each state the history can return to has a number
   (`stateId`; a merge makes a new one), `markSaved(id)` records the one saved and `dirty` compares; so
   undoing back to what was saved is clean again. `clear` (a model or project opened) is clean. The app
@@ -266,7 +268,8 @@ the workspace but loading, and the 3D view asks for frames only while a tween ru
   frame every frame only while one runs, then rendering is on demand again; a press on the view and a
   figure (`makeFigure`) finish them (`finishTweens`), reduced motion gives the end at once. Only what
   the user does by hand starts one: a landmark placed (`LandmarkLayer.pop`, `EASE_POP`) and a
-  measure's drawing coming into view (`HintLayer.show` with `fadeIn`), and the vectors being aligned moving to the placement a
+  measure's drawing coming into view (`HintLayer.show` with `fadeIn`), a fitted plane selected or let go (`PlaneVisual.setLook`,
+  150 ms; at once while a button is held on the view), and the vectors being aligned moving to the placement a
   pair or a fit gave them (`IgesAlign.moveTo`, `IGES_IMPORT.MOVE_MS`). A drawn arrow is there whole
   at once. Loading, undo, redo, generated and imported annotations draw at once.
 
@@ -913,7 +916,21 @@ sections on the views (see "Figures"). The label ("X1", …) can be changed in t
 * The `all_vertices` plane and the plane frames use the vertex PCA computed with the other
   mesh measurements. Sections of the model by each plane (`intersectPlaneSteps`, using the
   edge table kept from that pass) run in slices and are cached per plane position.
-* `render/planeLayer.ts` draws discs, sections and normals in the measure and present modes.
+* `render/planeLayer.ts` draws them in the measure and present modes (`PlaneLayer`), and a symmetry reference's plane while its
+  row is pointed at (`PlaneVisual` on its own). The shape is `compute/planeShape.ts` (pure, tested in Node): a rounded rectangle
+  in the plane fitted to the section — u the section's first principal direction (each segment weighted by its length), v = n × u;
+  a nearly round section (λ₂ / λ₁ > `PLANE_ROUND_RATIO`) or none takes the specimen frame's x in the plane, else the world axis
+  furthest from the normal; the extent of the points along u and v with a margin of `PLANE_MARGIN` × the longer side, corners of
+  `PLANE_CORNER` × the shorter side; with no section (not computed yet, or no cut) the box's eight corners stand for its points, and
+  the section arriving changes the shape at once. Its grid: the least step of 1, 2, 5 × 10^k with at most `GRID_MAX_CELLS` cells
+  along the longer side, lines through the centre cut to the rounded rectangle (no numbers: no scale). A symmetry reference's
+  rectangle is fitted to its plane's section, or to its curve's points.
+* `PlaneVisual` draws the fill (a fan, double-sided, no depth writes), the grid (`LineSegments2`, 1 px), the outline (`Line2`,
+  1.2 px, no halo), the normal (a 1.5 px line from the centre, 0.4 × the shorter side, ending in a 6 px dot) and the section, in that
+  render order; no line writes depth, so none flickers against the fill. Its looks (`PLANE_LOOKS`): not selected (fill 0.06,
+  outline 0.5, no grid, no normal), selected (0.12, 0.95, grid 0.28, the normal) and the present mode's (0.10, 0.9, grid 0.25, no
+  normal; no selection there). Another look fades in `PLANE_STYLE.FADE_MS` by `Viewer.tween`; a plane coming into view, a button
+  held on the view (`Viewer.pressed`) or reduced motion give the end at once.
 
 ## Data model
 

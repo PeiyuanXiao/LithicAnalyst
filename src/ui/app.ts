@@ -42,7 +42,7 @@ import { askToWrite, droppedHandle, isAbort, openFilePicker, saveFilePicker, wri
 import { ArrowLayer, arrowColor, arrowColorModeOf, ARROW_COLORS, DEFAULT_ARROW_DISPLAY, type ArrowColorMode } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
-import { discRadius, PlaneLayer, planeColor, PlaneVisual } from '../render/planeLayer';
+import { PlaneLayer, planeColor, PlaneVisual, type PlaneStyleInfo } from '../render/planeLayer';
 import { SectionLayer, sectionLoops2D } from '../render/sectionLayer';
 import { SectionTool } from '../tools/sectionTool';
 import { ClickTool } from '../tools/clickTool';
@@ -384,6 +384,9 @@ export class App implements AppApi {
   private symGroup: THREE.Group | null = null;
   private symDisc: PlaneVisual | null = null;
   private symCut: { key: string; lines: Polyline[] | null } = { key: '', lines: null };
+  /** The reference whose plane is drawn, and a curve's points as the lines its rectangle is fitted to (kept while the curve is the same). */
+  private symDiscRef: string | null = null;
+  private symCurveLines: { points: Vec3[]; lines: Polyline[] } | null = null;
   private symLegend: HTMLElement | null = null;
   problemsOpen = false;
   private focusedProblem: number | null = null;
@@ -777,7 +780,7 @@ export class App implements AppApi {
     this.viewportEl.append(this.edgeLegend, this.symLegend);
     this.symGroup = new THREE.Group();
     this.symGroup.name = 'symmetry-plane';
-    this.symDisc = new PlaneVisual();
+    this.symDisc = new PlaneVisual(viewer);
     this.symGroup.add(this.symDisc.root);
     this.symGroup.visible = false;
     viewer.overlay.add(this.symGroup);
@@ -2167,8 +2170,10 @@ export class App implements AppApi {
       this.planes,
       this.selection.id,
       this.mode === 'measure' || (this.mode === 'present' && this.figure.overlays.planes),
+      this.mode === 'present',
       mesh ? { min: mesh.bboxMin, max: mesh.bboxMax } : null,
       (id) => this.cuts.get(id)?.lines ?? null,
+      this.specimenFrameX(),
     );
     this.syncCompare();
     this.applyLayerVisibility();
@@ -6553,9 +6558,21 @@ export class App implements AppApi {
     this.symmetry.wantVertices([...new Set(ids)]);
   }
 
+  /** The specimen frame's x axis (null: no specimen frame): the direction of a round section's rectangle. */
+  private specimenFrameX(): Vec3 | null {
+    const f = this.store.state.specimen.frame;
+    return f ? frameAxes(f.matrix).x : null;
+  }
+
+  /** How a fitted plane, or a symmetry reference's plane while its row is pointed at, is drawn now (tests); null: not drawn. */
+  planeStyle(id: string): PlaneStyleInfo | null {
+    if (this.store.symmetryRef(id)) return this.symGroup?.visible && this.symDiscRef === id ? (this.symDisc?.info() ?? null) : null;
+    return this.planesLayer?.info(id) ?? null;
+  }
+
   /**
-   * A symmetry reference's row is pointed at (`symmetry:id|…`): its plane as a fitted plane is drawn (the disc, where it cuts the model,
-   * the normal toward side A), and over the deviation its colours. Anything else: none of it.
+   * A symmetry reference's row is pointed at (`symmetry:id|…`): its plane as a fitted plane is drawn (the rectangle fitted to where
+   * it cuts the model or to its curve, the normal toward side A), and over the deviation its colours. Anything else: none of it.
    */
   private syncSymmetryHint(key: string | null): void {
     const group = this.symGroup, disc = this.symDisc, loaded = this.loaded, base = this.measureBase;
@@ -6571,6 +6588,7 @@ export class App implements AppApi {
     }
     this.meshView?.setOverrideColors(deviation ? this.deviationColors(ref!.id) : null);
     if (!group || !disc || !loaded || !base || !ref || !c) {
+      this.symDiscRef = null;
       if (group?.visible) {
         group.visible = false;
         this.viewer?.requestRender();
@@ -6579,11 +6597,12 @@ export class App implements AppApi {
     }
     const o = loaded.offset;
     const s = ref.swap ? -1 : 1;
-    const plane = { center: [c.plane.point[0] + o[0], c.plane.point[1] + o[1], c.plane.point[2] + o[2]] as Vec3, normal: [s * c.plane.normal[0], s * c.plane.normal[1], s * c.plane.normal[2]] as Vec3 };
+    const point: Vec3 = [c.plane.point[0] + o[0], c.plane.point[1] + o[1], c.plane.point[2] + o[2]];
+    const normal: Vec3 = [s * c.plane.normal[0], s * c.plane.normal[1], s * c.plane.normal[2]];
     const colour = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#d98e04';
-    disc.update(plane, colour, discRadius(plane, { min: loaded.info.bboxMin, max: loaded.info.bboxMax }), (this.viewer?.diagonal ?? 1) * 0.18, true, o);
-    // where the plane cuts the model: not along a curve (the curve itself parts the sides)
-    const cutKey = c.sides?.parts?.kind === 'loop' ? '' : JSON.stringify([c.plane.point, c.plane.normal]);
+    // where the plane cuts the model: not along a curve (the curve itself parts the sides, and the rectangle is fitted to it)
+    const curve = ref.source.kind === 'curve' ? this.store.curve(ref.source.curveId) : undefined;
+    const cutKey = curve ? '' : JSON.stringify([c.plane.point, c.plane.normal]);
     if (cutKey !== this.symCut.key) {
       this.symCut = { key: cutKey, lines: null };
       if (cutKey) {
@@ -6591,12 +6610,19 @@ export class App implements AppApi {
         void runSliced(intersectPlaneSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, c.plane.point, c.plane.normal, base.edges)).then((lines) => {
           if (this.symCut.key !== cutKey || this.loaded !== loaded) return;
           this.symCut = { key: cutKey, lines: lines.map((l) => ({ closed: l.closed, points: l.points.map((p) => [p[0] + o[0], p[1] + o[1], p[2] + o[2]] as Vec3) })) };
-          this.symDisc?.setSections(this.symCut.lines, colour, true, o);
-          this.viewer?.requestRender();
+          // (its rectangle, fitted to the section now: at once)
+          this.refreshHint();
         });
       }
     }
+    if (curve && this.symCurveLines?.points !== curve.points) this.symCurveLines = { points: curve.points, lines: [{ points: curve.points, closed: true }] };
+    const lines = curve ? this.symCurveLines!.lines : this.symCut.lines;
+    disc.setShape({ point, normal, lines, box: { min: loaded.info.bboxMin, max: loaded.info.bboxMax }, frameX: this.specimenFrameX() }, o);
+    disc.setColor(colour);
+    // (the plane pointed at: as a selected one, at once)
+    disc.setLook('selected', false);
     disc.setSections(this.symCut.lines, colour, true, o);
+    this.symDiscRef = ref.id;
     group.visible = true;
     this.viewer?.requestRender();
   }
@@ -8106,6 +8132,8 @@ export class App implements AppApi {
       /** A vertex's mirror deviation by a reference (its index in the mesh), once computed for the shading. */
       symmetryDeviation: (id: string, vertex: number) => this.symmetry.vertexDeviation(id)?.[vertex] ?? null,
       /** The drawing of how a measure was taken: which row, what is fixed, its parts and what is on the view. */
+      /** How a fitted plane (by its id) or a symmetry reference's plane (by the reference's id, while its row is pointed at) is drawn now. */
+      planeStyle: (id: string) => this.planeStyle(id),
       measureHint: () => ({
         key: this.hintShown?.key ?? null,
         pinned: this.hintPinned,
