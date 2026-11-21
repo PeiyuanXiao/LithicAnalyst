@@ -44,7 +44,7 @@ const STORED = {
 function exported(type: SpecimenType): Array<{ suffix: string; text: string }> {
   const state = parseProjectFile(JSON.parse(JSON.stringify(oldFile(type))));
   const b = box([40, 20, 10], 2);
-  const measures = { auto: autoMeasurements(b.positions, surfaceMeasures(b.positions, b.index), null), vertices: null, box: frameMeasures(b.positions, surfaceMeasures(b.positions, b.index), null).box };
+  const measures = { auto: autoMeasurements(b.positions, surfaceMeasures(b.positions, b.index)).auto, vertices: null, box: frameMeasures(b.positions, surfaceMeasures(b.positions, b.index), null).box };
   const project: BatchProject = { path: `LithicAnalyst/projects/${type}.json`, state, derived: STORED, appVersion: '0.1.0' };
   return batchOutputs([batchSpecimen(`${type}.ply`, { project, measures }, [{ project, measures }])], { excelBom: false });
 }

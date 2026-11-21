@@ -233,9 +233,9 @@ export class ProfilePanel {
     }
     const u = quantityUnit('length', c.unit);
     this.readings.append(
-      ...numRow(t('profile.position'), fmtQuantity('length', this.fraction * c.techLength), u, 'profile-y'),
-      ...numRow(t('profile.width'), fmtQuantity('length', cx?.width), u, 'profile-width'),
-      ...numRow(t('profile.thickness'), fmtQuantity('length', cx?.thickness), u, 'profile-thickness'),
+      numRow(t('profile.position'), fmtQuantity('length', this.fraction * c.techLength), u, 'profile-y'),
+      numRow(t('profile.width'), fmtQuantity('length', cx?.width), u, 'profile-width'),
+      numRow(t('profile.thickness'), fmtQuantity('length', cx?.thickness), u, 'profile-thickness'),
     );
   }
 }

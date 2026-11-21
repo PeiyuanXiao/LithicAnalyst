@@ -23,6 +23,8 @@ export const VI_WIDTHS_MM = [0.5, 1.0, 1.5] as const;
 export const VI_SAMPLE_MM = 0.02;
 /** The mesh's edges within this distance of P give its mean edge length there (mm). */
 export const POP_MESH_RADIUS_MM = 2;
+/** Above this mean edge length round P (mm) the mesh is too coarse there to trust the proximal measures: the card warns (no measure changes). */
+export const POP_MESH_WARN_MM = 0.5;
 /**
  * The BSA's reference: the plane of the ventral face within this distance of P (mm; at most half the technical length), fitted robustly:
  * at most BSA_REF_ITERATIONS times, those more than BSA_REF_TRIM_UP robust deviations above the median (the bulb), or more than

@@ -22,7 +22,7 @@ function specimen(id: string, size: [number, number, number], observers: Record<
   return {
     file: `site/${id}.ply`,
     state: s.state,
-    auto: autoMeasurements(b.positions, surfaceMeasures(b.positions, b.index), null),
+    auto: autoMeasurements(b.positions, surfaceMeasures(b.positions, b.index)).auto,
     planes: [],
     configuration: null,
     regions: [],
@@ -47,9 +47,13 @@ describe('batch outputs', () => {
     const rows = out[0].text.trim().split('\n');
     expect(rows).toHaveLength(3);
     expect(rows[0].endsWith(',nodule_fit_rms,file')).toBe(true);
-    expect(rows[1].startsWith('A,mm,principal,40,20,10,')).toBe(true);
+    // length, width and thickness: the longest measure (a box's space diagonal) and the widths across it, no frame column
+    const cells = (row: string) => row.split(',');
+    expect(cells(rows[0]).slice(0, 5)).toEqual(['specimen_id', 'unit', 'length', 'width', 'thickness']);
+    expect(cells(rows[1]).slice(0, 2)).toEqual(['A', 'mm']);
+    expect(Number(cells(rows[1])[2])).toBeCloseTo(Math.hypot(40, 20, 10), 4);
     expect(rows[1].endsWith(',site/A.ply')).toBe(true);
-    expect(rows[2].startsWith('B,mm,principal,30,20,10,')).toBe(true);
+    expect(Number(cells(rows[2])[2])).toBeCloseTo(Math.hypot(30, 20, 10), 4);
     expect(out[1].text.trim().split('\n')).toHaveLength(3);
     expect(out[3].text).toBe('LM3=1\n0 0 0\nID=A\n');
   });
@@ -104,7 +108,7 @@ describe('batch outputs', () => {
       updateSpecimen(s, { id: 'box', annotator, frame: f });
       addPlane(s, 'all_vertices', [0, 0, 1]);
       addScarVector(s, { start: [0, 0, 5], end: [5, 0, 5], startNormal: [0, 0, 1], endNormal: [0, 0, 1] });
-      const raw = JSON.parse(JSON.stringify(serializeProject(s.state, version, { measurements: measured.auto[k], vertices: measured.vertices, box: measured.boxes[k] })));
+      const raw = JSON.parse(JSON.stringify(serializeProject(s.state, version, { measurements: measured.auto, vertices: measured.vertices, box: measured.boxes[k] })));
       return { path: `LithicAnalyst/projects/box.${annotator}.json`, state: parseProjectFile(raw), derived: raw.derived, appVersion: raw.app.version };
     };
     const ps = [project('A', null, 0), project('B', frame, 1)];
@@ -113,6 +117,8 @@ describe('batch outputs', () => {
     expect(savedResultsUsable(ps[0], '1.0.1')).toBe(false);
     expect(savedResultsUsable({ ...ps[0], derived: { ...ps[0].derived, vertices: null } }, '1.0.0')).toBe(false);
     expect(savedResultsUsable({ ...ps[0], derived: { ...ps[0].derived, measurements: null } }, '1.0.0')).toBe(false);
+    // length, width and thickness stored along a frame (as before): measured again
+    expect(savedResultsUsable({ ...ps[0], derived: { ...ps[0].derived, measurements: { ...(ps[0].derived.measurements as object), frame: 'principal' } } }, '1.0.0')).toBe(false);
     // a project with arrows needs the box of its volumetric configuration
     expect(savedResultsUsable({ ...ps[0], derived: { ...ps[0].derived, configuration: null } }, '1.0.0')).toBe(false);
 
@@ -122,15 +128,15 @@ describe('batch outputs', () => {
     const jobs2 = new MeshJobs(async (steps) => runSync(steps));
     await jobs2.hash(2, file);
     const fresh = await jobs2.measure(2, ps.map((p) => p.state.specimen.frame));
-    const measures = (k: number) => ({ auto: fresh.auto[k], vertices: fresh.vertices, box: fresh.boxes[k] });
+    const measures = (k: number) => ({ auto: fresh.auto, vertices: fresh.vertices, box: fresh.boxes[k] });
     const fromMesh = batchSpecimen('box.ply', { project: ps[0], measures: measures(0) }, ps.map((p, k) => ({ project: p, measures: measures(k) })));
     const opts = { excelBom: false };
     expect(batchOutputs([fromSaved], opts)).toEqual(batchOutputs([fromMesh], opts));
     const tables = batchOutputs([fromSaved], opts).map((f) => f.suffix);
     expect(tables).toEqual(expect.arrayContaining(['measurements.csv', 'planes.csv', 'scar_vectors.csv', 'configuration.csv', 'flaking_surfaces.csv']));
-    // the two observers measured along their own frames
-    expect(fromSaved.observers.get('A')!.length).toBeCloseTo(40, 4);
-    expect(fromSaved.observers.get('B')!.length).not.toBeCloseTo(40, 1);
+    // the two observers' frames differ: length, width and thickness do not
+    expect(fromSaved.observers.get('A')!.length).toBeCloseTo(Math.hypot(40, 20, 10), 4);
+    expect(fromSaved.observers.get('B')!.length).toBe(fromSaved.observers.get('A')!.length);
   });
 });
 

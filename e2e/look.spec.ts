@@ -136,14 +136,16 @@ test('solid amber is the current mode alone; Save has a dot only while something
 test('a flake: the measures in groups; platform width and depth 2 × 2, EPA 2 × 3; a cell shows its own; an empty cell recedes', async ({ page }) => {
   await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
-  // nothing annotated yet: every value is empty, and recedes
+  // nothing annotated yet: an empty value recedes; a group all empty for one reason is one line that says why
   await page.locator('#app-mode-measure').click();
   const ink3 = await textColourOf(page, '--ink-3');
-  await expect(page.locator('#flake-platform_width_chord')).toHaveText('—');
-  expect(await page.locator('#flake-platform_width_chord').evaluate((e) => getComputedStyle(e).color)).toBe(ink3);
+  await expect(page.locator('#flake-group-platform')).toHaveClass(/is-empty/);
+  await expect(page.locator('#flake-group-platform .measure-empty-why')).toHaveText('No technological axis');
+  await expect(page.locator('#flake-platform_width_chord')).toHaveCount(0);
+  await expect(page.locator('#flake-tech_length')).toHaveText('—');
   expect(await page.locator('#flake-tech_length').evaluate((e) => getComputedStyle(e).color)).toBe(ink3);
   // a cell with nothing has no drawing to show, and no focus
-  await expect(page.locator('#flake-epa_3pt_2mm')).not.toHaveAttribute('data-hint', /./);
+  await expect(page.locator('#flake-tech_length')).not.toHaveAttribute('data-hint', /./);
 
   await page.locator('#app-mode-annotate').click();
   await annotate(page);
@@ -151,21 +153,22 @@ test('a flake: the measures in groups; platform width and depth 2 × 2, EPA 2 ×
   await expect.poll(() => page.evaluate(() => window.lithicanalyst.flake()?.measures?.epa_3pt_2mm ?? null)).not.toBeNull();
   if (await page.locator('#profile-panel').isVisible()) await page.locator('#profile-close').click();
 
-  // the groups, their titles in the data face
+  // the groups, their titles in the interface's face (the tables' heads in the data face)
   const titles = page.locator('#flake-measures .measure-group-title');
-  await expect(titles).toHaveText(['Technological axis', 'Morphology', 'Whole', 'Proximal end']);
-  expect(await titles.first().evaluate((e) => ({ font: getComputedStyle(e).fontFamily, size: getComputedStyle(e).fontSize, spacing: getComputedStyle(e).letterSpacing, color: getComputedStyle(e).color }))).toMatchObject({ size: '10.5px', color: ink3 });
-  expect(await titles.first().evaluate((e) => getComputedStyle(e).fontFamily)).toContain('Plex Mono');
+  await expect(titles).toHaveText(['Dimensions', 'Platform', 'Proximal angles (°)', 'Bulb']);
+  expect(await titles.first().evaluate((e) => ({ size: getComputedStyle(e).fontSize, weight: getComputedStyle(e).fontWeight }))).toMatchObject({ size: '12px', weight: '500' });
+  expect(await titles.first().evaluate((e) => getComputedStyle(e).fontFamily)).not.toContain('Plex Mono');
+  expect(await page.locator('#flake-platform-table thead th').nth(1).evaluate((e) => ({ font: getComputedStyle(e).fontFamily, color: getComputedStyle(e).color }))).toMatchObject({ color: ink3 });
 
   const pw = page.locator('#flake-platform-table');
   await expect(pw.locator('tbody tr')).toHaveCount(2);
   for (const r of await pw.locator('tbody tr').all()) await expect(r.locator('td')).toHaveCount(2);
   await expect(pw.locator('thead th')).toHaveText(['mm', 'Chord', 'Along surface']);
   await expect(pw.locator('tbody th')).toHaveText(['Width', 'Depth']);
-  const epa = page.locator('#flake-epa-table');
-  await expect(epa.locator('tbody tr')).toHaveCount(2);
+  const epa = page.locator('#flake-angle-table');
+  await expect(epa.locator('tbody tr')).toHaveCount(4);
   for (const r of await epa.locator('tbody tr').all()) await expect(r.locator('td')).toHaveCount(3);
-  await expect(epa.locator('thead th')).toHaveText(['°', '1 mm', '2 mm', '3 mm']);
+  await expect(epa.locator('thead th')).toHaveText(['', '1 mm', '2 mm', '3 mm']);
   // the unit is in the head, not in the cells; the numbers right-aligned in the data face
   expect(await epa.locator('td').first().textContent()).not.toContain('°');
   expect(await epa.locator('td').first().evaluate((e) => getComputedStyle(e).textAlign)).toBe('right');
@@ -202,7 +205,8 @@ test('a core and a generic specimen: dimensions, then the whole', async ({ page 
     await loadMesh(page, boxPly());
     await page.locator('#app-mode-measure').click();
     await expect(page.locator('#measure-auto .measure-group-title')).toHaveText(['Dimensions', 'Whole']);
-    await expect(page.locator('#auto-length')).toHaveText('40.000');
+    // the longest measure: the box's space diagonal
+    await expect(page.locator('#auto-length')).toHaveText('45.826');
     await expect(page.locator('#auto-volume')).toHaveText('8000.00');
   }
 });

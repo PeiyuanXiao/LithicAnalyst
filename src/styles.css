@@ -9,6 +9,8 @@
   --surface-pop: #f7f4ec;
   --surface-2: #f3efe5;
   --well: #d8d1bd;
+  /* a value pointed at: the ink, very faint */
+  --hint-hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --overlay: rgba(239, 234, 223, 0.95);
   --line: #c9c0aa;
   --line-soft: #d6cdb8;
@@ -638,6 +640,15 @@ kbd {
   border-color: transparent;
 }
 
+/* a secondary button whose action removes something: its border as any, its words in the danger colour */
+.btn-danger-line {
+  color: var(--danger);
+}
+
+.btn-danger-line:hover {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface-pop));
+}
+
 .btn-sm {
   min-height: 28px;
   padding: 3px 9px;
@@ -933,13 +944,27 @@ kbd {
   color: var(--ink);
 }
 
-/* what the annotation has so far: as the coordinate reading across the view */
-.status-pills {
+/* the view's lower left: the colour scales above, the status pills below, one column, so they never overlap */
+.vp-stack {
   position: absolute;
   left: max(12px, env(safe-area-inset-left, 0px));
   bottom: 10px;
   /* (leaves room for the coordinate reading: on a narrower view the pills take more rows) */
   max-width: calc(100% - 340px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.vp-stack > * {
+  pointer-events: auto;
+}
+
+/* what the annotation has so far: as the coordinate reading across the view */
+.status-pills {
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap-reverse;
   align-items: center;
@@ -1065,7 +1090,7 @@ kbd {
   color: var(--ink);
 }
 
-.status-pills.is-collapsed {
+.vp-stack:has(.status-pills.is-collapsed) {
   max-width: calc(100% - 24px);
 }
 
@@ -2334,15 +2359,32 @@ input[type="checkbox"]:disabled {
   overflow-wrap: anywhere;
 }
 
-/* label | number | unit; numbers line up on the right */
+/* label | number | unit; numbers line up on the right. Each row is one box on the list's columns (subgrid),
+   so a row is marked as a whole: one rounded piece from its label to its unit */
 .num-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content max-content;
   /* no gap before the unit column: a list without units ends flush with its text values */
-  gap: 3px 0;
+  gap: 0;
   margin: 0;
   font-size: var(--step--1);
   align-items: baseline;
+}
+
+.num-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding-block: 1.5px;
+}
+
+/* a row that can be marked reaches 6px past its text either side; the text stays where it is */
+.num-row[data-hint],
+.measure-groups .num-row {
+  margin-inline: -6px;
+  padding-inline: 6px;
+  border-radius: var(--radius);
 }
 
 .num-grid dt {
@@ -2367,28 +2409,47 @@ input[type="checkbox"]:disabled {
   overflow-wrap: anywhere;
 }
 
-/* a measure that shows on the model how it was taken: on the pointer or the focus, and fixed by a click */
-.num-grid [data-hint],
-.measure-table [data-hint] {
+/* a measure that shows on the model how it was taken: on the pointer or the focus a neutral ground, fixed by a click
+   pale amber in an amber ring (the selection's look); the text keeps its colour, the number goes to 500 */
+.num-row[data-hint],
+.measure-table td[data-hint],
+.score-cell[data-hint] {
   cursor: pointer;
+  border-radius: var(--radius);
+  transition:
+    background-color 140ms var(--ease),
+    box-shadow 140ms var(--ease),
+    color 140ms var(--ease);
 }
 
-.num-grid [data-hint].is-hinted,
-.measure-table [data-hint].is-hinted {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+.num-row[data-hint]:hover,
+.num-row[data-hint].is-hinted,
+.measure-table td[data-hint]:hover,
+.measure-table td[data-hint].is-hinted,
+.score-cell[data-hint]:hover,
+.score-cell[data-hint].is-hinted,
+.arrow-row[data-hint].is-hinted {
+  background-color: var(--hint-hover);
 }
 
-.num-grid [data-hint].is-pinned,
-.measure-table [data-hint].is-pinned {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+.num-row[data-hint].is-pinned,
+.measure-table td[data-hint].is-pinned,
+.score-cell[data-hint].is-pinned {
+  background-color: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-/* the automatic measures: in groups, each under a small title */
+.num-row.is-pinned dd.num,
+.measure-table td.is-pinned,
+.score-cell.is-pinned .score-value {
+  font-weight: 500;
+}
+
+/* the automatic measures: in groups, each under a small title; a fine line between groups */
 .measure-groups {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .measure-group {
@@ -2398,52 +2459,90 @@ input[type="checkbox"]:disabled {
   margin: 0;
 }
 
-.measure-group-title,
-.measure-table th {
+.measure-group + .measure-group {
+  border-top: 0.5px solid var(--line);
+  padding-top: 10px;
+}
+
+/* a group's title: the interface's own type, not the tables' heads */
+.measure-group-title {
   margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--ink-2);
+}
+
+/* a group with nothing in it, all for one reason: its title, "—" and why, on one line */
+.measure-group-empty {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.measure-group-empty .measure-group-title {
+  flex: none;
+}
+
+.measure-group-empty .measure-empty-dash {
   font-family: var(--font-data);
-  font-size: 10.5px;
-  font-weight: 400;
-  letter-spacing: 0.14em;
   color: var(--ink-3);
 }
 
-/* said beside a value, faintly (the BSA's level) */
-.measure-aside {
+.measure-group-empty .measure-empty-why {
+  min-width: 0;
+  font-size: var(--step--1);
   color: var(--ink-3);
 }
 
-/* a row that is no measure of the specimen (the mesh's resolution): it recedes */
+/* a row that is no measure of the specimen: it recedes */
 .num-grid .is-quiet {
   color: var(--ink-3);
 }
 
 /* a value with nothing in it: the whole row, or the cell, recedes; "—" stays */
 .num-grid .is-missing,
+.num-row.is-missing dt,
+.num-row.is-missing dd,
 .measure-table .is-missing {
   color: var(--ink-3);
 }
 
-/* two or three related measures as a small table: the unit in the head, right-aligned numbers */
+/* two or three related measures as a small table: what it measures and its unit in the corner, right-aligned numbers */
 .measure-table {
-  width: 100%;
-  border-collapse: collapse;
+  /* the last column's numbers end where the lists' do; each cell's ground reaches 6px past its number */
+  width: calc(100% + 6px);
+  margin-right: -6px;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--step--1);
 }
 
-.measure-table th {
-  padding: 0 0 2px 8px;
+.measure-table thead th {
+  padding: 0 6px 2px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
   text-align: right;
   white-space: nowrap;
+  color: var(--ink-3);
+  transition: color 140ms var(--ease);
 }
 
-.measure-table th:first-child {
+/* the corner: what the table measures, and in what unit */
+.measure-table thead th.measure-corner {
   padding-left: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
   text-align: left;
+  color: var(--ink-2);
 }
 
 .measure-table td {
-  padding: 1.5px 0 1.5px 8px;
+  padding: 1.5px 6px;
 }
 
 /* the row's name, as a label of the lists above */
@@ -2451,20 +2550,27 @@ input[type="checkbox"]:disabled {
   padding: 1.5px 8px 1.5px 0;
   font-family: inherit;
   font-size: inherit;
+  font-weight: 400;
   letter-spacing: normal;
-  text-transform: none;
   text-align: left;
   white-space: normal;
   color: var(--ink-2);
+  transition: color 140ms var(--ease);
+}
+
+/* the row and the column of a cell shown or fixed */
+.measure-table th.is-lit,
+.measure-table th.is-lit .measure-row-pick {
+  color: var(--ink);
 }
 
 .measure-table td.num {
   width: 1%;
 }
 
-.measure-table .measure-unit {
-  text-transform: none;
-  letter-spacing: 0.02em;
+/* a cell with no measure in it (the bulb angle's further distances): nothing in it */
+.measure-table td.is-blank {
+  padding: 0;
 }
 
 [data-hint]:focus-visible {
@@ -2472,8 +2578,54 @@ input[type="checkbox"]:disabled {
   outline-offset: -2px;
 }
 
-.arrow-row[data-hint].is-hinted {
-  box-shadow: inset 2px 0 0 var(--accent-line);
+/* a value changed by the user: its row (or cell) flashes in the same rounded shape */
+@keyframes value-flash {
+  from {
+    background-color: var(--accent-soft);
+  }
+}
+
+.num-row.is-flash,
+.measure-table td.is-flash {
+  border-radius: var(--radius);
+  animation: value-flash 280ms var(--ease);
+}
+
+/* the large cells of the indices without a unit (symmetry, retouch): side by side, the number large */
+.score-cells {
+  display: grid;
+  grid-template-columns: repeat(var(--score-cols, 3), minmax(0, 1fr));
+  gap: 6px;
+}
+
+.score-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px 7px;
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+.score-label {
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.score-value {
+  font-family: var(--font-data);
+  font-size: 18px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.score-cell.is-missing .score-value {
+  color: var(--ink-3);
 }
 
 /* the value at the middle of a dimension line; it lets the pointer through, as the labels' layer does */
@@ -3298,13 +3450,9 @@ input[type="checkbox"]:disabled {
 
 /* ------------------------------------------------------------ narrow screens */
 
-/* words that do not fit (a language with longer ones): the steps of a narrower window (ui/app.ts fitTopbar) */
-.topbar.is-tight .mode-btn {
-  width: 40px;
-  padding: 0;
-}
-
-.topbar.is-tight .mode-btn .mode-label {
+/* words that do not fit (a narrower window, a language with longer ones), step by step (ui/app.ts fitTopbar):
+   the frame's pill first, then the buttons' words (not the main action's), last the modes' names but the current one's */
+.topbar.is-tight .spec-frame {
   display: none;
 }
 
@@ -3316,26 +3464,19 @@ input[type="checkbox"]:disabled {
   display: inline;
 }
 
-/* the mode switch shows icons only */
-@media (max-width: 1199px) {
-  .mode-btn {
-    width: 40px;
-    padding: 0;
-  }
-  .mode-btn .mode-label {
-    display: none;
-  }
+.topbar.is-tightest .mode-btn:not([aria-checked="true"]) {
+  width: 40px;
+  padding: 0;
 }
 
+.topbar.is-tightest .mode-btn:not([aria-checked="true"]) .mode-label {
+  display: none;
+}
+
+/* (the top bar's words go by fitTopbar's steps, in their order) */
 @media (max-width: 1100px) {
   :root {
     --sidebar-w: 330px;
-  }
-  .hdr-btn .btn-text {
-    display: none;
-  }
-  .hdr-btn.btn-primary .btn-text {
-    display: inline;
   }
 }
 
@@ -3349,7 +3490,7 @@ input[type="checkbox"]:disabled {
     justify-self: stretch;
   }
   .mode-btn,
-  .topbar.is-tight .mode-btn {
+  .topbar.is-tightest .mode-btn:not([aria-checked="true"]) {
     flex: 1 1 0;
     width: auto;
   }
@@ -4574,12 +4715,13 @@ input[type="checkbox"]:disabled {
   height: 13px;
 }
 
+/* the technical axis: one row as any object's (chip, name, why it gives no frame, delete) */
 .axis-row {
-  width: 100%;
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.axis-row > .icon-btn {
+  margin-block: -4px;
 }
 
 .profile-panel {
@@ -5100,10 +5242,6 @@ input[type="checkbox"]:disabled {
 }
 
 .edge-legend {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 5;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -5356,11 +5494,53 @@ input[type="checkbox"]:disabled {
   width: 58px;
 }
 
+/* the volume removed along the fitted lengths: what and its unit at the top left, its range and the lengths' at the axes' ends */
 .retouch-fit-curve {
   display: block;
   width: 100%;
-  height: 56px;
+  min-width: 260px;
+  height: auto;
   margin-top: 6px;
+  overflow: visible;
+}
+
+.fit-plot-title {
+  font: 400 11px var(--font-ui);
+  fill: var(--ink-2);
+}
+
+.fit-plot-num {
+  font: 400 11px var(--font-data);
+  font-variant-numeric: tabular-nums;
+  fill: var(--ink-3);
+}
+
+.fit-plot-axis {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.fit-plot-line {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.25;
+}
+
+.fit-plot-w {
+  stroke: var(--accent-line);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.fit-plot-dot {
+  fill: var(--accent);
+  stroke: var(--ink);
+  stroke-width: 0.75;
+}
+
+.fit-plot-wlabel {
+  fill: var(--ink);
 }
 
 .retouch-table {
@@ -5369,13 +5549,29 @@ input[type="checkbox"]:disabled {
   font-size: var(--step--1);
 }
 
-/* a heading goes onto two lines rather than the table out of the sidebar (a longer language, a narrow window) */
+/* the heads as a measure table's: monospaced, small, on one line */
 .retouch-table th {
   padding: 2px 4px;
-  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 11px;
   font-weight: 400;
+  letter-spacing: 0;
+  color: var(--ink-3);
   text-align: left;
+  white-space: nowrap;
   vertical-align: bottom;
+}
+
+/* the retouch card's four indices: two by two */
+.retouch-scores {
+  --score-cols: 2;
+  margin: 4px 0 2px;
+}
+
+.retouch-scores[hidden],
+#retouch-values[hidden],
+.retouch-grids[hidden] {
+  display: none;
 }
 
 .retouch-table td {
@@ -5433,49 +5629,19 @@ input[type="checkbox"]:disabled {
   color: var(--ink-2);
 }
 
-/* the three symmetries: one row of flat cells, a large number in each (no selected state, no amber) */
+/* the three symmetries: one row of large cells (.score-cells) */
 .symmetry-scores {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  --score-cols: 3;
   margin: 8px 0 10px;
 }
 
-.symmetry-score {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 6px 8px 7px;
-  border-radius: var(--radius);
-  background: var(--well);
-  transition: opacity 160ms var(--ease);
-}
-
-.symmetry-score-label {
-  font-size: var(--step--1);
-  color: var(--ink-2);
-}
-
-.symmetry-score-value {
-  font-family: var(--font-data);
-  font-size: var(--step-2);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-  color: var(--ink);
-}
-
-.symmetry-score.is-missing .symmetry-score-value {
-  color: var(--ink-3);
-}
-
-.symmetry-score[data-hint] {
-  cursor: pointer;
-}
-
-.symmetry-score:focus-visible {
-  outline: 2px solid var(--line-strong);
-  outline-offset: 1px;
+/* (their values before fade while the present ones are computed) */
+.symmetry-score.score-cell {
+  transition:
+    background-color 140ms var(--ease),
+    box-shadow 140ms var(--ease),
+    color 140ms var(--ease),
+    opacity 160ms var(--ease);
 }
 
 /* the values of the inputs before, while the present ones are computed */
@@ -5542,7 +5708,4 @@ input[type="checkbox"]:disabled {
   margin-top: 3px;
 }
 
-/* the deviation's scale over the edge angles' when both are there */
-.edge-legend:not([hidden]) + #symmetry-legend {
-  bottom: 44px;
-}
+

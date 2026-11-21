@@ -9,7 +9,7 @@ const auto = (page: Page) => page.evaluate(() => window.lithicanalyst.autoMeasur
 const camera = (page: Page) => page.evaluate(() => [window.lithicanalyst.towardViewer()!, window.lithicanalyst.cameraUp()!] as const);
 const row = (m: number[], r: number): V => [m[4 * r], m[4 * r + 1], m[4 * r + 2]];
 
-test('sets the specimen frame from the view, a plane and an arrow; turns it; measurements follow', async ({ page }) => {
+test('sets the specimen frame from the view, a plane and an arrow; turns it; length, width and thickness stay', async ({ page }) => {
   await openApp(page);
   await loadMesh(page, boxPly());
   // an arrow along +X on the top face, and a plane (all vertices: normal +Z)
@@ -19,7 +19,8 @@ test('sets the specimen frame from the view, a plane and an arrow; turns it; mea
   await dragArrow(page, boxPoint(-10, 0, 5), boxPoint(10, 0, 5));
   await page.keyboard.press('m');
   await page.locator('#plane-add').click();
-  await expect.poll(async () => (await auto(page))?.frame).toBe('principal');
+  await expect.poll(async () => (await auto(page))?.length ?? null).not.toBeNull();
+  const before = await auto(page);
 
   await page.keyboard.press('m');
   await expect(page.locator('#sec-orientation')).toBeVisible();
@@ -34,14 +35,14 @@ test('sets the specimen frame from the view, a plane and an arrow; turns it; mea
   let f = (await frame(page))!;
   expect(dot(row(f.matrix, 2), [0, 0, 1])).toBeCloseTo(1, 6);
   expect(dot(row(f.matrix, 1), [0, 1, 0])).toBeCloseTo(1, 6);
-  // length along the frame's Y (the box's 20), width along X (40)
-  await expect.poll(async () => [(await auto(page))!.frame, (await auto(page))!.length, (await auto(page))!.width]).toEqual(['specimen', 20, 40]);
+  // length, width and thickness do not follow the frame
+  expect(await auto(page)).toEqual(before);
 
   // turn left 90°: what was to the right is up
   await page.locator('#frame-rot-ccw').click();
   f = (await frame(page))!;
   expect(dot(row(f.matrix, 1), [1, 0, 0])).toBeCloseTo(1, 6);
-  await expect.poll(async () => (await auto(page))!.length).toBeCloseTo(40, 6);
+  expect(await auto(page)).toEqual(before);
   // the camera follows the frame
   const [toward, up] = await camera(page);
   expect(dot(toward, [0, 0, 1])).toBeCloseTo(1, 6);
@@ -70,7 +71,7 @@ test('sets the specimen frame from the view, a plane and an arrow; turns it; mea
 
   await page.locator('#frame-clear').click();
   await expect(page.locator('#frame-status')).toHaveText('Not set');
-  await expect.poll(async () => (await auto(page))!.frame).toBe('principal');
+  expect(await auto(page)).toEqual(before);
   await page.keyboard.press('ControlOrMeta+z');
   await expect(page.locator('#frame-status')).not.toHaveText('Not set');
 

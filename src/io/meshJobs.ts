@@ -1,7 +1,7 @@
 import { sha256Hex } from '../compute/hash';
 import type { ConfigBox } from '../compute/configuration';
 import type { GmResult } from '../compute/gm';
-import { frameMeasuresSteps, surfaceMeasuresSteps } from '../compute/measure';
+import { autoMeasurementsSteps, frameMeasuresSteps, surfaceMeasuresSteps } from '../compute/measure';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { gmOfProjectSteps } from '../compute/projectRegions';
 import type { Steps } from '../compute/steps';
@@ -20,10 +20,10 @@ export interface IgesCheck {
   arrows: PlacedArrow[] | null;
 }
 
-/** What a batch export needs from a model: its size, shape and box along each frame asked for, and the vertices' principal axes. */
+/** What a batch export needs from a model: its size and shape, its box along each frame asked for, and the vertices' principal axes. */
 export interface MeshMeasures {
-  /** One per frame asked for, in that order. */
-  auto: AutoMeasurements[];
+  /** Whatever the frame. */
+  auto: AutoMeasurements;
   /** The model's box along each frame (volumetric configuration), original coordinates. */
   boxes: ConfigBox[];
   /** Principal axes of all vertices, original coordinates. */
@@ -59,14 +59,10 @@ export class MeshJobs {
     this.files.delete(id);
     const mesh = centredMesh(parseMeshBuffer(f.name, f.size, f.buffer, f.sha256));
     const base = await this.run(surfaceMeasuresSteps(mesh.positions, mesh.index));
-    const auto: AutoMeasurements[] = [];
-    const boxes: ConfigBox[] = [];
     const o = mesh.offset;
-    for (const frame of frames) {
-      const m = await this.run(frameMeasuresSteps(mesh.positions, base, frame, o));
-      auto.push(m.auto);
-      boxes.push(m.box);
-    }
+    const { auto } = await this.run(autoMeasurementsSteps(mesh.positions, base, o));
+    const boxes: ConfigBox[] = [];
+    for (const frame of frames) boxes.push((await this.run(frameMeasuresSteps(mesh.positions, base, frame, o))).box);
     const mean: Vec3 = [base.vertices.mean[0] + o[0], base.vertices.mean[1] + o[1], base.vertices.mean[2] + o[2]];
     return { auto, boxes, vertices: { ...base.vertices, mean } };
   }

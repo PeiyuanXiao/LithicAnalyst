@@ -91,7 +91,7 @@ Requires Node.js ≥ 20.
 
 | Measure | Description |
 |:-----------------------------------|:-----------------------------------|
-| Dimensions | Length, width and thickness along a flake’s technological axis or the specimen’s orientation; morphological length, width and thickness |
+| Dimensions | Length, width and thickness along a flake’s technological axis; morphological length, width and thickness whatever the orientation (largest dimension, then the widths across it), also for cores and generic specimens |
 | Surface area, volume | Of the whole model (volume on closed meshes only) |
 | Platform and bulb | Width and depth (straight and along the surface), area; exterior platform angle (EPA, up to 3 mm from the edge as in Grosman et al., 2022), interior platform angle (IPA) and platform surface interior angle (PSIA; McPherron et al., 2020); bulb angle at 1 mm (Li et al., 2022); bulb surface angle (BSA) and vertical interval (VI) of the bulb (Nagai, 2026) |
 | Edge angles | Every 1 mm along an edge, at 2, 5 and 10 mm from it, by the three-point and two-line methods (Schunk et al., 2023); means per working edge; the parts of an edge sharper than a threshold |

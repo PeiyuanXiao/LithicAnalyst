@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { EPA_DISTANCES_MM, flakeMeasures, FLAKE_MEASURES, morphDimensions, type FlakeMeasure, type FlakeResult } from '../src/compute/flake';
-import { arcAngle, boxHint, flakeHint, noduleHint, sharpHint, stationsHint, symmetryHint, wholeModelHint, type HintArc, type HintDots, type HintFaces, type HintLine, type HintPrim, type MeasureHint } from '../src/compute/measureHint';
+import { arcAngle, dimensionsHint, flakeHint, HINT_LOOK, hintLook, noduleHint, sharpHint, stationsHint, symmetryHint, wholeModelHint, type HintArc, type HintDots, type HintFaces, type HintLine, type HintPrim, type MeasureHint } from '../src/compute/measureHint';
 import { buildEdges, surfaceArea, signedVolume } from '../src/compute/meshGeometry';
-import { frameMeasures, surfaceMeasures } from '../src/compute/measure';
+import { autoMeasurements, surfaceMeasures } from '../src/compute/measure';
 import { splitByLoopSteps, splitByPlaneSteps, type SplitParts } from '../src/compute/split';
 import { runSync } from '../src/compute/steps';
 import { technicalFrame } from '../src/compute/technicalFrame';
-import type { SpecimenFrame, Vec3 } from '../src/core/types';
+import type { Vec3 } from '../src/core/types';
 import { box, facesFacing, flakeT1, mapped, rigid, sphere, T1, type Mesh } from './meshes';
 
 const TOLERANCE = 1e-9;
@@ -250,25 +250,38 @@ describe('the other measures', () => {
     expect(wholeModelHint()).toEqual([{ kind: 'faces', part: 'model', tint: 'current', faces: 'all', through: false }]);
   });
 
-  it('a core\'s length, width and thickness: the box along the frame, and three lines of those lengths', () => {
+  it('a core\'s length, width and thickness: drawn as a flake\'s morphological ones, three lines of those lengths', () => {
     const m = mapped(box([40, 20, 10], 4), rigid([1, -1, 2], 33, [5, 6, 7]));
     const offset: Vec3 = [5, 6, 7];
     const local = m.positions.map((x, i) => x - offset[i % 3]);
     const base = surfaceMeasures(local, m.index);
-    const along: SpecimenFrame = { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], source: 'view' };
-    for (const frame of [null, along]) {
-      const { auto, box: b } = frameMeasures(local, base, frame, offset);
-      const h = boxHint('width', b, auto, 'mm');
-      close(lengthOf(line(h, 'length')), auto.length);
-      close(lengthOf(line(h, 'width')), auto.width);
-      close(lengthOf(line(h, 'thickness')), auto.thickness);
-      expect(line(h, 'width').role).toBe('current');
-      expect(line(h, 'length').role).toBe('other');
-      const edges = line(h, 'box');
-      const sizes: number[] = [];
-      for (let i = 0; i < 24; i += 2) sizes.push(size(sub(edges.points[i + 1], edges.points[i])));
-      for (const want of [auto.length, auto.width, auto.thickness]) expect(sizes.filter((s) => Math.abs(s - want) < TOLERANCE).length).toBeGreaterThanOrEqual(4);
-    }
+    const { auto, construction } = autoMeasurements(local, base, offset);
+    const h = dimensionsHint('width', construction!, auto, 'mm');
+    close(lengthOf(line(h, 'length')), auto.length);
+    close(lengthOf(line(h, 'width')), auto.width);
+    close(lengthOf(line(h, 'thickness')), auto.thickness);
+    expect(line(h, 'width').role).toBe('current');
+    expect(line(h, 'length').role).toBe('other');
+    // the longest measure's ends are vertices of the model (original coordinates)
+    for (const p of line(h, 'length').points) expect(Math.min(...Array.from({ length: m.positions.length / 3 }, (_, i) => size(sub(p, [m.positions[3 * i], m.positions[3 * i + 1], m.positions[3 * i + 2]]))))).toBeLessThan(1e-5);
+  });
+
+  it('only the current part stands out: the others at HINT_LOOK.OTHER_OPACITY and without their values', () => {
+    const m = box([40, 20, 10], 2);
+    const { auto, construction } = autoMeasurements(m.positions, surfaceMeasures(m.positions, m.index));
+    const h = dimensionsHint('length', construction!, auto, 'mm');
+    const looks = h.map((p) => ({ part: p.part, role: 'role' in p ? p.role : null, ...hintLook(p) }));
+    expect(HINT_LOOK.OTHER_OPACITY).toBe(0.35);
+    for (const l of looks) expect(l.opacity).toBe(l.role === 'current' ? 1 : HINT_LOOK.OTHER_OPACITY);
+    // three lines carry values; only the current one's is written
+    expect(h.filter((p) => p.kind === 'line' && p.label).length).toBe(3);
+    expect(looks.filter((l) => l.label).map((l) => l.part)).toEqual(['length']);
+    // the box of a flake's technical dimensions: its edges and the others' dots are faint too
+    const tech = flakeHint('tech_width', measured().r, 'mm')!;
+    expect(hintLook(line(tech, 'box')).opacity).toBe(HINT_LOOK.OTHER_OPACITY);
+    expect(tech.filter((p) => hintLook(p).label).map((p) => p.part)).toEqual(['width']);
+    // pieces of surface keep their own tints
+    expect(hintLook(wholeModelHint()[0])).toEqual({ opacity: 1, label: false });
   });
 
   it('a symmetry reference by a plane: side A tinted, each triangle on its side; swapped, the other side', () => {

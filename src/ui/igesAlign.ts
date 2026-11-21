@@ -357,7 +357,7 @@ export class IgesAlign {
     const res = this.residual();
     const unit = quantityUnit('length', this.host.unit);
     clear(r.residual);
-    r.residual.append(...numRow(t('align.median'), fmtQuantity('length', res.median), unit, 'align-median'), ...numRow(t('align.p90'), fmtQuantity('length', res.p90), unit, 'align-p90'), ...numRow(t('align.max'), fmtQuantity('length', res.max), unit, 'align-max'));
+    r.residual.append(numRow(t('align.median'), fmtQuantity('length', res.median), unit, 'align-median'), numRow(t('align.p90'), fmtQuantity('length', res.p90), unit, 'align-p90'), numRow(t('align.max'), fmtQuantity('length', res.max), unit, 'align-max'));
     r.ok.hidden = !isAligned(res, this.tol());
     r.fit.disabled = this.fitting;
     r.unfit.disabled = this.fitting || !this.beforeFit;

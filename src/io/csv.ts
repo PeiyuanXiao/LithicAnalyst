@@ -341,7 +341,6 @@ export function measurementsCsv(
   const header = [
     'specimen_id',
     'unit',
-    'frame',
     'length',
     'width',
     'thickness',
@@ -360,7 +359,6 @@ export function measurementsCsv(
   const row = [
     csvCell(state.specimen.id),
     csvCell(state.specimen.unit),
-    auto?.frame ?? '',
     cell(auto?.length ?? null),
     cell(auto?.width ?? null),
     cell(auto?.thickness ?? null),

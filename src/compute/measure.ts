@@ -2,6 +2,7 @@ import type { AutoMeasurements } from '../core/derived';
 import type { SpecimenFrame, Vec3 } from '../core/types';
 import type { ConfigBox } from './configuration';
 import { buildEdgesSteps, meshTopologySteps, surfaceIntegralsSteps, surfacePca, vertexPcaSteps, type EdgeTable, type MeshTopology, type PrincipalAxes } from './meshGeometry';
+import { morphDimensionsSteps, type MorphConstruction, type MorphDimensions } from './flake';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /** What the automatic measurements need from the mesh; computed once per mesh. */
@@ -69,19 +70,16 @@ export function* extentsSteps(positions: ArrayLike<number>, axes: readonly Vec3[
   return [0, 1, 2].map((k) => (hi[k] >= lo[k] ? hi[k] - lo[k] : 0)) as [number, number, number];
 }
 
-/** Length, width and thickness along a frame, and the model's box in that frame. */
+/** The model's box along a frame (the volumetric configuration's). */
 export interface FrameMeasures {
-  auto: AutoMeasurements;
   box: ConfigBox;
 }
 
 /**
- * Length, width and thickness are the ranges of the model along three axes:
- * the specimen frame's Y, X and Z when one is set (rows of its matrix), else
- * the first, second and third principal axes of the surface. The same pass
- * gives the box of the volumetric configuration (X, Y, Z: the frame's, or the
- * first principal axis as Y, the third as Z and X = Y × Z). `offset`: the
- * positions are relative to it (the box is in original coordinates).
+ * The box of the volumetric configuration: the model's ranges along the specimen frame's X, Y and Z (rows of its matrix) when
+ * one is set, else along the surface's principal axes (the first as Y, the third as Z and X = Y × Z). Only the box: length,
+ * width and thickness do not depend on the frame (autoMeasurementsSteps). `offset`: the positions are relative to it (the box
+ * is in original coordinates).
  */
 export function* frameMeasuresSteps(positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null, offset: Vec3 = [0, 0, 0]): Steps<FrameMeasures> {
   const m = frame?.matrix;
@@ -93,9 +91,8 @@ export function* frameMeasuresSteps(positions: ArrayLike<number>, base: SurfaceM
       ]
     : base.principal.axes;
   const { lo, hi } = yield* rangesSteps(positions, axes);
-  const [length, width, thickness] = [0, 1, 2].map((k) => (hi[k] >= lo[k] ? hi[k] - lo[k] : 0));
-  // the measured axes are length (Y), width (X), thickness (Z): box axis k is measured axis
-  // `from[k]`, turned round when `sign[k]` is −1 (principal axes: X = Y × Z, the second axis or its opposite)
+  // the ranges are along Y, X, Z: box axis k is range `from[k]`, turned round when `sign[k]` is −1
+  // (principal axes: X = Y × Z, the second axis or its opposite)
   const [a1, a2, a3] = axes;
   const x: Vec3 = [a1[1] * a3[2] - a1[2] * a3[1], a1[2] * a3[0] - a1[0] * a3[2], a1[0] * a3[1] - a1[1] * a3[0]];
   const sign = m ? [1, 1, 1] : [x[0] * a2[0] + x[1] * a2[1] + x[2] * a2[2] < 0 ? -1 : 1, 1, 1];
@@ -104,26 +101,41 @@ export function* frameMeasuresSteps(positions: ArrayLike<number>, base: SurfaceM
   const shift = boxAxes.map((a) => a[0] * offset[0] + a[1] * offset[1] + a[2] * offset[2]);
   const min = from.map((i, k) => (sign[k] > 0 ? lo[i] : -hi[i]) + shift[k]) as Vec3;
   const max = from.map((i, k) => (sign[k] > 0 ? hi[i] : -lo[i]) + shift[k]) as Vec3;
-  return {
-    auto: {
-      frame: m ? 'specimen' : 'principal',
-      length,
-      width,
-      thickness,
-      surfaceArea: base.surfaceArea,
-      volume: base.volume,
-      closed: base.topology.closed,
-    },
-    box: { frame: m ? 'specimen' : 'principal', axes: boxAxes, min, max },
-  };
+  return { box: { frame: m ? 'specimen' : 'principal', axes: boxAxes, min, max } };
 }
 
 export const frameMeasures = (positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null, offset: Vec3 = [0, 0, 0]): FrameMeasures =>
   runSync(frameMeasuresSteps(positions, base, frame, offset));
 
-export function* autoMeasurementsSteps(positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null): Steps<AutoMeasurements> {
-  return (yield* frameMeasuresSteps(positions, base, frame)).auto;
+/** The automatic measurements, and how the dimensions were taken (in original coordinates; null for a mesh without extent). */
+export interface AutoResult {
+  auto: AutoMeasurements;
+  construction: MorphConstruction | null;
 }
 
-export const autoMeasurements = (positions: ArrayLike<number>, base: SurfaceMeasures, frame: SpecimenFrame | null): AutoMeasurements =>
-  runSync(autoMeasurementsSteps(positions, base, frame));
+/**
+ * Length, width and thickness whatever the orientation, as a flake's morphological dimensions (`morphDimensionsSteps`): the largest
+ * distance between two vertices (on the convex hull), the largest width with every vertex projected onto the plane across the
+ * length, and the range across both. A specimen frame does not change them. With the area, volume and closedness of `base`.
+ * `morph`: the dimensions when they are known already (computed once per mesh); `offset`: the positions are relative to it.
+ */
+export function* autoMeasurementsSteps(positions: ArrayLike<number>, base: SurfaceMeasures, offset: Vec3 = [0, 0, 0], morph?: MorphDimensions | null): Steps<AutoResult> {
+  const d = morph !== undefined ? morph : yield* morphDimensionsSteps(positions);
+  const at = (p: Vec3): Vec3 => [p[0] + offset[0], p[1] + offset[1], p[2] + offset[2]];
+  const pair = (x: [Vec3, Vec3]): [Vec3, Vec3] => [at(x[0]), at(x[1])];
+  const c = d?.construction;
+  return {
+    auto: {
+      length: d?.length ?? 0,
+      width: d?.width ?? 0,
+      thickness: d?.thickness ?? 0,
+      surfaceArea: base.surfaceArea,
+      volume: base.volume,
+      closed: base.topology.closed,
+    },
+    construction: c ? { length: pair(c.length), width: pair(c.width), thickness: pair(c.thickness), widthVertices: pair(c.widthVertices), thicknessVertices: pair(c.thicknessVertices) } : null,
+  };
+}
+
+export const autoMeasurements = (positions: ArrayLike<number>, base: SurfaceMeasures, offset: Vec3 = [0, 0, 0], morph?: MorphDimensions | null): AutoResult =>
+  runSync(autoMeasurementsSteps(positions, base, offset, morph));

@@ -58,12 +58,15 @@ test('hovering technical length: the axis, the box and three lines; gone when th
   expect(await parts(page)).toEqual(expect.arrayContaining(['line:axis', 'line:axis-head', 'line:box', 'line:length', 'line:width', 'line:thickness', 'dots:extremes']));
   expect(h.prims.find((p) => p.part === 'length')?.role).toBe('current');
   expect(h.prims.find((p) => p.part === 'width')?.role).toBe('other');
-  // what is on the view, with the values at the lines
+  // what is on the view: the current line with its value; the others fainter, without theirs
   expect(h.drawn!.lines).toBe(6);
   expect(h.drawn!.dots).toBe(2);
-  expect(h.labels).toHaveLength(3);
-  for (const l of h.labels) expect(l).toMatch(/^\d+\.\d{3} mm$/);
-  await expect(page.locator('dt[data-hint="flake:tech_length"]')).toHaveClass(/is-hinted/);
+  expect(h.drawn!.labels).toBe(1);
+  // (a label joins the page when the view is next drawn)
+  await expect.poll(async () => (await hint(page)).labels.length).toBe(1);
+  for (const l of (await hint(page)).labels) expect(l).toMatch(/^\d+\.\d{3} mm$/);
+  expect(h.looks!.filter((l) => l.role === 'other').every((l) => l.opacity === 0.35 && !l.label)).toBe(true);
+  await expect(page.locator('#flake-tech_length')).toHaveClass(/is-hinted/);
   // the labels take no clicks
   expect(await page.locator('.hint-label').first().evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
   await page.screenshot({ path: `${SHOTS}/hint-tech-length.png` });
@@ -82,7 +85,7 @@ test('hovering technical length: the axis, the box and three lines; gone when th
   await away(page);
   await nextFrames(page, 3);
   expect(await shown(page)).toBe('flake:tech_length');
-  await expect(page.locator('dt[data-hint="flake:tech_length"]')).toHaveClass(/is-pinned/);
+  await expect(page.locator('#flake-tech_length')).toHaveClass(/is-pinned/);
   // another row shows while the pointer is on it, and the fixed one comes back
   await hover(page, 'flake-tech_width');
   await expect.poll(() => shown(page)).toBe('flake:tech_width');
@@ -124,14 +127,15 @@ test('in the dark theme too, and a change of theme while one is fixed', async ({
 
 test('the keyboard: a row with the focus shows at once; Enter fixes it', async ({ page }) => {
   await flakeInMeasureMode(page);
-  await page.locator('dt[data-hint="flake:tech_length"]').focus();
+  // the dimensions' table goes by rows: technological length, morphological length, technological width …
+  await page.locator('#flake-tech_length').focus();
   await page.keyboard.press('Tab');
-  await expect(page.locator('dt[data-hint="flake:tech_width"]')).toBeFocused();
-  await expect.poll(() => shown(page)).toBe('flake:tech_width');
+  await expect(page.locator('#flake-morph_length')).toBeFocused();
+  await expect.poll(() => shown(page)).toBe('flake:morph_length');
   await page.keyboard.press('Enter');
-  expect((await hint(page)).pinned).toBe('flake:tech_width');
+  expect((await hint(page)).pinned).toBe('flake:morph_length');
   await page.keyboard.press('Tab');
-  await expect.poll(() => shown(page)).toBe('flake:tech_thickness');
+  await expect.poll(() => shown(page)).toBe('flake:tech_width');
   await page.keyboard.press('Escape');
   expect((await hint(page)).pinned).toBeNull();
 });
@@ -244,13 +248,14 @@ async function boxWithRing(page: Page, type: 'core' | 'generic'): Promise<void> 
   await expect(page.locator('#auto-length')).not.toHaveText('—');
 }
 
-test('a core: the box and its three lines; the whole model; a symmetry reference by its curve, side A coloured', async ({ page }) => {
+test('a core: its three lines (as a flake\'s morphological ones); the whole model; a symmetry reference by its curve, side A coloured', async ({ page }) => {
   await boxWithRing(page, 'core');
   await hover(page, 'auto-width');
   await expect.poll(() => shown(page)).toBe('auto:width');
-  expect(await parts(page)).toEqual(expect.arrayContaining(['line:box', 'line:length', 'line:width', 'line:thickness']));
+  expect(await parts(page)).toEqual(expect.arrayContaining(['line:length', 'line:width', 'line:thickness', 'dots:extremes']));
+  expect(await parts(page)).not.toContain('line:box');
   expect((await hint(page)).prims.find((p) => p.part === 'width')?.role).toBe('current');
-  expect((await hint(page)).labels).toHaveLength(3);
+  expect((await hint(page)).labels).toHaveLength(1);
   await hover(page, 'auto-area');
   await expect.poll(() => shown(page)).toBe('auto:area');
   expect((await hint(page)).prims).toMatchObject([{ kind: 'faces', part: 'model', role: 'current' }]);
@@ -275,11 +280,12 @@ test('a core: the box and its three lines; the whole model; a symmetry reference
   expect(await parts(page)).toEqual(['faces:side-a', 'line:symmetry-curve']);
 });
 
-test('a generic specimen: the same box, and the same for the whole model', async ({ page }) => {
+test('a generic specimen: the same three lines, and the same for the whole model', async ({ page }) => {
   await boxWithRing(page, 'generic');
   await hover(page, 'auto-length');
   await expect.poll(() => shown(page)).toBe('auto:length');
-  expect(await parts(page)).toEqual(expect.arrayContaining(['line:box', 'line:length', 'line:width', 'line:thickness']));
+  expect(await parts(page)).toEqual(expect.arrayContaining(['line:length', 'line:width', 'line:thickness', 'dots:extremes']));
+  expect(await parts(page)).not.toContain('line:box');
   await hover(page, 'auto-area');
   await expect.poll(() => shown(page)).toBe('auto:area');
 });

@@ -51,7 +51,7 @@ test('the table of means: by method and distance, over the curve or a working ed
   // the method and distance buttons are gone
   await expect(page.locator('[id^="edge-method-"]')).toHaveCount(0);
   await expect(page.locator('[id^="edge-series-"]')).toHaveCount(0);
-  await expect(page.locator('#edge-mean-table thead th')).toHaveText(['°', '2 mm', '5 mm', '10 mm']);
+  await expect(page.locator('#edge-mean-table thead th')).toHaveText(['Mean (°)', '2 mm', '5 mm', '10 mm']);
   await expect(page.locator('#edge-mean-table tbody tr')).toHaveCount(2);
 
   // all of the curve: the plain mean of the stations with a value

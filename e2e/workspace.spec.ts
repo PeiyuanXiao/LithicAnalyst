@@ -157,7 +157,9 @@ test('summary export and figures for the whole folder: new export folders, broke
     ['box', 'a/box.ply', 'true'],
     ['nodule', 'b/nodule.ply', 'true'],
   ]);
-  expect(Number(measured[0].length)).toBeCloseTo(40, 3);
+  // the box 40 × 20 × 10: its longest measure, the space diagonal
+  expect(Number(measured[0].length)).toBeCloseTo(Math.hypot(40, 20, 10), 3);
+  expect(Object.keys(measured[0])).not.toContain('frame');
   expect(parseCsv((await folderText(page, `${all.base}/failures.csv`))!).map((r) => r.file)).toEqual(['broken.ply']);
   const icc = parseCsv((await folderText(page, `${all.base}/icc.csv`))!);
   expect(icc.find((r) => r.measure === 'length')).toMatchObject({ n_specimens: '2', n_raters: '2', icc: '1' });

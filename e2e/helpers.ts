@@ -133,6 +133,8 @@ export interface LithicApi {
     pinned: string | null;
     prims: Array<{ kind: 'line' | 'dots' | 'arc' | 'faces' | 'patch'; part: string; role: string; label: string | null; points: Vec3[] | null }>;
     drawn: { lines: number; dots: number; arcs: number; faces: number; patches?: number; labels: number } | null;
+    /** How each part is drawn: its opacity as a share of the current one's, and whether it carries its value. */
+    looks: Array<{ kind: string; part: string; role: string; opacity: number; label: boolean }> | null;
     labels: string[];
   };
   /** Shading by height: the shading, its reference plane and those offered, its range, and how many contour segments (thin, the BSA level's thick). */
@@ -147,6 +149,8 @@ export interface LithicApi {
   exportRegionsCsvText(): string;
   figure(format: 'png' | 'svg'): Promise<{ layout: import('../src/render/figure').FigureLayout; data: string } | null>;
   autoMeasurements(): import('../src/core/derived').AutoMeasurements | null;
+  /** When the flake's card warns of a sparse mesh round P (mm; null: as set). */
+  setMeshWarnMm(mm: number | null): void;
   exportMeasurementsCsvText(): string;
   exportManualMeasurementsCsvText(): string;
   exportRelationsCsvText(): string;

@@ -115,8 +115,8 @@ test('keeps the top bar on one line and the resolution buttons on one row at 102
   await loadMesh(page, boxPly());
   const bar = (await page.locator('.topbar').boundingBox())!;
   expect(bar.height).toBeLessThanOrEqual(64);
-  // the modes show icons only, their names in tooltips
-  await expect(page.locator('#app-mode-annotate .mode-label')).toBeHidden();
+  // the current mode keeps its name; the others' are in their tooltips
+  await expect(page.locator('#app-mode-annotate .mode-label')).toBeVisible();
   await page.locator('#app-mode-measure').hover();
   await expect(page.locator('.tip')).toContainText('Measure');
   await expect(page.locator('.tip kbd')).toHaveText('M');

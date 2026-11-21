@@ -227,6 +227,8 @@ export interface AppApi {
   /** A curve's mean edge angles over all its stations (`edge` null) or a working edge's (by label), and the stations in scope. */
   edgeAngleMeansOf(curveId: string, edge: string | null): { means: import('../compute/edgeAngle').EdgeAngleMeans; stations: number[] } | null;
   flakeEmptyReasons(): Partial<Record<FlakeMeasure, FlakeEmptyReason>> | null;
+  /** Above this mean edge length round P (mm) the flake's card warns that the mesh is sparse there. */
+  meshWarnMm(): number;
   gmResult(): GmResult | null;
   /** How the template stands (null: there is none). */
   gmTemplateInfo(): { file: string; seed: number; isThis: boolean; changed: boolean; missing: boolean } | null;

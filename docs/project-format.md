@@ -106,8 +106,8 @@ unless the user reversed them all before confirming. Undoing the import removes 
 * `annotator` is the observer. One project file = one annotator's annotation of one mesh.
 * `unit` (`mm`, `cm`, `m`, `in`, or `""` for not stated) is a declaration only; coordinates
   are never scaled.
-* `frame` is the specimen coordinate system used for display and for length, width and
-  thickness, or `null` when none is set. `matrix` is a row-major 4×4 matrix (16 numbers) that
+* `frame` is the specimen coordinate system used for display, figures and the box of a core's
+  volumetric configuration, or `null` when none is set (length, width and thickness do not use it). `matrix` is a row-major 4×4 matrix (16 numbers) that
   maps original coordinates to specimen coordinates: +Z points toward the viewer of the main
   face, +Y is up on the page, +X is to the right; the origin is the centre of the mesh's
   bounding box. `source` records how it was set: `view`, or `plane:P1`, or `technical_axis` (a
@@ -130,7 +130,6 @@ fitted planes, fitted spheres, volumes ….
 ```json
 {
   "measurements": {
-    "frame": "principal",
     "length": 61.204, "width": 38.551, "thickness": 14.093,
     "surfaceArea": 4410.25, "volume": 19873.6,
     "closed": true
@@ -141,10 +140,14 @@ fitted planes, fitted spheres, volumes ….
 }
 ```
 
-* `measurements` (null until the mesh has been measured): length, width and thickness are the
-  ranges of the model along three axes, the specimen frame's Y, X and Z when `specimen.frame` is
-  set (`frame: "specimen"`), else the first, second and third principal axes of the surface
-  (area-weighted PCA; `frame: "principal"`). `surfaceArea` is in unit², `volume` in unit³ and
+* `measurements` (null until the mesh has been measured): length, width and thickness whatever
+  the orientation, as a flake's morphological ones (`morphDimensionsSteps`): the length is the
+  largest distance between two vertices (found on the convex hull's vertices), the width the largest
+  width with every vertex projected onto the plane perpendicular to the length, the thickness the
+  range perpendicular to both. Neither `specimen.frame` nor turning the model changes them. Files
+  saved before kept `frame` here (`specimen` or `principal`: the ranges along that frame's or
+  the principal axes); it is not read (`derived` is not read back, and a folder export measures
+  such a model again). `surfaceArea` is in unit², `volume` in unit³ and
   only computed when the mesh is closed (otherwise null; holes are not filled). Files saved earlier
   also have `surfaceToVolumeRatio` and `wadellSphericity` here; `derived` is not read back, so they
   are simply gone when the file is saved again.
@@ -204,7 +207,7 @@ scar makes a flaking surface); every one can be corrected by hand. Only scars wi
 
 **The box.** Three axes: the specimen frame's X, Y, Z when `specimen.frame` is set (`frame:
 "specimen"`), else the surface's principal axes (Y the first, Z the third, X = Y × Z; `frame:
-"principal"`, the same axes as length, width and thickness — this orientation is not written to
+"principal"` — this orientation is not written to
 `specimen.frame`). The box is the range of the vertices along each axis. Its six faces:
 
 | code | direction | | code | direction |
@@ -1018,7 +1021,7 @@ the segment back to the first point).
 Automatic measurements (`<specimen>_measurements.csv`, one row):
 
 ```
-specimen_id,unit,frame,length,width,thickness,surface_area,volume,closed
+specimen_id,unit,length,width,thickness,surface_area,volume,closed
 ```
 
 Manual measurements (`<specimen>_manual_measurements.csv`, one row each; unused points empty,

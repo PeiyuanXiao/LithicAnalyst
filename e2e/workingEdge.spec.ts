@@ -139,8 +139,8 @@ test('two halves by the tool: their rows, the columns of the files, the charts a
   await expect(page.locator('#retouch-plan-edge')).toHaveCount(0);
   await expect(page.locator('#retouch-plan-chord')).toHaveCount(0);
   expect(r3!.width + r3!.height).toBeGreaterThan(20);
-  // the table of retouch regions has a column for it
-  await expect(page.locator('#retouch-segment-table th').last()).toHaveText('Working edge');
+  // the table of retouch regions: region, layer, face, length (the working edge is in retouch_segments.csv)
+  await expect(page.locator('#retouch-segment-table th')).toHaveText(['Region', 'Layer', 'Face', 'Length']);
   expect(pageErrors).toEqual([]);
 });
 

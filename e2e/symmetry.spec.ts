@@ -98,7 +98,7 @@ test('the symmetry card: three symmetries from a fitted plane, a closed curve an
   await expect(page.locator('#symmetry-volume')).toHaveText('1.000');
   await expect(page.locator('#symmetry-area')).toHaveText('1.000');
   await expect(page.locator('#symmetry-shape')).toHaveText(v[2].shapeSymmetry!.toFixed(3));
-  await expect(page.locator('#symmetry-table thead th')).toHaveText(['', 'A', 'B']);
+  await expect(page.locator('#symmetry-table thead th')).toHaveText(['Raw values', 'A', 'B']);
   await expect(page.locator('#symmetry-table th[scope="row"]')).toHaveText(['Volume (mm³)', 'Area (mm²)']);
   await expect(page.locator('#symmetry-dev-mean')).toBeVisible();
   // RMS and 95 %: folded away until asked for

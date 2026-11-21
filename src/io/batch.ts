@@ -126,10 +126,10 @@ function storedRegionFit(planes: unknown, id: string): { centroid: Vec3; normal:
   return p?.center && p.normal ? { centroid: p.center, normal: p.normal, count: p.inputCount } : null;
 }
 
-/** The automatic measurements as stored in a project file, or null. */
+/** The automatic measurements as stored in a project file, or null (also when taken along a frame, as before: measured again). */
 function storedAuto(v: unknown): AutoMeasurements | null {
-  const m = v as AutoMeasurements | null | undefined;
-  return m && (m.frame === 'specimen' || m.frame === 'principal') && [m.length, m.width, m.thickness, m.surfaceArea].every((x) => typeof x === 'number' && Number.isFinite(x)) ? m : null;
+  const m = v as (AutoMeasurements & { frame?: unknown }) | null | undefined;
+  return m && m.frame === undefined && [m.length, m.width, m.thickness, m.surfaceArea].every((x) => typeof x === 'number' && Number.isFinite(x)) ? m : null;
 }
 
 /**

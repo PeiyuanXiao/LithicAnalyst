@@ -1,6 +1,5 @@
 import { fmtQuantity, quantityUnit, type Quantity } from '../core/format';
 import type { Vec3 } from '../core/types';
-import type { ConfigBox } from './configuration';
 import { onPlane } from './bulb';
 import { angleDeg, EPA_DISTANCES_MM, VI_MEASURES, type BulbConstruction, type FlakeMeasure, type FlakeResult, type IpaConstruction, type MorphConstruction, type ProfileConstruction, type TechConstruction } from './flake';
 import type { SphereFit } from './sphere';
@@ -28,6 +27,12 @@ export const MEASURE_HINT_PARAMETERS = {
 
 /** `current`: the measure the row is about; `other`: what else belongs to the drawing. */
 export type HintRole = 'current' | 'other';
+
+/** How the parts of a drawing stand apart: only the current one is the accent and carries its value. */
+export const HINT_LOOK = {
+  /** The other lines, the box's edges and their dots: this share of the current one's opacity, and no value on them. */
+  OTHER_OPACITY: 0.35,
+} as const;
 
 export interface HintLine {
   kind: 'line';
@@ -83,6 +88,16 @@ export interface HintPatch {
 
 export type HintPrim = HintLine | HintDots | HintArc | HintFaces | HintPatch;
 export type MeasureHint = HintPrim[];
+
+/**
+ * How a part is drawn: its opacity as a share of the current part's, and whether its value is written on it. The current
+ * part as it is, with its value; the others at HINT_LOOK.OTHER_OPACITY, without one. Pieces of surface and of a plane keep their own tints.
+ */
+export function hintLook(prim: HintPrim): { opacity: number; label: boolean } {
+  if (prim.kind === 'faces' || prim.kind === 'patch') return { opacity: 1, label: false };
+  const current = prim.role === 'current';
+  return { opacity: current ? 1 : HINT_LOOK.OTHER_OPACITY, label: current && prim.kind !== 'dots' && !!prim.label && !!prim.labelAt };
+}
 
 const add = (a: Vec3, b: Vec3, s = 1): Vec3 => [a[0] + s * b[0], a[1] + s * b[1], a[2] + s * b[2]];
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -176,12 +191,6 @@ const frameBox = (origin: Vec3, axes: readonly [Vec3, Vec3, Vec3], min: Vec3, ma
   at: (x, y, z) => add(add(add(origin, axes[0], x), axes[1], y), axes[2], z),
 });
 
-/** A core's or a generic specimen's length, width and thickness: the box along the specimen's frame and three lines. */
-export function boxHint(current: Side, box: ConfigBox, values: Record<Side, number>, unit: string): MeasureHint {
-  const b = frameBox([0, 0, 0], box.axes, box.min, box.max);
-  return [boxEdges(b, 'box'), ...boxDimensions(b, current, values, unit)];
-}
-
 // ---------------------------------------------------------------- a flake
 
 function techHint(current: Side, c: TechConstruction, values: Record<Side, number>, unit: string): MeasureHint {
@@ -218,6 +227,9 @@ function morphHint(current: Side, c: MorphConstruction, values: Record<Side, num
     { kind: 'dots', part: 'extremes', role: 'current', points: [...reached[current]] },
   ];
 }
+
+/** A core's or a generic specimen's length, width and thickness: taken as a flake's morphological ones, and drawn so. */
+export const dimensionsHint = (current: Side, c: MorphConstruction, values: Record<Side, number>, unit: string): MeasureHint => morphHint(current, c, values, unit);
 
 /** The straight distance and the way over the surface between two points, one of them the measure; the points as dots. */
 function chordAndPath(current: 'chord' | 'path', a: Vec3, b: Vec3, path: Vec3[] | null, chord: number | null, along: number | null, unit: string): MeasureHint {

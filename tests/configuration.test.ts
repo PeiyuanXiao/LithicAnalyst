@@ -368,13 +368,12 @@ describe('configuration CSV', () => {
 });
 
 describe('box of the volumetric configuration', () => {
-  it('comes from the pass that measures length, width and thickness, in original coordinates', () => {
+  it('goes along the specimen frame, in original coordinates (length, width and thickness do not)', () => {
     const mesh = boxMesh([36, 60, 24], 2);
     const base = surfaceMeasures(mesh.positions, mesh.index);
     // a frame turned a quarter on the page: X along the model's −Y, Y along its X
     const frame = { matrix: [0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], source: 'view' };
-    const { auto, box: b } = frameMeasures(mesh.positions, base, frame, [5, 0, 0]);
-    expect([auto.length, auto.width, auto.thickness]).toEqual([36, 60, 24]);
+    const { box: b } = frameMeasures(mesh.positions, base, frame, [5, 0, 0]);
     expect(b).toEqual({
       frame: 'specimen',
       axes: [

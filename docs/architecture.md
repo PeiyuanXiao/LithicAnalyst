@@ -248,6 +248,20 @@ the workspace but loading, and the 3D view asks for frames only while a tween ru
   check boxes and slider thumbs are ink. `--ease` is the one easing.
 * **Fitted planes** (`render/planeLayer.ts`, see "Fitted planes"): a rounded rectangle fitted to the plane's section, a thin
   outline, a translucent fill; the selected plane shows a sparse grid and a slim normal.
+* **Measures in the sidebar** (`ui/sidebar.ts`, `styles.css`): a group's title (`.measure-group-title`) is in the
+  interface's own type (12 px, 500, `--ink-2`), a fine line above every group but the first; a small table's heads are
+  monospaced (11 px, `--ink-3`, no letter spacing) and its corner says what the table measures and its unit
+  (`measureTable(id, corner, …)`, "mm", "VI (mm)"); a group all empty for one reason is one line (its title, "—", why:
+  `emptyGroup`, `oneReason`). The main indices without a unit stand in large cells side by side (`.score-cells`:
+  symmetry, retouch indices). A list's row is one box on the list's columns (`numRow` → `.num-row`, subgrid), so a value is
+  marked as one rounded piece from its name to its unit, 6 px past its text either side without moving it: pointed at, a
+  neutral ground (`--hint-hover`, the ink at 6%); fixed, pale amber in a 1 px amber ring (`box-shadow: inset`, the
+  selection's look), the number at 500, the text's colour unchanged; 4 px corners, 140 ms (`background-color`,
+  `box-shadow`, `color`). A table's cell shown or fixed lights its row's name and its column's head to `--ink`
+  (`App.paintHintRows`, `.is-lit`). A value changed by the user flashes in the same shape (`value-flash`, 280 ms).
+* **How a measure was taken, on the view** (`render/hintLayer.ts`, `compute/measureHint.ts` `hintLook`): only the current
+  part is the accent and carries its value; the others (`other` lines, the box's edges, their dots) at
+  `HINT_LOOK.OTHER_OPACITY` (35%) of it and without values. It fades in and out in 150 ms with the one easing.
 * **Unsaved changes** (`core/commands.ts`): each state the history can return to has a number
   (`stateId`; a merge makes a new one), `markSaved(id)` records the one saved and `dirty` compares; so
   undoing back to what was saved is clean again. `clear` (a model or project opened) is clean. The app
@@ -262,13 +276,13 @@ the workspace but loading, and the 3D view asks for frames only while a tween ru
   from the focused button); the sidebar's cards come in on a change of mode (`Sidebar.enter`); a
   dialog answers at once and only fades. A status pill made done by the user ticks itself
   (`statusDone`); a measure's value changed by the user flashes (`valueFlash`, only while its list is
-  in sight). Toasts stand over the coordinate reading of the view (`Feedback.anchor`); the busy
+  in sight; the row as one rounded piece, 280 ms). Toasts stand over the coordinate reading of the view (`Feedback.anchor`); the busy
   overlay turns the logo (`fx-*` parts on a 1.5 s round of their own) only after `BUSY_LOGO_AFTER_MS`.
 * **The view's tweens** (`render/viewer.ts`, `render/easing.ts`): `Viewer.tween(ms, step)` draws a
   frame every frame only while one runs, then rendering is on demand again; a press on the view and a
   figure (`makeFigure`) finish them (`finishTweens`), reduced motion gives the end at once. Only what
   the user does by hand starts one: a landmark placed (`LandmarkLayer.pop`, `EASE_POP`) and a
-  measure's drawing coming into view (`HintLayer.show` with `fadeIn`), a fitted plane selected or let go (`PlaneVisual.setLook`,
+  measure's drawing coming into view and leaving it (`HintLayer.show` with `fadeIn`, `HintLayer.clear(true)`, 150 ms), a fitted plane selected or let go (`PlaneVisual.setLook`,
   150 ms; at once while a button is held on the view), and the vectors being aligned moving to the placement a
   pair or a fit gave them (`IgesAlign.moveTo`, `IGES_IMPORT.MOVE_MS`). A drawn arrow is there whole
   at once. Loading, undo, redo, generated and imported annotations draw at once.
@@ -287,10 +301,12 @@ camera moves: no coordinates change.
 ## Measurements
 
 * `compute/measure.ts` measures a mesh once after loading (`surfaceMeasuresSteps`: area, volume,
-  closedness, area-weighted principal axes) and derives length, width and thickness from the
-  specimen frame or the principal axes (`autoMeasurementsSteps`). The app keeps the result and
-  recomputes the dimensions when `specimen.frame` changes; `serializeProject` stores it under
-  `derived.measurements`.
+  closedness, area-weighted principal axes); length, width and thickness are a flake's morphological
+  dimensions (`compute/flake.ts` `morphDimensionsSteps`, once per mesh, shared with a flake's
+  measures) put together by `autoMeasurementsSteps`, with how they were taken for their drawings
+  (`dimensionsHint`). They do not depend on `specimen.frame`: only the box of the volumetric
+  configuration does (`frameMeasuresSteps`, made again when the frame changes). `serializeProject`
+  stores them under `derived.measurements`.
 * Long computations are generators (`compute/steps.ts`): `runSync` runs them at once (tests),
   `runSliced` in slices of ~12 ms between frames, so a large scan never freezes the interface.
 * Manual measurements are annotations (`ProjectState.measurements`, commands like the others).
@@ -454,8 +470,8 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
 
 ## Volumetric configuration
 
-* **The box** comes from the pass that measures length, width and thickness
-  (`frameMeasuresSteps` in `compute/measure.ts`: the vertices' min and max along the specimen
+* **The box** comes from a pass of its own (length, width and thickness no longer do:
+  `frameMeasuresSteps` in `compute/measure.ts`: the vertices' min and max along the specimen
   frame's X, Y, Z, or the principal axes with Y the first, Z the third and X = Y × Z), in the app
   (`App.updateAuto`, again when the frame changes) and in the batch worker (`MeshMeasures.boxes`).
   It reaches the derived results through `MeshResults.box`; the principal orientation is never

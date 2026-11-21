@@ -3,7 +3,7 @@ import { boxPly, boxPoint, roofPly, type Vec3 } from './fixtures/meshes';
 import { download, expect, exportAvailable, exportFile, fileMenu, loadMesh, measureDraftLength, nextFrames, openApp, parseCsv, setUnit, state, test, toScreen, waitForMesh } from './helpers';
 
 const MEASUREMENTS_HEADER =
-  'specimen_id,unit,frame,length,width,thickness,surface_area,volume,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,file';
+  'specimen_id,unit,length,width,thickness,surface_area,volume,closed,area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,file';
 const MANUAL_HEADER = 'specimen_id,measure_id,type,value,unit,p1_x,p1_y,p1_z,p2_x,p2_y,p2_z,p3_x,p3_y,p3_z';
 
 async function measureMode(page: Page): Promise<void> {
@@ -33,12 +33,12 @@ test('measures the size and shape of a closed model and exports them', async ({ 
   await openApp(page);
   await loadMesh(page, boxPly());
   await measureMode(page);
-  // numbers and units in columns of their own
-  await expect(page.locator('#auto-length')).toHaveText('40.000');
+  // numbers and units in columns of their own; the box 40 × 20 × 10: its space diagonal and the widths across it
+  await expect(page.locator('#auto-length')).toHaveText('45.826');
   await expect(page.locator('#auto-length-unit')).toHaveText('mm');
-  await expect(page.locator('#auto-width')).toHaveText('20.000');
-  await expect(page.locator('#auto-thickness')).toHaveText('10.000');
-  await expect(page.locator('#auto-frame')).toHaveText('Principal axes');
+  await expect(page.locator('#auto-width')).toHaveText('39.036');
+  await expect(page.locator('#auto-thickness')).toHaveText('17.889');
+  await expect(page.locator('#auto-frame')).toHaveCount(0);
   await expect(page.locator('#auto-area')).toHaveText('2800.00');
   await expect(page.locator('#auto-area-unit')).toHaveText('mm²');
   await expect(page.locator('#auto-volume')).toHaveText('8000.00');
@@ -53,10 +53,11 @@ test('measures the size and shape of a closed model and exports them', async ({ 
   expect(csv.name).toBe('box_measurements.csv');
   expect(csv.text.split('\n')[0]).toBe(MEASUREMENTS_HEADER);
   const [row] = parseCsv(csv.text);
-  expect(row).toMatchObject({ specimen_id: 'box', unit: 'cm', frame: 'principal', closed: 'true', file: 'box.ply' });
-  expect(Number(row.length)).toBeCloseTo(40, 4);
-  expect(Number(row.width)).toBeCloseTo(20, 4);
-  expect(Number(row.thickness)).toBeCloseTo(10, 4);
+  expect(row).toMatchObject({ specimen_id: 'box', unit: 'cm', closed: 'true', file: 'box.ply' });
+  expect(row.frame).toBeUndefined();
+  expect(Number(row.length)).toBeCloseTo(Math.sqrt(2100), 4);
+  expect(Number(row.width)).toBeCloseTo((80 / 21) * Math.sqrt(105), 4);
+  expect(Number(row.thickness)).toBeCloseTo(8 * Math.sqrt(5), 4);
   expect(Number(row.surface_area)).toBeCloseTo(2800, 3);
   expect(Number(row.volume)).toBeCloseTo(8000, 2);
 });
@@ -156,7 +157,8 @@ test('takes distance, along-surface and angle measurements; undo, redo, export a
   const file = JSON.parse(saved.text);
   expect(file.annotations.measurements).toEqual(st.measurements);
   expect(file.derived.manualMeasurements.map((m: { label: string }) => m.label)).toEqual(['M1', 'M2', 'M3']);
-  expect(file.derived.measurements).toMatchObject({ frame: 'principal', closed: true });
+  expect(file.derived.measurements).toMatchObject({ closed: true });
+  expect(file.derived.measurements.frame).toBeUndefined();
 
   const context = await browser.newContext();
   const fresh = await context.newPage();

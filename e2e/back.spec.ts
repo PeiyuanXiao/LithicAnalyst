@@ -39,11 +39,13 @@ test('the back: a back ridge drawn and typed with 7 parts it off, coloured, in r
   await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.drawn())).regions).toContain(back.id);
   // the ridge parts it off: no warning
   await expect(page.locator('#curve-back-uncut')).toHaveCount(0);
-  // the region list: the parts in their order, the back after the dorsal face; its area among the totals
+  // the region list: the parts in their order, the back after the dorsal face, with its area (one back: not again among the totals)
   await openSection(page, 'regions');
   const listed = await page.locator('#region-list li').evaluateAll((els) => els.map((e) => e.textContent ?? ''));
   expect(listed.findIndex((x) => x.includes('Back'))).toBeGreaterThan(listed.findIndex((x) => x.includes('Dorsal face')));
-  await expect(page.locator('#region-total-back')).toBeVisible();
+  expect(listed.find((x) => x.includes('Back'))).toMatch(/\d/);
+  await expect(page.locator('#region-totals')).toBeAttached();
+  await expect(page.locator('#region-total-back')).toHaveCount(0);
 
   // regions.csv has it
   const rows = parseCsv(await page.evaluate(() => window.lithicanalyst.exportRegionsCsvText()));

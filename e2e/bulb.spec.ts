@@ -32,30 +32,21 @@ test('the proximal end: its measures in order, as computed, each showing how it 
 
   await page.locator('#app-mode-measure').click();
   await openSection(page, 'flake');
-  // the groups: technical axis, morphology, the whole, the proximal end
-  await expect(page.locator('#flake-measures .measure-group-title')).toHaveText(['Technological axis', 'Morphology', 'Whole', 'Proximal end']);
-  const proximal = page.locator('#flake-measures .measure-group').last();
-  const ids = await proximal.locator('[id^="flake-"]').evaluateAll((els) => els.map((e) => e.id).filter((id) => !id.endsWith('-unit') && !id.endsWith('-table') && id !== 'flake-bsa-level'));
-  expect(ids).toEqual([
-    'flake-platform_width_chord', 'flake-platform_width_path', 'flake-platform_depth_chord', 'flake-platform_depth_path',
-    'flake-platform_area',
-    'flake-epa_3pt_1mm', 'flake-epa_3pt_2mm', 'flake-epa_3pt_3mm', 'flake-epa_2ln_1mm', 'flake-epa_2ln_2mm', 'flake-epa_2ln_3mm',
-    'flake-ipa', 'flake-psia',
-    'flake-bulb_angle_3pt_1mm', 'flake-bulb_angle_2ln_1mm',
-    'flake-bsa',
-    'flake-vi_0_5mm', 'flake-vi_1_0mm', 'flake-vi_1_5mm',
-    'flake-pop_mesh_edge',
-  ]);
-  await expect(page.locator('#flake-bulb-table thead th')).toHaveText(['°', 'Three points', 'Two lines']);
-  await expect(page.locator('#flake-bulb-table tbody th')).toHaveText('Bulb angle 1 mm');
-  await expect(page.locator('#flake-vi-table thead th')).toHaveText(['mm', '0.5 mm', '1.0 mm', '1.5 mm']);
-  // the values as computed (one decimal for angles, the BSA with its level before it), the mesh's row receding
+  // the groups: dimensions, platform, proximal angles, bulb
+  await expect(page.locator('#flake-measures .measure-group-title')).toHaveText(['Dimensions', 'Platform', 'Proximal angles (°)', 'Bulb']);
+  const ids = (group: string) => page.locator(`#flake-group-${group} [id^="flake-"]`).evaluateAll((els) => els.map((e) => e.id).filter((id) => !id.endsWith('-unit') && !id.endsWith('-table')));
+  expect(await ids('platform')).toEqual(['flake-platform_width_chord', 'flake-platform_width_path', 'flake-platform_depth_chord', 'flake-platform_depth_path', 'flake-platform_area']);
+  expect(await ids('angles')).toEqual(['flake-epa_3pt_1mm', 'flake-epa_3pt_2mm', 'flake-epa_3pt_3mm', 'flake-epa_2ln_1mm', 'flake-epa_2ln_2mm', 'flake-epa_2ln_3mm', 'flake-bulb_angle_3pt_1mm', 'flake-bulb_angle_2ln_1mm', 'flake-ipa', 'flake-psia']);
+  expect(await ids('bulb')).toEqual(['flake-bsa', 'flake-vi_0_5mm', 'flake-vi_1_0mm', 'flake-vi_1_5mm']);
+  await expect(page.locator('#flake-vi-table thead th')).toHaveText(['VI (mm)', '0.5 mm', '1.0 mm', '1.5 mm']);
+  // the values as computed (one decimal for angles; the BSA's level in its row's name), no row for the mesh round P
   await expect(page.locator('#flake-psia')).toHaveText(m.psia!.toFixed(1));
-  await expect(page.locator('#flake-bsa')).toHaveText(`0.10 mm · ${m.bsa!.toFixed(1)}`);
-  await expect(page.locator('#flake-pop_mesh_edge')).toHaveClass(/is-quiet/);
+  await expect(page.locator('#flake-bsa')).toHaveText(m.bsa!.toFixed(1));
+  await expect(page.locator('#flake-group-bulb dt').first()).toHaveText('BSA (at 0.10 mm)');
+  await expect(page.locator('#flake-pop_mesh_edge')).toHaveCount(0);
 
   // each new cell: its drawing on the model
-  for (const k of ['psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm', 'pop_mesh_edge']) {
+  for (const k of ['psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm']) {
     await page.locator(`#flake-${k}`).hover();
     await expect.poll(async () => (await hint(page)).key, { message: k }).toBe(`flake:${k}`);
     const drawn = (await hint(page)).drawn!;

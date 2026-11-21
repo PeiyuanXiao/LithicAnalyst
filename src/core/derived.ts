@@ -20,10 +20,12 @@ import { SYMMETRY_PARAMETERS, type SymmetryDerived, type SymmetryValues } from '
 import { measurementUnit, measurementValue } from './measurements';
 import type { MeasureType, ProjectState, SharpEdgeRule, Vec3 } from './types';
 
-/** Size and shape of the whole model, measured automatically when it is opened. */
+/**
+ * Size and shape of the whole model, measured automatically when it is opened. Length, width and thickness whatever the
+ * orientation (as a flake's morphological ones): the largest distance between two vertices, the largest width across it, the
+ * range across both; the specimen frame does not change them.
+ */
 export interface AutoMeasurements {
-  /** Axes of length, width and thickness: the specimen frame (Y, X, Z) or the surface's principal axes (1st, 2nd, 3rd). */
-  frame: 'specimen' | 'principal';
   length: number;
   width: number;
   thickness: number;

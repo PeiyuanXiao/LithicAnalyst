@@ -2,7 +2,7 @@ import type { LongestStretch } from '../compute/retouchIndex';
 import type { P2, PlanLoops, PlanShape } from '../compute/retouchPlan';
 import { pngWithDpi } from '../io/png';
 import { drawPrims, planDrawing, primsMarkup, sectionDrawing, SCREEN_PALETTE, svgFile, type Drawing, type PlanEdge, type SectionModel } from '../render/retouchDrawing';
-import { numRow } from './controls';
+import { numRow, rowCells } from './controls';
 import { clear, h } from './dom';
 import { t } from './i18n';
 import { tip } from './tooltip';
@@ -146,9 +146,10 @@ export class RetouchSectionPanel {
     clear(this.readings);
     for (const r of c?.readings ?? []) {
       const row = numRow(r.label, r.value, r.unit, r.id);
-      if (r.why) tip(row[1], r.why);
-      if (r.note) row[2].append(h('span', { class: 'pill retouch-filled', id: `${r.id}-note` }, r.note));
-      this.readings.append(...row);
+      const cells = rowCells(row);
+      if (r.why) tip(cells.value, r.why);
+      if (r.note) cells.unit?.append(h('span', { class: 'pill retouch-filled', id: `${r.id}-note` }, r.note));
+      this.readings.append(row);
     }
     this.draw();
   }

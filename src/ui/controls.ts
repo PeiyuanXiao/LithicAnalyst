@@ -185,15 +185,23 @@ export function iconButton(path: string, label: string, onClick: () => void, o: 
 /**
  * A row of a `.num-grid` list: the label, the number (right-aligned, tabular) and its unit
  * in a column of its own, so the numbers line up. `id` goes on the number; `id-unit` on the unit.
+ * The three cells are in one box (`.num-row`, on the list's columns by subgrid): a row is marked as a whole.
  */
-export function numRow(label: string, value: string, unit: string, id?: string): HTMLElement[] {
-  return [h('dt', {}, label), h('dd', { class: 'num', id }, value), h('dd', { class: 'unit', id: id ? `${id}-unit` : undefined }, unit)];
+export function numRow(label: string, value: string, unit: string, id?: string): HTMLElement {
+  return h('div', { class: 'num-row' }, h('dt', {}, label), h('dd', { class: 'num', id }, value), h('dd', { class: 'unit', id: id ? `${id}-unit` : undefined }, unit));
 }
 
 /** A row of a `.num-grid` list whose value is not a number (it takes the number and unit columns). */
-export function textValueRow(label: string, value: string, id?: string): [HTMLElement, HTMLElement] {
-  return [h('dt', {}, label), h('dd', { class: 'text', id }, value)];
+export function textValueRow(label: string, value: string | Node, id?: string): HTMLElement {
+  return h('div', { class: 'num-row' }, h('dt', {}, label), h('dd', { class: 'text', id }, value));
 }
+
+/** The cells of such a row: its label, its value and (a number's) unit. */
+export const rowCells = (row: HTMLElement): { term: HTMLElement; value: HTMLElement; unit: HTMLElement | null } => ({
+  term: row.children[0] as HTMLElement,
+  value: row.children[1] as HTMLElement,
+  unit: (row.children[2] as HTMLElement | undefined) ?? null,
+});
 
 /** Coordinates in a `.coord-grid`: the label, x, y and z right-aligned in their columns, the unit. */
 export function coordRow(label: string, values: string[], unit: string): HTMLElement[] {

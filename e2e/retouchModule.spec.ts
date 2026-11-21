@@ -313,12 +313,10 @@ test('the frame and its direction: the ends exchanged on the plan and in invasiv
   await page.locator('#retouch-cell-3').click();
   await expect(page.locator('#retouch-plan-face-dorsal')).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('#retouch-plan-highlight')).toHaveAttribute('data-segment', '3');
-  // by score, or by how far in it reaches
+  // by score only (no switch to how far in it reaches)
   const lit = (await retouch(page))!.penetration.find((p) => p.score > 0)!;
-  const style = () => page.locator(`#retouch-cell-${lit.segment}`).getAttribute('style');
-  const byScore = await style();
-  await page.locator('#retouch-grid-by-p').click();
-  await expect.poll(style).not.toBe(byScore);
+  expect(await page.locator(`#retouch-cell-${lit.segment}`).getAttribute('style')).toContain('background');
+  await expect(page.locator('#retouch-grid-by')).toHaveCount(0);
 });
 
 test('the previews export: SVG and PNG, named as they should be, to scale, on white', async ({ page }) => {

@@ -105,12 +105,13 @@ test('German, Spanish, French, Italian and Vietnamese: the top bar stays in the 
     // room enough: every name shown
     expect(await bar(), code).toEqual({ fits: true, names: true });
   }
-  // less room (in French, the longest): the modes' names go before anything leaves the window, and come back with the room
+  // less room (in French, the longest): the frame's pill and the buttons' words go before the modes' names, and the current
+  // mode (Annotate) keeps its name; nothing leaves the window, and all comes back with the room
   await chooseLang(page, 'fr');
   await page.setViewportSize({ width: 1280, height: 800 });
-  expect(await bar()).toEqual({ fits: true, names: false });
+  expect(await bar()).toEqual({ fits: true, names: true });
   await page.setViewportSize({ width: 1000, height: 800 });
-  expect((await bar()).fits).toBe(true);
+  expect(await bar()).toEqual({ fits: true, names: true });
   await page.setViewportSize({ width: 1600, height: 900 });
   expect(await bar()).toEqual({ fits: true, names: true });
   await chooseLang(page, 'en');

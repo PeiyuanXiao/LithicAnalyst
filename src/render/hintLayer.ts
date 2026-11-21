@@ -5,7 +5,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import type { HintArc, HintDots, HintFaces, HintLine, HintPatch, HintRole, MeasureHint } from '../compute/measureHint';
+import { hintLook, type HintArc, type HintDots, type HintFaces, type HintLine, type HintPatch, type HintRole, type MeasureHint } from '../compute/measureHint';
 import type { Vec3 } from '../core/types';
 import { EASE, VIEW_MOTION } from './easing';
 import type { Viewer } from './viewer';
@@ -78,6 +78,10 @@ export class HintLayer {
   private fades: Array<(f: number) => void> = [];
   /** Counts the hints shown: a fade belongs to the one it began with. */
   private shown = 0;
+  /** How each part was drawn (for the tests): its opacity as a share of the current one's, and whether it carries its value. */
+  private looked: Array<{ kind: string; part: string; role: string; opacity: number; label: boolean }> = [];
+  /** A drawing fading out (no row pointed at any more): the next drawing or clearing ends it at once. */
+  private leaving: { finish: () => void } | null = null;
 
   constructor(private readonly viewer: Viewer) {
     this.group.name = 'measure-hint';
@@ -93,9 +97,11 @@ export class HintLayer {
     const mine = ++this.shown;
     this.group.position.set(origin[0], origin[1], origin[2]);
     for (const prim of hint) {
-      if (prim.kind === 'line') this.line(prim, colors, origin);
-      else if (prim.kind === 'arc') this.arc(prim, colors, origin);
-      else if (prim.kind === 'dots') this.dots(prim, colors, origin);
+      const look = hintLook(prim);
+      this.looked.push({ kind: prim.kind, part: prim.part, role: prim.kind === 'faces' ? prim.tint : prim.kind === 'patch' ? 'current' : prim.role, ...look });
+      if (prim.kind === 'line') this.line(prim, colors, origin, look);
+      else if (prim.kind === 'arc') this.arc(prim, colors, origin, look);
+      else if (prim.kind === 'dots') this.dots(prim, colors, origin, look.opacity);
       else if (prim.kind === 'patch') this.patch(prim, colors, origin);
       else this.faces(prim, colors, position, index);
     }
@@ -130,7 +136,8 @@ export class HintLayer {
     return m;
   }
 
-  private addLine(flat: number[], segments: boolean, role: HintRole, colors: HintColors): void {
+  /** `share`: of the opacities its role has (the others are fainter, hintLook). */
+  private addLine(flat: number[], segments: boolean, role: HintRole, colors: HintColors, share = 1): void {
     const make = (material: LineMaterial) => {
       if (segments) {
         const g = new LineSegmentsGeometry().setPositions(flat);
@@ -143,8 +150,8 @@ export class HintLayer {
       return new Line2(g, material);
     };
     const current = role === 'current';
-    const halo = make(this.lineMaterial(current ? HALO : colors.otherHalo, LINE_PX[role] + HALO_PX, current ? HALO_OPACITY : OTHER_HALO_OPACITY));
-    const core = make(this.lineMaterial(current ? colors.current : colors.other, LINE_PX[role]));
+    const halo = make(this.lineMaterial(current ? HALO : colors.otherHalo, LINE_PX[role] + HALO_PX, share * (current ? HALO_OPACITY : OTHER_HALO_OPACITY)));
+    const core = make(this.lineMaterial(current ? colors.current : colors.other, LINE_PX[role], share));
     halo.renderOrder = ORDER.halo;
     core.renderOrder = ORDER.line;
     for (const l of [halo, core]) {
@@ -154,29 +161,31 @@ export class HintLayer {
     }
   }
 
-  private line(prim: HintLine, colors: HintColors, origin: Vec3): void {
+  /** Only the current part carries its value (`look`: hintLook). */
+  private line(prim: HintLine, colors: HintColors, origin: Vec3, look: { opacity: number; label: boolean }): void {
     const points = prim.closed && prim.points.length > 2 ? [...prim.points, prim.points[0]] : prim.points;
     if (points.length < 2) return;
-    this.addLine(this.local(points, origin), !!prim.segments, prim.role, colors);
+    this.addLine(this.local(points, origin), !!prim.segments, prim.role, colors, look.opacity);
     this.counted.lines++;
-    if (prim.label && prim.labelAt) this.label(prim.label, prim.labelAt, prim.role, origin);
+    if (look.label && prim.label && prim.labelAt) this.label(prim.label, prim.labelAt, prim.role, origin);
   }
 
-  private arc(prim: HintArc, colors: HintColors, origin: Vec3): void {
+  private arc(prim: HintArc, colors: HintColors, origin: Vec3, look: { opacity: number; label: boolean }): void {
     if (prim.points.length < 2) return;
-    this.addLine(this.local(prim.points, origin), false, prim.role, colors);
+    this.addLine(this.local(prim.points, origin), false, prim.role, colors, look.opacity);
     this.counted.arcs++;
-    if (prim.label && prim.labelAt) this.label(prim.label, prim.labelAt, prim.role, origin, ARC_LABEL_CENTER);
+    if (look.label && prim.label && prim.labelAt) this.label(prim.label, prim.labelAt, prim.role, origin, ARC_LABEL_CENTER);
   }
 
-  private dots(prim: HintDots, colors: HintColors, origin: Vec3): void {
+  private dots(prim: HintDots, colors: HintColors, origin: Vec3, share = 1): void {
     if (!prim.points.length) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.local(prim.points, origin)), 3));
     const current = prim.role === 'current';
     const material = dotsMaterial(current ? colors.current : colors.other, current ? HALO : colors.otherHalo, DOT_PX[prim.role] * this.viewer.renderer.getPixelRatio());
     this.owned.push(g, material);
-    this.fades.push((f) => (material.uniforms.fade.value = f));
+    material.uniforms.fade.value = share;
+    this.fades.push((f) => (material.uniforms.fade.value = share * f));
     const points = new THREE.Points(g, material);
     points.frustumCulled = false;
     points.renderOrder = ORDER.dots;
@@ -253,21 +262,55 @@ export class HintLayer {
     this.counted.labels++;
   }
 
-  clear(): void {
+  /** `fade`: it fades out (as it came in) unless a button is held on the view; the next drawing or clearing ends that at once. */
+  clear(fade = false): void {
+    this.leaving?.finish();
+    const fades = this.fades;
     this.fades = [];
+    this.looked = [];
     if (!this.things.length && !this.labels.length) return;
     this.shown++;
-    for (const t of this.things) this.group.remove(t);
-    for (const l of this.labels) {
-      l.element.remove();
-      this.group.remove(l);
-    }
-    for (const o of this.owned) o.dispose();
+    const things = this.things, labels = this.labels, owned = this.owned;
     this.things = [];
     this.labels = [];
     this.owned = [];
     this.counted = { lines: 0, dots: 0, arcs: 0, faces: 0, labels: 0, patches: 0 };
-    this.viewer.requestRender();
+    const drop = () => {
+      for (const t of things) this.group.remove(t);
+      for (const l of labels) {
+        l.element.remove();
+        this.group.remove(l);
+      }
+      for (const o of owned) o.dispose();
+      this.viewer.requestRender();
+    };
+    if (!fade || this.viewer.pressed) {
+      drop();
+      return;
+    }
+    let done = false;
+    const leaving = {
+      finish: () => {
+        if (done) return;
+        done = true;
+        if (this.leaving === leaving) this.leaving = null;
+        drop();
+      },
+    };
+    this.leaving = leaving;
+    for (const l of labels) l.element.classList.remove('is-fading-in');
+    this.viewer.tween(VIEW_MOTION.HINT_FADE_MS, (k) => {
+      if (done) return;
+      const f = k >= 1 ? 0 : 1 - EASE(k);
+      for (const fn of fades) fn(f);
+      for (const l of labels) l.element.style.opacity = String(f);
+      if (k >= 1) leaving.finish();
+    });
+  }
+
+  /** How each part of what is drawn now looks (hintLook), for the tests. */
+  looks(): Array<{ kind: string; part: string; role: string; opacity: number; label: boolean }> {
+    return this.looked.map((l) => ({ ...l }));
   }
 
   /** What is drawn now, for the tests. */

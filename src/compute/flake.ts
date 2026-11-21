@@ -2,7 +2,7 @@ import { frameAxes, type FrameAxes } from '../core/frame';
 import { mmPerUnit } from '../core/format';
 import type { Vec3 } from '../core/types';
 import { convexHullSteps } from './convexHull';
-import { BSA_LEVEL_DEFAULT_MM, BSA_LEVEL_RANGE_MM, BSA_MIN_PROMINENCE, BSA_NEAR_POP_MM, BSA_OPEN_REACH_MM, BSA_REF_ITERATIONS, BSA_REF_RADIUS_MM, BSA_REF_TRIM_UP, BULB_ANGLE_DISTANCE_MM, bulbSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, proximalPlaneSteps, VI_SAMPLE_MM, VI_WIDTHS_MM, type BulbPlane, type ViStrip } from './bulb';
+import { BSA_LEVEL_DEFAULT_MM, BSA_LEVEL_RANGE_MM, BSA_MIN_PROMINENCE, BSA_NEAR_POP_MM, BSA_OPEN_REACH_MM, BSA_REF_ITERATIONS, BSA_REF_RADIUS_MM, BSA_REF_TRIM_UP, BULB_ANGLE_DISTANCE_MM, bulbSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, POP_MESH_WARN_MM, proximalPlaneSteps, VI_SAMPLE_MM, VI_WIDTHS_MM, type BulbPlane, type ViStrip } from './bulb';
 import { IPA_BAND_END, IPA_BAND_FALLBACK_START, IPA_MIN_BAND_SHARE, IPA_TRIM_SIGMA, ipaSteps, type IpaBand } from './ipa';
 import { arcLengths, pointAtArc } from './landmarks';
 import { symmetricEigen3 } from './linalg';
@@ -101,6 +101,12 @@ const PLATFORM_MEASURES: readonly FlakeMeasure[] = ['platform_width_chord', 'pla
 /** What is taken on the longitudinal section: from the platform's edge there (S). */
 const SECTION_MEASURES: readonly FlakeMeasure[] = ['platform_depth_chord', 'platform_depth_path', ...EPA_MEASURES, 'ipa', ...BULB_ANGLE_MEASURES];
 const AXIS_MEASURES: readonly FlakeMeasure[] = ['tech_length', 'tech_width', 'tech_thickness', 'morph_tech_angle_deg', ...PLATFORM_MEASURES, ...BSA_MEASURES, 'psia', 'pop_mesh_edge'];
+
+/** Whether the mesh round P is coarser than `warnMm` (its mean edge length `popMeshEdge` is in the coordinate unit; no unit: not judged). */
+export function meshSparseNearP(popMeshEdge: number | null, unit: string, warnMm = POP_MESH_WARN_MM): boolean {
+  const mm = mmPerUnit(unit);
+  return popMeshEdge !== null && mm !== null && popMeshEdge * mm > warnMm;
+}
 
 export const emptyFlakeMeasures = (): FlakeMeasures => Object.fromEntries(ALL_FLAKE_MEASURES.map((k) => [k, null])) as FlakeMeasures;
 

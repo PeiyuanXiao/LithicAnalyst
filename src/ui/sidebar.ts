@@ -64,7 +64,7 @@ import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMean, type E
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
 import { edgeAxis, rangeOf, type EdgeRetouchKey } from '../compute/workingEdge';
-import { AGREEMENT_FLAKE_MEASURES, EPA_DISTANCES_MM, type FlakeMeasure } from '../compute/flake';
+import { AGREEMENT_FLAKE_MEASURES, EPA_DISTANCES_MM, meshSparseNearP, type FlakeMeasure } from '../compute/flake';
 import { bsaSettingsOf, VI_WIDTHS_MM } from '../compute/bulb';
 import { gmCounts, gmListTotal, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
 import { FLAKE_TEMPLATE_PATCHES, gmConfigSummary, GM_TEMPLATE_PARAMETERS, usesTemplate } from '../compute/gmTemplate';
@@ -89,7 +89,7 @@ import { sequenceColors, sequenceSwatch } from '../render/sequenceColor';
 import { LANDMARK_COLORS } from '../render/landmarkLayer';
 import type { ShadingMode } from '../render/meshView';
 import type { AppApi, AppMode, EdgeChartMethod } from './appApi';
-import { addButton, checkbox, coordRow, iconButton, numRow, optionList, plusButton, segmented, selectRow, slider, softSet, textRow, textValueRow } from './controls';
+import { addButton, checkbox, coordRow, iconButton, numRow, optionList, plusButton, rowCells, segmented, selectRow, slider, softSet, textRow, textValueRow } from './controls';
 import { clear, h, icon, ICONS, revealInList } from './dom';
 import { EdgeAngleChart, type ChartSeries } from './edgeAngleChart';
 import { t, tl } from './i18n';
@@ -385,7 +385,7 @@ function arrowsSection(api: AppApi): Section {
     if (v) {
       const cu = quantityUnit('coord', u);
       refs.coords.append(...coordRow(t('arrows.start'), coords(v.start), cu), ...coordRow(t('arrows.end'), coords(v.end), cu));
-      refs.length.append(...numRow(t('arrows.length'), ...quantity('length', vectorLength(v), u), 'arrow-length'));
+      refs.length.append(numRow(t('arrows.length'), ...quantity('length', vectorLength(v), u), 'arrow-length'));
     }
   };
 
@@ -503,7 +503,7 @@ function curvesSection(api: AppApi): Section {
       const fields = CURVE_FIELDS.map((f) => buildField(f, c));
       const meta = h('dl', { class: 'num-grid' });
       // an open curve along part of the edge, carried on round until it closes
-      const complete = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'curve-complete', onclick: () => api.selection.id && api.completeLoop(api.selection.id) }, t('curves.complete')) as HTMLButtonElement;
+      const complete = h('button', { type: 'button', class: 'btn btn-sm', id: 'curve-complete', onclick: () => api.selection.id && api.completeLoop(api.selection.id) }, t('curves.complete')) as HTMLButtonElement;
       const edgeRow = checkbox('curve-edge-angle', t('curves.edgeAngle'), false, (on) => api.selection.id && setCurveEdgeAngle(api.store, api.selection.id, on));
       // without a stated unit no millimetres can be converted: not measured, and why
       const edgeStatus = h('span', { class: 'pill pill-warn', id: 'curve-edge-no-unit', hidden: true }, t('edge.noUnit'));
@@ -520,14 +520,14 @@ function curvesSection(api: AppApi): Section {
     (refs.edge.closest('.checks-row') as HTMLElement).hidden = !hasEdgeAngles(st.specimen.type);
     refs.edge.checked = measuresEdgeAngle(c, st.specimen.type);
     refs.edgeStatus.hidden = !refs.edge.checked || !!u;
-    refs.meta.append(...numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), ...textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
+    refs.meta.append(numRow(t('arrows.length'), ...quantity('length', curveLength(c), u), 'curve-length'), textValueRow(t('curves.closed'), t(c.closed ? 'curves.yes' : 'curves.no')));
     // the platform outline must be closed before it means anything
     if (c.attributes.type === PLATFORM_OUTLINE && !c.closed) refs.meta.append(h('dt', {}), h('dd', { class: 'text', id: 'curve-outline-open' }, h('span', { class: 'pill pill-warn' }, t('curves.notClosed'))));
     // a back ridge that parts no back from the dorsal face (its ends not on the edge or the outline)
     if (c.attributes.type === BACK_RIDGE && st.specimen.type === 'flake' && api.backCut(c.id) === false) refs.meta.append(h('dt', {}), h('dd', { class: 'text', id: 'curve-back-uncut' }, h('span', { class: 'pill pill-warn' }, t('curves.noBack'))));
     // what runs along the platform is not measured as edge: say how much is
     const line = measuredLine(c, st);
-    if (line.points !== c.points) refs.meta.append(...numRow(t('curves.measuredLength'), ...quantity('length', curveLength(line), u), 'curve-measured-length'));
+    if (line.points !== c.points) refs.meta.append(numRow(t('curves.measuredLength'), ...quantity('length', curveLength(line), u), 'curve-measured-length'));
     // a flake's edge need not close when a platform outline ends it: it would only go along the platform
     const endsOnOutline = c.attributes.type === 'edge' && st.specimen.type === 'flake' && st.curves.some((x) => x.attributes.type === PLATFORM_OUTLINE && x.closed);
     (refs.complete.parentElement as HTMLElement).hidden = c.closed || endsOnOutline;
@@ -550,7 +550,7 @@ function workingEdgesSection(api: AppApi): Section {
   const { el, body } = section('working-edges', t('sec.workingEdges'), badge);
   const list = h('ol', { class: 'arrow-list num-list', id: 'working-edge-list', role: 'listbox', 'aria-label': t('sec.workingEdges') });
   const inspector = h('div', { class: 'inspector', id: 'working-edge-inspector' });
-  const generate = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'working-edge-generate', onclick: () => api.generateWorkingEdges() }, t('edges.generate')) as HTMLButtonElement;
+  const generate = h('button', { type: 'button', class: 'btn btn-sm', id: 'working-edge-generate', onclick: () => api.generateWorkingEdges() }, t('edges.generate')) as HTMLButtonElement;
   const foot = h('div', { class: 'btn-row' }, generate);
   body.append(list, inspector, foot);
   const hiddenCount = titlePill(api, el, 'working-edge-list-hidden');
@@ -597,7 +597,7 @@ function workingEdgesSection(api: AppApi): Section {
       const id = e.id;
       const name = textRow('working-edge-name', t('edges.name'), e.name, (v) => void updateWorkingEdge(api.store, id, { name: v }));
       const note = noteRow('working-edge-note', e.note, (v) => setWorkingEdgeNote(api.store, id, v));
-      const other = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'working-edge-other', onclick: () => api.otherEdgeStretch(id) }, t('edges.other'));
+      const other = h('button', { type: 'button', class: 'btn btn-sm', id: 'working-edge-other', onclick: () => api.otherEdgeStretch(id) }, t('edges.other'));
       const status = h('span', { class: 'pill pill-warn', id: 'working-edge-not-measured', hidden: true }, t('edges.notMeasured'));
       inspector.append(
         h('div', { class: 'insp-head' }, h('span', { class: 'arrow-id mono', id: 'working-edge-label' }, e.label), deleteButton('working-edge-delete', () => deleteWorkingEdge(api.store, id))),
@@ -882,11 +882,11 @@ function displaySection(api: AppApi): Section {
 // ---------------------------------------------------------------- measure mode
 
 /** A row of a measure with a value: it can show on the model how it was taken (`key`: `group:item`; null: it cannot). */
-function hintRow<T extends HTMLElement[]>(cells: T, key: string | null): T {
-  if (key === null) return cells;
-  for (const c of cells) c.dataset.hint = key;
-  cells[0].tabIndex = 0;
-  return cells;
+function hintRow<T extends HTMLElement>(row: T, key: string | null): T {
+  if (key === null) return row;
+  row.dataset.hint = key;
+  row.tabIndex = 0;
+  return row;
 }
 
 /** The rows in a box of such rows: the pointer, the keyboard's focus, a click; made anew as often as they like. */
@@ -923,19 +923,38 @@ function rebuildHints(api: AppApi, box: HTMLElement, fill: () => void): void {
   api.paintHintRows();
 }
 
-/** A row of measures' list: its three cells (receding when the value is missing); the drawing of how it was taken only with a value. */
-function measureRow(term: string, kind: Quantity, v: number | null, unit: string, id: string, hint: string, reason?: string): HTMLElement[] {
-  const cells = numRow(term, ...quantity(kind, v, unit), id);
-  if (v === null) for (const c of cells) c.classList.add('is-missing');
+/**
+ * A row of measures' list (one box: its name, value and unit; receding when the value is missing); the drawing of how it was
+ * taken only with a value. `unit` false: the group's title says it.
+ */
+function measureRow(term: string, kind: Quantity, v: number | null, unit: string | false, id: string, hint: string, reason?: string): HTMLElement {
+  const [value, u] = quantity(kind, v, unit === false ? '' : unit);
+  const row = numRow(term, value, unit === false ? '' : u, id);
+  if (v === null) row.classList.add('is-missing');
   // nothing to draw for an empty value: it says why, as ever
-  if (reason) tip(cells[1], reason);
-  return hintRow(cells, v === null ? null : hint);
+  if (reason) tip(rowCells(row).value, reason);
+  return hintRow(row, v === null ? null : hint);
 }
 
 /** A group of measures under its small title. */
 const measureGroup = (title: string, ...parts: HTMLElement[]): HTMLElement => h('section', { class: 'measure-group' }, h('h3', { class: 'measure-group-title' }, title), ...parts);
 
-const measureList = (...rows: HTMLElement[][]): HTMLElement => h('dl', { class: 'num-grid' }, ...rows.flat());
+/** A group with nothing in it, all for the one reason: its title, "—" and why, on one line. */
+const emptyGroup = (title: string, why: string, id?: string): HTMLElement =>
+  h(
+    'section',
+    { class: 'measure-group is-empty', id },
+    h('div', { class: 'measure-group-empty' }, h('h3', { class: 'measure-group-title' }, title), h('span', { class: 'measure-empty-dash' }, MISSING), h('span', { class: 'measure-empty-why' }, why)),
+  );
+
+/** The one reason all these values are empty for, or null (one has a value, or they are empty for different reasons, or for none said). */
+function oneReason(values: ReadonlyArray<number | null>, reasons: ReadonlyArray<string | undefined>): string | null {
+  if (!values.length || values.some((v) => v !== null)) return null;
+  const first = reasons[0];
+  return first && reasons.every((r) => r === first) ? first : null;
+}
+
+const measureList = (...rows: HTMLElement[]): HTMLElement => h('dl', { class: 'num-grid' }, ...rows);
 
 interface MeasureCell {
   /** The id of its value (`flake-<measure>`), the key of how it was taken (`group:item`), its value, its name and why it is empty. */
@@ -951,12 +970,14 @@ interface MeasureCell {
 }
 
 /**
- * Measures that differ two ways, as a small table: a row for each, a column for each way, the unit in its corner (no
- * cell repeats it). Each cell is a measure of its own: the pointer on it or the focus shows how it was taken, a click fixes that.
+ * Measures that differ two ways, as a small table: a row for each, a column for each way; in its corner what it measures and
+ * its unit (no cell repeats it). Each cell is a measure of its own: the pointer on it or the focus shows how it was taken, a
+ * click fixes that; its row's name and its column's head are lit with it. A cell null: no measure there (left blank).
  */
-function measureTable(id: string, kind: Quantity | null, unit: string, columns: string[], rows: Array<{ head: string; kind?: Quantity; cells: MeasureCell[] }>): HTMLTableElement {
-  const cell = (c: MeasureCell, rowKind: Quantity | undefined) => {
-    const td = h('td', { class: `num${c.value === null ? ' is-missing' : ''}`, id: c.id, 'aria-label': c.label }, fmtQuantity(c.kind ?? rowKind ?? kind ?? 'length', c.value));
+function measureTable(id: string, corner: string, kind: Quantity, columns: string[], rows: Array<{ head: string; kind?: Quantity; cells: Array<MeasureCell | null> }>): HTMLTableElement {
+  const cell = (c: MeasureCell | null, rowKind: Quantity | undefined) => {
+    if (!c) return h('td', { class: 'is-blank' });
+    const td = h('td', { class: `num${c.value === null ? ' is-missing' : ''}`, id: c.id, 'aria-label': c.label }, fmtQuantity(c.kind ?? rowKind ?? kind, c.value));
     if (c.value !== null) {
       td.dataset.hint = c.hint;
       td.tabIndex = 0;
@@ -968,14 +989,13 @@ function measureTable(id: string, kind: Quantity | null, unit: string, columns: 
   return h(
     'table',
     { class: 'measure-table', id },
-    h('thead', {}, h('tr', {}, h('th', { scope: 'col', class: 'measure-unit' }, kind ? quantityUnit(kind, unit) : ''), ...columns.map((c) => h('th', { scope: 'col' }, c)))),
-    // rows of their own kind (no unit over them all): each says its unit
-    h('tbody', {}, ...rows.map((r) => {
-      const u = r.kind && !kind ? quantityUnit(r.kind, unit) : '';
-      return h('tr', {}, h('th', { scope: 'row', class: 'measure-row-head' }, u ? `${r.head} (${u})` : r.head), ...r.cells.map((c) => cell(c, r.kind)));
-    })),
+    h('thead', {}, h('tr', {}, h('th', { scope: 'col', class: 'measure-corner' }, corner), ...columns.map((c) => h('th', { scope: 'col' }, c)))),
+    h('tbody', {}, ...rows.map((r) => h('tr', {}, h('th', { scope: 'row', class: 'measure-row-head' }, r.head), ...r.cells.map((c) => cell(c, r.kind))))),
   );
 }
+
+/** A table's corner: what it measures and its unit, "VI (mm)"; the unit alone without a name. */
+const cornerOf = (name: string, unit: string): string => (name && unit ? `${name} (${unit})` : name || unit);
 
 /**
  * The values a list of measures shows, by the id of their cells: when the user's own change alters one, its row (or cell)
@@ -991,12 +1011,10 @@ function valueFlash(api: AppApi, box: HTMLElement): () => void {
       for (const [id, v] of now) {
         if (!last.has(id) || last.get(id) === v) continue;
         const c = box.querySelector<HTMLElement>(`#${CSS.escape(id)}`)!;
-        const row = c.tagName === 'TD' ? [c] : [c.previousElementSibling, c, box.querySelector(`#${CSS.escape(`${id}-unit`)}`)];
-        for (const x of row)
-          if (x instanceof HTMLElement) {
-            x.classList.add('is-flash');
-            x.addEventListener('animationend', () => x.classList.remove('is-flash'), { once: true });
-          }
+        // the whole row, in one piece; or the table's cell
+        const x = c.tagName === 'TD' ? c : (c.closest<HTMLElement>('.num-row') ?? c);
+        x.classList.add('is-flash');
+        x.addEventListener('animationend', () => x.classList.remove('is-flash'), { once: true });
       }
     last = now;
   };
@@ -1018,11 +1036,9 @@ function measureAutoSection(api: AppApi): Section {
       }
       const u = api.store.state.specimen.unit;
       const row = (id: string, term: string, kind: Quantity, v: number | null) => measureRow(term, kind, v, u, `auto-${id}`, `auto:${id}`);
+      // the largest dimension, the width across it, the thickness across both: whatever the orientation
       box.append(
-        measureGroup(
-          t('measure.group.size'),
-          measureList(row('length', t('measure.length'), 'length', m.length), row('width', t('measure.width'), 'length', m.width), row('thickness', t('measure.thickness'), 'length', m.thickness), textValueRow(t('measure.axes'), t(`measure.axes.${m.frame}`), 'auto-frame')),
-        ),
+        measureGroup(t('measure.group.size'), measureList(row('length', t('measure.length'), 'length', m.length), row('width', t('measure.width'), 'length', m.width), row('thickness', t('measure.thickness'), 'length', m.thickness))),
         measureGroup(
           t('measure.group.whole'),
           measureList(row('area', t('measure.area'), 'area', m.surfaceArea), m.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'auto-volume') : row('volume', t('measure.volume'), 'volume', m.volume)),
@@ -1040,67 +1056,101 @@ function measureAutoSection(api: AppApi): Section {
 /** The kind of quantity of each of a flake's measurements. */
 const flakeQuantity = (k: string): Quantity => (k === 'platform_area' ? 'area' : k.startsWith('epa') || k.startsWith('bulb_angle') || k === 'ipa' || k === 'psia' || k === 'bsa' || k.endsWith('_deg') ? 'angle' : 'length');
 
+/** A flake's groups of measures, each with what is in it (a group all empty for one reason is one line). */
+const FLAKE_GROUPS = {
+  size: ['tech_length', 'tech_width', 'tech_thickness', 'morph_length', 'morph_width', 'morph_thickness', 'morph_tech_angle_deg'],
+  platform: ['platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'platform_area'],
+  angles: ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'ipa', 'psia'],
+  bulb: ['bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm'],
+} as const satisfies Record<string, readonly FlakeMeasure[]>;
+
 /**
- * A flake's measurements (measure mode): technical axis, morphology, the whole, then the proximal end: the platform's width and depth
- * (a small table), its area, EPA (a table), IPA, PSIA, the bulb angle (a row of two), BSA with its level, VI (a row of three) and the
- * mesh's resolution round P, which recedes.
+ * A flake's measurements (measure mode), in four groups: the dimensions (technological and morphological as a small table, then
+ * the angle between their axes, the area and the volume); the platform (width and depth, chord and along the surface; its area);
+ * the proximal angles (EPA and the bulb angle by method and distance; IPA, PSIA); the bulb (BSA at its level, VI). The mesh's
+ * resolution round P is no measure of the flake: only when it is coarse, a warning by the card's title says so.
  */
 function flakeSection(api: AppApi): Section {
-  const { el, body } = section('flake', t('sec.measureAuto'));
+  const meshPill = h('span', { class: 'pill pill-warn', id: 'flake-mesh-sparse', hidden: true }, t('flake.meshSparse'));
+  const { el, body } = section('flake', t('sec.measureAuto'), meshPill);
+  tips.attach(meshPill, () => {
+    const v = api.flakeMeasures()?.pop_mesh_edge ?? null;
+    const u = quantityUnit('length', api.store.state.specimen.unit);
+    return v === null ? null : { label: `${t('flake.pop_mesh_edge')}: ${fmtQuantity('length', v)}${u ? ` ${u}` : ''}` };
+  });
   const box = h('div', { class: 'measure-groups measure-auto', id: 'flake-measures' });
   body.append(box);
   watchHints(api, box);
   const flash = valueFlash(api, box);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'measure', 'specimen', 'flake'].includes(kind)) return;
+    const u = api.store.state.specimen.unit;
+    const m = api.flakeMeasures();
+    const sparse = meshSparseNearP(m?.pop_mesh_edge ?? null, u, api.meshWarnMm());
+    meshPill.hidden = !sparse;
     rebuildHints(api, box, () => {
-      const u = api.store.state.specimen.unit;
-      const m = api.flakeMeasures();
       const empty = api.flakeEmptyReasons();
       const value = (k: FlakeMeasure) => m?.[k] ?? null;
       const reason = (k: FlakeMeasure) => (empty?.[k] ? t(`flake.empty.${empty[k]}`) : undefined);
-      const row = (k: FlakeMeasure) => measureRow(t(`flake.${k}`), flakeQuantity(k), value(k), u, `flake-${k}`, `flake:${k}`, reason(k));
+      const row = (k: FlakeMeasure, label = t(`flake.${k}`), unit: string | false = u) => measureRow(label, flakeQuantity(k), value(k), unit, `flake-${k}`, `flake:${k}`, reason(k));
       const cell = (k: FlakeMeasure): MeasureCell => ({ id: `flake-${k}`, hint: `flake:${k}`, value: value(k), label: t(`flake.${k}`), reason: reason(k) });
       const a = api.autoMeasurements();
-      // the BSA's row says its level, faintly, before the angle
-      const bsaRow = row('bsa');
-      bsaRow[1].prepend(h('span', { class: 'measure-aside', id: 'flake-bsa-level' }, `${fmtNum(bsaSettingsOf(api.store.state.flake).level, 2)} mm · `));
-      // the mesh's resolution round P is no measure of the flake: it recedes
-      const meshRow = row('pop_mesh_edge');
-      for (const c of meshRow) c.classList.add('is-quiet');
+      const mm = quantityUnit('length', u);
+      /** A group, or one line when all of it is empty for the one reason (`others`: it has values of its own besides). */
+      const group = (key: keyof typeof FLAKE_GROUPS, title: string, parts: () => HTMLElement[], others = false): HTMLElement => {
+        const keys = FLAKE_GROUPS[key];
+        const why = others ? null : oneReason(keys.map(value), keys.map(reason));
+        const g = why ? emptyGroup(title, why) : measureGroup(title, ...parts());
+        g.id = `flake-group-${key}`;
+        return g;
+      };
+      const level = fmtNum(bsaSettingsOf(api.store.state.flake).level, 2);
       box.append(
-        measureGroup(t('measure.group.axis'), measureList(row('tech_length'), row('tech_width'), row('tech_thickness'))),
-        measureGroup(t('measure.group.morph'), measureList(row('morph_length'), row('morph_width'), row('morph_thickness'), row('morph_tech_angle_deg'))),
-        measureGroup(
-          t('measure.group.whole'),
-          measureList(
-            measureRow(t('measure.area'), 'area', a?.surfaceArea ?? null, u, 'flake-area', 'flake:area'),
-            a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : measureRow(t('measure.volume'), 'volume', a?.volume ?? null, u, 'flake-volume', 'flake:volume'),
-          ),
+        group(
+          'size',
+          t('measure.group.size'),
+          () => [
+            measureTable('flake-size-table', mm, 'length', [t('flake.table.tech'), t('flake.table.morph')], [
+              { head: t('measure.length'), cells: [cell('tech_length'), cell('morph_length')] },
+              { head: t('measure.width'), cells: [cell('tech_width'), cell('morph_width')] },
+              { head: t('measure.thickness'), cells: [cell('tech_thickness'), cell('morph_thickness')] },
+            ]),
+            measureList(
+              row('morph_tech_angle_deg'),
+              measureRow(t('measure.area'), 'area', a?.surfaceArea ?? null, u, 'flake-area', 'flake:area'),
+              a && a.volume === null ? textValueRow(t('measure.volume'), t('measure.notClosed'), 'flake-volume') : measureRow(t('measure.volume'), 'volume', a?.volume ?? null, u, 'flake-volume', 'flake:volume'),
+            ),
+          ],
+          !!a,
         ),
-        measureGroup(
-          t('measure.group.proximal'),
-          measureTable('flake-platform-table', 'length', u, [t('flake.table.chord'), t('flake.table.path')], [
+        group('platform', t('measure.group.platform'), () => [
+          measureTable('flake-platform-table', mm, 'length', [t('flake.table.chord'), t('flake.table.path')], [
             { head: t('flake.table.width'), cells: [cell('platform_width_chord'), cell('platform_width_path')] },
             { head: t('flake.table.depth'), cells: [cell('platform_depth_chord'), cell('platform_depth_path')] },
           ]),
-          measureList(row('platform_area')),
+          measureList(row('platform_area', t('flake.table.area'))),
+        ]),
+        // the unit in the group's title: none in the table's corner, none on the rows
+        group('angles', t('measure.group.angles'), () => [
           measureTable(
-            'flake-epa-table',
+            'flake-angle-table',
+            '',
             'angle',
-            u,
             EPA_DISTANCES_MM.map((d) => `${d} mm`),
             [
-              { head: `EPA ${t('edge.method.three_points')}`, cells: [cell('epa_3pt_1mm'), cell('epa_3pt_2mm'), cell('epa_3pt_3mm')] },
-              { head: `EPA ${t('edge.method.two_lines')}`, cells: [cell('epa_2ln_1mm'), cell('epa_2ln_2mm'), cell('epa_2ln_3mm')] },
+              { head: `EPA ${t('flake.method.3pt')}`, cells: [cell('epa_3pt_1mm'), cell('epa_3pt_2mm'), cell('epa_3pt_3mm')] },
+              { head: `EPA ${t('flake.method.2ln')}`, cells: [cell('epa_2ln_1mm'), cell('epa_2ln_2mm'), cell('epa_2ln_3mm')] },
+              // the bulb angle is taken at 1 mm only
+              { head: `${t('flake.table.bulb')} ${t('flake.method.3pt')}`, cells: [cell('bulb_angle_3pt_1mm'), null, null] },
+              { head: `${t('flake.table.bulb')} ${t('flake.method.2ln')}`, cells: [cell('bulb_angle_2ln_1mm'), null, null] },
             ],
           ),
-          measureList(row('ipa'), row('psia')),
-          measureTable('flake-bulb-table', 'angle', u, [t('edge.method.three_points'), t('edge.method.two_lines')], [{ head: t('flake.table.bulb'), cells: [cell('bulb_angle_3pt_1mm'), cell('bulb_angle_2ln_1mm')] }]),
-          measureList(bsaRow),
-          measureTable('flake-vi-table', 'length', u, VI_WIDTHS_MM.map((w) => `${fmtNum(w, 1)} mm`), [{ head: t('flake.table.vi'), cells: [cell('vi_0_5mm'), cell('vi_1_0mm'), cell('vi_1_5mm')] }]),
-          measureList(meshRow),
-        ),
+          measureList(row('ipa', undefined, false), row('psia', undefined, false)),
+        ]),
+        group('bulb', t('measure.group.bulb'), () => [
+          measureList(row('bsa', t('flake.bsaAt', { level }))),
+          measureTable('flake-vi-table', cornerOf('VI', mm), 'length', VI_WIDTHS_MM.map((w) => `${fmtNum(w, 1)} mm`), [{ head: '', cells: [cell('vi_0_5mm'), cell('vi_1_0mm'), cell('vi_1_5mm')] }]),
+        ]),
       );
     });
     flash();
@@ -1110,27 +1160,31 @@ function flakeSection(api: AppApi): Section {
   return { el, refresh, visible: () => ofType(api.store.state.specimen.type), ofType };
 }
 
-/** A flake's technical axis (annotate mode): its ends, why it gives no frame, delete. */
+/** A flake's technical axis (annotate mode): one row as any other object's (a chip, its name, why it gives no frame, delete). */
 function axisSection(api: AppApi): Section {
-  const status = h('span', { class: 'pill', id: 'axis-status', hidden: true });
-  const { el, body } = section('axis', t('sec.axis'), status);
-  const inspector = h('div', { class: 'inspector', id: 'axis-inspector' });
-  body.append(inspector);
+  const { el, body } = section('axis', t('sec.axis'));
+  const list = h('ol', { class: 'arrow-list', id: 'axis-list' });
+  body.append(list);
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'flake', 'specimen', 'selection'].includes(kind)) return;
-    const st = api.store.state;
-    const a = st.flake.axis;
-    status.hidden = !a?.failure;
-    status.classList.toggle('pill-warn', !!a?.failure);
-    status.textContent = a?.failure ? t(`axis.${a.failure}`) : '';
-    clear(inspector);
+    const a = api.store.state.flake.axis;
+    list.hidden = !a;
+    clear(list);
     if (!a) return;
-    const cu = quantityUnit('coord', st.specimen.unit);
     const selected = api.selection.id === a.id;
-    inspector.append(
-      h('button', { type: 'button', class: `arrow-row axis-row${selected ? ' is-selected' : ''}`, id: 'axis-row', 'aria-pressed': String(selected), onclick: () => api.selection.set(a.id) }, h('span', { class: 'chip', style: `--chip:${selected ? ARROW_COLORS.selected : ARROW_COLORS.axis}` }), h('span', { class: 'arrow-meta' }, t('sec.axis'))),
-      h('dl', { class: 'coord-grid', id: 'axis-coords' }, ...coordRow(t('axis.start'), coords(a.start), cu), ...coordRow(t('axis.end'), coords(a.end), cu)),
-      h('div', { class: 'btn-row' }, deleteButton('axis-delete', () => deleteTechnicalAxis(api.store))),
+    const status = a.failure ? h('span', { class: 'pill pill-warn', id: 'axis-status' }, t(`axis.${a.failure}`)) : null;
+    // (deleting it does not select it first)
+    const del = deleteButton('axis-delete', () => deleteTechnicalAxis(api.store));
+    del.addEventListener('click', (e) => e.stopPropagation());
+    list.append(
+      h(
+        'li',
+        { class: `arrow-row axis-row${selected ? ' is-selected' : ''}`, id: 'axis-row', role: 'option', 'aria-selected': String(selected), onclick: () => api.selection.set(a.id) },
+        h('span', { class: 'chip', style: `--chip:${selected ? ARROW_COLORS.selected : ARROW_COLORS.axis}` }),
+        h('span', { class: 'arrow-meta' }, t('sec.axis')),
+        status,
+        del,
+      ),
     );
   };
   refresh('all');
@@ -1202,7 +1256,7 @@ function edgeAngleSection(api: AppApi): Section {
         return { id: `edge-mean-${m}-${d}`, hint: `edgemean:${id}|${edge ?? ''}|${m}|${i}`, value: x.mean, label: `${t(`edge.method.${m}`)} ${d} mm`, reason: x.mean === null ? empty : undefined, more: x.mean === null ? undefined : meanTip(x) };
       }),
     }));
-    const table = measureTable('edge-mean-table', 'angle', api.store.state.specimen.unit, EDGE_ANGLE_DISTANCES_MM.map((d) => `${d} mm`), rows);
+    const table = measureTable('edge-mean-table', t('edge.mean.corner'), 'angle', EDGE_ANGLE_DISTANCES_MM.map((d) => `${d} mm`), rows);
     table.querySelectorAll('tbody tr').forEach((tr, r) => {
       const m = EDGE_ANGLE_METHODS[r];
       const shownRow = m === api.edgeMethod && chosen === 'all';
@@ -1261,9 +1315,9 @@ function edgeAngleSection(api: AppApi): Section {
           h('span', { class: 'chip chip-line', style: `--chip:${curveColor(c)}` }),
           h('span', { class: 'arrow-id mono' }, c.label),
           h('span', { class: 'arrow-meta' }, fieldText(CURVE_FIELDS[0], c.attributes.type)),
-          ...valueCells([n ? fmtCount(n) : MISSING, '']),
+          ...valueCells([n ? fmtCount(n) : MISSING, n ? t(n === 1 ? 'edge.mean.one' : 'edge.mean.n', { n: '' }).trim() : '']),
         );
-        list.append(...hintRow([row], n ? `edge:${c.id}` : null));
+        list.append(hintRow(row, n ? `edge:${c.id}` : null));
       }
     });
     const shown = sel && curves.some((c) => c.id === sel) ? api.edgeAngleResult(sel) : null;
@@ -1305,7 +1359,7 @@ function edgeAngleSection(api: AppApi): Section {
     (colorBy.el as HTMLElement).hidden = !shown || rl.threshold === null;
     sharpSummary.hidden = !sharp;
     rebuildHints(api, sharpSummary, () => {
-      if (sharp) sharpSummary.append(...hintRow(numRow(t('edge.sharp.length'), ...quantity('length', sharp.length, st.specimen.unit), 'sharp-length'), `sharp:${sel}`), ...hintRow(numRow(t('edge.sharp.count'), fmtCount(sharp.segments.length), '', 'sharp-count'), `sharp:${sel}`));
+      if (sharp) sharpSummary.append(hintRow(numRow(t('edge.sharp.length'), ...quantity('length', sharp.length, st.specimen.unit), 'sharp-length'), `sharp:${sel}`), hintRow(numRow(t('edge.sharp.count'), fmtCount(sharp.segments.length), '', 'sharp-count'), `sharp:${sel}`));
     });
   };
   refresh('all');
@@ -1338,11 +1392,25 @@ function layerSeries(api: AppApi, retouch: RetouchAngleResult, m: EdgeChartMetho
   return out;
 }
 
-/** The indices of a flake (retouch mode): the numbers, each saying why it is empty, and the sixteen segments. */
+/** The four indices of the retouch card, each in a large cell (2 × 2). */
+const RETOUCH_SCORES = [
+  { id: 'retouch-erp', label: 'retouch.erp', key: 'erp' },
+  { id: 'retouch-giur', label: 'retouch.giur', key: 'giur' },
+  { id: 'retouch-invasiveness', label: 'retouch.invasiveness', key: 'invasiveness' },
+  { id: 'retouch-perimeter', label: 'retouch.perimeterTotal', key: 'retouch_perimeter' },
+] as const satisfies ReadonlyArray<{ id: string; label: string; key: RetouchSummaryKey }>;
+
+/**
+ * The indices of a flake (retouch mode): ERP, GIUR, invasiveness and the retouched perimeter in four large cells, the sixteen
+ * segments by their scores, the edge curvature, and each working edge's own (a row each). What else the indices hold (the volume
+ * removed, the share interpolated, the stations used, the continuous invasiveness, the perimeter by face, R3, R6) goes to the
+ * exports only. All of it empty for one reason: one line that says why.
+ */
 function retouchIndicesSection(api: AppApi): Section {
   const { el, body } = section('retouch-indices', t('sec.retouchIndices'));
+  const scores = h('div', { class: 'score-cells retouch-scores', id: 'retouch-scores' });
   const values = h('dl', { class: 'num-grid', id: 'retouch-values' });
-  let gridBy: 'score' | 'p' = 'score';
+  const empty = h('div', { class: 'measure-group-empty', id: 'retouch-empty', hidden: true });
   const cells: HTMLButtonElement[] = [];
   const cell = (n: number, wide: boolean) => {
     const b = h('button', { type: 'button', class: `retouch-cell${wide ? ' is-wide' : ''}`, id: `retouch-cell-${n}`, 'data-segment': n, 'aria-pressed': 'false', onclick: () => api.focusPlanSegment(n) }, String(n)) as HTMLButtonElement;
@@ -1352,18 +1420,15 @@ function retouchIndicesSection(api: AppApi): Section {
   // Clarkson's order: the distal end above, the proximal below, left and right between them
   const grid = (face: 'dorsal' | 'ventral', base: number) =>
     h('div', { class: 'retouch-grid-face' }, h('span', { class: 'retouch-grid-title' }, t(`retouch.face.${face}`)), h('div', { class: 'retouch-grid', id: `retouch-grid-${face}` }, cell(base + 8, true), cell(base + 6, false), cell(base + 7, false), cell(base + 4, false), cell(base + 5, false), cell(base + 2, false), cell(base + 3, false), cell(base + 1, true)));
-  const by = segmented('retouch-grid-by', null, [{ value: 'score', label: t('retouch.grid.score') }, { value: 'p', label: t('retouch.grid.p') }], gridBy, (v) => {
-    gridBy = v as typeof gridBy;
-    paint();
-  });
+  const grids = h('div', { class: 'retouch-grids' }, grid('dorsal', 0), grid('ventral', 8));
+  // each segment by its score: none, part (pale amber), all (amber)
   const paint = () => {
     const rows = api.retouchResult()?.indices.penetration ?? [];
     cells.forEach((b, i) => {
-      const r = rows[i];
-      const reach = gridBy === 'p' ? (r?.penetration ?? 0) : (r?.score ?? 0);
-      b.style.background = reach > 0 ? (gridBy === 'p' ? `color-mix(in srgb, var(--accent) ${Math.round(reach * 100)}%, transparent)` : reach >= 1 ? 'var(--accent)' : 'var(--accent-soft)') : '';
-      b.classList.toggle('is-full', reach > 0.6);
-      b.dataset.score = String(r?.score ?? '');
+      const score = rows[i]?.score ?? 0;
+      b.style.background = score > 0 ? (score >= 1 ? 'var(--accent)' : 'var(--accent-soft)') : '';
+      b.classList.toggle('is-full', score > 0.6);
+      b.dataset.score = String(rows[i]?.score ?? '');
       b.setAttribute('aria-pressed', String(api.planMark() === i + 1));
     });
   };
@@ -1400,39 +1465,51 @@ function retouchIndicesSection(api: AppApi): Section {
       );
     });
   };
-  body.append(values, edgeTable, h('div', { class: 'retouch-grids' }, grid('dorsal', 0), grid('ventral', 8)), by.el);
+  body.append(empty, scores, grids, values, edgeTable);
   let shownKey: unknown = null;
   const refresh = (kind: RefreshKind) => {
     if (!['all', 'mesh', 'retouch', 'specimen', 'figure'].includes(kind)) return;
     const r = api.retouchResult();
-    const u = api.store.state.specimen.unit;
     paint();
     paintEdges();
-    // the rows stay under the pointer, with their tips, as long as what they say does
-    const key = JSON.stringify([r?.indices.removed_volume, r?.indices.erp, r?.indices.erp_filled_share, r?.indices.giur, r?.indices.giur_stations, r?.indices.invasiveness, r?.indices.invasiveness_continuous, r?.indices.retouch_perimeter, r?.indices.retouch_perimeter_dorsal, r?.indices.retouch_perimeter_ventral, r?.indices.edge_curvature, r?.indices.edge_curvature_chord, r?.indices.edge_curvature_depth, r?.reasons, u]);
+    // the cells stay under the pointer, with their tips, as long as what they say does
+    const key = JSON.stringify([r?.indices.erp, r?.indices.giur, r?.indices.invasiveness, r?.indices.retouch_perimeter, r?.indices.edge_curvature, r?.reasons]);
     if (key === shownKey) return;
     shownKey = key;
+    clear(scores);
     clear(values);
-    const row = (id: string, label: string, key: RetouchSummaryKey, kind2: Quantity | 'count') => {
-      const v = r?.indices[key] ?? null;
-      const cellsOf = numRow(t(label), ...(kind2 === 'count' ? ([fmtCount(v), ''] as [string, string]) : quantity(kind2, v, u)), id);
-      const why = v === null ? r?.reasons[key] : undefined;
-      if (why) tip(cellsOf[1], t(`retouch.empty.${why}`));
-      values.append(...cellsOf);
+    clear(empty);
+    const why = (k: RetouchSummaryKey) => {
+      const reason = (r?.indices[k] ?? null) === null ? r?.reasons[k] : undefined;
+      return reason ? t(`retouch.empty.${reason}`) : undefined;
     };
-    row('retouch-erp', 'retouch.erp', 'erp', 'ratio');
-    row('retouch-removed', 'retouch.removed', 'removed_volume', 'volume');
-    row('retouch-filled', 'retouch.filledShare', 'erp_filled_share', 'ratio');
-    row('retouch-giur', 'retouch.giur', 'giur', 'ratio');
-    row('retouch-giur-stations', 'retouch.giurStations', 'giur_stations', 'count');
-    row('retouch-invasiveness', 'retouch.invasiveness', 'invasiveness', 'ratio');
-    row('retouch-continuous', 'retouch.invasivenessContinuous', 'invasiveness_continuous', 'ratio');
-    row('retouch-perimeter', 'retouch.perimeter', 'retouch_perimeter', 'ratio');
-    row('retouch-perimeter-dorsal', 'retouch.perimeterDorsal', 'retouch_perimeter_dorsal', 'ratio');
-    row('retouch-perimeter-ventral', 'retouch.perimeterVentral', 'retouch_perimeter_ventral', 'ratio');
-    row('retouch-curvature', 'retouch.curvature', 'edge_curvature', 'ratio');
-    row('retouch-chord', 'retouch.chord', 'edge_curvature_chord', 'length');
-    row('retouch-depth', 'retouch.depth', 'edge_curvature_depth', 'length');
+    // nothing at all, for the one reason: one line
+    const keys: RetouchSummaryKey[] = [...RETOUCH_SCORES.map((s) => s.key), 'edge_curvature'];
+    const one = r ? oneReason(keys.map((k) => r.indices[k] ?? null), keys.map(why)) : null;
+    empty.hidden = !one;
+    scores.hidden = grids.hidden = values.hidden = !!one;
+    if (one) {
+      empty.append(h('span', { class: 'measure-empty-dash' }, MISSING), h('span', { class: 'measure-empty-why' }, one));
+      return;
+    }
+    for (const s of RETOUCH_SCORES) {
+      const v = r?.indices[s.key] ?? null;
+      const c = h(
+        'div',
+        { class: `score-cell${v === null ? ' is-missing' : ''}`, id: `${s.id}-cell` },
+        h('span', { class: 'score-label' }, t(s.label)),
+        h('span', { class: 'score-value', id: s.id }, v === null ? MISSING : fmtQuantity('ratio', v)),
+      );
+      const w = why(s.key);
+      if (w) tip(c, w);
+      scores.append(c);
+    }
+    const curvature = r?.indices.edge_curvature ?? null;
+    const row = numRow(t('retouch.curvature'), fmtQuantity('ratio', curvature), '', 'retouch-curvature');
+    if (curvature === null) row.classList.add('is-missing');
+    const w = why('edge_curvature');
+    if (w) tip(rowCells(row).value, w);
+    values.append(row);
   };
   refresh('all');
   return { el, refresh };
@@ -1451,7 +1528,7 @@ function retouchParamsSection(api: AppApi): Section {
     setRetouchFitLength(api.store, v);
     show();
   };
-  const reset = h('button', { type: 'button', class: 'btn btn-quiet btn-tiny', id: 'retouch-fit-default', onclick: () => commit(null) }, t('retouch.fit.default'));
+  const reset = h('button', { type: 'button', class: 'btn btn-sm', id: 'retouch-fit-default', onclick: () => commit(null) }, t('retouch.fit.default'));
   let previewing = false;
   range.addEventListener('input', () => {
     previewing = true;
@@ -1467,7 +1544,7 @@ function retouchParamsSection(api: AppApi): Section {
   const plot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   plot.setAttribute('id', 'retouch-fit-curve');
   plot.setAttribute('class', 'retouch-fit-curve');
-  plot.setAttribute('viewBox', '0 0 240 56');
+  plot.setAttribute('viewBox', `0 0 ${FIT_PLOT.W} ${FIT_PLOT.H}`);
   plot.setAttribute('role', 'img');
   plot.setAttribute('aria-label', t('retouch.fitCurve'));
   const show = () => {
@@ -1480,29 +1557,58 @@ function retouchParamsSection(api: AppApi): Section {
     own.hidden = stored === null;
     drawPlot(previewing ? Number(range.value) : w);
   };
+  /**
+   * The volume removed along the fitted lengths: what it is and its unit at the top left, its largest and smallest values at the
+   * ends of the vertical axis, the range's ends (mm) at those of the horizontal one, and the length in use as a dashed line, a dot
+   * and its value.
+   */
   const drawPlot = (w: number) => {
     const pts = (api.retouchFitCurve() ?? []).filter((p): p is { length: number; removed: number } => p.removed !== null);
     if (pts.length < 2) {
-      plot.innerHTML = '';
+      plot.replaceChildren();
       plot.style.display = 'none';
       return;
     }
     plot.style.display = '';
-    const x0 = pts[0].length, x1 = pts[pts.length - 1].length;
+    const { W, H, RIGHT, TOP, BOTTOM } = FIT_PLOT;
+    const u = api.store.state.specimen.unit;
     const lo2 = Math.min(...pts.map((p) => p.removed)), hi2 = Math.max(...pts.map((p) => p.removed));
-    const sx = (l: number) => 6 + ((l - x0) / (x1 - x0)) * 228;
-    const sy = (v: number) => 50 - (hi2 > lo2 ? (v - lo2) / (hi2 - lo2) : 0.5) * 44;
-    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.length).toFixed(1)} ${sy(p.removed).toFixed(1)}`).join('');
+    // the vertical axis stands right of its longer number
+    const [top, bottom] = [fmtQuantity('volume', hi2), fmtQuantity('volume', lo2)];
+    const LEFT = Math.max(FIT_PLOT.LEFT, 8 + FIT_PLOT.DIGIT * Math.max(top.length, bottom.length));
+    const sx = (l: number) => LEFT + ((l - lo) / (hi - lo)) * (W - LEFT - RIGHT);
+    const sy = (v: number) => H - BOTTOM - (hi2 > lo2 ? (v - lo2) / (hi2 - lo2) : 0.5) * (H - TOP - BOTTOM);
+    const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>, text?: string): SVGElementTagNameMap[K] => {
+      const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      if (text !== undefined) e.textContent = text;
+      return e;
+    };
+    const vu = quantityUnit('volume', u);
+    const parts: SVGElement[] = [
+      svg('text', { id: 'retouch-fit-ylabel', class: 'fit-plot-title', x: 0, y: 11 }, vu ? `${t('retouch.removed')} (${vu})` : t('retouch.removed')),
+      // the axes: left and bottom
+      svg('path', { class: 'fit-plot-axis', d: `M${LEFT} ${TOP}V${H - BOTTOM}H${W - RIGHT}` }),
+      svg('text', { id: 'retouch-fit-ymax', class: 'fit-plot-num', x: LEFT - 4, y: sy(hi2) + 4, 'text-anchor': 'end' }, top),
+      svg('text', { id: 'retouch-fit-ymin', class: 'fit-plot-num', x: LEFT - 4, y: sy(lo2), 'text-anchor': 'end' }, bottom),
+      svg('text', { id: 'retouch-fit-xmin', class: 'fit-plot-num', x: sx(lo), y: H - 2, 'text-anchor': 'start' }, `${lo} mm`),
+      svg('text', { id: 'retouch-fit-xmax', class: 'fit-plot-num', x: sx(hi), y: H - 2, 'text-anchor': 'end' }, `${hi} mm`),
+      svg('path', { id: 'retouch-fit-line', class: 'fit-plot-line', d: pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.length).toFixed(1)} ${sy(p.removed).toFixed(1)}`).join('') }),
+    ];
     // where the length in use lies on it
-    let dot = '';
+    const x = sx(Math.min(hi, Math.max(lo, w)));
+    parts.push(svg('line', { id: 'retouch-fit-w', class: 'fit-plot-w', x1: x, x2: x, y1: TOP, y2: H - BOTTOM }));
     for (let i = 0; i + 1 < pts.length; i++) {
       const a = pts[i], b = pts[i + 1];
       if (w < a.length || w > b.length) continue;
       const v = a.removed + ((b.removed - a.removed) * (w - a.length)) / (b.length - a.length);
-      dot = `<circle id="retouch-fit-dot" cx="${sx(w).toFixed(1)}" cy="${sy(v).toFixed(1)}" r="3.5" fill="var(--accent)" stroke="var(--ink)" stroke-width="0.75"/>`;
+      parts.push(svg('circle', { id: 'retouch-fit-dot', class: 'fit-plot-dot', cx: x.toFixed(1), cy: sy(v).toFixed(1), r: 3.5 }));
       break;
     }
-    plot.innerHTML = `<path id="retouch-fit-line" d="${line}" fill="none" stroke="var(--ink-2)" stroke-width="1.25"/>${dot}`;
+    // its value beside the line, on the side with more room
+    const right = x < (LEFT + W - RIGHT) / 2;
+    parts.push(svg('text', { id: 'retouch-fit-wlabel', class: 'fit-plot-num fit-plot-wlabel', x: right ? x + 4 : x - 4, y: TOP + 9, 'text-anchor': right ? 'start' : 'end' }, `${fmtNum(w, 1)} mm`));
+    plot.replaceChildren(...parts);
   };
   body.append(h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, t('retouch.fit')), h('div', { class: 'retouch-fit-row' }, range, box, h('span', { class: 'unit' }, 'mm'))), h('div', { class: 'retouch-fit-row' }, own, reset), plot);
   const refresh = (kind: RefreshKind) => {
@@ -1512,6 +1618,12 @@ function retouchParamsSection(api: AppApi): Section {
   return { el, refresh };
 }
 
+/**
+ * The plot of the volume removed along the fitted lengths: its size and margins (SVG units, drawn at least as large); the left
+ * margin at least LEFT, else as wide as its longer number (DIGIT: the width of one figure of 11-unit monospaced type).
+ */
+const FIT_PLOT = { W: 260, H: 100, LEFT: 30, RIGHT: 6, TOP: 18, BOTTOM: 16, DIGIT: 6.8 } as const;
+
 /** Each retouch region along the edge: a click goes to the middle of its stretch, and selects it. */
 function retouchSegmentsSection(api: AppApi): Section {
   const { el, body } = section('retouch-segments', t('sec.retouchSegments'));
@@ -1519,7 +1631,7 @@ function retouchSegmentsSection(api: AppApi): Section {
   const table = h(
     'table',
     { class: 'retouch-table', id: 'retouch-segment-table' },
-    h('thead', {}, h('tr', {}, ...['label', 'layer', 'face', 'length', 'chord', 'depth', 'edge'].map((k) => h('th', {}, t(`retouch.seg.${k}`))))),
+    h('thead', {}, h('tr', {}, ...['label', 'layer', 'face', 'length'].map((k) => h('th', {}, t(`retouch.seg.${k}`))))),
     rows,
   );
   body.append(table);
@@ -1530,11 +1642,6 @@ function retouchSegmentsSection(api: AppApi): Section {
     table.hidden = !segments.length;
     clear(rows);
     segments.forEach((s, i) => {
-      const num = (v: number | null) => h('td', { class: 'num' }, fmtQuantity('length', v));
-      const why = (cell: HTMLElement, v: number | null) => {
-        if (v === null) tip(cell, t('retouch.empty.whole_edge'));
-        return cell;
-      };
       rows.append(
         h(
           'tr',
@@ -1542,10 +1649,7 @@ function retouchSegmentsSection(api: AppApi): Section {
           h('td', { class: 'mono' }, st.regions.find((r) => r.id === s.region)?.label ?? ''),
           h('td', { class: 'num' }, String(s.layer)),
           h('td', {}, s.face ? t(`retouch.face.${s.face}`) : MISSING),
-          num(s.length),
-          why(num(s.chord), s.chord),
-          why(num(s.depth), s.depth),
-          h('td', { class: 'mono' }, api.workingEdgeAt(s.curveId, s.middle) || MISSING),
+          h('td', { class: 'num' }, fmtQuantity('length', s.length)),
         ),
       );
     });
@@ -1749,14 +1853,14 @@ function frameSourceText(source: string): string {
 function orientationSection(api: AppApi): Section {
   const status = h('span', { class: 'pill', id: 'frame-status' });
   const { el, body } = section('orientation', t('sec.orientation'), status);
-  const btn = (id: string, label: string, onclick: () => void, kind = 'btn-quiet') =>
-    h('button', { type: 'button', class: `btn ${kind} btn-sm`, id, onclick }, label) as HTMLButtonElement;
+  const btn = (id: string, label: string, onclick: () => void, kind = '') =>
+    h('button', { type: 'button', class: `btn ${kind} btn-sm`.replace('  ', ' '), id, onclick }, label) as HTMLButtonElement;
   const fromView = btn('frame-from-view', t('frame.fromView'), () => api.setFrameFromView());
   /** A button with a menu of items; when unusable it says why (a tooltip) instead of opening. */
   const menuButton = (id: string, label: string) => {
     const menu = h('div', { class: 'popover menu menu-left', id: `${id}-menu`, role: 'menu', hidden: true });
     let reason: string | null = null;
-    const b = h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id, 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: () => reason === null && api.popovers.toggle(b, menu) }, h('span', {}, label), icon(ICONS.chevron)) as HTMLButtonElement;
+    const b = h('button', { type: 'button', class: 'btn btn-sm', id, 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: () => reason === null && api.popovers.toggle(b, menu) }, h('span', {}, label), icon(ICONS.chevron)) as HTMLButtonElement;
     tips.attach(b, () => (reason === null ? null : { label: reason }));
     const set = (items: Array<{ id: string; label: string; color?: string; pick: () => void }>, why: string | null) => {
       reason = why;
@@ -1800,7 +1904,7 @@ function orientationSection(api: AppApi): Section {
     fine.set(0);
   });
   const view = btn('frame-view', t('frame.view'), () => api.viewFrame());
-  const clearBtn = btn('frame-clear', t('frame.clear'), () => api.clearFrame(), 'btn-text-danger');
+  const clearBtn = btn('frame-clear', t('frame.clear'), () => api.clearFrame(), 'btn-danger-line');
   // front view, vertical, turning: a label column and the controls
   body.append(
     h(
@@ -2014,8 +2118,10 @@ function regionsSection(api: AppApi, setType: (id: string, type: string) => void
     // (by the preset types: free text has no totals)
     totals.hidden = !info || shownRegions.length === 0 || generic;
     if (info && shownRegions.length && !generic) {
-      for (const k of ['scar', 'cortex', 'joint', 'damage', 'retouch', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'back'] as const) if (info.totals[k] > 0) totals.append(...numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
-      if (info.totals.cortex > 0) totals.append(...numRow(t('region.cortexRatio'), fmtQuantity('ratio', info.totals.cortexRatio), '', 'region-cortex-ratio'));
+      // a type with one region in the list: its row says its area already
+      const rows = (k: string) => shownRegions.filter((x) => x.type === k).length;
+      for (const k of ['scar', 'cortex', 'joint', 'damage', 'retouch', 'flaking_surface', 'platform', 'ventral', 'dorsal', 'back'] as const) if (info.totals[k] > 0 && rows(k) !== 1) totals.append(numRow(t(`region.area.${k}`), ...area(info.totals[k]), `region-total-${k}`));
+      if (info.totals.cortex > 0) totals.append(numRow(t('region.cortexRatio'), fmtQuantity('ratio', info.totals.cortexRatio), '', 'region-cortex-ratio'));
       totals.hidden = !totals.childElementCount;
     }
     facesOpen.hidden = !api.facesOpen();
@@ -2214,8 +2320,8 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     if (bicone) {
       const b = isBicone(found) ? found : null;
       traits.append(
-        ...textValueRow(t('config.facial'), b?.facialCharacter ? t(`config.facial.${b.facialCharacter}`) : MISSING, 'config-facial'),
-        ...textValueRow(t('config.surfaces'), b ? coneSurfaces(b) : MISSING, 'config-surfaces'),
+        textValueRow(t('config.facial'), b?.facialCharacter ? t(`config.facial.${b.facialCharacter}`) : MISSING, 'config-facial'),
+        textValueRow(t('config.surfaces'), b ? coneSurfaces(b) : MISSING, 'config-surfaces'),
       );
       if (b) renderConeCard(b);
       else card.hidden = true;
@@ -2230,14 +2336,13 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     );
     polarity.disabled = !r?.surfaces.length;
     traits.append(
-      ...textValueRow(t('config.facial'), code('config.facial', r?.facialCharacter ?? null), 'config-facial'),
-      ...textValueRow(t('config.surfaces'), r?.surfaces.length ? r.surfaces.map(surfaceText).join(' · ') : MISSING, 'config-surfaces'),
-      ...textValueRow(t('config.surfaceRelation'), code('config.relation', r?.flakingSurfaceRelation ?? null), 'config-surface-relation'),
-      ...textValueRow(t('config.platformRelation'), code('config.relation', r?.platformRelation ?? null), 'config-platform-relation'),
-      h('dt', { class: 'config-wide' }, t('config.polarity')),
-      h('dd', { class: 'text config-wide', id: 'config-polarity-cell' }, polarity),
-      ...textValueRow(t('config.surfaceType'), r ? perSurface(r, (s) => t(`config.type.${s.type}`)) : MISSING, 'config-type-value'),
-      ...textValueRow(t('config.axis'), r ? perSurface(r, (s) => t(`config.axis.${s.axis}`)) : MISSING, 'config-axis-value'),
+      textValueRow(t('config.facial'), code('config.facial', r?.facialCharacter ?? null), 'config-facial'),
+      textValueRow(t('config.surfaces'), r?.surfaces.length ? r.surfaces.map(surfaceText).join(' · ') : MISSING, 'config-surfaces'),
+      textValueRow(t('config.surfaceRelation'), code('config.relation', r?.flakingSurfaceRelation ?? null), 'config-surface-relation'),
+      textValueRow(t('config.platformRelation'), code('config.relation', r?.platformRelation ?? null), 'config-platform-relation'),
+      h('div', { class: 'num-row' }, h('dt', { class: 'config-wide' }, t('config.polarity')), h('dd', { class: 'text config-wide', id: 'config-polarity-cell' }, polarity)),
+      textValueRow(t('config.surfaceType'), r ? perSurface(r, (s) => t(`config.type.${s.type}`)) : MISSING, 'config-type-value'),
+      textValueRow(t('config.axis'), r ? perSurface(r, (s) => t(`config.axis.${s.axis}`)) : MISSING, 'config-axis-value'),
     );
     if (r) renderCard(r);
     else card.hidden = true;
@@ -2503,7 +2608,7 @@ function landmarksSection(api: AppApi): Section {
           h('button', { type: 'button', class: 'icon-btn', id: 'landmark-stop-names', title: t('landmark.stopNames'), 'aria-label': t('landmark.stopNames'), onclick: () => api.stopNames() }, icon(ICONS.close))),
       );
     } else if (api.previousNames().length) {
-      names.append(h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'landmark-reuse-names', onclick: () => api.reuseNames() }, t('landmark.reuseNames')));
+      names.append(h('button', { type: 'button', class: 'btn btn-sm', id: 'landmark-reuse-names', onclick: () => api.reuseNames() }, t('landmark.reuseNames')));
     }
     names.hidden = !names.childElementCount;
 
@@ -2812,7 +2917,7 @@ function gmSection(api: AppApi): Section {
     const n = r && (r.complete || r.method === 'template') ? r.rows.length : flake ? gmTotal(c, st.landmarks.every((l) => l.code !== 'platform_end'), own) : gmListTotal(c);
     setCount(total, n);
     clear(counts);
-    counts.append(...numRow(t('gm.total'), fmtCount(n), '', 'gm-total'));
+    counts.append(numRow(t('gm.total'), fmtCount(n), '', 'gm-total'));
     tip(counts, t('gm.totalWhy'));
     // what lacks: by name, where it goes with a thing of the specimen's
     const named = r?.details ?? [];
@@ -2869,9 +2974,9 @@ function noduleSection(api: AppApi): Section {
     rebuildHints(api, meta, () => {
       if (f)
         meta.append(
-          ...hintRow(numRow(t('nodule.radius'), ...quantity('length', f.radius, u), 'nodule-radius'), 'nodule:radius'),
-          ...numRow(t('nodule.rms'), ...quantity('length', f.rms, u), 'nodule-rms'),
-          ...numRow(t('nodule.points'), fmtCount(f.count), '', 'nodule-points'),
+          hintRow(numRow(t('nodule.radius'), ...quantity('length', f.radius, u), 'nodule-radius'), 'nodule:radius'),
+          numRow(t('nodule.rms'), ...quantity('length', f.rms, u), 'nodule-rms'),
+          numRow(t('nodule.points'), fmtCount(f.count), '', 'nodule-points'),
         );
     });
     (show.querySelector('input') as HTMLInputElement).checked = st.nodule.show;
@@ -2988,14 +3093,26 @@ function symmetrySection(api: AppApi): Section {
     const hint = (what: string) => `symmetry:${s.id}|${what}`;
     renderProgress(s);
     rebuildHints(api, results, () => {
-      // the three symmetries: one row, a cell each
+      // nothing at all, for the one reason (the plane cuts nothing, say): one line that says why
+      const all = [
+        pick('sides', (v) => v.volumeSymmetry, (v) => v.reasons.volume),
+        pick('sides', (v) => v.areaSymmetry, (v) => v.reasons.area),
+        pick('shape', (v) => v.shapeSymmetry, (v) => v.reasons.shape),
+        pick('deviation', (v) => v.deviationMean, (v) => v.reasons.deviation),
+      ];
+      const one = all.some((v) => v.stale) ? null : oneReason(all.map((v) => v.value), all.map((v) => v.reason));
+      if (one) {
+        results.append(h('div', { class: 'measure-group-empty', id: 'symmetry-empty' }, h('span', { class: 'measure-empty-dash' }, MISSING), h('span', { class: 'measure-empty-why' }, one)));
+        return;
+      }
+      // the three symmetries: one row, a large cell each
       const score = (what: 'volume' | 'area' | 'shape', part: keyof typeof done, get: (v: SymmetryValues) => number | null, why: (v: SymmetryValues) => SymmetryReason | null) => {
         const v = pick(part, get, why);
         const cell = h(
           'div',
-          { class: `symmetry-score${v.value === null ? ' is-missing' : ''}${v.stale ? ' is-stale' : ''}`, id: `symmetry-${what}-cell` },
-          h('span', { class: 'symmetry-score-label' }, t(`symmetry.${what}`)),
-          h('span', { class: 'symmetry-score-value', id: `symmetry-${what}` }, v.value === null ? MISSING : fmtQuantity('ratio', v.value)),
+          { class: `symmetry-score score-cell${v.value === null ? ' is-missing' : ''}${v.stale ? ' is-stale' : ''}`, id: `symmetry-${what}-cell` },
+          h('span', { class: 'symmetry-score-label score-label' }, t(`symmetry.${what}`)),
+          h('span', { class: 'symmetry-score-value score-value', id: `symmetry-${what}` }, v.value === null ? MISSING : fmtQuantity('ratio', v.value)),
         );
         // (what it is drawn from: the sides for volume and area, the deviation's colours for shape)
         if (v.value !== null && !v.stale) {
@@ -3007,7 +3124,7 @@ function symmetrySection(api: AppApi): Section {
       };
       const scores = h(
         'div',
-        { class: 'symmetry-scores', id: 'symmetry-scores' },
+        { class: 'symmetry-scores score-cells', id: 'symmetry-scores' },
         score('volume', 'sides', (v) => v.volumeSymmetry, (v) => v.reasons.volume),
         score('area', 'sides', (v) => v.areaSymmetry, (v) => v.reasons.area),
         score('shape', 'shape', (v) => v.shapeSymmetry, (v) => v.reasons.shape),
@@ -3021,15 +3138,15 @@ function symmetrySection(api: AppApi): Section {
         [sides((v) => v.volumeA, (v) => v.reasons.volume, 'symmetry-volume-a', 'volume'), sides((v) => v.volumeB, (v) => v.reasons.volume, 'symmetry-volume-b', 'volume')],
         [sides((v) => v.areaA, (v) => v.reasons.area, 'symmetry-area-a', 'area'), sides((v) => v.areaB, (v) => v.reasons.area, 'symmetry-area-b', 'area')],
       ];
-      const table = measureTable('symmetry-table', null, u, [t('symmetry.sideA'), t('symmetry.sideB')], [
-        { head: t('symmetry.volume'), kind: 'volume', cells: cells[0] },
-        { head: t('symmetry.area'), kind: 'area', cells: cells[1] },
+      const table = measureTable('symmetry-table', t('symmetry.raw'), 'volume', [t('symmetry.sideA'), t('symmetry.sideB')], [
+        { head: cornerOf(t('symmetry.volume'), quantityUnit('volume', u)), kind: 'volume', cells: cells[0] },
+        { head: cornerOf(t('symmetry.area'), quantityUnit('area', u)), kind: 'area', cells: cells[1] },
       ]);
       const dev = (get: (v: SymmetryValues) => number | null) => pick('deviation', get, (v) => v.reasons.deviation);
       const devRow = (term: string, get: (v: SymmetryValues) => number | null, id: string) => {
         const v = dev(get);
         const row = measureRow(term, 'length', v.value, u, id, hint('deviation'), v.reason);
-        if (v.stale) for (const c of row) c.classList.add('is-stale');
+        if (v.stale) row.classList.add('is-stale');
         return row;
       };
       const mean = measureList(devRow(t('symmetry.deviation'), (v) => v.deviationMean, 'symmetry-dev-mean'));
@@ -3069,7 +3186,7 @@ function symmetrySection(api: AppApi): Section {
       const actions = h(
         'div',
         { class: 'btn-row' },
-        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'symmetry-swap', onclick: () => swapSymmetry(api.store, s.id) }, icon(ICONS.swap), h('span', {}, t('symmetry.swap'))),
+        h('button', { type: 'button', class: 'btn btn-sm', id: 'symmetry-swap', onclick: () => swapSymmetry(api.store, s.id) }, icon(ICONS.swap), h('span', {}, t('symmetry.swap'))),
         deleteButton('symmetry-delete', () => deleteSymmetry(api.store, s.id)),
       );
       inspector.append(labelRow.el, sourceRow, progress, results, noteBox.el, actions);
@@ -3540,7 +3657,7 @@ function selectionTarget(api: AppApi): [string, string] | null {
   const id = api.selection.id;
   const st = api.store;
   if (!id) return null;
-  if (st.state.flake.axis?.id === id) return ['axis', '#axis-inspector'];
+  if (st.state.flake.axis?.id === id) return ['axis', '#axis-row'];
   if (st.scar(id)) return ['arrows', '#arrow-inspector'];
   if (st.workingEdge(id)) return ['working-edges', '#working-edge-inspector'];
   if (st.curve(id)) return api.mode === 'measure' ? ['edge-angle', '#edge-angle-list [aria-selected="true"]'] : ['curves', '#curve-inspector'];
@@ -3567,7 +3684,7 @@ export function buildSidebar(api: AppApi): Sidebar {
   for (const s of sections) el.append(s.el, s.ghost);
   const display = displaySection(api);
   const config = configurationPanel(api);
-  const exportBtn = h('button', { type: 'button', class: 'btn btn-quiet btn-block', id: 'btn-export', onclick: () => api.openExport() }, icon(ICONS.download), t('export.button'));
+  const exportBtn = h('button', { type: 'button', class: 'btn btn-block', id: 'btn-export', onclick: () => api.openExport() }, icon(ICONS.download), t('export.button'));
   const foot = h('div', { class: 'sidebar-foot' }, exportBtn);
   el.append(foot);
   // before a model is open the sidebar has the mode's sections as grey titles (the view offers the ways to open one)

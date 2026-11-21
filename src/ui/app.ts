@@ -35,7 +35,7 @@ import BatchWorker from '../io/batchWorker?worker&inline';
 import { zipStored } from '../io/zip';
 import { fileStem, initHostDownloads, runningInHost, saveFile, saveTextFile } from '../io/saveFile';
 import { facesOfPieceSteps, regionPlyComments, regionPlySteps } from '../io/regionPly';
-import { bsaSettingsOf, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_DIAGONAL, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, planeCoords, surfaceOverSteps, VI_WIDTHS_MM, windowContoursSteps, type BulbPlane } from '../compute/bulb';
+import { bsaSettingsOf, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_DIAGONAL, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, planeCoords, POP_MESH_WARN_MM, surfaceOverSteps, VI_WIDTHS_MM, windowContoursSteps, type BulbPlane } from '../compute/bulb';
 import { heightColors, SEQUENTIAL_RAMP, sequentialColors } from '../compute/colormap';
 import { ContourLayer } from '../render/contourLayer';
 import { askToWrite, droppedHandle, isAbort, openFilePicker, saveFilePicker, writeHandle, type ProjectFileHandle } from '../io/fileHandle';
@@ -55,7 +55,7 @@ import { SequenceTool } from '../tools/sequenceTool';
 import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjacency';
 import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
-import { AGREEMENT_FLAKE_MEASURES, FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, storedFlakeMeasures, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
+import { AGREEMENT_FLAKE_MEASURES, FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, storedFlakeMeasures, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphConstruction, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, EDGE_ANGLE_PARAMETERS, edgeAngleMeans, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleMeans, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { gmAnchorRows, gmLandPairs, gmMissingInputs, gmSteps, type GmMissing, type GmResult } from '../compute/gm';
 import { anchorsHashOf, gmCacheKey, gmConfigSummary, gmInUse, gmManifest, gmStanding, GM_TEMPLATE_PARAMETERS, layPatchSteps, regionsHashOf, sameGmConfig, usesTemplate } from '../compute/gmTemplate';
@@ -97,7 +97,7 @@ import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
 import { facesOfPiecesSteps, overPiecesSteps, pieceSeedSteps, piecesBesideSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
-import { boxHint, flakeHint, MEASURE_HINT_PARAMETERS, noduleHint, sharpHint, stationsHint, symmetryHint, wholeModelHint, type MeasureHint } from '../compute/measureHint';
+import { dimensionsHint, flakeHint, MEASURE_HINT_PARAMETERS, noduleHint, sharpHint, stationsHint, symmetryHint, wholeModelHint, type MeasureHint } from '../compute/measureHint';
 import { HintLayer } from '../render/hintLayer';
 import { assembleCurve, curveSegments } from '../core/curveGeometry';
 
@@ -120,7 +120,7 @@ import type { EdgeEnd, ToolContext } from '../tools/tool';
 import { ToolController } from '../tools/toolController';
 import { APP_MODES, type AppApi, type AppMode, type EdgeChartMethod, type ConfigPick, type ConfigStatus, type DisplayAspect, type DisplaySettings } from './appApi';
 import { fmtCount, fmtNum, fmtQuantity, MISSING, mmPerUnit, quantityUnit, type Quantity } from '../core/format';
-import { numRow, segmented, softSet, textRow, textValueRow } from './controls';
+import { numRow, rowCells, segmented, softSet, textRow, textValueRow } from './controls';
 import { floatingPanel } from './floatingPanel';
 import { Popovers, onViewport } from './popover';
 import { clear, h, icon, icon20, ICONS, ICONS20 } from './dom';
@@ -140,12 +140,20 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => set
  * ones), it takes the narrow window's steps in turn: the modes' names go (icons stay), then the names on
  * the header buttons. Each time it is measured afresh, so the names come back where they fit again.
  */
+/**
+ * The top bar when its parts do not fit (a narrower window, a language's longer words, the specimen's name), step by step:
+ * first the frame's pill by the specimen's name goes (its tooltip says it), then the words of the buttons (not the main
+ * action's), and only then the modes' names, the current mode's always staying.
+ */
+const TOPBAR_STEPS = ['is-tight', 'is-tighter', 'is-tightest'] as const;
+
 function fitTopbar(bar: HTMLElement): void {
   const over = () => bar.scrollWidth > bar.clientWidth + 1;
-  bar.classList.remove('is-tight', 'is-tighter');
-  if (!over()) return;
-  bar.classList.add('is-tight');
-  if (over()) bar.classList.add('is-tighter');
+  bar.classList.remove(...TOPBAR_STEPS);
+  for (const step of TOPBAR_STEPS) {
+    if (!over()) return;
+    bar.classList.add(step);
+  }
 }
 
 /** How near a curve the cursor must be for the working edge tool to take it. */
@@ -498,6 +506,8 @@ export class App implements AppApi {
   private helpTab: 'about' | 'shortcuts' = 'about';
   private startOnScreen = false;
   private readonly statusEl: HTMLElement;
+  /** The view's lower left: the colour scales over the status pills, one column (they never overlap). */
+  private readonly stackEl: HTMLElement;
   private statusKey = '';
   /** Which pills were done when they were last drawn (a pill that becomes done by the user's change ticks itself). */
   private statusDone = new Map<string, boolean>();
@@ -529,6 +539,8 @@ export class App implements AppApi {
   private hoverTipTimer = 0;
   private measureBase: SurfaceMeasures | null = null;
   private auto: AutoMeasurements | null = null;
+  /** How length, width and thickness were taken (original coordinates), for their drawings. */
+  private autoMorph: MorphConstruction | null = null;
   private autoFrameKey = '';
   /** The model's box along the frame (from the pass that measures length, width and thickness), and the volumetric configuration. */
   private configBox: ConfigBox | null = null;
@@ -638,6 +650,8 @@ export class App implements AppApi {
   /** Just let go, with the pointer still on it: not drawn again until the pointer has left it. */
   private hintMuted: string | null = null;
   private hintTimer = 0;
+  /** When the flake's card warns of a sparse mesh round P (mm); the tests set it low. */
+  private meshWarn = POP_MESH_WARN_MM;
   private hintShown: { key: string; hint: MeasureHint } | null = null;
   /** The folder's configuration of those points (null: none yet, or no folder open). */
   private folderGm: GmConfig | null = null;
@@ -687,6 +701,7 @@ export class App implements AppApi {
     this.startEl = this.startPage.el;
     this.emptyEl = h('div', { class: 'vp-empty', id: 'viewport-empty', hidden: true });
     this.statusEl = h('div', { class: 'viewport-ui status-pills', id: 'annotation-status', role: 'group', hidden: true });
+    this.stackEl = h('div', { class: 'viewport-ui vp-stack', id: 'viewport-stack' }, this.statusEl);
     this.coordEl = h('span', { class: 'viewport-ui status-coords mono', id: 'status-coords' });
     this.dropEl = h('div', { class: 'drop-overlay', hidden: true }, icon(ICONS.open));
     this.meshInput = h('input', { type: 'file', accept: '.ply,.stl,.obj', hidden: true, id: 'file-mesh' }) as HTMLInputElement;
@@ -736,7 +751,7 @@ export class App implements AppApi {
     const viewer = this.viewer;
     // corner marks of the view (decoration; not part of figures, which are rendered apart)
     const corners = (['tl', 'tr', 'bl', 'br'] as const).map((c) => h('span', { class: `vp-corner vp-corner-${c}`, 'aria-hidden': 'true' }));
-    this.viewportEl.append(...corners, this.emptyEl, this.toolbarEl, this.statusEl, this.coordEl, this.dropEl);
+    this.viewportEl.append(...corners, this.emptyEl, this.toolbarEl, this.stackEl, this.coordEl, this.dropEl);
     this.appEl.append(this.startEl);
     new ResizeObserver(() => this.fitStatus()).observe(this.viewportEl);
     this.statusEl.addEventListener('pointerenter', (e) => {
@@ -777,7 +792,8 @@ export class App implements AppApi {
     this.igesLayer = new IgesLayer(viewer);
     this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
     this.symLegend = h('div', { class: 'viewport-ui edge-legend', id: 'symmetry-legend', hidden: true });
-    this.viewportEl.append(this.edgeLegend, this.symLegend);
+    // the deviation's scale over the edge angles', both over the status pills
+    this.stackEl.prepend(this.symLegend, this.edgeLegend);
     this.symGroup = new THREE.Group();
     this.symGroup.name = 'symmetry-plane';
     this.symDisc = new PlaneVisual(viewer);
@@ -1138,7 +1154,8 @@ export class App implements AppApi {
     const name = h('span', { class: 'spec-name', id: 'specimen-name' });
     const unitText = h('span', { class: 'spec-unit', id: 'specimen-unit-text' });
     const more = h('button', { type: 'button', class: 'spec-btn', id: 'specimen-more', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', onclick: () => this.popovers.toggle(more, panel) }, name, unitText, icon(ICONS.chevron));
-    tip(more, t('sec.specimen'));
+    // (its pill gone from a tight bar, the frame is said here)
+    tips.attach(more, () => ({ label: more.closest('.topbar.is-tight') && !framePill.hidden && framePill.textContent ? `${t('sec.specimen')} · ${framePill.textContent}` : t('sec.specimen') }));
     const framePill = h('span', { class: 'pill spec-frame', id: 'frame-pill', hidden: true });
     tips.attach(framePill, () => {
       const f = this.store.state.flake.axis?.failure;
@@ -1176,9 +1193,9 @@ export class App implements AppApi {
     clear(r.meta);
     const m = st.mesh;
     if (m) {
-      const [dt, dd] = textValueRow(t('mesh.file'), m.fileName);
-      dd.title = `SHA-256 ${m.sha256}`;
-      r.meta.append(dt, dd, ...numRow(t('mesh.vertices'), fmtCount(m.vertexCount), '', 'specimen-vertices'), ...numRow(t('mesh.triangles'), fmtCount(m.triangleCount), '', 'specimen-triangles'));
+      const file = textValueRow(t('mesh.file'), m.fileName);
+      rowCells(file).value.title = `SHA-256 ${m.sha256}`;
+      r.meta.append(file, numRow(t('mesh.vertices'), fmtCount(m.vertexCount), '', 'specimen-vertices'), numRow(t('mesh.triangles'), fmtCount(m.triangleCount), '', 'specimen-triangles'));
     }
   }
 
@@ -1837,18 +1854,28 @@ export class App implements AppApi {
       const css = getComputedStyle(document.documentElement);
       const colour = (name: string) => css.getPropertyValue(name).trim();
       layer!.show(hint, { current: colour('--accent'), other: colour('--hint-other'), otherHalo: colour('--hint-other-halo') }, loaded!.offset, loaded!.geometry.getAttribute('position') as THREE.BufferAttribute, loaded!.geometry.index!, fadeIn);
-    } else layer?.clear();
+    } else layer?.clear(true);
     this.paintHintRows();
   }
 
-  /** Which rows of measures are shown and fixed. */
+  /** Which rows of measures are shown and fixed; a table's cell lights its row's name and its column's head with it. */
   paintHintRows(): void {
     if (!this.sidebar) return;
     const shown = this.hintShown?.key ?? null;
+    const lit = new Set<Element>();
     for (const el of this.sidebar.el.querySelectorAll<HTMLElement>('[data-hint]')) {
-      el.classList.toggle('is-hinted', el.dataset.hint === shown);
-      el.classList.toggle('is-pinned', el.dataset.hint === this.hintPinned);
+      const on = el.dataset.hint === shown, pinned = el.dataset.hint === this.hintPinned;
+      el.classList.toggle('is-hinted', on);
+      el.classList.toggle('is-pinned', pinned);
+      if ((on || pinned) && el instanceof HTMLTableCellElement) {
+        const row = el.parentElement as HTMLTableRowElement;
+        const head = row.querySelector('th');
+        if (head) lit.add(head);
+        const col = el.closest('table')?.tHead?.rows[0]?.cells[el.cellIndex];
+        if (col) lit.add(col);
+      }
     }
+    for (const th of this.sidebar.el.querySelectorAll('.measure-table th')) th.classList.toggle('is-lit', lit.has(th));
   }
 
   /** The drawing of a row of the measure mode (`group:item`). */
@@ -1867,7 +1894,7 @@ export class App implements AppApi {
       case 'auto': {
         if (item === 'area' || item === 'volume') return whole ? wholeModelHint() : null;
         const a = this.auto;
-        return a && this.configBox ? boxHint(item as 'length' | 'width' | 'thickness', this.configBox, { length: a.length, width: a.width, thickness: a.thickness }, unit) : null;
+        return a && this.autoMorph ? dimensionsHint(item as 'length' | 'width' | 'thickness', this.autoMorph, { length: a.length, width: a.width, thickness: a.thickness }, unit) : null;
       }
       // a symmetry reference (`id|volume`, `id|area`: its sides; `id|shape`, `id|deviation`: the deviation's colours) and its plane (syncSymmetryHint)
       case 'symmetry': {
@@ -3121,6 +3148,10 @@ export class App implements AppApi {
 
   flakeEmptyReasons(): FlakeResult['reasons'] | null {
     return this.isFlake() ? (this.flake?.reasons ?? null) : null;
+  }
+
+  meshWarnMm(): number {
+    return this.meshWarn;
   }
 
   /** Look at the flake as the technical frame says, the whole of it: the dorsal face toward the viewer, the platform down. Only the camera moves. */
@@ -5391,10 +5422,9 @@ export class App implements AppApi {
       primary = live;
       const positions = loaded!.geometry.getAttribute('position').array as Float32Array;
       const vertices = this.vertexAxes();
-      measure = (p) => {
-        const m = frameMeasures(positions, base!, p.state.specimen.frame, loaded!.offset);
-        return { auto: m.auto, vertices, box: m.box };
-      };
+      // (length, width and thickness are the same along any frame: measured once)
+      const auto = this.auto ?? autoMeasurements(positions, base!, loaded!.offset, this.flakeMorph?.loaded === loaded ? this.flakeMorph.value : undefined).auto;
+      measure = (p) => ({ auto, vertices, box: frameMeasures(positions, base!, p.state.specimen.frame, loaded!.offset).box });
     } else {
       const fresh: BatchProject = { path: null, state: emptyProject(), derived: {}, appVersion: __APP_VERSION__ };
       fresh.state.specimen.id = this.wsIds.get(path) ?? baseName(path).replace(/\.[^.]+$/, '');
@@ -5405,7 +5435,7 @@ export class App implements AppApi {
       } else {
         const asked = projects.length ? projects : [primary];
         const m = await measurer.measure(i, asked.map((p) => p.state.specimen.frame));
-        measure = (p) => ({ auto: m.auto[Math.max(0, asked.indexOf(p))], vertices: m.vertices, box: m.boxes[Math.max(0, asked.indexOf(p))] });
+        measure = (p) => ({ auto: m.auto, vertices: m.vertices, box: m.boxes[Math.max(0, asked.indexOf(p))] });
       }
     }
     const rows = projects.map((p, k) => ({ project: p, measures: measure(p, k) }));
@@ -6050,12 +6080,14 @@ export class App implements AppApi {
     const areas = this.triangleAreas();
     const positions = loaded.geometry.getAttribute('position').array as Float32Array;
     const data: ObserverData[] = [];
+    // (length, width and thickness do not depend on an observer's frame: the model's own)
+    const auto = this.auto ?? autoMeasurements(positions, base, loaded.offset, await this.morphOf(loaded)).auto;
+    if (token !== this.agreementToken) return;
     for (const o of included) {
       const st = o.state ?? this.store.state;
       const layers = await this.observerFaces(o, st);
       const faces = layers?.labels ?? null;
       if (token !== this.agreementToken) return;
-      const auto = autoMeasurements(positions, base, st.specimen.frame);
       const measures: Record<string, number | null> = { length: auto.length, width: auto.width, thickness: auto.thickness };
       if (faces && areas) {
         const sums = new Float64Array(this.faceTypes.length);
@@ -6825,18 +6857,22 @@ export class App implements AppApi {
   }
 
   measuringBusy(): boolean {
-    return this.hasMesh() && !this.measureBase;
+    return this.hasMesh() && !this.auto;
   }
 
-  /** Measure the mesh in slices after it is shown (area, volume, closedness, principal axes). */
+  /**
+   * Measure the mesh in slices after it is shown (area, volume, closedness, principal axes), then its length, width and thickness
+   * (the longest measure, once per mesh: a flake's morphological dimensions are the same).
+   */
   private startMeasuring(loaded: LoadedMesh): void {
     const token = ++this.measureToken;
     this.measureBase = null;
     this.auto = null;
+    this.autoMorph = null;
     this.configBox = null;
     this.autoFrameKey = '';
     const g = loaded.geometry;
-    void runSliced(surfaceMeasuresSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array)).then((base) => {
+    void runSliced(surfaceMeasuresSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array)).then(async (base) => {
       if (token !== this.measureToken) return;
       this.measureBase = base;
       this.updateAuto();
@@ -6846,23 +6882,28 @@ export class App implements AppApi {
       this.updateSymmetry();
       this.syncAnnotations();
       this.scheduleEdgeAngles();
+      const morph = await this.morphOf(loaded);
+      if (token !== this.measureToken) return;
+      const r = autoMeasurements(g.getAttribute('position').array as Float32Array, base, loaded.offset, morph);
+      this.auto = r.auto;
+      this.autoMorph = r.construction;
+      this.sidebar.refresh('measure');
+      this.refreshHint();
+      // (the file stores them)
+      if (this.unsaved) this.scheduleAutosave();
     });
   }
 
-  /** Length, width and thickness follow the specimen frame: recompute when it changes. */
+  /** The box of the volumetric configuration follows the specimen frame: made again when it changes (length, width and thickness do not). */
   private updateAuto(): void {
     const base = this.measureBase;
     const loaded = this.loaded;
     if (!base || !loaded) return;
     const frame = this.store.state.specimen.frame;
     const key = JSON.stringify(frame);
-    if (this.auto && key === this.autoFrameKey) return;
+    if (this.configBox && key === this.autoFrameKey) return;
     this.autoFrameKey = key;
-    // the same pass gives the box of the volumetric configuration
-    const m = frameMeasures(loaded.geometry.getAttribute('position').array as Float32Array, base, frame, loaded.offset);
-    this.auto = m.auto;
-    this.configBox = m.box;
-    this.sidebar.refresh('measure');
+    this.configBox = frameMeasures(loaded.geometry.getAttribute('position').array as Float32Array, base, frame, loaded.offset).box;
     this.updateConfiguration();
     if (this.pickedFace) this.syncAnnotations();
     this.refreshHint();
@@ -7342,6 +7383,7 @@ export class App implements AppApi {
     this.measureToken++;
     this.measureBase = null;
     this.auto = null;
+    this.autoMorph = null;
     this.autoFrameKey = '';
     this.faceAreas = null;
     this.curvBusy = false;
@@ -8102,6 +8144,11 @@ export class App implements AppApi {
       exportFlakingSurfacesCsvText: () => flakingSurfacesCsv(this.store.state, this.configResult, { excelBom: false }),
       exportCurvesCsvText: () => curveCsv(this.store.state, { excelBom: false }),
       autoMeasurements: () => this.auto,
+      /** Tests: when the flake's card warns of a sparse mesh round P (mm; null: as set). */
+      setMeshWarnMm: (mm: number | null) => {
+        this.meshWarn = mm ?? POP_MESH_WARN_MM;
+        this.sidebar.refresh('flake');
+      },
       planes: () => this.planes,
       planeSectionCount: (id: string) => this.cuts.get(id)?.lines?.length ?? null,
       sectionFigure: async (id: string, format: 'png' | 'svg') => {
@@ -8139,6 +8186,8 @@ export class App implements AppApi {
         pinned: this.hintPinned,
         prims: (this.hintShown?.hint ?? []).map((p) => ({ kind: p.kind, part: p.part, role: p.kind === 'faces' ? p.tint : p.kind === 'patch' ? 'current' : p.role, label: p.kind === 'line' || p.kind === 'arc' ? (p.label ?? null) : null, points: p.kind === 'faces' ? null : p.points })),
         drawn: this.hintLayer?.counts() ?? null,
+        /** How each part is drawn: its opacity as a share of the current one's, and whether it carries its value. */
+        looks: this.hintLayer?.looks() ?? null,
         labels: [...document.querySelectorAll<HTMLElement>('.hint-label')].map((el) => el.textContent ?? ''),
       }),
       nodule: () => this.nodule,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { convexHull } from '../src/compute/convexHull';
-import { ALL_FLAKE_MEASURES, emptyFlakeMeasures, FLAKE_PARAMETERS, flakeMeasures, FLAKE_MEASURES, morphDimensions, morphTechAngle, type FlakeMeasure, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
+import { POP_MESH_WARN_MM } from '../src/compute/bulb';
+import { ALL_FLAKE_MEASURES, emptyFlakeMeasures, FLAKE_PARAMETERS, flakeMeasures, FLAKE_MEASURES, meshSparseNearP, morphDimensions, morphTechAngle, type FlakeMeasure, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
 import { buildEdges } from '../src/compute/meshGeometry';
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
 import { regionPlane } from '../src/compute/planes';
@@ -683,5 +684,19 @@ describe('why a measure is empty', () => {
 
   it('the reasons are not in the measures, so neither in the file nor in the tables', () => {
     expect(Object.keys(run({ platform: false }).measures)).toEqual([...ALL_FLAKE_MEASURES]);
+  });
+});
+
+describe('the warning of a sparse mesh round P', () => {
+  it('compares the mean edge length there, in mm, with POP_MESH_WARN_MM (0.5 mm); no unit: no warning', () => {
+    expect(POP_MESH_WARN_MM).toBe(0.5);
+    expect(meshSparseNearP(0.6, 'mm')).toBe(true);
+    expect(meshSparseNearP(0.5, 'mm')).toBe(false);
+    expect(meshSparseNearP(0.4, 'mm')).toBe(false);
+    // 0.06 cm = 0.6 mm
+    expect(meshSparseNearP(0.06, 'cm')).toBe(true);
+    expect(meshSparseNearP(0.6, '')).toBe(false);
+    expect(meshSparseNearP(null, 'mm')).toBe(false);
+    expect(meshSparseNearP(0.3, 'mm', 0.2)).toBe(true);
   });
 });

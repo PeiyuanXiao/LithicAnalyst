@@ -125,8 +125,8 @@ export class BulbPage {
     if (!c) return;
     const u = quantityUnit('length', c.unit);
     this.readings.append(
-      ...numRow(t('flake.bsa'), fmtQuantity('angle', c.bsa), '°', 'bulb-bsa'),
-      ...VI_WIDTHS_MM.flatMap((w, i) => numRow(`VI ${fmtNum(w, 1)} mm`, fmtQuantity('length', c.vi[i]), u, `bulb-vi-${i}`)),
+      numRow(t('flake.bsa'), fmtQuantity('angle', c.bsa), '°', 'bulb-bsa'),
+      ...VI_WIDTHS_MM.map((w, i) => numRow(`VI ${fmtNum(w, 1)} mm`, fmtQuantity('length', c.vi[i]), u, `bulb-vi-${i}`)),
     );
     if (!shown) return;
     const b = c.bulb!;
