@@ -276,7 +276,7 @@ test('exports the configuration, the flaking surfaces and the new arrow columns'
   ]);
   // the project file keeps the result with its box and thresholds
   const file = await page.evaluate(() => window.lithicanalyst.projectJson());
-  expect(file.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } });
+  expect(file.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', biconeRef: null, bicone: { roles: {} } });
   expect(file.derived.configuration).toMatchObject({ model: 'box', frame: 'principal', facialCharacter: 'unifacial', thresholds: { wideRatio: 1.25 } });
   const derivedBox = file.derived.configuration as import('../src/compute/configuration').ConfigurationResult;
   const size = [0, 1, 2].map((k) => derivedBox.max[k] - derivedBox.min[k]);

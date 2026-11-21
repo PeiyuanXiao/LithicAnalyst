@@ -67,7 +67,7 @@ const inFaceOrder = (faces: Iterable<ConfigFace>): ConfigFace[] => {
   return CONFIG_FACES.filter((f) => set.has(f));
 };
 
-export const emptyCorrections = (): ConfigCorrections => ({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } });
+export const emptyCorrections = (): ConfigCorrections => ({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', biconeRef: null, bicone: { roles: {} } });
 
 /** Corrections stored by face (all but the polarity), which a change of orientation clears. */
 export const hasFaceCorrections = (c: Readonly<ConfigCorrections>): boolean =>

@@ -5,7 +5,8 @@
 //        npm run bench -- path/to/mesh.ply loading steps on a file
 import { readFileSync } from 'node:fs';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
-import { computeBicone } from '../src/compute/bicone';
+import { biconeVolumes, computeBicone } from '../src/compute/bicone';
+import { deviationStatsSteps, shapeSymmetrySteps, symmetryMeshSteps, symmetrySidesSteps, symmetryValues, vertexDeviationSteps, type SymmetryPlane } from '../src/compute/symmetry';
 import { completeLoopSteps, COMPLETE_ANCHOR_STEP_DEG, COMPLETE_STEP_DEG } from '../src/compute/completeLoop';
 import { computeConfiguration, emptyCorrections } from '../src/compute/configuration';
 import type { CurvatureService } from '../src/compute/curvatureService';
@@ -30,10 +31,10 @@ import { facesOfPiecesSteps, polylineEdgesSteps, regionsSteps } from '../src/com
 import { facesOfPieceSteps, regionPlySteps } from '../src/io/regionPly';
 import { anchorWarpSteps } from '../src/compute/tps';
 import { triangleBvhSteps } from '../src/compute/triangleBvh';
-import { splitByLoopSteps } from '../src/compute/split';
+
 import { runSync, type Steps } from '../src/compute/steps';
 import { emptyProject } from '../src/core/store';
-import { defaultRetouchSettings, type Curve, type ProjectState, type Scar, type Vec3 } from '../src/core/types';
+import { defaultRetouchSettings, type Curve, type ProjectState, type Scar, type SymmetryRef, type Vec3 } from '../src/core/types';
 import { buildLoadedMesh } from '../src/io/loadMesh';
 import { SurfaceSnap } from '../src/tools/surfaceSnap';
 import { BSA_LEVEL_DEFAULT_MM, bulbSteps, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, proximalPlaneSteps, surfaceOverSteps, windowContoursSteps } from '../src/compute/bulb';
@@ -170,8 +171,9 @@ async function benchGenerated(triangles: number): Promise<void> {
   });
   once('2 computeConfiguration, 50 arrows', () => computeConfiguration(scars, emptyCorrections(), measured.box));
 
-  // ③ the split along the closed curve, as the app does it
-  const fit = fitPlane(rim)!;
+  // ③ symmetry: the reference on the closed curve, as the app computes it (the bicone stands on it)
+  let fit = fitPlane(rim)!;
+  if (fit.normal[2] < 0) fit = { ...fit, normal: [-fit.normal[0], -fit.normal[1], -fit.normal[2]] };
   const search = snap.search(3);
   const chain = steps(
     '3a curve to mesh edges (polylineEdges)',
@@ -181,11 +183,23 @@ async function benchGenerated(triangles: number): Promise<void> {
       return search.reach(b) ? search.path(b) : null;
     }),
   );
-  const volumes = steps('3b volume split (splitByLoop)', splitByLoopSteps(pos, idx, base.edges, chain, fit.normal))!;
-  console.log(`upper ${volumes.upper.toFixed(0)}, lower ${volumes.lower.toFixed(0)}`);
+  // (in the symmetry worker: once a model, then each reference's three parts, each in its own steps)
+  const symMesh = steps('3b symmetry: once a model (moments, edges, tree, surface and interior samples)', symmetryMeshSteps(pos, idx, base.topology.closed));
+  console.log(`${symMesh.surfaceSamples.length / 3} surface samples, ${symMesh.interiorSamples.length / 3} interior samples (grid step ${symMesh.gridStep?.toFixed(3)})`);
+  const symPlane: SymmetryPlane = { point: fit.centroid, normal: fit.normal };
+  const sides = steps('3c1 symmetry on the curve: ① the sides (volumes, areas)', symmetrySidesSteps(symMesh, { plane: symPlane, chain, closed: base.topology.closed }));
+  const deviation = steps('3c2 symmetry on the curve: ② mirror deviation (surface samples)', deviationStatsSteps(symMesh, symPlane));
+  const shape = steps('3c3 symmetry on the curve: ③ shape symmetry (interior samples)', shapeSymmetrySteps(symMesh, symPlane));
+  const onCurve = { plane: symPlane, sides, deviation, shape };
+  const sv = symmetryValues({ id: 'S1', swap: false }, onCurve, [0, 0, 0]);
+  console.log(`A ${sv.volumeA?.toFixed(0)}, B ${sv.volumeB?.toFixed(0)}; volume ${sv.volumeSymmetry?.toFixed(3)}, area ${sv.areaSymmetry?.toFixed(3)}, shape ${sv.shapeSymmetry?.toFixed(3)}; deviation mean ${deviation.mean.toFixed(3)}, 95 % ${deviation.p95.toFixed(3)}`);
+  steps('3c4 deviation at every vertex (only for the shading by it)', vertexDeviationSteps(symMesh, symPlane));
 
   // ④ the bicone on it
-  const state: ProjectState = { ...emptyProject(), scars, curves: [curve], split: { source: 'curve', id: 'rim', upHint: [0, 0, 1], swap: false } };
+  const ref: SymmetryRef = { id: 'S1', label: 'S1', note: '', source: { kind: 'curve', curveId: 'rim' }, upHint: [0, 0, 1], swap: false, createdAt: '', modifiedAt: '' };
+  const state: ProjectState = { ...emptyProject(), scars, curves: [curve], symmetry: [ref] };
+  state.configuration = { ...state.configuration, model: 'bicone', biconeRef: 'S1' };
+  const volumes = biconeVolumes(state, [sv]);
   once(`4 computeBicone (${rim.length} curve points)`, () => computeBicone(state, volumes));
 
   // ⑤ a third of the edge carried round to its start

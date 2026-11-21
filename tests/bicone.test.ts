@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { biconePolar, computeBicone, coreConfiguration, defaultUpHint, edgeCurves, soleEdgeCurve } from '../src/compute/bicone';
-import { buildEdges, meshTopology } from '../src/compute/meshGeometry';
-import { splitByLoopSteps, swappedSplit, type VolumeSplit } from '../src/compute/split';
+import { biconePolar, biconeRefOf, biconeVolumes, computeBicone, coreConfiguration, defaultUpHint, edgeCurves, soleEdgeCurve } from '../src/compute/bicone';
+import { meshTopology } from '../src/compute/meshGeometry';
+import type { VolumeSplit } from '../src/compute/split';
 import { runSync } from '../src/compute/steps';
-import { addCurve, addScarVector, setBiconeRole, setBiconeSplit, setConfigModel, setConfigRole, setSplit, swapSplit, updateSpecimen } from '../src/core/actions';
+import { symmetryMeshSteps, symmetrySteps, symmetryValues, type SymmetryComputed } from '../src/compute/symmetry';
+import { addCurve, addScarVector, addSymmetry, deleteSymmetry, setBiconeRole, setConfigModel, setConfigRole, swapBicone, updateSpecimen, useBiconeCurve } from '../src/core/actions';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { ProjectStore } from '../src/core/store';
-import type { Vec3 } from '../src/core/types';
+import type { ProjectState, Vec3 } from '../src/core/types';
 import { configurationCsv, flakingSurfacesCsv, scarVectorCsv } from '../src/io/csv';
 import { biconeOutline, biconeSize, fitOutline } from '../src/render/biconeShape';
 import { bicone } from './meshes';
@@ -17,13 +18,22 @@ const mesh = bicone(R, UP, DOWN, SEG, 6);
 const point = (v: number): Vec3 => [mesh.positions[3 * v], mesh.positions[3 * v + 1], mesh.positions[3 * v + 2]];
 const rim = Array.from({ length: SEG }, (_, j) => point(mesh.rim + j));
 
-/** The volumes on either side of the rim, the upper toward +z (as the app splits along a closed curve). */
-function rimSplit(m = mesh): VolumeSplit {
-  const edges = buildEdges(m.index, m.positions.length / 3);
+/** The sides of the rim's symmetry reference, A toward +z (as the app parts them along a closed curve), before any swap. */
+function rimSymmetry(m = mesh): Required<SymmetryComputed> {
   const chain: number[] = [];
   for (let j = 0; j < SEG; j++) chain.push(m.rim + j, m.rim + ((j + 1) % SEG));
-  return runSync(splitByLoopSteps(m.positions, m.index, edges, chain, [0, 0, 1]))!;
+  const closed = meshTopology(m.index, m.positions.length / 3).closed;
+  const sm = runSync(symmetryMeshSteps(m.positions, m.index, closed));
+  return runSync(symmetrySteps(sm, { plane: { point: [0, 0, 0], normal: [0, 0, 1] }, chain, closed }));
 }
+const rim0 = rimSymmetry();
+
+/** The bicone's volumes as the app gives them: its reference's sides, as its `swap` has them. */
+const volumesOf = (state: Readonly<ProjectState>): VolumeSplit | null => {
+  const ref = biconeRefOf(state);
+  return ref ? biconeVolumes(state, [symmetryValues(ref, rim0, [0, 0, 0])]) : null;
+};
+const rimSplit = (): VolumeSplit => ({ upper: rim0.sides.volumes![0], lower: rim0.sides.volumes![1], ratio: rim0.sides.volumes![0] / rim0.sides.volumes![1] });
 
 /** A point on the upper or lower cone at angle `t` and `rho` of the radius from the axis. */
 const onCone = (t: number, rho: number, upper: boolean): Vec3 => [rho * R * Math.cos(t), rho * R * Math.sin(t), (upper ? UP : -DOWN) * (1 - rho)];
@@ -32,16 +42,14 @@ const onCone = (t: number, rho: number, upper: boolean): Vec3 => [rho * R * Math
 const scarAt = (store: ProjectStore, t: number, upper: boolean) =>
   addScarVector(store, { start: onCone(t, 1, upper), end: onCone(t, 0.4, upper), startNormal: [Math.cos(t), Math.sin(t), 0], endNormal: [0, 0, upper ? 1 : -1] });
 
-/** A specimen split along a closed curve on the rim (normal toward +z), configured as a bicone. */
+/** A specimen with a symmetry reference on a closed curve on the rim (A toward +z), configured as a bicone on it. */
 function setup() {
   const store = new ProjectStore();
   updateSpecimen(store, { id: 'B1' });
   const curve = addCurve(store, { anchors: [rim[0], rim[32], rim[64]], points: rim, anchorIndex: [0, 32, 64], closed: true, attributes: { type: 'core_edge' } });
-  setSplit(store, { source: 'curve', id: curve.id, upHint: [0, 0, 1], swap: false });
-  setConfigModel(store, 'bicone');
-  const raw = rimSplit();
-  const volumes = () => swappedSplit(raw, store.state.split!.swap);
-  return { store, raw, volumes, result: () => computeBicone(store.state, volumes())! };
+  useBiconeCurve(store, curve.id, [0, 0, 1]);
+  const volumes = () => volumesOf(store.state);
+  return { store, volumes, result: () => computeBicone(store.state, volumes())! };
 }
 
 describe('choosing the curve', () => {
@@ -79,28 +87,35 @@ describe('choosing the curve', () => {
     expect(up(below)).toBeCloseTo(1, 6);
   });
 
-  it('sets the split and the model in one step that undo takes back whole', () => {
-    const { store } = setup();
-    setConfigModel(store, 'box');
-    const plane = { source: 'plane' as const, id: 'p', upHint: [0, 0, 1] as Vec3, swap: false };
-    setSplit(store, plane);
-    const curveId = store.state.curves[0].id;
-    setBiconeSplit(store, { source: 'curve', id: curveId, upHint: [0, 0, 1], swap: false });
-    expect(store.state.split).toMatchObject({ source: 'curve', id: curveId });
-    expect(store.state.configuration.model).toBe('bicone');
+  it('finds or makes the curve’s symmetry reference and sets the model in one step that undo takes back whole', () => {
+    const store = new ProjectStore();
+    const curve = addCurve(store, { anchors: [rim[0], rim[32], rim[64]], points: rim, anchorIndex: [0, 32, 64], closed: true, attributes: { type: 'core_edge' } });
+    addSymmetry(store, { kind: 'plane', planeId: 'p' }, [0, 0, 1]);
+    useBiconeCurve(store, curve.id, [0, 0, 1]);
+    const made = store.state.symmetry[1];
+    expect(made).toMatchObject({ label: 'S2', source: { kind: 'curve', curveId: curve.id }, upHint: [0, 0, 1], swap: false });
+    expect(store.state.configuration).toMatchObject({ model: 'bicone', biconeRef: made.id });
     store.history.undo();
-    expect(store.state.split).toEqual(plane);
-    expect(store.state.configuration.model).toBe('box');
+    expect(store.state.symmetry.map((s) => s.source.kind)).toEqual(['plane']);
+    expect(store.state.configuration).toMatchObject({ model: 'box', biconeRef: null });
     store.history.redo();
-    expect(store.state.configuration.model).toBe('bicone');
-    // back to the box: the split stays
+    expect(store.state.configuration).toMatchObject({ model: 'bicone', biconeRef: made.id });
+    // back to the box: the reference stays; the curve again: the same reference, none made anew
     setConfigModel(store, 'box');
-    expect(store.state.split).toMatchObject({ source: 'curve', id: curveId });
+    expect(store.state.configuration.biconeRef).toBe(made.id);
+    useBiconeCurve(store, curve.id, [0, 0, -1]);
+    expect(store.state.symmetry).toHaveLength(2);
+    expect(store.state.configuration).toMatchObject({ model: 'bicone', biconeRef: made.id });
+    // the reference deleted: the bicone lets go of it in the same step
+    deleteSymmetry(store, made.id);
+    expect(store.state.configuration.biconeRef).toBeNull();
+    store.history.undo();
+    expect(store.state.configuration.biconeRef).toBe(made.id);
   });
 });
 
 describe('bicone', () => {
-  it('takes the base from the split curve and the heights from the volumes; swapped, they change places', () => {
+  it('takes the base from the reference’s curve and the heights from its volumes; swapped, they change places', () => {
     const { store, result } = setup();
     scarAt(store, 0, true);
     const r = result();
@@ -113,7 +128,7 @@ describe('bicone', () => {
     expect(r.plane.normal[2]).toBeCloseTo(1, 9);
     expect(r.cones.map((c) => [c.cone, c.side, c.scars])).toEqual([['upper', 'positive', 1], ['lower', 'negative', 0]]);
 
-    swapSplit(store);
+    swapBicone(store);
     const s = result();
     expect(s.upperHeight).toBeCloseTo(DOWN, 4);
     expect(s.lowerHeight).toBeCloseTo(UP, 4);
@@ -125,7 +140,7 @@ describe('bicone', () => {
     // a correction stays with its physical side (the +z cone)
     setBiconeRole(store, 'positive', 'none');
     expect(result().cones.map((c) => [c.cone, c.role])).toEqual([['upper', 'none'], ['lower', 'none']]);
-    swapSplit(store);
+    swapBicone(store);
     expect(result().cones.map((c) => [c.cone, c.autoRole, c.role])).toEqual([['upper', 'flaking', 'none'], ['lower', 'none', 'none']]);
   });
 
@@ -170,39 +185,68 @@ describe('bicone', () => {
   it('has no result without the volumes of a closed mesh', () => {
     const { store } = setup();
     scarAt(store, 0, true);
-    // the bicone without its lower apex: open, so the app has no volumes to split
+    // the bicone without its lower apex: open, so its reference has no volumes
     const open = { ...mesh, index: mesh.index.slice(0, mesh.index.length - 3 * SEG) };
     expect(meshTopology(open.index, open.positions.length / 3).closed).toBe(false);
     expect(meshTopology(mesh.index, mesh.positions.length / 3).closed).toBe(true);
+    const openSides = rimSymmetry(open);
+    expect(openSides.sides.volumes).toBeNull();
+    expect(openSides.sides.volumeReason).toBe('not_closed');
+    expect(biconeVolumes(store.state, [symmetryValues(biconeRefOf(store.state)!, openSides, [0, 0, 0])])).toBeNull();
     expect(computeBicone(store.state, null)).toBeNull();
-    // no split by a curve, or no arrows: none either
-    setSplit(store, null);
+    // no reference on a curve, or no arrows: none either
+    deleteSymmetry(store, store.state.symmetry[0].id);
     expect(computeBicone(store.state, rimSplit())).toBeNull();
     // the box model still needs its box
     setConfigModel(store, 'box');
     expect(coreConfiguration(store.state, null, rimSplit())).toBeNull();
   });
 
-  it('round-trips through the project file; a change of orientation keeps its corrections', () => {
-    const { store, volumes } = setup();
+  it('round-trips through the project file; a file’s old split becomes S1 with the same bicone; a change of orientation keeps its corrections', () => {
+    const { store } = setup();
     scarAt(store, 0, true);
-    swapSplit(store);
+    swapBicone(store);
     setBiconeRole(store, 'negative', 'flaking');
     setConfigRole(store, 'front', 'platform');
-    const file = serializeProject(store.state, 'test', { measurements: null, vertices: null, split: volumes() });
-    expect(file.split!.swap).toBe(true);
-    expect(file.configuration).toMatchObject({ model: 'bicone', bicone: { roles: { negative: 'flaking' } } });
+    const ref = biconeRefOf(store.state)!;
+    const file = serializeProject(store.state, 'test', { measurements: null, vertices: null, symmetry: [symmetryValues(ref, rim0, [0, 0, 0])] });
+    expect(file.symmetry[0]).toMatchObject({ label: 'S1', swap: true });
+    expect(file.configuration).toMatchObject({ model: 'bicone', biconeRef: ref.id, bicone: { roles: { negative: 'flaking' } } });
     expect(file.derived.configuration).toMatchObject({ model: 'bicone', frame: 'principal', facialCharacter: 'bifacial' });
+    expect(file.derived.symmetry!.refs[0]).toMatchObject({ id: ref.id, volumeA: rim0.sides.volumes![1], volumeB: rim0.sides.volumes![0] });
     const back = parseProjectFile(JSON.parse(JSON.stringify(file)));
-    expect(back.split).toEqual(store.state.split);
+    expect(back.symmetry).toEqual(store.state.symmetry);
     expect(back.configuration).toEqual(store.state.configuration);
-    // older files: no swap, the box, no bicone corrections
+    expect(back.nextSymmetryNumber).toBe(2);
+    // a file of before stage 34: its upper / lower split becomes S1, which the bicone stands on, and the bicone is the same
     const raw = JSON.parse(JSON.stringify(file));
-    delete raw.split.swap;
+    delete raw.symmetry;
+    delete raw.nextSymmetryNumber;
+    delete raw.configuration.biconeRef;
+    raw.split = { source: 'curve', id: store.state.curves[0].id, upHint: [0, 0, 1], swap: true };
+    const migrated = parseProjectFile(raw);
+    expect(migrated.symmetry).toHaveLength(1);
+    expect(migrated.symmetry[0]).toMatchObject({ label: 'S1', note: '', source: { kind: 'curve', curveId: store.state.curves[0].id }, upHint: [0, 0, 1], swap: true });
+    expect(migrated.configuration.biconeRef).toBe(migrated.symmetry[0].id);
+    expect(migrated.nextSymmetryNumber).toBe(2);
+    expect(computeBicone(migrated, volumesOf(migrated))).toEqual(computeBicone(store.state, volumesOf(store.state)));
+    // a plane's split: S1 on the plane, no bicone reference; no split: none
+    const byPlane = parseProjectFile({ ...raw, split: { source: 'plane', id: 'p1', upHint: [0, 1, 0] } });
+    expect(byPlane.symmetry[0]).toMatchObject({ source: { kind: 'plane', planeId: 'p1' }, upHint: [0, 1, 0], swap: false });
+    expect(byPlane.configuration.biconeRef).toBeNull();
+    expect(parseProjectFile({ ...raw, split: null }).symmetry).toEqual([]);
+    // a reference of a source not understood is left out; one that is: kept (stage 34's `optimize` let go)
+    const odd = JSON.parse(JSON.stringify(file));
+    odd.symmetry.push({ id: 'x', label: 'S9', source: { kind: 'sphere' } }, { id: 'y', label: 'S8', source: { kind: 'frame', frame: 'specimen', axis: 'y' }, optimize: true });
+    const kept = parseProjectFile(odd);
+    expect(kept.symmetry.map((s) => s.id)).toEqual([ref.id, 'y']);
+    expect(kept.symmetry[1]).toMatchObject({ source: { kind: 'frame', frame: 'specimen', axis: 'y' }, swap: false, note: '' });
+    expect(kept.symmetry[1]).not.toHaveProperty('optimize');
+    expect(kept.nextSymmetryNumber).toBe(9);
+    // older files: the box, no bicone corrections
     delete raw.configuration.model;
     delete raw.configuration.bicone;
     const old = parseProjectFile(raw);
-    expect(old.split!.swap).toBe(false);
     expect(old.configuration.model).toBe('box');
     expect(old.configuration.bicone).toEqual({ roles: {} });
     // a new orientation clears the corrections by face only
@@ -225,7 +269,7 @@ describe('bicone', () => {
     );
     const rows = scarVectorCsv(store.state, opts, both).trim().split('\n');
     expect(rows.slice(1).map((l) => l.split(',').slice(-5, -2).join(','))).toEqual([',F1,mm', ',F2,mm']);
-    // without a result (no split volumes): the model still
+    // without a result (no volumes): the model still
     expect(configurationCsv(store.state, null, opts).split('\n')[1]).toBe('B1,bicone,,,,,');
   });
 });

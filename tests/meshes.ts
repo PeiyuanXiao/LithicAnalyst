@@ -683,3 +683,11 @@ export function flakeT9(n = 24): Mesh & { platform: Uint32Array; ventral: Uint32
   const of = (name: string) => Uint32Array.from(parts.flatMap((x, t) => (x === name ? [t] : [])));
   return { ...m, platform: of('platform'), ventral: of('ventral'), back: of('back'), dorsal: of('dorsal') };
 }
+
+/** S1 (stage 34): an ellipsoid of three different half-axes, made from the icosphere, which keeps its symmetry about each coordinate plane to the last bit. */
+export const S_BODY = { a: 30, b: 20, c: 12, subdivisions: 5, bump: 3 };
+export const symmetryS1 = (): Mesh => mapped(sphere(1, S_BODY.subdivisions), (p) => [S_BODY.a * p[0], S_BODY.b * p[1], S_BODY.c * p[2]]);
+/** How far S2's bump pushes a point of S1 at this x outward along X: from nothing at x = 0.8 a, smoothly, to `bump` at the end. */
+export const s2Bump = (x: number): number => (x > 0.8 * S_BODY.a ? S_BODY.bump * ((x / S_BODY.a - 0.8) / 0.2) ** 2 : 0);
+/** S2: S1 with a bump on its +X end; its volume is told by the whole meshes' volumes. */
+export const symmetryS2 = (): Mesh => mapped(symmetryS1(), (p) => [p[0] + s2Bump(p[0]), p[1], p[2]]);

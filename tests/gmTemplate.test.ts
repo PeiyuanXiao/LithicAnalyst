@@ -584,7 +584,7 @@ describe('the exports by a template', () => {
   const same = (p: Vec3) => p;
   const specimen = (s: ProjectStore, r: GmResult, id: string): BatchSpecimen => {
     s.state.specimen.id = id;
-    return { file: `site/${id}.ply`, state: s.state, gm: { config: gmConfigSummary(s.state.gm), ...r }, auto: null as never, planes: [], configuration: null, regions: [], regionTotals: null, nodule: null, split: null, flake: null, edgeAngles: [], retouchAngles: [], observers: new Map() };
+    return { file: `site/${id}.ply`, state: s.state, gm: { config: gmConfigSummary(s.state.gm), ...r }, auto: null as never, planes: [], configuration: null, regions: [], regionTotals: null, nodule: null, symmetry: [], flake: null, edgeAngles: [], retouchAngles: [], observers: new Map() };
   };
 
   it('the sliding definitions say the same points as the kind in the table, for geomorph and for Morpho', () => {

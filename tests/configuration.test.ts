@@ -289,7 +289,7 @@ describe('corrections of the volumetric configuration', () => {
     // reset: the face's role, the surface's type and axis, the joins with it
     setConfigJoin(store, 'front', 'right', true);
     resetConfigFace(store, 'front', ['front', 'right']);
-    expect(store.state.configuration).toEqual({ roles: { back: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_orthogonal', model: 'box', bicone: { roles: {} } });
+    expect(store.state.configuration).toEqual({ roles: { back: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_orthogonal', model: 'box', biconeRef: null, bicone: { roles: {} } });
   });
 
   it('a new orientation clears the corrections by face in the same step; undo brings them back', () => {
@@ -303,7 +303,7 @@ describe('corrections of the volumetric configuration', () => {
     expect(store.state.configuration).toEqual(before);
     const frame = { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], source: 'view' };
     expect(updateSpecimen(store, { frame }, false)).toBe(true);
-    expect(store.state.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_opposed', model: 'box', bicone: { roles: {} } });
+    expect(store.state.configuration).toEqual({ roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: 'bipolar_opposed', model: 'box', biconeRef: null, bicone: { roles: {} } });
     store.history.undo();
     expect(store.state.specimen.frame).toBeNull();
     expect(store.state.configuration).toEqual(before);
@@ -337,7 +337,7 @@ describe('corrections of the volumetric configuration', () => {
     // unknown faces and codes are dropped
     const raw = JSON.parse(JSON.stringify(file));
     raw.configuration = { roles: { front: 'flaking', side: 'flaking', top: 'edge' }, joins: { 'right|front': true, 'front|back': true, 'front|top': 1 }, polarity: 'radial' };
-    expect(parseProjectFile(raw).configuration).toEqual({ roles: { front: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } });
+    expect(parseProjectFile(raw).configuration).toEqual({ roles: { front: 'flaking' }, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', biconeRef: null, bicone: { roles: {} } });
     delete raw.configuration;
     expect(parseProjectFile(raw).configuration).toEqual(emptyCorrections());
     // no box (mesh not measured): no derived configuration

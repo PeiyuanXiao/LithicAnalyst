@@ -1,4 +1,4 @@
-import type { GmResult } from '../compute/gm';
+import { gmLandPairs, type GmResult } from '../compute/gm';
 import { shownLandmarks, type LandmarkRow, type LandmarkTable } from '../compute/landmarks';
 import type { ProjectState } from '../core/types';
 import { csvCell, fmt, type CsvOptions } from './csv';
@@ -55,6 +55,11 @@ export function slidersCsv(table: LandmarkTable): string {
 /** The sliding curve semilandmarks of a flake, for geomorph's `curves`: by point number, the ends of a curve not among them. */
 export function gmCurvesCsv(gm: Pick<GmResult, 'curves'>): string {
   return ['before,slide,after', ...gm.curves.map((s) => s.join(','))].join('\n') + '\n';
+}
+
+/** A flake's grid points in left–right pairs, for geomorph's `bilat.symmetry(…, object.sym = TRUE, land.pairs = …)`: by point number. */
+export function gmLandPairsCsv(gm: Pick<GmResult, 'rows'>): string {
+  return ['left,right', ...gmLandPairs(gm).map((p) => p.join(','))].join('\n') + '\n';
 }
 
 /** The surface semilandmarks of a flake, for geomorph's `surfaces`: by point number. */

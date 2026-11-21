@@ -189,7 +189,7 @@ turn and comes back to this one. Planes keep their own `visible`, which is data.
 The type is one code in `SPECIMEN_TYPES`, and what it means is said where each thing is decided:
 
 * `core/fields.ts`: `offeredOptions` leaves a field that takes free text with nothing else, so `keyedOptions` gives `['custom']`, and `customValue` keeps what was typed; `isUpperRegion(type, specimen)` and `isBoundaryCurve` say there is no upper layer, `layerCurves` that the lower layer is cut by all the curves. `isCustomValue` knows nothing of the type: a preset code from another type keeps its label and is shown, not offered (`customField`), as older codes are.
-* `hasEdgeAngles` and `hasVolumeSplit` (`core/fields.ts`) say what belongs to which type: edge angles and working edges to a flake, the split to a core. `measuresEdgeAngle` is false on any other type, so nothing downstream runs on them; `App.updateSplit` gives null there and `App.workingEdgeDetails` none. Their data stay in the state and the file (`edgeAngle` on a curve, `workingEdges`, `sharpEdge`, `split`), and come back with the type. `batchSpecimen` leaves out what a file stored under another type, so the tables say the same as the open model.
+* `hasEdgeAngles` (`core/fields.ts`) says what belongs to a flake: edge angles and working edges. `measuresEdgeAngle` is false on any other type, so nothing downstream runs on them; `App.workingEdgeDetails` gives none there. Their data stay in the state and the file (`edgeAngle` on a curve, `workingEdges`, `sharpEdge`), and come back with the type. `batchSpecimen` leaves out what a file stored under another type, so the tables say the same as the open model. The symmetry references are every type's.
 * `core/actions.ts`: `isScarRegion` keeps "scar" a word, with no scar made; `setSpecimenType` moves frames only across `flake`, so `core` and `generic` share one, and `updateSpecimen` clears a core's corrections by face whichever of the two turned it.
 * `App.isCore`, `isGeneric` and the sections' `visible` choose tools, panels and exports (`App.exportables`, `batchOutputs`, whose kinds may name who they are for). `compute/planes.ts` holds `planeMethodsOf`. `arrowColorModeOf` falls back to one colour without changing the user's display setting, which comes back with the type. `App.inLowerLayer` keeps out the regions with `auto: true` that a flake left, which on a core go by being upper.
 
@@ -297,10 +297,10 @@ camera moves: no coordinates change.
 
 ### How a measure was taken
 
-A row of a measure in the measure mode shows on the model how it was taken. What is drawn is only what the measuring functions returned, so what is drawn is what was computed: they return the numbers and their construction together (`MorphDimensions.construction`, `TechDimensions.construction`, `FlakeResult.construction` in original coordinates, `FrameMeasures.box`, `SplitResult.parts`, the stations of `EdgeAngleResult`, `SharpResult.mask`, `SphereFit`). None of this is stored: `swappedSplit` hands on the volumes alone, and `computeDerived` picks what it stores from a `FlakeResult`.
+A row of a measure in the measure mode shows on the model how it was taken. What is drawn is only what the measuring functions returned, so what is drawn is what was computed: they return the numbers and their construction together (`MorphDimensions.construction`, `TechDimensions.construction`, `FlakeResult.construction` in original coordinates, `FrameMeasures.box`, `SymmetryComputed.parts` and `.plane`, the stations of `EdgeAngleResult`, `SharpResult.mask`, `SphereFit`). None of this is stored: `symmetryValues` hands on the values alone, and `computeDerived` picks what it stores from a `FlakeResult`.
 
 * `compute/measureHint.ts` (pure) turns those into a `MeasureHint`: lines, dots, arcs and pieces of surface, each `current` (the measure of the row) or `other` (the rest of the drawing). An arc carries its vertex and its two directions, so the tests can read the angle back. An empty value gives null. `MEASURE_HINT_PARAMETERS` holds the delay and the shares that size arcs and such.
-* `render/hintLayer.ts` draws one in the overlay (so figures leave it out): `Line2` lines of a constant width on the screen, point sprites, CSS labels that let the pointer through, all without a depth test and over everything else. Pieces of surface share the mesh's vertex buffer; the platform shows through the model, a whole model or a split's two sides are tinted where they are seen (seen through, they would only add up to a blur).
+* `render/hintLayer.ts` draws one in the overlay (so figures leave it out): `Line2` lines of a constant width on the screen, point sprites, CSS labels that let the pointer through, all without a depth test and over everything else. Pieces of surface share the mesh's vertex buffer; the platform shows through the model, a whole model or a symmetry reference's side A is tinted where it is seen (seen through, it would only add up to a blur). A symmetry reference's plane is drawn by the fitted planes' own `PlaneVisual` (`render/planeLayer.ts`: disc, normal toward side A, and where it cuts the model), so the two look alike whatever the planes' look becomes; over the deviation the mesh shows its colours for a while (`MeshView.setOverrideColors`).
 * `App`: `hoverHint` (after `HOVER_MS`), `focusHint` (the keyboard's, `:focus-visible`), `pinHint`; the first of hover, focus and pinned is drawn (`syncHint`, from `hintOf`, which goes by the key `group:item` the row has in `data-hint`). `refreshHint` runs when what it draws from changes; `clearHints` on another mode, specimen or type. `hintMuted` keeps a row just let go from coming straight back under the pointer. A curve's row of edge angles has no pin: a click selects the curve, as ever.
 * `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks). The automatic measures are in groups (`measureGroup`; a flake's: technical axis, morphology, whole, proximal end; a core's and a generic specimen's: dimensions, whole); platform width and depth, the EPA, the bulb angle and VI are small tables (`measureTable`), each cell a measure of its own with its key and its focus. The export order is the order on screen.
 
@@ -458,19 +458,20 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   It reaches the derived results through `MeshResults.box`; the principal orientation is never
   written to `specimen.frame`.
 * **Two models** (`configuration.model`): the box (below) and the bicone. `compute/bicone.ts` is
-  pure: `computeBicone` takes the base from the split curve (`biconeBase`: PCA plane oriented like
-  the split, shoelace area and centroid) and the heights from the split's volumes (already swapped),
-  puts each scar on a cone by its end, and gives the cones' roles (corrections by physical side), the
+  pure: the bicone stands on a symmetry reference with a closed curve as its source
+  (`configuration.biconeRef`, `biconeRefOf`); `computeBicone` takes the base from that curve (`biconeBase`: PCA plane oriented by the
+  reference's `upHint` and `swap`, shoelace area and centroid) and the heights from the reference's volumes (`biconeVolumes`: side A
+  upper, side B lower, as swapped), puts each scar on a cone by its end, and gives the cones' roles (corrections by physical side), the
   flaking cones and the facial character; `biconePolar` maps points over the base (angle, and the
   share of the way to the projected curve) for drawing. `coreConfiguration` picks the model; the
-  derived results, the batch (with the project's stored split; no box needed) and the app all use
+  derived results, the batch (with the project's stored symmetry results; no box needed) and the app all use
   it. The picked face is a `ConfigPick` (a face of the box or a cone); a pick of the other model is
-  let go. `App.configStatus` says why the bicone shows nothing (its split still being computed, an
-  open mesh, no valid split). Choosing the bicone from the panel needs no visit to the volume panel:
+  let go. `App.configStatus` says why the bicone shows nothing (the references still being computed, an
+  open mesh, a curve that parts nothing). Choosing the bicone from the panel needs no visit to the symmetry card:
   `soleEdgeCurve` names the curve when it goes without saying, else the panel asks (`edgeCurves`);
-  `App.useEdgeCurve` applies `setBiconeSplit` (split and model in one `CompoundCommand`), with
-  `defaultUpHint` (the side with more scars up; when even, toward the viewer), which the volume panel
-  uses too.
+  `App.useEdgeCurve` applies `useBiconeCurve` (the curve's reference, found or made, and the model in one `CompoundCommand`), with
+  `defaultUpHint` (the side with more scars as side A; when even, toward the viewer), which the symmetry card
+  uses too for a reference on a curve. Its swap is `swapBicone`, the reference's own swap.
 * `compute/configuration.ts` is pure: `placeScar` (face by the averaged normal without its
   component along the arrow, platform = the adjacent face facing back along the arrow),
   `computeConfiguration` (which faces are flaking surfaces first, with the corrections, so that
@@ -839,16 +840,58 @@ relative to the centroid). The app refits whenever the regions or `ProjectState.
 cortex regions are left out, whether the sphere is drawn) change, using the vertices of the
 chosen cortex pieces, and keeps the result for `derived.nodule` and the measurement CSV.
 
-## Volume split
+## Symmetry
 
-A core's (`hasVolumeSplit`). `compute/split.ts`: `splitByPlaneSteps` sums signed tetrahedra from a point on the plane over the
-triangles (clipped at the plane) on its upper side; `splitByLoopSteps` partitions along a closed
-chain of mesh edges and sums each side from the chain's centre. In both, the cap closing each
-part has zero volume relative to that reference point, so no cap is built. The app recomputes
-when the split, the planes or the curves change; `split.swap` only exchanges the two
-(`swappedSplit`), so swapping reuses the last result (`App.splitRaw`). Its result feeds the bicone.
-Turning a curve into mesh edges (`polylineEdgesSteps`, for the split and the regions) runs in
-slices too.
+`state.symmetry` holds the references (`SymmetryRef`: a source, `upHint`, `swap`); every change is a `SetSymmetryCommand`
+over the list and its counter (labels and notes merge while typed). The results are derived, in the symmetry worker:
+
+* `compute/split.ts` parts a mesh: `splitByPlaneSteps` sums signed tetrahedra from a point on the plane over the triangles (clipped at
+  the plane) on its upper side, and their clipped areas; `splitByLoopSteps` partitions along a closed chain of mesh edges and sums each
+  side from the chain's centre. In both, the cap closing each part has zero volume relative to that reference point, so no cap is built.
+* `compute/symmetry.ts` (pure, `Steps`): `symmetrySource` turns a source into a plane (a fitted plane's result; a closed curve's PCA
+  plane turned by `upHint`; a frame's axis through the point of percussion or the surface centroid). Once a model,
+  `meshMomentsSteps` (area, volume, box, surface centroid) and `symmetryMeshSteps`: the edge table, a `TriangleBvh` over all the
+  triangles, and two sets of samples — `SYM_DEVIATION_SAMPLES` points on the surface (systematic along the running sum of the
+  triangles' areas, the place within a triangle from the R2 low-discrepancy sequence) and, on a closed mesh, the points of a regular grid
+  (step (V / `SYM_OVERLAP_SAMPLES`)^(1/3), half a step in from the box's corner) that lie inside it. Each reference has three parts, each
+  its own `Steps`: ① `symmetrySidesSteps` parts the sides (along the curve, or by the plane) for the volumes, areas and the volume and
+  area symmetries; ② `deviationStatsSteps` mirrors the surface samples and takes their nearest points on the surface (no mirrored mesh;
+  the quantile by selection, `robust.weightedQuantile`); ③ `shapeSymmetrySteps` mirrors the interior samples and counts those still
+  inside. `vertexDeviationSteps` gives the deviation at every vertex, only for the shading. `symmetryValues` turns the parts there are
+  into values (swapping A and B, the plane to original coordinates; the three symmetries do not change with a swap).
+* Inside or not (`insideMesh`): `TriangleBvh.crossings` counts the triangles a ray crosses (slab test down the tree, Möller–Trumbore at
+  the leaves, a fixed stack, no allocation); along each of the three `SYM_RAY_DIRECTIONS` (none along an axis, so a grid's rows and
+  axis-aligned faces do not meet a ray edge-on) odd is inside, and the majority of the three decides (the third ray only when the first
+  two disagree). A point outside the tree's box is outside at once.
+* The worker (`io/symmetryWorker.ts`, imported with `?worker&inline` like the batch worker) wraps `io/symmetryJobs.ts`'s
+  `SymmetryEngine`. Messages: `mesh` (copies of the positions and index, transferred; it answers `mesh` with the surface centroid after
+  the moments, then `ready` once prepared), `task` (`SymmetryJob`s: a key naming the inputs, the plane in positions' coordinates, a
+  curve's chain of vertices — still followed on the page — whether the mesh is closed, and the parts asked for in order: `sides`,
+  `deviation`, `shape`, `vertices`), `drop` (the model went). It answers each part as a `result` as soon as it is done (the sides' face
+  sides and the vertex deviations transferred), `progress` (stage and share, at once when a stage begins and then at most every
+  `PROGRESS_MS`), `idle`, `error`. Sides that a plane does not cut, or of an open mesh, drop the shape asked for with them (`null`).
+* Cancelling: the worker runs the steps in slices of about 30 ms with a turn of its event loop between (`runInSlices`, a
+  `MessageChannel` message to itself), so a new task is heard; it replaces the list in hand, and the part being computed goes on only
+  when the new task asks for it too (it is checked at each yield and otherwise dropped). Where no worker can be made, it does not answer
+  a `ping` within 4 s or fails, `workerBackend` moves the same engine to the page (`pageBackend`, by `runSliced`), sending the model and
+  the last task again.
+* `ui/symmetryRunner.ts` (no DOM; tested in Node on the page backend) keys each reference by its inputs (the source's plane in original
+  coordinates, the curve's points, closed or not, the model) and asks for what each key lacks, as one task, only when that differs from
+  what is in hand: a swap, a label or a note computes nothing. It keeps the results by key, at most `SYMMETRY_CACHE_SIZE` (16), the oldest
+  not shown let go first, so going back to a source used before is at once; vertex deviations on at most four of them. A specimen frame's
+  mid-plane waits for the centroid; a curve's sides wait for its chain. `shown()` gives the card its values so far, those of the
+  reference's inputs before (faded until the new ones come) and the progress (the stages weighted roughly); `values()` gives those
+  computed in full (the project file, the exports) or, `partial`, whatever is there (the bicone needs only ① and does not wait for the
+  rest; the app draws its sketch again only when its volumes change).
+* The shading by deviation and a pointed-at shape or deviation row ask for that reference's vertex deviations
+  (`SymmetryRunner.wantVertices`); until they come the legend shows the progress, then they colour the mesh on the sequential ramp the
+  edge angles use (`compute/colormap.ts` `SEQUENTIAL_RAMP`, `sequentialColors`).
+* The tree's build yields between the passes of a large selection; the queries yield every 512.
+
+Turning a curve into mesh edges (`polylineEdgesSteps`, for a reference on a curve and the regions) runs in slices too.
+
+`gm_land_pairs.csv` (`compute/gm.ts` `gmLandPairs`) pairs a grid flake's points by their names and sets, as `gmSteps` writes them: the
+edge and the outline by the order of their points, the grids by row and column.
 
 ## Sections
 
@@ -945,7 +988,7 @@ Harris matrix) are downloads as before (`io/saveFile.ts`).
   its own copy.
 * `npm run bench` (`scripts/bench.ts`) times the heavy steps on a generated core of about 2 million
   triangles, each with its total and its longest stretch between two yields: the measure pass, the
-  box, the configuration, the volume split, the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The proximal end (reference plane, bulb, BSA, VI, IPA's band, the mesh at P, shading by height and the bulb page's lines) is timed on T8 (`tests/meshes.ts`) made as dense (rings 0.02 mm apart). The longest stretch is what
+  box, the configuration, the symmetry references (once a model: edges, tree, the two sets of samples; then a reference on a curve by its three parts — sides, mirror deviation, shape symmetry — and the deviation at every vertex for the shading), the bicone, "Complete loop", a flake's frame, hull, sections and paths, and the edge angles along the edge, the retouch layers, the points for geometric morphometrics, the retouch indices and what the retouch mode draws. The proximal end (reference plane, bulb, BSA, VI, IPA's band, the mesh at P, shading by height and the bulb page's lines) is timed on T8 (`tests/meshes.ts`) made as dense (rings 0.02 mm apart). The longest stretch is what
   design principle 10 limits to about 100 ms.
 
 ## Interface text

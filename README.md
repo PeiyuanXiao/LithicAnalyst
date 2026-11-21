@@ -96,6 +96,7 @@ Requires Node.js ≥ 20.
 | Platform and bulb | Width and depth (straight and along the surface), area; exterior platform angle (EPA, up to 3 mm from the edge as in Grosman et al., 2022), interior platform angle (IPA) and platform surface interior angle (PSIA; McPherron et al., 2020); bulb angle at 1 mm (Li et al., 2022); bulb surface angle (BSA) and vertical interval (VI) of the bulb (Nagai, 2026) |
 | Edge angles | Every 1 mm along an edge, at 2, 5 and 10 mm from it, by the three-point and two-line methods (Schunk et al., 2023); means per working edge; the parts of an edge sharper than a threshold |
 | Volumetric configuration | Cores: faciality, flaking surfaces and their relations, platforms and polarity, on a box or bicone model, drawing on the Logical Analytical System |
+| Symmetry | About a plane the user chooses (a fitted plane, a closed curve or a frame’s mid-plane): volume, area and shape symmetry (0–1; shape as mirror overlap, the flip test in 3D; Hardaker & Dunn, 2005), the two sides’ volumes and areas and, as a supplement, mirror deviation, with a shading by deviation; computed in the background |
 | Manual | Distances (straight and along the surface), angles, sections |
 
 #### Retouch (flakes)
@@ -114,7 +115,7 @@ Requires Node.js ≥ 20.
 | Feature | Description |
 |:-----------------------------------|:-----------------------------------|
 | Semilandmarks | Along curves; on surfaces, a grid in a flake’s technological frame, or points laid on a template and carried to every specimen by thin-plate spline |
-| Landmark exports | TPS, 3D Slicer `.fcsv` and CSV, with sliding definitions for geomorph and Morpho |
+| Landmark exports | TPS, 3D Slicer `.fcsv` and CSV, with sliding definitions for geomorph and Morpho, and left–right pairs of a flake’s grid semilandmarks for Procrustes asymmetry (Klingenberg et al., 2002) |
 | Figures | Six orthographic views with a scale bar, as PNG or SVG; for one specimen or a folder |
 | Compare | Agreement between observers: matched arrows and curves, region overlap, flake measures, Cohen’s and Fleiss’ κ, ICC |
 | Folders | Every model of a folder, its project files kept alongside, and summary exports |

@@ -19,7 +19,7 @@ import {
   SetConfigurationCommand,
   SetFlakeCommand, SetSharpEdgeCommand, SetGmConfigCommand,
   SetSequencesCommand,
-  SetSplitCommand,
+  SetSymmetryCommand,
   SetSpecimenCommand,
   SetSectionLabelCommand,
   SetWorkingEdgesCommand,
@@ -41,9 +41,9 @@ import { autoRetouchCurves } from '../compute/retouchBand';
 import { edgeAxis, refusalOf, retouchRunEdges, type WorkingEdgeRefusal } from '../compute/workingEdge';
 import { backRidges, curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, measuresEdgeAngle, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
-import { landmarkData, type LandmarkData, type ProjectStore } from './store';
+import { landmarkData, symmetryData, type LandmarkData, type ProjectStore, type SymmetryData } from './store';
 import { retouchSettingsOf, type BsaSettings, type RetouchAxisChoice, type RetouchSettings } from './types';
-import type { GmConfig, ImportRecord, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, TechnicalAxis, Vec3, WorkingEdge } from './types';
+import type { GmConfig, ImportRecord, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, SymmetryRef, SymmetrySource, TechnicalAxis, Vec3, WorkingEdge } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -1029,11 +1029,97 @@ export const deleteSemilandmarkSet = (store: ProjectStore, id: string): void =>
     d.semilandmarks = d.semilandmarks.filter((x) => x.id !== id);
   });
 
-/** Split the volume by a plane or a closed curve (null: no split); `upHint` orients a curve's normal. */
-export function setSplit(store: ProjectStore, split: ProjectState['split']): void {
-  const before = store.state.split;
-  if (JSON.stringify(before) === JSON.stringify(split)) return;
-  store.history.execute(new SetSplitCommand(structuredClone(before), structuredClone(split)));
+// ---------------------------------------------------------------- symmetry
+
+/** A new symmetry reference (not yet executed) and the data after adding it. */
+function newSymmetry(d: SymmetryData, source: SymmetrySource, upHint: Vec3): { ref: SymmetryRef; after: SymmetryData } {
+  const t = nowIso();
+  const n = d.nextSymmetryNumber;
+  const ref: SymmetryRef = { id: uuid(), label: `S${n}`, note: '', source: structuredClone(source), upHint: copy(upHint), swap: false, createdAt: t, modifiedAt: t };
+  return { ref, after: { symmetry: [...structuredClone(d.symmetry), ref], nextSymmetryNumber: n + 1 } };
+}
+
+/** Add a symmetry reference from a source; `upHint` says which side is A for a curve's plane. */
+export function addSymmetry(store: ProjectStore, source: SymmetrySource, upHint: Vec3): SymmetryRef {
+  const before = symmetryData(store.state);
+  const { ref, after } = newSymmetry(before, source, upHint);
+  store.history.execute(new SetSymmetryCommand('cmd.addSymmetry', before, after));
+  return ref;
+}
+
+/** Delete a symmetry reference; the bicone standing on it lets go of it in the same step. */
+export function deleteSymmetry(store: ProjectStore, id: string): void {
+  if (!store.symmetryRef(id)) return;
+  const before = symmetryData(store.state);
+  const after: SymmetryData = { ...structuredClone(before), symmetry: before.symmetry.filter((s) => s.id !== id) };
+  const sym = new SetSymmetryCommand('cmd.deleteSymmetry', before, after);
+  const config = store.state.configuration;
+  if (config.biconeRef !== id) return store.history.execute(sym);
+  store.history.execute(new CompoundCommand('cmd.deleteSymmetry', [sym, new SetConfigurationCommand('cmd.editConfiguration', structuredClone(config), { ...structuredClone(config), biconeRef: null })]));
+}
+
+function updateSymmetry(store: ProjectStore, id: string, labelKey: string, change: (s: SymmetryRef) => void, mergeKey: string | null = null): void {
+  const before = symmetryData(store.state);
+  const after = structuredClone(before);
+  const ref = after.symmetry.find((s) => s.id === id);
+  if (!ref) return;
+  change(ref);
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  ref.modifiedAt = nowIso();
+  store.history.execute(new SetSymmetryCommand(labelKey, before, after, mergeKey ? `${mergeKey}:${id}` : null));
+}
+
+/** Another source for a reference (its sides start again: A by `upHint`, not swapped). */
+export const setSymmetrySource = (store: ProjectStore, id: string, source: SymmetrySource, upHint: Vec3): void =>
+  updateSymmetry(store, id, 'cmd.editSymmetry', (s) => {
+    if (JSON.stringify(s.source) === JSON.stringify(source)) return;
+    s.source = structuredClone(source);
+    s.upHint = copy(upHint);
+    s.swap = false;
+  });
+
+export const setSymmetryLabel = (store: ProjectStore, id: string, label: string): void =>
+  updateSymmetry(store, id, 'cmd.editSymmetry', (s) => {
+    s.label = label;
+  }, 'label');
+
+export const setSymmetryNote = (store: ProjectStore, id: string, note: string): void =>
+  updateSymmetry(store, id, 'cmd.editSymmetry', (s) => {
+    s.note = note;
+  }, 'note');
+
+/** Exchange the sides A and B. */
+export const swapSymmetry = (store: ProjectStore, id: string): void =>
+  updateSymmetry(store, id, 'cmd.swapSymmetry', (s) => {
+    s.swap = !s.swap;
+  });
+
+
+/** The reference with this closed curve as its source the bicone takes: the one it stands on already, else the first. */
+export function curveSymmetryRef(state: Readonly<ProjectState>, curveId: string): SymmetryRef | null {
+  const on = (s: SymmetryRef) => s.source.kind === 'curve' && s.source.curveId === curveId;
+  const current = state.symmetry.find((s) => s.id === state.configuration.biconeRef);
+  return current && on(current) ? current : (state.symmetry.find(on) ?? null);
+}
+
+/**
+ * Use the bicone on a closed curve: the symmetry reference with that curve as its source (a new one, A toward `upHint`, when there
+ * is none), and the model, in one step that undo takes back whole.
+ */
+export function useBiconeCurve(store: ProjectStore, curveId: string, upHint: Vec3): void {
+  const st = store.state;
+  const parts: Command[] = [];
+  let ref = curveSymmetryRef(st, curveId);
+  if (!ref) {
+    const before = symmetryData(st);
+    const made = newSymmetry(before, { kind: 'curve', curveId }, upHint);
+    ref = made.ref;
+    parts.push(new SetSymmetryCommand('cmd.addSymmetry', before, made.after));
+  }
+  const config = st.configuration;
+  const after: ConfigCorrections = { ...structuredClone(config), biconeRef: ref.id, model: 'bicone' };
+  if (JSON.stringify(after) !== JSON.stringify(config)) parts.push(new SetConfigurationCommand('cmd.editConfiguration', structuredClone(config), after));
+  if (parts.length) store.history.execute(new CompoundCommand('cmd.useBicone', parts));
 }
 
 /** Use (or leave out) a cortex region in the nodule sphere fit. */
@@ -1065,10 +1151,10 @@ export function updateSpecimen(store: ProjectStore, patch: Partial<SpecimenInfo>
   const key = Object.keys(patch).sort().join(',');
   const turned = JSON.stringify(before.frame?.matrix ?? null) !== JSON.stringify(after.frame?.matrix ?? null);
   const corrections = store.state.configuration;
-  // the polarity, the model and the bicone's corrections (by side of the split curve, not by face) stay;
+  // the polarity, the model and the bicone's reference and corrections (by side of its curve, not by face) stay;
   // a flake's frame is not the one the corrections name faces of (see setSpecimenType)
   const config = turned && before.type !== 'flake' && hasFaceCorrections(corrections)
-    ? { before: structuredClone(corrections), after: { ...emptyCorrections(), polarity: corrections.polarity, model: corrections.model, bicone: structuredClone(corrections.bicone) } }
+    ? { before: structuredClone(corrections), after: { ...emptyCorrections(), polarity: corrections.polarity, model: corrections.model, biconeRef: corrections.biconeRef, bicone: structuredClone(corrections.bicone) } }
     : null;
   store.history.execute(new SetSpecimenCommand(structuredClone(before), after, merge ? `specimen:${key}` : null, config));
   return !!config;
@@ -1298,7 +1384,7 @@ export const setConfigPolarity = (store: ProjectStore, polarity: Polarity | null
     c.polarity = polarity;
   });
 
-/** The model of the configuration: the box or the bicone on the split curve. */
+/** The model of the configuration: the box or the bicone on the closed curve of its symmetry reference. */
 export const setConfigModel = (store: ProjectStore, model: ConfigModel): void =>
   changeConfiguration(store, (c) => {
     c.model = model;
@@ -1311,20 +1397,8 @@ export const setBiconeRole = (store: ProjectStore, side: BiconeSide, role: Bicon
     else c.bicone.roles[side] = role;
   });
 
-/** Split the volume along a closed curve and use the bicone on it, in one step that undo takes back whole. */
-export function setBiconeSplit(store: ProjectStore, split: NonNullable<ProjectState['split']>): void {
-  const before = store.state.configuration;
-  const after = { ...(structuredClone(before) as ConfigCorrections), model: 'bicone' as const };
-  store.history.execute(
-    new CompoundCommand('cmd.useBicone', [
-      new SetSplitCommand(structuredClone(store.state.split), structuredClone(split)),
-      new SetConfigurationCommand('cmd.editConfiguration', structuredClone(before), after),
-    ]),
-  );
-}
-
-/** Exchange the upper and lower side of the volume split (also the bicone's cones). */
-export function swapSplit(store: ProjectStore): void {
-  const sp = store.state.split;
-  if (sp) setSplit(store, { ...sp, swap: !sp.swap });
+/** Exchange the bicone's upper and lower cone: the sides of the symmetry reference it stands on. */
+export function swapBicone(store: ProjectStore): void {
+  const id = store.state.configuration.biconeRef;
+  if (id && store.symmetryRef(id)) swapSymmetry(store, id);
 }

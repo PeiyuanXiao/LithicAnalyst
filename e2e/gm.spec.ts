@@ -138,6 +138,13 @@ test('a flake\'s points: as configured, in the exports with their sliding defini
   const listed = parseCsv(surfaces.text);
   expect(listed.length).toBe(332);
   expect(rows[Number(listed[0].index) - 1].kind).toBe('surface');
+  // left and right in pairs, by the same numbers: the platform's ends first
+  const pairs = await exportFile(page, 'gm-land-pairs');
+  expect(pairs.name).toBe('t1_gm_land_pairs.csv');
+  const paired = parseCsv(pairs.text);
+  expect(paired[0]).toEqual({ left: '2', right: '3' });
+  expect(paired.every((p) => rows[Number(p.left) - 1].kind === rows[Number(p.right) - 1].kind)).toBe(true);
+  expect(await page.evaluate(() => window.lithicanalyst.exportGmText('pairs'))).toBe(pairs.text);
 
   // the file holds the configuration and the points
   const file = await page.evaluate(() => window.lithicanalyst.projectJson());

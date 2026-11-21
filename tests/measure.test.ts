@@ -53,7 +53,7 @@ describe('automatic measurements', () => {
     expect(m.volume).toBeNull();
     const st = emptyProject();
     st.specimen.id = 'open';
-    expect(measurementsCsv(st, m, { excelBom: false }).split('\n')[1]).toBe('open,mm,principal,2,2,2,20,,false,,,,,,,,,,,');
+    expect(measurementsCsv(st, m, { excelBom: false }).split('\n')[1]).toBe('open,mm,principal,2,2,2,20,,false,,,,,,,,');
   });
 });
 

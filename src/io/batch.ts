@@ -1,5 +1,6 @@
 import { icc21 } from '../compute/agreement';
-import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
+import { biconeVolumes, coreConfiguration, type CoreConfiguration } from '../compute/bicone';
+import { alike, type SymmetryValues } from '../compute/symmetry';
 import { storedBox, type ConfigBox } from '../compute/configuration';
 import { landmarkTable } from '../compute/landmarks';
 import type { PrincipalAxes } from '../compute/meshGeometry';
@@ -8,14 +9,14 @@ import type { RegionResult, RegionTotals } from '../compute/regions';
 import { AGREEMENT_FLAKE_MEASURES, storedFlakeMeasures, type FlakeMeasures, type FlakeResult } from '../compute/flake';
 import type { RetouchIndices } from '../compute/retouchIndex';
 import type { WorkingEdgesDerived, WorkingEdgeRow } from '../compute/workingEdge';
-import { gmMissingInputs, type GmMissing } from '../compute/gm';
+import { gmLandPairs, gmMissingInputs, type GmMissing } from '../compute/gm';
 import type { gmManifest } from '../compute/gmTemplate';
 import type { AutoMeasurements, EdgeAngleCurve, FlakeDerived, GmDerived, MeshResults, RetouchAngleCurve } from '../core/derived';
-import { hasEdgeAngles, hasVolumeSplit } from '../core/fields';
+import { hasEdgeAngles } from '../core/fields';
 import { measurementValue } from '../core/measurements';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
-import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, workingEdgesCsv, type CsvOptions } from './csv';
-import { gmCurvesCsv, gmLandmarksCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksTps } from './landmarks';
+import { configurationCsv, csvCell, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, fmt, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, symmetryCsv, workingEdgesCsv, type CsvOptions } from './csv';
+import { gmCurvesCsv, gmLandmarksCsv, gmLandPairsCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksTps } from './landmarks';
 
 /** One specimen of a batch: its project (or a fresh one), measured on its model. */
 export interface BatchSpecimen {
@@ -25,13 +26,14 @@ export interface BatchSpecimen {
   auto: AutoMeasurements;
   /** Recomputed from the project's inputs. */
   planes: PlaneResult[];
-  /** Recomputed from the project's inputs and the model's box (the bicone: and the stored volume split). */
+  /** Recomputed from the project's inputs and the model's box (the bicone: and the stored volumes of its symmetry reference). */
   configuration: CoreConfiguration | null;
   /** From the project file's derived results (the values the app last computed). */
   regions: RegionResult[];
   regionTotals: RegionTotals | null;
   nodule: { radius: number; rms: number } | null;
-  split: { upper: number; lower: number; ratio: number | null } | null;
+  /** The symmetry references' results, from the project file's derived results. */
+  symmetry: SymmetryValues[];
   /** A flake's measurements, from the project file's derived results (null for a core). */
   flake: FlakeMeasures | null;
   /** The curves' edge angles, from the project file's derived results. */
@@ -73,10 +75,49 @@ function storedAxes(v: unknown): PrincipalAxes | null {
   return a && isVec(a.mean) && Array.isArray(a.axes) && a.axes.length === 3 && a.axes.every(isVec) && Array.isArray(a.variances) ? a : null;
 }
 
-/** The volume split as stored in a project file, or null. */
-function storedSplit(v: unknown): BatchSpecimen['split'] {
-  const s = v as BatchSpecimen['split'] | undefined;
-  return s && Number.isFinite(s.upper) && Number.isFinite(s.lower) ? { upper: s.upper, lower: s.lower, ratio: typeof s.ratio === 'number' ? s.ratio : null } : null;
+const REASONS = ['no_source', 'not_closed', 'no_cut'] as const;
+
+/**
+ * A reference's results as a project file stores them; one of stage 34 (before the three symmetries) has the sides' values only:
+ * the volume and area symmetries follow from them, the shape symmetry is empty.
+ */
+export function storedSymmetryValues(raw: unknown): SymmetryValues | null {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  if (!r || typeof r.id !== 'string') return null;
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const why = (v: unknown) => REASONS.find((x) => x === v) ?? null;
+  const rs = (r.reasons && typeof r.reasons === 'object' ? r.reasons : {}) as Record<string, unknown>;
+  const pl = r.plane as { point?: unknown; normal?: unknown } | null | undefined;
+  const vec = (v: unknown): v is Vec3 => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+  const v: Omit<SymmetryValues, 'volumeSymmetry' | 'areaSymmetry'> = {
+    id: r.id,
+    plane: pl && vec(pl.point) && vec(pl.normal) ? { point: [...pl.point] as Vec3, normal: [...pl.normal] as Vec3 } : null,
+    shapeSymmetry: num(r.shapeSymmetry),
+    volumeA: num(r.volumeA),
+    volumeB: num(r.volumeB),
+    areaA: num(r.areaA),
+    areaB: num(r.areaB),
+    deviationMean: num(r.deviationMean),
+    deviationRms: num(r.deviationRms),
+    deviationP95: num(r.deviationP95),
+    reasons: { volume: why(rs.volume), area: why(rs.area), shape: why(rs.shape ?? rs.volume), deviation: why(rs.deviation) },
+  };
+  const of = (a: number | null, b: number | null) => (a !== null && b !== null ? alike(a, b) : null);
+  return { ...v, volumeSymmetry: num(r.volumeSymmetry) ?? of(v.volumeA, v.volumeB), areaSymmetry: num(r.areaSymmetry) ?? of(v.areaA, v.areaB) };
+}
+
+/**
+ * The symmetry references' results as stored in a project file. A file of before stage 34 stored an upper / lower `split` instead:
+ * its volumes stand for those of S1, the reference it became (parseProject).
+ */
+export function storedSymmetry(derived: Record<string, unknown>, state: Pick<ProjectState, 'symmetry'>): SymmetryValues[] {
+  const d = derived.symmetry as { refs?: unknown } | null | undefined;
+  if (Array.isArray(d?.refs)) return d.refs.flatMap((r) => storedSymmetryValues(r) ?? []);
+  const s = derived.split as { upper?: unknown; lower?: unknown } | null | undefined;
+  const ref = state.symmetry.length === 1 ? state.symmetry[0] : null;
+  if (!ref || !s || typeof s.upper !== 'number' || typeof s.lower !== 'number' || !Number.isFinite(s.upper) || !Number.isFinite(s.lower)) return [];
+  const v = storedSymmetryValues({ id: ref.id, volumeA: s.upper, volumeB: s.lower });
+  return v ? [v] : [];
 }
 
 /** A region plane's fit as stored with the results (it needs the mesh and the regions to compute again). */
@@ -107,7 +148,7 @@ export function storedMeshResults(derived: Record<string, unknown>): MeshResults
     vertices: storedAxes(d.vertices),
     regions: Array.isArray(d.regions) && d.regionTotals ? { results: d.regions as RegionResult[], totals: d.regionTotals as RegionTotals } : null,
     nodule: (d.nodule as MeshResults['nodule']) ?? null,
-    split: (d.split as MeshResults['split']) ?? null,
+    symmetry: Array.isArray((d.symmetry as { refs?: unknown } | null | undefined)?.refs) ? (d.symmetry as { refs: unknown[] }).refs.flatMap((r) => storedSymmetryValues(r) ?? []) : null,
     box: storedBox(d.configuration),
     flake: d.flake?.measures && d.flake.geometry ? ({ measures: d.flake.measures, geometry: d.flake.geometry } as FlakeResult) : null,
     regionFits: fits,
@@ -123,7 +164,7 @@ export function storedMeshResults(derived: Record<string, unknown>): MeshResults
  * The results a project stored can stand for its model's (no need to read the
  * mesh): written by this version of the app, with the automatic measurements,
  * — when it has planes — the vertices' axes and — when it has arrows — the box of
- * its volumetric configuration (not needed by the bicone, which uses the stored split). (The checksum is checked by the caller: the
+ * its volumetric configuration (not needed by the bicone, which uses the stored volumes of its symmetry reference). (The checksum is checked by the caller: the
  * project is the model's by its `mesh.sha256`.)
  */
 export function savedResultsUsable(p: BatchProject, appVersion: string): boolean {
@@ -156,8 +197,6 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     if (typeof totals?.cortexRatio === 'number') values.cortex_ratio = totals.cortexRatio;
     const nod = p.derived.nodule as { radius?: number } | null | undefined;
     if (typeof nod?.radius === 'number') values.nodule_radius = nod.radius;
-    const sp = p.derived.split as { ratio?: number | null } | null | undefined;
-    if (hasVolumeSplit(st.specimen.type) && typeof sp?.ratio === 'number') values.volume_ratio = sp.ratio;
     for (const m of st.measurements) values[m.label] = measurementValue(m);
     // a flake's own measures, as the project stored them
     if (st.specimen.type === 'flake') {
@@ -171,18 +210,18 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
   }
   const { state, derived } = primary.project;
   // what a file stored under another type is not exported under this one
-  const split = hasVolumeSplit(state.specimen.type) ? storedSplit(derived.split) : null;
+  const symmetry = storedSymmetry(derived, state);
   const edges = hasEdgeAngles(state.specimen.type);
   return {
     file,
     state,
     auto: primary.measures.auto,
     planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices, storedRegionFit(derived.planes, p.id))),
-    configuration: state.specimen.type === 'core' ? coreConfiguration(state, primary.measures.box, split) : null,
+    configuration: state.specimen.type === 'core' ? coreConfiguration(state, primary.measures.box, biconeVolumes(state, symmetry)) : null,
     regions: (derived.regions as BatchSpecimen['regions']) ?? [],
     regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
-    split,
+    symmetry,
     flake: state.specimen.type === 'flake' ? ((derived.flake as FlakeDerived | null | undefined)?.measures ?? null) : null,
     edgeAngles: edges ? ((derived.edgeAngles as { curves?: EdgeAngleCurve[] } | null | undefined)?.curves ?? []) : [],
     retouchAngles: edges ? ((derived.retouchAngles as { curves?: RetouchAngleCurve[] } | null | undefined)?.curves ?? []) : [],
@@ -275,6 +314,8 @@ export function gmOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions)
   if (first.curves.length) files.push({ suffix: 'gm_curves.csv', text: gmCurvesCsv(first) });
   if (first.curves.length && morpho) files.push({ suffix: 'gm_smvector.csv', text: gmSmvectorCsv(first) }, { suffix: 'gm_outlines.csv', text: gmOutlinesCsv(first) });
   if (first.surfaces.length) files.push({ suffix: 'gm_surfaces.csv', text: gmSurfacesCsv(first) });
+  // a flake's points by the grid: left and right in pairs
+  if (!morpho && kept[0].state.specimen.type === 'flake' && gmLandPairs(first).length) files.push({ suffix: 'gm_land_pairs.csv', text: gmLandPairsCsv(first) });
   if (first.surfaces.length && morpho) files.push({ suffix: 'gm_surp.csv', text: gmSurpCsv(first) });
   if (morpho) files.push({ suffix: 'gm_models.csv', text: gmModelsCsv(kept.map((s) => ({ id: s.state.specimen.id, file: s.file }))) });
   return { files, skipped, incomplete };
@@ -316,13 +357,14 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
   // what a generic specimen does not have, whatever it held on another type
   const typed = specimens.filter((s) => s.state.specimen.type !== 'generic');
   const out: Array<{ suffix: string; text: string }> = [
-    { suffix: 'measurements.csv', text: merged((s) => measurementsCsv(s.state, s.auto, plain, s.regionTotals, s.nodule, s.split, s.file)) },
+    { suffix: 'measurements.csv', text: merged((s) => measurementsCsv(s.state, s.auto, plain, s.regionTotals, s.nodule, s.file)) },
   ];
   const kinds: Array<[string, (s: BatchSpecimen) => string, (readonly BatchSpecimen[])?]> = [
     ['scar_vectors.csv', (s) => scarVectorCsv(s.state, plain, s.configuration)],
     ['curves.csv', (s) => curveCsv(s.state, plain)],
     ['manual_measurements.csv', (s) => manualMeasurementsCsv(s.state, plain)],
     ['planes.csv', (s) => planesCsv(s.state, s.planes, plain)],
+    ['symmetry.csv', (s) => symmetryCsv(s.state, s.symmetry, plain)],
     ['regions.csv', (s) => regionsCsv(s.state, s.regions, plain)],
     ['edge_angles.csv', (s) => edgeAnglesCsv(s.state, s.edgeAngles, plain)],
     ['retouch_angles.csv', (s) => retouchAnglesCsv(s.state, s.retouchAngles, plain)],

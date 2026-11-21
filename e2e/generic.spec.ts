@@ -64,11 +64,12 @@ test('a generic specimen has none of the tools, panels and sections of a core or
   expect(await page.evaluate(() => window.lithicanalyst.configPanelShown())).toBe(false);
   expect(await page.evaluate(() => window.lithicanalyst.harrisShown())).toBe(false);
 
-  // the measure mode: dimensions, area and volume; no flake's, no nodule, no edge angles, no volume split
+  // the measure mode: dimensions, area and volume; no flake's, no nodule, no edge angles; symmetry as every type
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#sec-measure-auto')).toBeVisible();
   await expect(page.locator('#auto-length')).not.toHaveText('—');
-  for (const id of ['flake', 'nodule', 'edge-angle', 'split']) await expect(page.locator(`#sec-${id}`)).toBeHidden();
+  for (const id of ['flake', 'nodule', 'edge-angle']) await expect(page.locator(`#sec-${id}`)).toBeHidden();
+  await expect(page.locator('#sec-symmetry')).toBeVisible();
   // planes by all the vertices, curves or regions
   await expect(page.locator('#sec-planes')).toBeVisible();
   await page.locator('#plane-add').click();

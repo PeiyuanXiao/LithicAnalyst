@@ -71,7 +71,7 @@ export interface LithicApi {
   exportEdgeAnglesCsvText(): string;
   endpointPreview(): Vec3 | null;
   gm(): import('../src/compute/gm').GmResult | null;
-  exportGmText(kind: 'tps' | 'csv' | 'curves' | 'surfaces'): string;
+  exportGmText(kind: 'tps' | 'csv' | 'curves' | 'surfaces' | 'pairs'): string;
   gmTemplate(): import('../src/core/types').GmTemplate | null;
   gmTemplateInfo(): { file: string; seed: number; isThis: boolean; changed: boolean; missing: boolean } | null;
   layGmTemplate(): Promise<void>;
@@ -116,7 +116,15 @@ export interface LithicApi {
   clipping(): number;
   regions(): { results: import('../src/compute/regions').RegionResult[]; totals: import('../src/compute/regions').RegionTotals } | null;
   regionCount(): number | null;
-  volumeSplit(): import('../src/compute/split').VolumeSplit | null;
+  /** The symmetry references' values (those computed in full; `partial`: whatever parts are there), whether any is being computed, and whether in the worker. */
+  symmetry(): { busy: boolean; values: import('../src/compute/symmetry').SymmetryValues[]; partial: import('../src/compute/symmetry').SymmetryValues[]; worker: boolean };
+  /** Hold back what the symmetry references ask for (they show as being computed), or let it go. */
+  symmetryHold(on: boolean): void;
+  /** Shading by mirror deviation: the shading, the reference and the upper end of its colours, its legend's text, and whether it is coloured. */
+  symmetryShading(): { shading: string; reference: string | null; limit: { value: number; min: number; max: number; step: number; unit: string } | null; legend: string | null; colored: boolean };
+  /** A vertex's mirror deviation by a reference. */
+  symmetryDeviation(id: string, vertex: number): number | null;
+  exportSymmetryCsvText(): string;
   /** The drawing of how a measure was taken: which row, what is fixed, its parts and what is on the view. */
   measureHint(): {
     key: string | null;

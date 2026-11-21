@@ -8,7 +8,7 @@ import { nowIso, uuid } from './ids';
 import { clampFitLength } from '../compute/retouchIndex';
 import { BSA_LEVEL_DEFAULT_MM, bsaSettingsOf, clampBsaLevel } from '../compute/bulb';
 import { GM_TEMPLATE_PARAMETERS } from '../compute/gmTemplate';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, GM_CONFIG_VERSION, RETOUCH_AXES, retouchSettingsOf, type BsaSettings, type GmConfig, type ImportRecord, type GmCurveListItem, type GmTemplate, type GmTemplatePoint, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, GM_CONFIG_VERSION, RETOUCH_AXES, retouchSettingsOf, type BsaSettings, type GmConfig, type ImportRecord, type GmCurveListItem, type GmTemplate, type GmTemplatePoint, type AttributeValue, type ConfigCorrections, type Curve, type CurveCompletion, type FlakeData, type Landmark, type Measurement, type MeasureType, type MeshInfo, type Plane, type PlaneMethod, type ProjectState, type Region, type RegionType, type Relation, type RetouchSettings, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenFrame, type SpecimenInfo, type SymmetryRef, type SymmetrySource, type Vec3, type SharpEdgeRule, type WorkingEdge } from './types';
 import { isFiniteVec, normalize } from './vec';
 
 export const PROJECT_FORMAT = 'lithicanalyst-project';
@@ -29,7 +29,7 @@ export interface ProjectFile {
   mesh: MeshInfo | null;
   annotations: { scars: Scar[]; curves: Curve[]; measurements: Measurement[]; planes: Plane[]; sections: Section[]; regions: Region[]; relations: Relation[]; sequences: Sequence[]; landmarks: Landmark[]; semilandmarks: SemilandmarkSet[] };
   nodule: ProjectState['nodule'];
-  split: ProjectState['split'];
+  symmetry: SymmetryRef[];
   configuration: ConfigCorrections;
   flake: FlakeData;
   sharpEdge: SharpEdgeRule;
@@ -49,6 +49,7 @@ export interface ProjectFile {
   nextSequenceNumber: number;
   nextLandmarkNumber: number;
   nextSemilandmarkNumber: number;
+  nextSymmetryNumber: number;
   createdAt: string;
   modifiedAt: string;
 }
@@ -64,7 +65,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     mesh: state.mesh ? structuredClone(state.mesh) : null,
     annotations: { scars: structuredClone(state.scars), curves: structuredClone(state.curves), measurements: structuredClone(state.measurements), planes: structuredClone(state.planes), sections: structuredClone(state.sections), regions: structuredClone(state.regions), relations: structuredClone(state.relations), sequences: structuredClone(state.sequences), landmarks: structuredClone(state.landmarks), semilandmarks: structuredClone(state.semilandmarks) },
     nodule: structuredClone(state.nodule),
-    split: structuredClone(state.split),
+    symmetry: structuredClone(state.symmetry),
     configuration: structuredClone(state.configuration),
     flake: { ...structuredClone(state.flake), retouch: { ...retouchSettingsOf(state.flake) }, bsa: structuredClone(bsaSettingsOf(state.flake)) },
     sharpEdge: { ...state.sharpEdge },
@@ -82,6 +83,7 @@ export function serializeProject(state: Readonly<ProjectState>, appVersion: stri
     nextSequenceNumber: state.nextSequenceNumber,
     nextLandmarkNumber: state.nextLandmarkNumber,
     nextSemilandmarkNumber: state.nextSemilandmarkNumber,
+    nextSymmetryNumber: state.nextSymmetryNumber,
     createdAt: state.createdAt,
     modifiedAt: state.modifiedAt,
   };
@@ -430,6 +432,45 @@ function parseSemilandmarkSet(raw: unknown, i: number, landmarkIds: Set<string>)
   };
 }
 
+const SYMMETRY_FRAMES = ['technical', 'specimen'] as const;
+const SYMMETRY_AXES = ['x', 'y', 'z'] as const;
+
+/** A symmetry reference's source; null when it is not understood. */
+function parseSymmetrySource(raw: unknown): SymmetrySource | null {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  if (r.kind === 'plane' && typeof r.planeId === 'string') return { kind: 'plane', planeId: r.planeId };
+  if (r.kind === 'curve' && typeof r.curveId === 'string') return { kind: 'curve', curveId: r.curveId };
+  const frame = SYMMETRY_FRAMES.find((f) => f === r.frame), axis = SYMMETRY_AXES.find((a) => a === r.axis);
+  if (r.kind === 'frame' && frame && axis) return { kind: 'frame', frame, axis };
+  return null;
+}
+
+/**
+ * The symmetry references, and the reference the bicone stands on. A file of before stage 34 has an upper / lower `split` instead:
+ * it becomes S1 (its source, `upHint` and `swap` as they were); a split along a curve was the bicone's, so the bicone stands on S1.
+ * A reference whose source is not understood is left out; an `optimize` of stage 34 (the best plane of symmetry, since dropped) is ignored.
+ */
+function parseSymmetry(raw: Record<string, unknown>): { symmetry: SymmetryRef[]; biconeRef: string | null } {
+  const t = nowIso();
+  const vec = (v: unknown): Vec3 => (isFiniteVec(v) ? [v[0], v[1], v[2]] : [0, 0, 1]);
+  if (!Array.isArray(raw.symmetry)) {
+    const sp = raw.split as Record<string, unknown> | null | undefined;
+    if (!sp || (sp.source !== 'plane' && sp.source !== 'curve') || typeof sp.id !== 'string') return { symmetry: [], biconeRef: null };
+    const source: SymmetrySource = sp.source === 'plane' ? { kind: 'plane', planeId: sp.id } : { kind: 'curve', curveId: sp.id };
+    const ref: SymmetryRef = { id: uuid(), label: 'S1', note: '', source, upHint: vec(sp.upHint), swap: sp.swap === true, createdAt: t, modifiedAt: t };
+    return { symmetry: [ref], biconeRef: source.kind === 'curve' ? ref.id : null };
+  }
+  const symmetry = (raw.symmetry as unknown[]).flatMap((x, i): SymmetryRef[] => {
+    const r = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+    const source = parseSymmetrySource(r.source);
+    if (!source) return [];
+    return [{ id: str(r.id, uuid()), label: str(r.label, `S${i + 1}`), note: str(r.note), source, upHint: vec(r.upHint), swap: r.swap === true, createdAt: str(r.createdAt, t), modifiedAt: str(r.modifiedAt, t) }];
+  });
+  const c = (raw.configuration && typeof raw.configuration === 'object' ? raw.configuration : {}) as Record<string, unknown>;
+  const biconeRef = typeof c.biconeRef === 'string' && symmetry.some((s) => s.id === c.biconeRef) ? c.biconeRef : null;
+  return { symmetry, biconeRef };
+}
+
 /** Corrections of the volumetric configuration; unknown faces and codes are dropped (a file without them has none). */
 function parseConfiguration(raw: unknown): ConfigCorrections {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -452,6 +493,8 @@ function parseConfiguration(raw: unknown): ConfigCorrections {
     axis: byFace(r.axis, ['long', 'short'] as const),
     polarity: POLARITIES.find((p) => p === r.polarity) ?? null,
     model: CONFIG_MODELS.find((m) => m === r.model) ?? 'box',
+    // set from the symmetry references (parseSymmetry)
+    biconeRef: null,
     bicone: (() => {
       const roles: ConfigCorrections['bicone']['roles'] = {};
       const b = (r.bicone && typeof r.bicone === 'object' ? r.bicone : {}) as Record<string, unknown>;
@@ -593,6 +636,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     frame: parseFrame(sp.frame),
     type: SPECIMEN_TYPES.find((x) => x === sp.type) ?? 'core',
   };
+  const sym = parseSymmetry(raw);
   return {
     specimen,
     mesh: (raw.mesh as MeshInfo | null) ?? null,
@@ -611,12 +655,8 @@ export function parseProjectFile(input: unknown): ProjectState {
       const nd = (raw.nodule ?? {}) as Record<string, unknown>;
       return { exclude: Array.isArray(nd.exclude) ? nd.exclude.filter((x): x is string => typeof x === 'string') : [], show: nd.show === true };
     })(),
-    split: (() => {
-      const sp = raw.split as Record<string, unknown> | null | undefined;
-      if (!sp || (sp.source !== 'plane' && sp.source !== 'curve') || typeof sp.id !== 'string') return null;
-      return { source: sp.source, id: sp.id, upHint: isFiniteVec(sp.upHint) ? [sp.upHint[0], sp.upHint[1], sp.upHint[2]] : [0, 0, 1], swap: sp.swap === true };
-    })(),
-    configuration: parseConfiguration(raw.configuration),
+    symmetry: sym.symmetry,
+    configuration: { ...parseConfiguration(raw.configuration), biconeRef: sym.biconeRef },
     flake: parseFlake(raw.flake),
     sharpEdge: parseSharpEdge(raw.sharpEdge),
     gm: parseGmConfig(raw.gm),
@@ -631,6 +671,7 @@ export function parseProjectFile(input: unknown): ProjectState {
     nextSequenceNumber: Math.max(positiveInt(raw.nextSequenceNumber), maxLabelNumber(sequences.map((q) => q.label), 'Q') + 1),
     nextLandmarkNumber: Math.max(positiveInt(raw.nextLandmarkNumber), maxLabelNumber(landmarks.map((l) => l.name), 'LM') + 1),
     nextSemilandmarkNumber: Math.max(positiveInt(raw.nextSemilandmarkNumber), maxLabelNumber(semilandmarks.map((q) => q.label), 'SL') + 1),
+    nextSymmetryNumber: Math.max(positiveInt(raw.nextSymmetryNumber), maxLabelNumber(sym.symmetry.map((s) => s.label), 'S') + 1),
     createdAt: str(raw.createdAt, nowIso()),
     modifiedAt: str(raw.modifiedAt, nowIso()),
   };

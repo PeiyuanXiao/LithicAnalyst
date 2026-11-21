@@ -28,7 +28,7 @@ function specimen(id: string, size: [number, number, number], observers: Record<
     regions: [],
     regionTotals: null,
     nodule: null,
-    split: null,
+    symmetry: [],
     flake: null,
     edgeAngles: [], retouchAngles: [], gm: null,
     observers: new Map(Object.entries(observers)),
@@ -46,7 +46,7 @@ describe('batch outputs', () => {
     expect(out.map((f) => f.suffix)).toEqual(['measurements.csv', 'scar_vectors.csv', 'landmarks.csv', 'landmarks.tps']);
     const rows = out[0].text.trim().split('\n');
     expect(rows).toHaveLength(3);
-    expect(rows[0].endsWith(',volume_ratio,file')).toBe(true);
+    expect(rows[0].endsWith(',nodule_fit_rms,file')).toBe(true);
     expect(rows[1].startsWith('A,mm,principal,40,20,10,')).toBe(true);
     expect(rows[1].endsWith(',site/A.ply')).toBe(true);
     expect(rows[2].startsWith('B,mm,principal,30,20,10,')).toBe(true);

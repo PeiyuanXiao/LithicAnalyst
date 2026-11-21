@@ -80,3 +80,28 @@ export function heightColors(heights: Float32Array, range: number): Float32Array
   }
   return out;
 }
+
+/** The sequential ramp of the edge angles and the mirror deviation: one hue from light (small) to dark (large); no yellow (it means selected). */
+export const SEQUENTIAL_RAMP = ['#cde2fb', '#86b6ef', '#3987e5', '#1c5cab', '#0d366b'] as const;
+
+const hexRgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
+
+/** Values from 0 to `limit` on the sequential ramp as linear-space RGB (3 per vertex); above `limit`, its darkest. */
+export function sequentialColors(values: ArrayLike<number>, limit: number): Float32Array {
+  const stops = SEQUENTIAL_RAMP.map(hexRgb);
+  const lut = new Float32Array(1024 * 3);
+  for (let i = 0; i < 1024; i++) {
+    const x = (i / 1023) * (stops.length - 1);
+    const k = Math.min(stops.length - 2, Math.floor(x)), f = x - k;
+    for (let c = 0; c < 3; c++) lut[3 * i + c] = srgbToLinear(stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f);
+  }
+  const out = new Float32Array(values.length * 3);
+  const s = limit > 0 ? 1023 / limit : 0;
+  for (let i = 0; i < values.length; i++) {
+    const u = Math.max(0, Math.min(1023, Math.round(values[i] * s)));
+    out[3 * i] = lut[3 * u];
+    out[3 * i + 1] = lut[3 * u + 1];
+    out[3 * i + 2] = lut[3 * u + 2];
+  }
+  return out;
+}

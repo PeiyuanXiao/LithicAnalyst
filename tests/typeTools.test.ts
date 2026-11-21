@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { autoMeasurements, frameMeasures, surfaceMeasures } from '../src/compute/measure';
 import { annotationStatus } from '../src/core/annotationStatus';
 import { setSpecimenType } from '../src/core/actions';
-import { hasEdgeAngles, hasVolumeSplit, measuresEdgeAngle, SPECIMEN_TYPES, type SpecimenType } from '../src/core/fields';
+import { hasEdgeAngles, measuresEdgeAngle, SPECIMEN_TYPES, type SpecimenType } from '../src/core/fields';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import type { ProjectState, Vec3 } from '../src/core/types';
@@ -12,7 +12,7 @@ import { box } from './meshes';
 const RIM: Vec3[] = [[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0]];
 const T = '2026-11-01T00:00:00.000Z';
 
-/** A project as an older version wrote it for a specimen of this type: edge angles, working edges, a split, and what was stored of them. */
+/** A project as an older version wrote it for a specimen of this type: edge angles, working edges, an upper / lower split, and what was stored of them. */
 function oldFile(type: SpecimenType): ReturnType<typeof serializeProject> {
   const st: ProjectState = {
     ...emptyProject(),
@@ -22,11 +22,12 @@ function oldFile(type: SpecimenType): ReturnType<typeof serializeProject> {
     ],
     workingEdges: [{ id: 'e1', label: 'E1', name: 'left', curveId: 'rim', start: RIM[0], end: RIM[2], note: '', createdAt: T, modifiedAt: T }],
     nextWorkingEdgeNumber: 2,
-    split: { source: 'curve', id: 'rim', upHint: [0, 0, 1], swap: true },
     sharpEdge: { method: 'three_points', distance: 2, threshold: 45 },
   };
   st.specimen = { ...st.specimen, id: type, type, unit: 'mm' };
-  return serializeProject(st, '0.1.0');
+  // (before stage 34: a split, no symmetry references)
+  const { symmetry: _symmetry, nextSymmetryNumber: _next, ...file } = serializeProject(st, '0.1.0');
+  return { ...file, split: { source: 'curve', id: 'rim', upHint: [0, 0, 1], swap: true } } as unknown as ReturnType<typeof serializeProject>;
 }
 
 const STORED = {
@@ -54,9 +55,8 @@ const cell = (csv: string, column: string): string => {
 };
 
 describe('what each type of specimen has', () => {
-  it('edge angles and working edges a flake, the volume split a core', () => {
+  it('edge angles and working edges a flake', () => {
     expect(SPECIMEN_TYPES.filter(hasEdgeAngles)).toEqual(['flake']);
-    expect(SPECIMEN_TYPES.filter(hasVolumeSplit)).toEqual(['core']);
   });
 
   for (const type of ['core', 'generic', 'flake'] as const) {
@@ -67,14 +67,17 @@ describe('what each type of specimen has', () => {
       expect(after.annotations.curves.map((c) => c.edgeAngle)).toEqual([true, undefined]);
       expect(after.workingEdges).toEqual(before.workingEdges);
       expect(after.nextWorkingEdgeNumber).toBe(2);
-      expect(after.split).toEqual({ source: 'curve', id: 'rim', upHint: [0, 0, 1], swap: true });
+      // the split as the symmetry reference it became
+      expect(after.symmetry).toHaveLength(1);
+      expect(after.symmetry[0]).toMatchObject({ label: 'S1', source: { kind: 'curve', curveId: 'rim' }, upHint: [0, 0, 1], swap: true });
+      expect(after.configuration.biconeRef).toBe(after.symmetry[0].id);
       expect(after.sharpEdge).toEqual({ method: 'three_points', distance: 2, threshold: 45 });
     });
   }
 
   it('on another type and back: nothing is lost, and what a core measured shows on a flake', () => {
     const store = new ProjectStore(parseProjectFile(JSON.parse(JSON.stringify(oldFile('core')))));
-    const data = () => JSON.stringify([store.state.curves, store.state.workingEdges, store.state.split, store.state.sharpEdge]);
+    const data = () => JSON.stringify([store.state.curves, store.state.workingEdges, store.state.symmetry, store.state.sharpEdge]);
     const start = data();
     const measured = () => store.state.curves.filter((c) => measuresEdgeAngle(c, store.state.specimen.type)).map((c) => c.id);
     expect(measured()).toEqual([]);
@@ -98,30 +101,36 @@ describe('what each type of specimen has', () => {
 });
 
 describe('the summary export by type', () => {
-  it('a core: its split in the shared table, no file of edge angles or working edges, whatever the project stored', () => {
+  /** Every type: the old split's volumes as S1's in symmetry.csv, none of them in measurements.csv. */
+  const symmetryOf = (out: Array<{ suffix: string; text: string }>) => {
+    const s = out.find((f) => f.suffix === 'symmetry.csv')!.text;
+    // (an old split's volumes give the volume symmetry, min / max; nothing else)
+    expect([cell(s, 'symmetry_id'), cell(s, 'source'), cell(s, 'source_id'), cell(s, 'volume_symmetry'), cell(s, 'shape_symmetry'), cell(s, 'volume_a'), cell(s, 'volume_b'), cell(s, 'area_a')]).toEqual(['S1', 'curve', 'C1', '0.333333', '', '3', '1', '']);
+    const m = out.find((f) => f.suffix === 'measurements.csv')!.text;
+    for (const c of ['volume_upper', 'volume_lower', 'volume_ratio']) expect(m.split('\n')[0].split(',')).not.toContain(c);
+  };
+
+  it('a core: its split as S1 in symmetry.csv, no file of edge angles or working edges, whatever the project stored', () => {
     const out = exported('core');
     const names = out.map((f) => f.suffix);
     for (const name of ['edge_angles.csv', 'retouch_angles.csv', 'edge_sharp.csv', 'working_edges.csv']) expect(names).not.toContain(name);
-    const m = out.find((f) => f.suffix === 'measurements.csv')!.text;
-    expect(cell(m, 'volume_upper')).toBe('3');
-    expect(cell(m, 'volume_ratio')).toBe('3');
+    symmetryOf(out);
   });
 
-  it('a generic specimen: the same columns, its split left empty, and no such file', () => {
+  it('a generic specimen: the same columns, its split as S1, and no such file', () => {
     const out = exported('generic');
     const names = out.map((f) => f.suffix);
     for (const name of ['edge_angles.csv', 'retouch_angles.csv', 'edge_sharp.csv', 'working_edges.csv']) expect(names).not.toContain(name);
     const core = exported('core').find((f) => f.suffix === 'measurements.csv')!.text;
     const m = out.find((f) => f.suffix === 'measurements.csv')!.text;
     expect(m.split('\n')[0]).toBe(core.split('\n')[0]);
-    for (const c of ['volume_upper', 'volume_lower', 'volume_ratio']) expect(cell(m, c)).toBe('');
+    symmetryOf(out);
   });
 
-  it('a flake: its edge angles and working edges, and its split left empty', () => {
+  it('a flake: its edge angles and working edges, and its split as S1', () => {
     const out = exported('flake');
     const names = out.map((f) => f.suffix);
     for (const name of ['edge_angles.csv', 'edge_sharp.csv', 'working_edges.csv']) expect(names).toContain(name);
-    const m = out.find((f) => f.suffix === 'measurements.csv')!.text;
-    for (const c of ['volume_upper', 'volume_lower', 'volume_ratio']) expect(cell(m, c)).toBe('');
+    symmetryOf(out);
   });
 });

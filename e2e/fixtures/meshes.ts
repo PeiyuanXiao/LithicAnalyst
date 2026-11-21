@@ -5,7 +5,7 @@
  * traced curve that stays on the ridge shows that snapping worked.
  */
 
-import { bicone, ellipsoid, flakeT1, flakeT2, flakeT6, flakeT8, flakeT9, heightAt, steppedTool, T1, T6, t6Dorsal, t6Ventral, t6Zv, T8, t8Arcs, t8Bulb, t8Dorsal, t8Rings, type T8Variant } from '../../tests/meshes';
+import { bicone, ellipsoid, flakeT1, flakeT2, flakeT6, flakeT8, flakeT9, heightAt, mapped, S_BODY, steppedTool, symmetryS1, symmetryS2, T1, T6, t6Dorsal, t6Ventral, t6Zv, T8, t8Arcs, t8Bulb, t8Dorsal, t8Rings, type T8Variant } from '../../tests/meshes';
 
 export { heightAt, T1, T6, t6Dorsal, t6Ventral, t6Zv, T8, t8Arcs, t8Bulb, t8Dorsal, t8Rings };
 
@@ -293,3 +293,16 @@ export const t8Ply = (variant: T8Variant = {}): MeshFile => ({ name: 't8.ply', m
 /** T9, the core-edge flake (tests/meshes.ts): a tetrahedron, its back the plane x = 10; about 2 300 triangles. */
 export { T9, T9_AREAS } from '../../tests/meshes';
 export const t9Ply = (): MeshFile => ({ name: 't9.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(flakeT9()) });
+
+/** S1 and S2 (stage 34) away from the origin: their plane of symmetry is x = S_CENTRE[0]; S2's bump on the +X end. */
+export const S_CENTRE: Vec3 = [60, -30, 20];
+export { S_BODY };
+const atCentre = (p: Vec3): Vec3 => [p[0] + S_CENTRE[0], p[1] + S_CENTRE[1], p[2] + S_CENTRE[2]];
+export const s1Ply = (): MeshFile => ({ name: 's1.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(mapped(symmetryS1(), atCentre)) });
+export const s2Ply = (): MeshFile => ({ name: 's2.ply', mimeType: 'application/octet-stream', buffer: toBinaryPly(mapped(symmetryS2(), atCentre)) });
+/** A point of S1's surface at angle `deg` round its X axis, at x (from the centre). */
+export const s1Point = (x: number, deg: number): Vec3 => {
+  const r = Math.sqrt(Math.max(0, 1 - (x / S_BODY.a) ** 2));
+  const t = (deg * Math.PI) / 180;
+  return atCentre([x, S_BODY.b * r * Math.cos(t), S_BODY.c * r * Math.sin(t)]);
+};

@@ -637,6 +637,63 @@ export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
   return { method: 'grid', complete: list.length === 0, missing: list, rows, curves, surfaces };
 }
 
+/**
+ * A flake's points by the grid in left–right pairs, by point number (as gm_landmarks.csv and gm_curves.csv), the left one first:
+ * the platform's two ends; along the edge (from its left end) the i-th point and the i-th from its right end; the outline's stretch
+ * from the left end to the point of percussion against the one from it to the right end, reversed; its outer rim against itself,
+ * reversed; in each row of the ventral, dorsal and platform grids (columns across the technical X) the j-th column and the j-th from
+ * the other side. What lies on the middle (the point of percussion, a middle point or column) has no pair, nor have the user's own
+ * landmarks and sets. For a bilateral object symmetry analysis (Klingenberg et al. 2002) in R.
+ */
+export function gmLandPairs(r: Pick<GmResult, 'rows'>): Array<[number, number]> {
+  const byName = new Map<string, number>();
+  for (const x of r.rows) if (!byName.has(x.name)) byName.set(x.name, x.index);
+  const out: Array<[number, number]> = [];
+  const seen = new Set<string>();
+  const pair = (left: number | undefined, right: number | undefined) => {
+    if (left === undefined || right === undefined || left === right) return;
+    const key = left < right ? `${left},${right}` : `${right},${left}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push([left, right]);
+  };
+  /** A curve's points in their order, its ends among them; null when it has none between them. */
+  const curve = (setId: string, start: string, end: string): Array<number | undefined> | null => {
+    const between = r.rows
+      .filter((x) => x.setId === setId && x.name.startsWith(`${setId}_`))
+      .map((x) => ({ k: Number(x.name.slice(setId.length + 1)), index: x.index }))
+      .sort((a, b) => a.k - b.k);
+    return between.length ? [byName.get(start), ...between.map((x) => x.index), byName.get(end)] : null;
+  };
+  pair(byName.get('platform_left'), byName.get('platform_right'));
+  // the edge: from the left end (or the point of percussion, without platform ends) round to the right
+  const ends = byName.has('platform_left') && byName.has('platform_right');
+  const edge = curve('edge', ends ? 'platform_left' : 'pop', ends ? 'platform_right' : 'pop');
+  if (edge) for (let k = 0; 2 * k < edge.length - 1; k++) pair(edge[k], edge[edge.length - 1 - k]);
+  const [a, b, c] = GM_OUTLINE_SETS;
+  const inner = [curve(a, 'platform_left', 'pop'), curve(b, 'pop', 'platform_right')];
+  if (inner[0] && inner[1] && inner[0].length === inner[1].length) for (let k = 0; k < inner[0].length; k++) pair(inner[0][k], inner[1][inner[1].length - 1 - k]);
+  // the outer rim runs from the right end to the left
+  const outer = curve(c, 'platform_right', 'platform_left');
+  if (outer) for (let k = 0; 2 * k < outer.length - 1; k++) pair(outer[outer.length - 1 - k], outer[k]);
+  for (const face of ['ventral', 'dorsal', 'platform']) {
+    const grid = new Map<number, Map<number, number>>();
+    for (const x of r.rows) {
+      // `face_row_column`
+      const m = x.setId === face ? x.name.slice(face.length + 1).split('_').map(Number) : null;
+      if (!m || m.length !== 2 || !m.every(Number.isInteger)) continue;
+      const row = m[0];
+      if (!grid.has(row)) grid.set(row, new Map());
+      grid.get(row)!.set(m[1], x.index);
+    }
+    for (const [, cols] of [...grid].sort((p, q) => p[0] - q[0])) {
+      const n = Math.max(...cols.keys());
+      for (let j = 1; 2 * j < n + 1; j++) pair(cols.get(j), cols.get(n + 1 - j));
+    }
+  }
+  return out;
+}
+
 function meanVertex(p: ArrayLike<number>): Vec3 {
   const m: Vec3 = [0, 0, 0];
   const n = Math.floor(p.length / 3);

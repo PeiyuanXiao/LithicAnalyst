@@ -48,13 +48,16 @@ export function medianAndSigma(values: Float64Array): { median: number; sigma: n
 }
 
 /** The weighted median: the value at which the weights below and above it each come to half (by selection, no sort). */
-export function weightedMedian(values: Float64Array, weights: Float64Array): number {
+export const weightedMedian = (values: Float64Array, weights: Float64Array): number => weightedQuantile(values, weights, 0.5);
+
+/** The weighted quantile q (0–1): the value at which the weights below it come to q of all of them (by selection, no sort). */
+export function weightedQuantile(values: ArrayLike<number>, weights: ArrayLike<number>, q: number): number {
   const n = values.length;
   if (!n) return NaN;
   const v = Float64Array.from(values), w = Float64Array.from(weights);
   let target = 0;
   for (let i = 0; i < n; i++) target += w[i];
-  target /= 2;
+  target *= q;
   const swap = (a: number, b: number) => {
     const tv = v[a], tw = w[a];
     v[a] = v[b];

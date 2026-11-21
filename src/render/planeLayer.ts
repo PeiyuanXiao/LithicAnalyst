@@ -23,8 +23,8 @@ const Z = new THREE.Vector3(0, 0, 1);
 const DISC_OPACITY = 0.032;
 const DISC_OPACITY_SELECTED = 0.26;
 
-/** A plane on screen: translucent disc, the section of the model, and the normal as an arrow. */
-class PlaneVisual {
+/** A plane on screen: translucent disc, the section of the model, and the normal as an arrow (fitted planes, and the symmetry references' planes). */
+export class PlaneVisual {
   readonly root = new THREE.Group();
   private readonly disc: THREE.Mesh;
   private readonly arrow: THREE.ArrowHelper;
@@ -41,7 +41,7 @@ class PlaneVisual {
     this.root.add(this.disc, this.arrow);
   }
 
-  update(r: PlaneResult, color: string, radius: number, arrowLength: number, selected: boolean, origin: Vec3): void {
+  update(r: Pick<PlaneResult, 'center' | 'normal'>, color: string, radius: number, arrowLength: number, selected: boolean, origin: Vec3): void {
     const c = new THREE.Vector3(r.center![0] - origin[0], r.center![1] - origin[1], r.center![2] - origin[2]);
     const n = new THREE.Vector3(...r.normal!);
     this.disc.position.copy(c);
@@ -147,7 +147,7 @@ export class PlaneLayer {
 }
 
 /** Radius around the plane's centre that covers the projection of the bounding box onto the plane. */
-function discRadius(r: PlaneResult, bbox: { min: Vec3; max: Vec3 }): number {
+export function discRadius(r: Pick<PlaneResult, 'center' | 'normal'>, bbox: { min: Vec3; max: Vec3 }): number {
   const c = r.center!, n = r.normal!;
   let best = 0;
   for (let i = 0; i < 8; i++) {

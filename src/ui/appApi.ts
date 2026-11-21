@@ -30,6 +30,8 @@ export interface DisplaySettings {
   /** Shading by height: over which plane (`ventral`, or a fitted plane's id), and its range (±) in mm with a stated unit. */
   heightRef: string;
   heightRangeMm: number;
+  /** Shading by mirror deviation: by which symmetry reference (its id; else the first). */
+  symmetryRef: string;
   /** Arrow display; `labels` and `showHidden` apply to curves too. */
   arrows: ArrowDisplay;
   /** What traced curves are drawn toward. */
@@ -54,12 +56,12 @@ export interface DisplaySettings {
   excelBom: boolean;
 }
 
-export type DisplayAspect = 'height' | 'retouch' | 'gm' | 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
+export type DisplayAspect = 'height' | 'symmetry' | 'retouch' | 'gm' | 'light' | 'shading' | 'curvature' | 'arrows' | 'snap' | 'regions' | 'harris' | 'configuration' | 'profile' | 'other';
 
 /** What can be picked in the configuration: a face of the box or a cone of the bicone. */
 export type ConfigPick = import('../core/fields').ConfigFace | import('../core/fields').BiconeCone;
 
-/** Why the bicone shows nothing: its split is being computed, the mesh is not closed, or the split gives no volumes. */
+/** Why the bicone shows nothing: its symmetry reference is being computed, the mesh is not closed, or the curve gives no volumes. */
 export type ConfigStatus = 'computing' | 'not_closed' | 'split_invalid';
 
 /** What the chart of edge angles shows. */
@@ -123,7 +125,10 @@ export interface AppApi {
   backCut(curveId: string): boolean | null;
   /** A region as a PLY mesh of its own (a download). */
   exportRegionPly(id: string): void;
-  volumeSplit(): import('../compute/split').VolumeSplit | null;
+  /** The symmetry references' values (those computed in full). */
+  symmetryValues(): import('../compute/symmetry').SymmetryValues[];
+  /** A reference as its card shows it: its values so far, those before, how far the rest is (null: no such reference). */
+  symmetryShown(id: string): import('./symmetryRunner').SymmetryShown | null;
   /** Null before the mesh is measured. */
   meshClosed(): boolean | null;
   /** Direction toward the viewer (for orienting a curve's normal). */
@@ -189,15 +194,15 @@ export interface AppApi {
   unjudgedPairs(): number;
   /** Turn the view to the next such border. */
   nextUnjudgedPair(): void;
-  /** Volumetric configuration by the box or the bicone (null without arrows, before the mesh is measured, or for the bicone without its split). */
+  /** Volumetric configuration by the box or the bicone (null without arrows, before the mesh is measured, or for the bicone without its volumes). */
   configuration(): import('../compute/bicone').CoreConfiguration | null;
   /** Why the bicone shows nothing (null: it shows, or the box is used). */
   configStatus(): ConfigStatus | null;
   /** The configuration panel's content changed: keep it inside the view. */
   fitConfigPanel(): void;
-  /** Which way up a new split along this curve points: the side with more scars, when even toward the viewer. */
-  splitUpHint(curveId: string): Vec3;
-  /** Stand the bicone on this closed curve: the split along it and the model, in one step. */
+  /** Which side of a closed curve's plane is A for a new symmetry reference on it: the side with more scars, when even toward the viewer. */
+  symmetryUpHint(curveId: string): Vec3;
+  /** Stand the bicone on this closed curve: the symmetry reference on it (found or made) and the model, in one step. */
   useEdgeCurve(curveId: string): void;
   /** The face (box) or cone (bicone) picked in the configuration panel or the view cube (null: none). */
   configFace(): ConfigPick | null;
@@ -281,6 +286,11 @@ export interface AppApi {
   heightReference(): string | null;
   heightRange(): { value: number; min: number; max: number; step: number; unit: string };
   setHeightRange(value: number): void;
+  /** Shading by mirror deviation: the references it can go by, the one in use, and the upper end of its colours (null: none to go by). */
+  symmetryReferences(): Array<{ value: string; label: string }>;
+  symmetryShadingRef(): string | null;
+  symmetryLimit(): { value: number; min: number; max: number; step: number; unit: string } | null;
+  setSymmetryLimit(value: number): void;
   /** An annotation hidden for the session (view state: not drawn, not picked, not in figures; never in the file, never undone). */
   isHidden(id: string): boolean;
   setHidden(id: string, hidden: boolean): void;

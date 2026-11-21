@@ -1,5 +1,5 @@
 import type { ConfigCorrections, Curve, FlakeData, ImportRecord, Measurement, Plane, ProjectState, Region, Relation, Scar, Section, Sequence, SpecimenInfo, GmConfig, SharpEdgeRule, WorkingEdge } from './types';
-import type { LandmarkData, ProjectStore } from './store';
+import type { LandmarkData, ProjectStore, SymmetryData } from './store';
 
 /**
  * Every change to project data goes through a Command. That single rule gives
@@ -619,20 +619,29 @@ export class SetLandmarksCommand implements Command {
   }
 }
 
-export class SetSplitCommand implements Command {
-  readonly labelKey = 'cmd.editSplit';
+/** The symmetry references (and their label counter) as a whole: added, edited, deleted. `mergeKey`: quick edits of one field become one step. */
+export class SetSymmetryCommand implements Command {
   readonly createdAt = Date.now();
   constructor(
-    private readonly before: ProjectState['split'],
-    private readonly after: ProjectState['split'],
+    readonly labelKey: string,
+    private readonly before: SymmetryData,
+    private after: SymmetryData,
+    private readonly mergeKey: string | null = null,
   ) {}
   apply(store: ProjectStore): void {
-    store._setSplit(structuredClone(this.after));
-    store.notify({ kind: 'split' });
+    store._setSymmetry(structuredClone(this.after));
+    store.notify({ kind: 'symmetry' });
   }
   revert(store: ProjectStore): void {
-    store._setSplit(structuredClone(this.before));
-    store.notify({ kind: 'split' });
+    store._setSymmetry(structuredClone(this.before));
+    store.notify({ kind: 'symmetry' });
+  }
+  merge(next: Command): boolean {
+    if (!(next instanceof SetSymmetryCommand)) return false;
+    if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
+    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
+    this.after = structuredClone(next.after);
+    return true;
   }
 }
 

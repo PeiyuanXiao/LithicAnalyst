@@ -484,7 +484,7 @@ describe('the exports', () => {
       [spec('a', scene()), spec('b', t1Scene(id3, { ends: false })), spec('core', null), spec('c', scene()), spec('d', extra)],
       { excelBom: false },
     );
-    expect(out.files.map((f) => f.suffix)).toEqual(['gm_landmarks.csv', 'gm_landmarks.tps', 'gm_curves.csv', 'gm_surfaces.csv']);
+    expect(out.files.map((f) => f.suffix)).toEqual(['gm_landmarks.csv', 'gm_landmarks.tps', 'gm_curves.csv', 'gm_surfaces.csv', 'gm_land_pairs.csv']);
     expect(out.skipped).toEqual([{ file: 'b.ply', id: 'b', missing: ['platform_ends'] }, { file: 'd.ply', id: 'd', missing: ['point_count'] }]);
     const csv = out.files[0].text.trim().split('\n');
     expect(new Set(csv.slice(1).map((l) => l.split(',')[0]))).toEqual(new Set(['a', 'c']));

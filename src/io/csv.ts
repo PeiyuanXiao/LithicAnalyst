@@ -11,6 +11,7 @@ import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_MEAN_COLUMNS, EDGE_ANGLE_METHODS, e
 import { RETOUCH_ANGLE_METHODS } from '../compute/retouchAngle';
 import { RETOUCH_SUMMARY, type RetouchIndices } from '../compute/retouchIndex';
 import { sharpOfCurve } from '../compute/sharpEdge';
+import { symmetrySourceCode, type SymmetryValues } from '../compute/symmetry';
 import { measuredLine } from '../compute/measuredLine';
 import { edgeAxis, edgeLabels, placedEdges, sharpPieces, type WorkingEdgeRow } from '../compute/workingEdge';
 import { frameSource, type AutoMeasurements, type EdgeAngleCurve } from '../core/derived';
@@ -335,7 +336,6 @@ export function measurementsCsv(
   opts: CsvOptions,
   regions: RegionTotals | null = null,
   nodule: { radius: number; rms: number } | null = null,
-  split: { upper: number; lower: number; ratio: number | null } | null = null,
   file: string = state.mesh?.fileName ?? '',
 ): string {
   const header = [
@@ -355,9 +355,6 @@ export function measurementsCsv(
     'cortex_ratio',
     'nodule_radius',
     'nodule_fit_rms',
-    'volume_upper',
-    'volume_lower',
-    'volume_ratio',
     'file',
   ];
   const row = [
@@ -377,12 +374,42 @@ export function measurementsCsv(
     cell(regions?.cortexRatio ?? null),
     cell(nodule?.radius ?? null),
     cell(nodule?.rms ?? null),
-    cell(split?.upper ?? null),
-    cell(split?.lower ?? null),
-    cell(split?.ratio ?? null),
     csvCell(file),
   ];
   return (opts.excelBom ? '﻿' : '') + [header.join(','), row.join(',')].join('\n') + '\n';
+}
+
+export const SYMMETRY_COLUMNS = ['specimen_id', 'symmetry_id', 'source', 'source_id', 'volume_symmetry', 'area_symmetry', 'shape_symmetry', 'volume_a', 'volume_b', 'area_a', 'area_b', 'deviation_mean', 'deviation_rms', 'deviation_p95', 'unit', 'note'] as const;
+
+/**
+ * One row per symmetry reference: its source (`plane` / `curve` by label, `frame` as `technical_x`, `specimen_y`, …), the three
+ * symmetries (0–1, no unit), the sides' volumes (unit³) and areas (unit²), and the mirror deviation (unit). Empty: not computed,
+ * or the reason the details give (an open mesh has no volume or shape symmetry; a plane that does not cut the mesh, no sides).
+ */
+export function symmetryCsv(state: Readonly<ProjectState>, values: readonly SymmetryValues[], opts: CsvOptions): string {
+  const rows = state.symmetry.map((s) => {
+    const v = values.find((x) => x.id === s.id);
+    const src = symmetrySourceCode(s, state);
+    return [
+      csvCell(state.specimen.id),
+      csvCell(s.label),
+      src.kind,
+      csvCell(src.id),
+      cell(v?.volumeSymmetry ?? null),
+      cell(v?.areaSymmetry ?? null),
+      cell(v?.shapeSymmetry ?? null),
+      cell(v?.volumeA ?? null),
+      cell(v?.volumeB ?? null),
+      cell(v?.areaA ?? null),
+      cell(v?.areaB ?? null),
+      cell(v?.deviationMean ?? null),
+      cell(v?.deviationRms ?? null),
+      cell(v?.deviationP95 ?? null),
+      csvCell(state.specimen.unit),
+      csvCell(s.note),
+    ].join(',');
+  });
+  return (opts.excelBom ? '﻿' : '') + [SYMMETRY_COLUMNS.join(','), ...rows].join('\n') + '\n';
 }
 
 /** One row per manual measurement; points it does not use are left empty; angles are in degrees. */

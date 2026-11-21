@@ -34,8 +34,13 @@ import {
   setConfigSurfaceType,
   setNoduleRegion,
   setNoduleShown,
-  setSplit,
-  swapSplit,
+  addSymmetry,
+  deleteSymmetry,
+  setSymmetryLabel,
+  setSymmetryNote,
+  setSymmetrySource,
+  swapBicone,
+  swapSymmetry,
   deleteScar,
   flipPlane,
   setPlaneCurve,
@@ -52,8 +57,9 @@ import {
 import { curveLength } from '../core/curveGeometry';
 import { measuredLine } from '../compute/measuredLine';
 import { planeMethodsOf } from '../compute/planes';
-import { BACK_RIDGE, BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, hasEdgeAngles, hasVolumeSplit, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, optionKey, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, UPPER_REGION_TYPES, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
-import { edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
+import { BACK_RIDGE, BICONE_ROLES, CONFIG_MODELS, CONFIG_ROLES, CURVE_FIELDS, customValue, fieldLocked, hasEdgeAngles, isCustomValue, isUpperRegion, measuresEdgeAngle, offeredOptions, optionKey, PLATFORM_OUTLINE, POLARITIES, REGION_FIELDS, RETOUCH_LAYERS, UPPER_REGION_TYPES, SCAR_FIELDS, SPECIMEN_TYPES, type BiconeRole, type ConfigFace, type ConfigModel, type ConfigRole, type FieldDef, type Polarity, type SpecimenType } from '../core/fields';
+import { biconeRefOf, edgeCurves, isBicone, soleEdgeCurve, type BiconeResult } from '../compute/bicone';
+import type { SymmetryReason, SymmetryValues } from '../compute/symmetry';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMean, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
@@ -68,7 +74,7 @@ import { fmtCount, fmtDuration, fmtNum, fmtQuantity, MISSING, quantityUnit, type
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { vectorLength } from '../core/store';
 import { deleteWorkingEdge, updateWorkingEdge } from '../core/actions';
-import { retouchSettingsOf, scarsToCheck, type AttributeValue, type Curve, type Measurement, type PlaneMethod, type Scar, type Vec3, type GmConfig, type SharpEdgeRule } from '../core/types';
+import { retouchSettingsOf, scarsToCheck, type AttributeValue, type Curve, type Measurement, type PlaneMethod, type Scar, type SymmetryRef, type SymmetrySource, type Vec3, type GmConfig, type SharpEdgeRule } from '../core/types';
 import { readPref, writePref } from '../io/autosave';
 import { ARROW_COLORS, arrowColor, arrowColorModeOf, type ArrowColorMode } from '../render/arrowLayer';
 import { CURVE_COLORS, curveColor } from '../render/curveLayer';
@@ -95,11 +101,13 @@ import { tip, tips } from './tooltip';
 /** The trash can, in the danger colour. */
 const deleteButton = (id: string, onClick: () => void) => iconButton(ICONS.trash, t('arrows.delete'), onClick, { id, danger: true });
 
-export type RefreshKind = 'hidden' | 'retouch' | 'station' | 'all' | 'flake' | 'edge' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'split' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode';
+export type RefreshKind = 'hidden' | 'retouch' | 'station' | 'all' | 'flake' | 'edge' | 'arrows' | 'curves' | 'measurements' | 'measure' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'configuration' | 'compare' | 'workspace' | 'nodule' | 'symmetry' | 'figure' | 'selection' | 'specimen' | 'display' | 'mesh' | 'mode' | 'symmetryProgress';
 
 interface Section {
   el: HTMLElement;
   refresh: (kind: RefreshKind) => void;
+  /** Only the progress of a computation moved (no values with it). */
+  progress?: () => void;
   /** Shown only while this holds (besides the work mode). */
   visible?: () => boolean;
   /** Shown on a specimen of this type, whatever it holds: also what the empty sidebar shows of it before a model is open. */
@@ -728,7 +736,21 @@ function displaySection(api: AppApi): Section {
     { value: 'scan', label: t('shading.scan'), disabled: !api.hasScanColors() },
     { value: 'curvature', label: t('shading.curvature') },
     { value: 'height', label: t('shading.height'), disabled: !api.heightReferences().length },
+    { value: 'symmetry', label: t('shading.symmetry'), disabled: !api.symmetryReferences().length },
   ], d.shading, (v) => api.setDisplay((x) => (x.shading = v as ShadingMode), 'shading'));
+  // by mirror deviation: which reference, and up to what the colours go
+  const symRef = h('select', { id: 'symmetry-shading-ref', class: 'ctl-select' }) as HTMLSelectElement;
+  symRef.addEventListener('change', () => api.setDisplay((x) => (x.symmetryRef = symRef.value), 'symmetry'));
+  const symRefRow = h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'symmetry-shading-ref' }, t('display.symmetryRef')), symRef);
+  const symLimit = slider({
+    id: 'symmetry-limit', label: t('display.symmetryLimit'), min: 0, max: 1, step: 0.01, value: 1,
+    format: (v) => {
+      const u = api.symmetryLimit()?.unit ?? '';
+      return `${fmtQuantity('length', v)}${u ? ` ${u}` : ''}`;
+    },
+    onInput: (v) => api.setSymmetryLimit(v),
+  });
+  const symGroup = h('div', { class: 'subgroup', id: 'symmetry-shading-group' }, symRefRow, symLimit.el);
   // by height over a plane: which, and how far either way the colours go
   const heightLegend = h('p', { class: 'field-hint legend' }, h('span', { class: 'legend-ramp', 'aria-hidden': 'true' }), t('display.heightLegend'));
   const heightRef = h('select', { id: 'height-ref', class: 'ctl-select' }) as HTMLSelectElement;
@@ -786,7 +808,7 @@ function displaySection(api: AppApi): Section {
     panelRow('retouch-edge-show', t('retouch.edge'), d.retouchEdge, (v) => api.setDisplay((x) => (x.retouchEdge = v), 'retouch')),
   ];
 
-  body.append(shading.el, curvGroup, heightGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, gmPoints.el, ...retouchRows.map((r) => r.el), h('div', { class: 'check-row' }, labels, hidden, regions));
+  body.append(shading.el, curvGroup, heightGroup, symGroup, lightRow, colorMode.el, config.el, harris.el, profile.el, gmPoints.el, ...retouchRows.map((r) => r.el), h('div', { class: 'check-row' }, labels, hidden, regions));
 
   const refresh = (kind: RefreshKind) => {
     // these panels belong to the annotate mode
@@ -829,6 +851,24 @@ function displaySection(api: AppApi): Section {
       heightRef.append(...refs.map((r) => h('option', { value: r.value }, r.label)));
     }
     heightRef.value = api.heightReference() ?? '';
+    // the references there are to go by; none: no shading by deviation
+    const syms = api.symmetryReferences();
+    const symBtn = shading.el.querySelector('[data-value="symmetry"]') as HTMLButtonElement | null;
+    if (symBtn) symBtn.disabled = !syms.length;
+    symGroup.hidden = api.display.shading !== 'symmetry' || !syms.length;
+    const symShown = syms.map((r) => `${r.value}:${r.label}`).join();
+    if (symRef.dataset.refs !== symShown) {
+      symRef.dataset.refs = symShown;
+      clear(symRef);
+      symRef.append(...syms.map((r) => h('option', { value: r.value }, r.label)));
+    }
+    symRef.value = api.symmetryShadingRef() ?? '';
+    const lim = api.symmetryLimit();
+    if (lim) {
+      const input = symLimit.el.querySelector('input') as HTMLInputElement;
+      Object.assign(input, { min: String(lim.min), max: String(lim.max), step: String(lim.step) });
+      if (document.activeElement !== input) symLimit.set(lim.value);
+    }
     const range = api.heightRange();
     const input = heightRange.el.querySelector('input') as HTMLInputElement;
     Object.assign(input, { min: String(range.min), max: String(range.max), step: String(range.step) });
@@ -906,15 +946,17 @@ interface MeasureCell {
   reason?: string;
   /** More about a value, in its tooltip. */
   more?: string;
+  /** How it is written, when not as the row or the table says (a ratio in a row of volumes). */
+  kind?: Quantity;
 }
 
 /**
  * Measures that differ two ways, as a small table: a row for each, a column for each way, the unit in its corner (no
  * cell repeats it). Each cell is a measure of its own: the pointer on it or the focus shows how it was taken, a click fixes that.
  */
-function measureTable(id: string, kind: Quantity, unit: string, columns: string[], rows: Array<{ head: string; cells: MeasureCell[] }>): HTMLTableElement {
-  const cell = (c: MeasureCell) => {
-    const td = h('td', { class: `num${c.value === null ? ' is-missing' : ''}`, id: c.id, 'aria-label': c.label }, fmtQuantity(kind, c.value));
+function measureTable(id: string, kind: Quantity | null, unit: string, columns: string[], rows: Array<{ head: string; kind?: Quantity; cells: MeasureCell[] }>): HTMLTableElement {
+  const cell = (c: MeasureCell, rowKind: Quantity | undefined) => {
+    const td = h('td', { class: `num${c.value === null ? ' is-missing' : ''}`, id: c.id, 'aria-label': c.label }, fmtQuantity(c.kind ?? rowKind ?? kind ?? 'length', c.value));
     if (c.value !== null) {
       td.dataset.hint = c.hint;
       td.tabIndex = 0;
@@ -926,8 +968,12 @@ function measureTable(id: string, kind: Quantity, unit: string, columns: string[
   return h(
     'table',
     { class: 'measure-table', id },
-    h('thead', {}, h('tr', {}, h('th', { scope: 'col', class: 'measure-unit' }, quantityUnit(kind, unit)), ...columns.map((c) => h('th', { scope: 'col' }, c)))),
-    h('tbody', {}, ...rows.map((r) => h('tr', {}, h('th', { scope: 'row', class: 'measure-row-head' }, r.head), ...r.cells.map(cell)))),
+    h('thead', {}, h('tr', {}, h('th', { scope: 'col', class: 'measure-unit' }, kind ? quantityUnit(kind, unit) : ''), ...columns.map((c) => h('th', { scope: 'col' }, c)))),
+    // rows of their own kind (no unit over them all): each says its unit
+    h('tbody', {}, ...rows.map((r) => {
+      const u = r.kind && !kind ? quantityUnit(r.kind, unit) : '';
+      return h('tr', {}, h('th', { scope: 'row', class: 'measure-row-head' }, u ? `${r.head} (${u})` : r.head), ...r.cells.map((c) => cell(c, r.kind)));
+    })),
   );
 }
 
@@ -2008,8 +2054,8 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     choosing = false;
     if (v === 'box') setConfigModel(api.store, 'box');
     else if (!noCurve()) {
-      const sp = st.split;
-      if (st.configuration.model === 'bicone' || (sp?.source === 'curve' && api.store.curve(sp.id)?.closed)) setConfigModel(api.store, 'bicone');
+      const ref = biconeRefOf(st);
+      if (st.configuration.model === 'bicone' || (ref && api.store.curve(ref.source.curveId)?.closed)) setConfigModel(api.store, 'bicone');
       else {
         const sole = soleEdgeCurve(st.curves);
         if (sole) api.useEdgeCurve(sole.id);
@@ -2031,8 +2077,8 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     api.useEdgeCurve(edgeSelect.value);
     refresh('configuration');
   });
-  const swap = h('button', { type: 'button', class: 'icon-btn', id: 'config-swap', 'aria-label': t('split.swap'), onclick: () => swapSplit(api.store) }, icon(ICONS.swap)) as HTMLButtonElement;
-  tip(swap, t('split.swap'));
+  const swap = h('button', { type: 'button', class: 'icon-btn', id: 'config-swap', 'aria-label': t('config.swap'), onclick: () => swapBicone(api.store) }, icon(ICONS.swap)) as HTMLButtonElement;
+  tip(swap, t('config.swap'));
   const edgeRow = h('div', { class: 'config-edge-row', id: 'config-edge-row' }, h('label', { class: 'ctl-label', for: 'config-edge-curve' }, t('config.edgeCurve')), edgeSelect, swap);
   const sketch = h('div', { class: 'config-sketch-wrap' }, api.configSketch().canvas);
   const traits = h('dl', { class: 'num-grid config-traits', id: 'config-traits' });
@@ -2135,7 +2181,7 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
   };
 
   const refresh = (kind: RefreshKind) => {
-    if (!['all', 'configuration', 'arrows', 'specimen', 'mesh', 'figure', 'split', 'curves'].includes(kind)) return;
+    if (!['all', 'configuration', 'arrows', 'specimen', 'mesh', 'figure', 'symmetry', 'curves'].includes(kind)) return;
     const st = api.store.state;
     const bicone = st.configuration.model === 'bicone';
     pill.hidden = !!st.specimen.frame || bicone;
@@ -2147,7 +2193,8 @@ function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
     const loops = edgeCurves(st.curves);
     if (bicone || off) choosing = false;
     edgeRow.hidden = !bicone && !choosing;
-    const current = st.split?.source === 'curve' && loops.some((c) => c.id === st.split!.id) ? st.split.id : '';
+    const ref = biconeRefOf(st);
+    const current = ref && loops.some((c) => c.id === ref.source.curveId) ? ref.source.curveId : '';
     clear(edgeSelect);
     edgeSelect.append(h('option', { value: '', hidden: true }, MISSING), ...loops.map((c) => h('option', { value: c.id }, c.label)));
     edgeSelect.value = bicone ? current : '';
@@ -2835,52 +2882,247 @@ function noduleSection(api: AppApi): Section {
   return { el, refresh, visible: () => api.store.state.specimen.type !== 'generic' && api.store.state.regions.some((r) => r.type === 'cortex') };
 }
 
-function splitSection(api: AppApi): Section {
-  const { el, body } = section('split', t('sec.split'));
-  const select = h('select', { id: 'split-source', class: 'ctl-select', 'aria-label': t('split.by') }) as HTMLSelectElement;
-  select.addEventListener('change', () => {
-    const [source, id] = select.value.split(':');
-    // a new curve: the side with more scars up
-    if (source === 'curve') setSplit(api.store, { source, id, upHint: api.splitUpHint(id), swap: false });
-    else setSplit(api.store, source === 'plane' ? { source, id, upHint: api.towardViewer(), swap: false } : null);
-  });
-  const flip = iconButton(ICONS.swap, t('split.swap'), () => swapSplit(api.store), { id: 'split-swap' });
-  const meta = h('dl', { class: 'num-grid' });
-  body.append(h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'split-source' }, t('split.by')), h('div', { class: 'split-source-row' }, select, flip)), meta);
-  watchHints(api, meta);
-  const refresh = (kind: RefreshKind) => {
-    if (!['all', 'split', 'planes', 'curves', 'mesh', 'specimen', 'measure'].includes(kind)) return;
-    const st = api.store.state;
-    const options: Array<[string, string]> = [['', t('split.none')]];
-    // closed core edges first: the curve a core is split along
-    const loops = st.curves.filter((c) => c.closed);
-    const edge = (c: Curve) => c.attributes.type === 'core_edge';
-    for (const c of loops.filter(edge)) options.push([`curve:${c.id}`, c.label]);
-    for (const p of api.planeResults()) if (p.valid) options.push([`plane:${p.id}`, p.label]);
-    for (const c of loops.filter((x) => !edge(x))) options.push([`curve:${c.id}`, c.label]);
-    // a split whose plane or curve can no longer split stays listed, so it can be seen and cleared
-    const current = st.split ? `${st.split.source}:${st.split.id}` : '';
-    if (st.split && !options.some(([v]) => v === current)) options.push([current, (st.split.source === 'plane' ? api.store.plane(st.split.id) : api.store.curve(st.split.id))?.label ?? '–']);
-    clear(select);
-    for (const [value, label] of options) select.append(h('option', { value }, label));
-    select.value = current;
-    flip.hidden = !st.split;
-    const u = st.specimen.unit;
-    const closed = api.meshClosed();
-    const v = api.volumeSplit();
-    rebuildHints(api, meta, () => {
-      if (closed === false) meta.append(...textValueRow(t('measure.volume'), t('measure.notClosed')));
-      if (v)
-        meta.append(
-          ...hintRow(numRow(t('split.upper'), ...quantity('volume', v.upper, u), 'split-upper'), 'split:upper'),
-          ...hintRow(numRow(t('split.lower'), ...quantity('volume', v.lower, u), 'split-lower'), 'split:lower'),
-          ...hintRow(numRow(t('split.ratio'), fmtQuantity('ratio', v.ratio), '', 'split-ratio'), 'split:ratio'),
+// ---------------------------------------------------------------- symmetry
+
+const FRAME_AXES = ['x', 'y', 'z'] as const;
+
+/** A source as the list says it: "P1", "C3", "Technical X", "Specimen Y" (a plane or curve that is gone: "?"). */
+function symmetrySourceText(api: AppApi, s: SymmetryRef): string {
+  const src = s.source;
+  if (src.kind === 'plane') return api.store.plane(src.planeId)?.label ?? '?';
+  if (src.kind === 'curve') return api.store.curve(src.curveId)?.label ?? '?';
+  return t(`symmetry.frame.${src.frame}`, { axis: src.axis.toUpperCase() });
+}
+
+/** The sources a reference can have, grouped: valid fitted planes, closed curves, the frames' mid-planes (those without their frame disabled). */
+function symmetrySources(api: AppApi): Array<{ group: string; items: Array<{ value: string; label: string; source: SymmetrySource; disabled: boolean }> }> {
+  const st = api.store.state;
+  const planes = api.planeResults().filter((p) => p.valid).map((p) => ({ value: `plane:${p.id}`, label: p.label, source: { kind: 'plane', planeId: p.id } as SymmetrySource, disabled: false }));
+  const curves = st.curves.filter((c) => c.closed).map((c) => ({ value: `curve:${c.id}`, label: c.label, source: { kind: 'curve', curveId: c.id } as SymmetrySource, disabled: false }));
+  const frame = (f: 'technical' | 'specimen', axis: (typeof FRAME_AXES)[number], ok: boolean) => ({ value: `frame:${f}:${axis}`, label: t(`symmetry.frame.${f}`, { axis: axis.toUpperCase() }), source: { kind: 'frame', frame: f, axis } as SymmetrySource, disabled: !ok });
+  const frames = [
+    ...(st.specimen.type === 'flake' ? [frame('technical', 'x', !!st.flake.axis?.matrix)] : []),
+    ...FRAME_AXES.map((a) => frame('specimen', a, !!st.specimen.frame)),
+  ];
+  return [
+    { group: t('symmetry.group.planes'), items: planes },
+    { group: t('symmetry.group.curves'), items: curves },
+    { group: t('symmetry.group.frames'), items: frames },
+  ].filter((g) => g.items.length);
+}
+
+const sourceValue = (s: SymmetrySource): string => (s.kind === 'plane' ? `plane:${s.planeId}` : s.kind === 'curve' ? `curve:${s.curveId}` : `frame:${s.frame}:${s.axis}`);
+
+/** Side A of a new reference: for a curve, the side with more scars; else toward the viewer (it does not count for a plane). */
+const upHintOf = (api: AppApi, s: SymmetrySource): Vec3 => (s.kind === 'curve' ? api.symmetryUpHint(s.curveId) : api.towardViewer());
+
+/** The "RMS, 95%" row of a symmetry reference's details: open or not (for the session). */
+let symmetryMoreOpen = false;
+
+/**
+ * The symmetry references: a plane each (a fitted plane, a closed curve's, a frame's mid-plane) and its sides A and B. First
+ * the three symmetries (volume, area, shape: 0–1), then the sides' volumes and areas and the mirror deviation. While a reference
+ * is computed its values before stay, faded, and the progress shows over them.
+ */
+function symmetrySection(api: AppApi): Section {
+  const badge = h('span', { class: 'badge mono' }, '0');
+  const { el, body } = section('symmetry', t('sec.symmetry'), badge);
+  const hiddenCount = titlePill(api, el, 'symmetry-list-hidden');
+  const list = h('ol', { class: 'arrow-list num-list has-eyes', id: 'symmetry-list', role: 'listbox', 'aria-label': t('sec.symmetry') });
+  const menu = h('div', { class: 'popover menu menu-left', id: 'symmetry-add-menu', role: 'menu', hidden: true });
+  const fillMenu = () => {
+    clear(menu);
+    const groups = symmetrySources(api);
+    if (!groups.length) menu.append(h('p', { class: 'menu-empty' }, MISSING));
+    for (const g of groups) {
+      menu.append(h('p', { class: 'menu-group', role: 'presentation' }, g.group));
+      for (const it of g.items)
+        menu.append(
+          h('button', {
+            type: 'button', class: 'menu-item', role: 'menuitem', id: `symmetry-add-${it.value.replace(/:/g, '-')}`, disabled: it.disabled,
+            onclick: () => {
+              api.popovers.close();
+              const ref = addSymmetry(api.store, it.source, upHintOf(api, it.source));
+              api.selection.set(ref.id);
+            },
+          }, h('span', { class: 'mono' }, it.label)),
         );
+    }
+  };
+  const add = plusButton(t('symmetry.add'), () => {
+    fillMenu();
+    api.popovers.toggle(add, menu);
+  }, 'symmetry-add');
+  add.setAttribute('aria-haspopup', 'menu');
+  const inspector = h('div', { class: 'inspector', id: 'symmetry-inspector' });
+  body.append(list, h('div', { class: 'menu-wrap' }, add, menu), inspector);
+  watchHints(api, inspector);
+  let builtFor: string | null = null;
+  let label: HTMLInputElement | null = null;
+  let note: HTMLInputElement | HTMLTextAreaElement | null = null;
+  const progress = h('p', { class: 'symmetry-progress busy-inline', id: 'symmetry-progress', role: 'status', hidden: true });
+  const results = h('div', { class: 'symmetry-results', id: 'symmetry-results' });
+
+  const reasonText = (r: SymmetryReason | null | undefined): string | undefined => (r ? t(`symmetry.reason.${r}`) : undefined);
+
+  /** "Computing 42 %" over the values while the reference is computed; nothing once it is all there. */
+  const renderProgress = (s: SymmetryRef | undefined) => {
+    const p = s ? api.symmetryShown(s.id)?.progress : null;
+    progress.hidden = p == null;
+    const text = p == null ? '' : t('symmetry.computingShare', { pct: String(Math.round(100 * p)) });
+    if (progress.textContent !== text) progress.textContent = text;
+  };
+
+  const renderResults = (s: SymmetryRef) => {
+    const st = api.store.state;
+    const u = st.specimen.unit;
+    const shown = api.symmetryShown(s.id);
+    const now = shown?.now ?? null, before = shown?.before ?? null;
+    const done = shown?.done ?? { sides: false, deviation: false, shape: false };
+    /** A value: the present one when its part is there, else the one before (faded), else none (with the reason when there is one). */
+    const pick = (part: keyof typeof done, get: (v: SymmetryValues) => number | null, why: (v: SymmetryValues) => SymmetryReason | null) => {
+      if (done[part] && now) return { value: get(now), stale: false, reason: get(now) === null ? reasonText(why(now)) : undefined };
+      const old = before ? get(before) : null;
+      return { value: old, stale: old !== null, reason: undefined };
+    };
+    const hint = (what: string) => `symmetry:${s.id}|${what}`;
+    renderProgress(s);
+    rebuildHints(api, results, () => {
+      // the three symmetries: one row, a cell each
+      const score = (what: 'volume' | 'area' | 'shape', part: keyof typeof done, get: (v: SymmetryValues) => number | null, why: (v: SymmetryValues) => SymmetryReason | null) => {
+        const v = pick(part, get, why);
+        const cell = h(
+          'div',
+          { class: `symmetry-score${v.value === null ? ' is-missing' : ''}${v.stale ? ' is-stale' : ''}`, id: `symmetry-${what}-cell` },
+          h('span', { class: 'symmetry-score-label' }, t(`symmetry.${what}`)),
+          h('span', { class: 'symmetry-score-value', id: `symmetry-${what}` }, v.value === null ? MISSING : fmtQuantity('ratio', v.value)),
+        );
+        // (what it is drawn from: the sides for volume and area, the deviation's colours for shape)
+        if (v.value !== null && !v.stale) {
+          cell.dataset.hint = hint(what);
+          cell.tabIndex = 0;
+        }
+        if (v.reason) tip(cell, v.reason);
+        return cell;
+      };
+      const scores = h(
+        'div',
+        { class: 'symmetry-scores', id: 'symmetry-scores' },
+        score('volume', 'sides', (v) => v.volumeSymmetry, (v) => v.reasons.volume),
+        score('area', 'sides', (v) => v.areaSymmetry, (v) => v.reasons.area),
+        score('shape', 'shape', (v) => v.shapeSymmetry, (v) => v.reasons.shape),
+      );
+      // the raw values, small
+      const sides = (get: (v: SymmetryValues) => number | null, why: (v: SymmetryValues) => SymmetryReason | null, id: string, what: string): MeasureCell & { stale: boolean } => {
+        const v = pick('sides', get, why);
+        return { id, hint: hint(what), value: v.value, label: id, reason: v.reason, stale: v.stale };
+      };
+      const cells = [
+        [sides((v) => v.volumeA, (v) => v.reasons.volume, 'symmetry-volume-a', 'volume'), sides((v) => v.volumeB, (v) => v.reasons.volume, 'symmetry-volume-b', 'volume')],
+        [sides((v) => v.areaA, (v) => v.reasons.area, 'symmetry-area-a', 'area'), sides((v) => v.areaB, (v) => v.reasons.area, 'symmetry-area-b', 'area')],
+      ];
+      const table = measureTable('symmetry-table', null, u, [t('symmetry.sideA'), t('symmetry.sideB')], [
+        { head: t('symmetry.volume'), kind: 'volume', cells: cells[0] },
+        { head: t('symmetry.area'), kind: 'area', cells: cells[1] },
+      ]);
+      const dev = (get: (v: SymmetryValues) => number | null) => pick('deviation', get, (v) => v.reasons.deviation);
+      const devRow = (term: string, get: (v: SymmetryValues) => number | null, id: string) => {
+        const v = dev(get);
+        const row = measureRow(term, 'length', v.value, u, id, hint('deviation'), v.reason);
+        if (v.stale) for (const c of row) c.classList.add('is-stale');
+        return row;
+      };
+      const mean = measureList(devRow(t('symmetry.deviation'), (v) => v.deviationMean, 'symmetry-dev-mean'));
+      const more = h(
+        'details',
+        { class: 'symmetry-more', id: 'symmetry-more', open: symmetryMoreOpen || undefined },
+        h('summary', { class: 'symmetry-more-head', id: 'symmetry-more-head' }, t('symmetry.more')),
+        measureList(devRow(t('symmetry.rms'), (v) => v.deviationRms, 'symmetry-dev-rms'), devRow(t('symmetry.p95'), (v) => v.deviationP95, 'symmetry-dev-p95')),
+      ) as HTMLDetailsElement;
+      more.addEventListener('toggle', () => (symmetryMoreOpen = more.open));
+      results.append(scores, h('div', { class: 'symmetry-raw', id: 'symmetry-raw' }, table, mean, more));
+      for (const c of cells.flat()) if (c.stale) results.querySelector(`#${c.id}`)?.classList.add('is-stale');
     });
   };
+
+  const renderInspector = () => {
+    const id = api.selection.id;
+    const s = id ? api.store.symmetryRef(id) : undefined;
+    if (!s) {
+      clear(inspector);
+      builtFor = null;
+      return;
+    }
+    if (builtFor !== s.id) {
+      builtFor = s.id;
+      clear(inspector);
+      const labelRow = textRow('symmetry-label', t('symmetry.label'), s.label, (v) => setSymmetryLabel(api.store, s.id, v), { mono: true });
+      label = labelRow.input as HTMLInputElement;
+      const select = h('select', { id: 'symmetry-source', class: 'ctl-select' }) as HTMLSelectElement;
+      select.addEventListener('change', () => {
+        const it = symmetrySources(api).flatMap((g) => g.items).find((x) => x.value === select.value);
+        if (it) setSymmetrySource(api.store, s.id, it.source, upHintOf(api, it.source));
+      });
+      const sourceRow = h('div', { class: 'ctl' }, h('label', { class: 'ctl-label', for: 'symmetry-source' }, t('symmetry.source')), select);
+      const noteBox = noteRow('symmetry-note', s.note, (v) => setSymmetryNote(api.store, s.id, v));
+      note = noteBox.input;
+      const actions = h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { type: 'button', class: 'btn btn-quiet btn-sm', id: 'symmetry-swap', onclick: () => swapSymmetry(api.store, s.id) }, icon(ICONS.swap), h('span', {}, t('symmetry.swap'))),
+        deleteButton('symmetry-delete', () => deleteSymmetry(api.store, s.id)),
+      );
+      inspector.append(labelRow.el, sourceRow, progress, results, noteBox.el, actions);
+    }
+    // the parts that follow the reference and its results
+    softSet(label!, s.label);
+    softSet(note!, s.note);
+    const select = inspector.querySelector('#symmetry-source') as HTMLSelectElement;
+    const groups = symmetrySources(api);
+    const current = sourceValue(s.source);
+    clear(select);
+    for (const g of groups) select.append(h('optgroup', { label: g.group }, ...g.items.map((it) => h('option', { value: it.value, disabled: it.disabled }, it.label))));
+    // a source that is gone stays listed, so that it can be seen and changed
+    if (!groups.some((g) => g.items.some((it) => it.value === current))) select.append(h('option', { value: current }, symmetrySourceText(api, s)));
+    select.value = current;
+    renderResults(s);
+  };
+
+  const refresh = (kind: RefreshKind) => {
+    if (!['all', 'symmetry', 'planes', 'curves', 'selection', 'mesh', 'specimen', 'flake', 'hidden', 'measure'].includes(kind)) return;
+    const st = api.store.state;
+    setCount(badge, st.symmetry.length);
+    hiddenCount.set(st.symmetry.map((s) => s.id));
+    add.disabled = !api.hasMesh();
+    list.hidden = st.symmetry.length === 0;
+    clear(list);
+    const sel = api.selection.id;
+    for (const s of st.symmetry) {
+      const isSel = s.id === sel;
+      const shown = api.symmetryShown(s.id);
+      // the shape symmetry; while computed, an ellipsis
+      const value = shown && shown.progress !== null ? '…' : fmtQuantity('ratio', shown?.now?.shapeSymmetry ?? null);
+      const li = h(
+        'li',
+        { class: `arrow-row symmetry-row${api.isHidden(s.id) ? ' is-hidden' : ''}`, role: 'option', 'aria-selected': String(isSel), 'data-id': s.id, onclick: () => api.selection.set(s.id) },
+        h('span', { class: 'chip', style: `--chip:${planeColor(s.label)}` }),
+        h('span', { class: 'arrow-id mono' }, s.label),
+        h('span', { class: 'arrow-meta' }, symmetrySourceText(api, s)),
+        ...valueCells([value, '']),
+        rowEye(api, s.id, s.label),
+      );
+      list.append(li);
+      if (isSel) requestAnimationFrame(() => revealInList(list, li));
+    }
+    renderInspector();
+  };
   refresh('all');
-  // a core's, and it needs a closed curve or a plane
-  return { el, refresh, visible: () => hasVolumeSplit(api.store.state.specimen.type) && (!!api.store.state.split || api.store.state.curves.some((c) => c.closed) || api.planeResults().some((p) => p.valid)) };
+  // only the progress moved: the line over the values, and the list's ellipses stay
+  const onProgress = () => {
+    const id = api.selection.id;
+    renderProgress(id ? api.store.symmetryRef(id) : undefined);
+  };
+  return { el, refresh, progress: onProgress };
 }
 
 function sectionsSection(api: AppApi): Section {
@@ -3249,8 +3491,8 @@ const SECTIONS: Array<[(api: AppApi) => Section, AppMode[]]> = [
   [edgeAngleSection, ['measure']],
   [measureManualSection, ['measure']],
   [planesSection, ['measure']],
+  [symmetrySection, ['measure']],
   [noduleSection, ['measure']],
-  [splitSection, ['measure']],
   [retouchIndicesSection, ['retouch']],
   [retouchParamsSection, ['retouch']],
   [retouchSegmentsSection, ['retouch']],
@@ -3380,6 +3622,10 @@ export function buildSidebar(api: AppApi): Sidebar {
       el.dataset.enterTimer = String(window.setTimeout(() => el.classList.remove('is-entering'), 300));
     },
     refresh: (kind) => {
+      if (kind === 'symmetryProgress') {
+        for (const s of sections) s.progress?.();
+        return;
+      }
       showMode();
       if (kind === 'mode') {
         for (const s of sections) s.refresh('figure');

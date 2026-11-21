@@ -219,9 +219,6 @@ export const isUpperRegion = (type: string, specimen: SpecimenType = 'core'): bo
 /** Edge angles and working edges belong to flakes. On another type their data stay in the file and nothing of them shows or is computed. */
 export const hasEdgeAngles = (specimen: SpecimenType): boolean => specimen === 'flake';
 
-/** The volume split and its upper and lower volumes belong to cores (the bicone stands on it); the same holds. */
-export const hasVolumeSplit = (specimen: SpecimenType): boolean => specimen === 'core';
-
 /** Whether a curve's edge angles are measured: only on a flake; as the user said, else an edge is (a core's too, when its specimen has become a flake, so what it measured still shows). */
 export const measuresEdgeAngle = (c: { edgeAngle?: boolean; attributes: Readonly<Record<string, AttributeValue>> }, specimen: SpecimenType): boolean =>
   hasEdgeAngles(specimen) && (c.edgeAngle ?? (c.attributes.type === 'edge' || c.attributes.type === 'core_edge'));

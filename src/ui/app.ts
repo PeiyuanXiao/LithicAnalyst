@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { CurvatureService } from '../compute/curvatureService';
-import { coreConfiguration, defaultUpHint, isBicone, type CoreConfiguration } from '../compute/bicone';
+import { biconeRefOf, biconeVolumes, coreConfiguration, defaultUpHint, isBicone, type CoreConfiguration } from '../compute/bicone';
+import { SYMMETRY_PARAMETERS, type SymmetryValues } from '../compute/symmetry';
+import { SymmetryRunner, type SymmetryShown } from './symmetryRunner';
+import { workerBackend } from '../io/symmetryJobs';
+import SymmetryWorker from '../io/symmetryWorker?worker&inline';
 import { completeLoopSteps, COMPLETE_ANCHOR_STEP_DEG, COMPLETE_STEP_DEG, type CompleteFailure } from '../compute/completeLoop';
 import type { ConfigBox } from '../compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasuresSteps, type SurfaceMeasures } from '../compute/measure';
@@ -10,17 +14,17 @@ import { bandPiecesSteps, mergePieces, retouchSideSteps, type RetouchSide } from
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { importScars, addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, setBsaEnds, setBsaLevel, TECHNICAL_FRAME, setBiconeSplit, setConfigModel, setSplit, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { importScars, addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, setBsaEnds, setBsaLevel, TECHNICAL_FRAME, useBiconeCurve, deleteSymmetry, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, GmDerived, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
 import { annotationStatus, type StatusKey } from '../core/annotationStatus';
-import { backRidges, keyIndex, CURVE_FIELDS, GENERIC_REGION_TYPE, hasVolumeSplit, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
+import { backRidges, keyIndex, CURVE_FIELDS, GENERIC_REGION_TYPE, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject, type ProjectFile } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
 import { hasVector, retouchSettingsOf, scarsToCheck, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Scar, type Section, type GmConfig, type MeshInfo, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
-import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, workingEdgesCsv } from '../io/csv';
+import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, symmetryCsv, workingEdgesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { APP_DIR, GM_CONFIG_FILE, SHARP_EDGE_FILE, folderPicker, igesFor, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
 import { batchOutputs, gmOutputs, batchSpecimen, storedMeshResults, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
@@ -32,13 +36,13 @@ import { zipStored } from '../io/zip';
 import { fileStem, initHostDownloads, runningInHost, saveFile, saveTextFile } from '../io/saveFile';
 import { facesOfPieceSteps, regionPlyComments, regionPlySteps } from '../io/regionPly';
 import { bsaSettingsOf, bulbWindow, HEIGHT_CONTOUR_SHARE, HEIGHT_RANGE_DIAGONAL, HEIGHT_RANGE_MM, heightsSteps, isoSegmentsSteps, planeCoords, surfaceOverSteps, VI_WIDTHS_MM, windowContoursSteps, type BulbPlane } from '../compute/bulb';
-import { heightColors } from '../compute/colormap';
+import { heightColors, SEQUENTIAL_RAMP, sequentialColors } from '../compute/colormap';
 import { ContourLayer } from '../render/contourLayer';
 import { askToWrite, droppedHandle, isAbort, openFilePicker, saveFilePicker, writeHandle, type ProjectFileHandle } from '../io/fileHandle';
 import { ArrowLayer, arrowColor, arrowColorModeOf, ARROW_COLORS, DEFAULT_ARROW_DISPLAY, type ArrowColorMode } from '../render/arrowLayer';
 import { CurveLayer } from '../render/curveLayer';
 import { MeasureLayer } from '../render/measureLayer';
-import { PlaneLayer, planeColor } from '../render/planeLayer';
+import { discRadius, PlaneLayer, planeColor, PlaneVisual } from '../render/planeLayer';
 import { SectionLayer, sectionLoops2D } from '../render/sectionLayer';
 import { SectionTool } from '../tools/sectionTool';
 import { ClickTool } from '../tools/clickTool';
@@ -53,7 +57,7 @@ import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
 import { AGREEMENT_FLAKE_MEASURES, FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, storedFlakeMeasures, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, EDGE_ANGLE_PARAMETERS, edgeAngleMeans, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleMeans, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
-import { gmAnchorRows, gmMissingInputs, gmSteps, type GmMissing, type GmResult } from '../compute/gm';
+import { gmAnchorRows, gmLandPairs, gmMissingInputs, gmSteps, type GmMissing, type GmResult } from '../compute/gm';
 import { anchorsHashOf, gmCacheKey, gmConfigSummary, gmInUse, gmManifest, gmStanding, GM_TEMPLATE_PARAMETERS, layPatchSteps, regionsHashOf, sameGmConfig, usesTemplate } from '../compute/gmTemplate';
 import { bandGroupsOf, inLowerLayer, regionSourceOf, upperComponentsOf } from '../compute/projectRegions';
 import { TPS_PARAMETERS } from '../compute/tps';
@@ -82,7 +86,7 @@ import { AlignTool } from '../tools/alignTool';
 import { IgesAlign, type AlignOutcome, type IgesFile } from './igesAlign';
 import { ProfilePanel } from './profilePanel';
 import { BulbPage, type BulbEndDrop } from './bulbPage';
-import { gmCurvesCsv, gmLandmarksCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
+import { gmCurvesCsv, gmLandmarksCsv, gmLandPairsCsv, gmModelsCsv, gmOutlinesCsv, gmSmvectorCsv, gmSurfacesCsv, gmSurpCsv, landmarksCsv, landmarksFcsv, landmarksTps, slidersCsv } from '../io/landmarks';
 import { GmLayer } from '../render/gmLayer';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
 import { declutterLabels } from '../render/labelLayout';
@@ -93,14 +97,12 @@ import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
 import { facesOfPiecesSteps, overPiecesSteps, pieceSeedSteps, piecesBesideSteps, joinOpenEndsSteps, JOIN_REACH_EDGES, polylineEdgesSteps, regionsSteps, resolveRegions, smallerPieceSteps, type Partition, type RegionResult, type RegionTotals } from '../compute/regions';
 import { fitSphere, type SphereFit } from '../compute/sphere';
-import { splitByLoopSteps, splitByPlaneSteps, swappedSplit, type SplitResult, type VolumeSplit } from '../compute/split';
-import { boxHint, flakeHint, MEASURE_HINT_PARAMETERS, noduleHint, sharpHint, splitHint, stationsHint, wholeModelHint, type MeasureHint } from '../compute/measureHint';
+import { boxHint, flakeHint, MEASURE_HINT_PARAMETERS, noduleHint, sharpHint, stationsHint, symmetryHint, wholeModelHint, type MeasureHint } from '../compute/measureHint';
 import { HintLayer } from '../render/hintLayer';
 import { assembleCurve, curveSegments } from '../core/curveGeometry';
 
 /** What "Complete loop" says when it cannot. */
 const COMPLETE_FAILURES: Record<CompleteFailure, string> = { short: 'toast.completeShort', edge: 'toast.completeEdge', loop: 'toast.completeLoop' };
-import { fitPlane } from '../compute/meshGeometry';
 import { DEFAULT_FIGURE, FigureError, figureBackgroundColor, figureLayout, FIGURE_BACKGROUNDS, FIGURE_VIEWS, legendItems, renderFigure, viewAxes, type Figure, type FigureBackground, type FigureContext, type FigureLayout, type FigureOverlays, type FigureSettings, type LegendEntry, type SectionDrawing } from '../render/figure';
 import { ConfigSketch } from '../render/configSketch';
 import { ViewCube } from '../render/viewCube';
@@ -167,6 +169,7 @@ const DEFAULT_DISPLAY: DisplaySettings = {
   curvContrast: 1,
   heightRef: 'ventral',
   heightRangeMm: HEIGHT_RANGE_MM.default,
+  symmetryRef: '',
   arrows: { ...DEFAULT_ARROW_DISPLAY },
   curveSnap: 'ridge',
   regions: true,
@@ -220,7 +223,8 @@ function loadDisplay(): DisplaySettings {
   return {
     ...DEFAULT_DISPLAY,
     ...saved,
-    shading: saved.shading === 'curvature' || saved.shading === 'height' ? saved.shading : 'plain',
+    shading: saved.shading === 'curvature' || saved.shading === 'height' || saved.shading === 'symmetry' ? saved.shading : 'plain',
+    symmetryRef: typeof saved.symmetryRef === 'string' ? saved.symmetryRef : '',
     curvScale: Math.max(0, Math.min(100, Math.round(saved.curvScale ?? DEFAULT_DISPLAY.curvScale))),
     heightRef: typeof saved.heightRef === 'string' ? saved.heightRef : DEFAULT_DISPLAY.heightRef,
     heightRangeMm: typeof saved.heightRangeMm === 'number' && Number.isFinite(saved.heightRangeMm) ? Math.max(HEIGHT_RANGE_MM.min, Math.min(HEIGHT_RANGE_MM.max, saved.heightRangeMm)) : HEIGHT_RANGE_MM.default,
@@ -363,8 +367,24 @@ export class App implements AppApi {
   private conflictKey = '';
   private nodule: (SphereFit & { regions: string[] }) | null = null;
   private noduleMesh: THREE.Mesh | null = null;
-  private split: VolumeSplit | null = null;
-  private splitToken = 0;
+  /** The symmetry references' results, computed in the symmetry worker (on the page, in slices, where there is none). */
+  private symmetry = new SymmetryRunner(
+    workerBackend(typeof Worker === 'function' ? () => new SymmetryWorker() : null),
+    () => this.symmetryChanged(),
+    () => this.symmetryProgress(),
+  );
+  /** The reference whose deviation is shown while its row is pointed at (its vertices' deviation is wanted). */
+  private symHoverRef: string | null = null;
+  /** What the bicone took from the symmetry references last (its reference, its volumes, whether its sides are there). */
+  private biconeInputKey = '';
+  /** The shading by mirror deviation: its upper end (null: the reference's 95 % quantile), and the colours shown, by what they are made of. */
+  private symLimit: number | null = null;
+  private symShadeKey = '';
+  /** A symmetry reference's plane while its row is pointed at, as a fitted plane is drawn; where it cuts the model, by reference and plane. */
+  private symGroup: THREE.Group | null = null;
+  private symDisc: PlaneVisual | null = null;
+  private symCut: { key: string; lines: Polyline[] | null } = { key: '', lines: null };
+  private symLegend: HTMLElement | null = null;
   problemsOpen = false;
   private focusedProblem: number | null = null;
   private harrisEl: HTMLElement | null = null;
@@ -630,10 +650,6 @@ export class App implements AppApi {
   private edgeDrag: { id: string; which: 'start' | 'end'; point: Vec3 } | null = null;
   private edgeLegend: HTMLElement | null = null;
   private edgeColorKey = '';
-  /** The split as computed (before `swap`), for the plane or curve it was computed from. */
-  private splitRaw: { key: string; value: SplitResult | null } | null = null;
-  /** The split is being computed (the bicone waits for it). */
-  private splitBusy = false;
   /** A curve being completed into a loop (its id). */
   private completing: string | null = null;
   private viewCube: ViewCube | null = null;
@@ -757,7 +773,14 @@ export class App implements AppApi {
     this.hintLayer = new HintLayer(viewer);
     this.igesLayer = new IgesLayer(viewer);
     this.edgeLegend = h('div', { class: 'viewport-ui edge-legend', id: 'edge-legend', hidden: true });
-    this.viewportEl.append(this.edgeLegend);
+    this.symLegend = h('div', { class: 'viewport-ui edge-legend', id: 'symmetry-legend', hidden: true });
+    this.viewportEl.append(this.edgeLegend, this.symLegend);
+    this.symGroup = new THREE.Group();
+    this.symGroup.name = 'symmetry-plane';
+    this.symDisc = new PlaneVisual();
+    this.symGroup.add(this.symDisc.root);
+    this.symGroup.visible = false;
+    viewer.overlay.add(this.symGroup);
     this.viewCube = new ViewCube(viewer);
     this.viewCube.onPick = (face) => this.selectConfigFace(face, true);
 
@@ -1632,7 +1655,7 @@ export class App implements AppApi {
   private onStoreChange(c: Change): void {
     const sel = this.selection.id;
     this.edgeDetails = null;
-    if (sel && this.store.state.flake.axis?.id !== sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.workingEdge(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel) && !this.store.landmark(sel) && !this.store.semilandmarkSet(sel))
+    if (sel && this.store.state.flake.axis?.id !== sel && !this.store.scar(sel) && !this.store.curve(sel) && !this.store.workingEdge(sel) && !this.store.measurement(sel) && !this.store.plane(sel) && !this.store.section(sel) && !this.store.region(sel) && !this.store.relation(sel) && !this.store.sequence(sel) && !this.store.landmark(sel) && !this.store.semilandmarkSet(sel) && !this.store.symmetryRef(sel))
       this.selection.set(null);
     if (['landmarks', 'curves', 'reset', 'specimen', 'flake'].includes(c.kind)) this.landmarks = landmarkTable(this.store.state);
     if (c.kind === 'landmarks') this.rememberLandmarkNames();
@@ -1651,8 +1674,13 @@ export class App implements AppApi {
     // (a plane's regions: its fit)
     else if (c.kind === 'regions' || c.kind === 'scars' || c.kind === 'planes') this.resolveRegionsNow();
     if (c.kind === 'nodule') this.updateNodule();
-    // only the swap of upper and lower changed: no need to compute the split again
-    if (['split', 'planes', 'curves', 'scars', 'reset'].includes(c.kind)) this.updateSplit(c.kind === 'split');
+    // (what a reference is computed from may have changed; a swap, a label or a note is no reason to compute it again)
+    if (['symmetry', 'curves', 'flake', 'specimen', 'reset'].includes(c.kind)) this.updateSymmetry();
+    if (c.kind === 'symmetry') {
+      this.updateConfiguration();
+      this.refreshHint();
+      this.updateSymmetryShading();
+    }
     // the frame (specimen) changes the box: updateAuto below
     if (['scars', 'configuration', 'reset', 'specimen'].includes(c.kind)) this.updateConfiguration();
     if (c.kind === 'specimen' || c.kind === 'reset') {
@@ -1680,7 +1708,6 @@ export class App implements AppApi {
     if (specimenCounts) {
       this.updatePartition();
       this.scheduleEdgeAngles();
-      this.updateSplit();
     }
     if (c.kind === 'curves' || c.kind === 'reset') this.scheduleEdgeAngles();
     if (['flake', 'specimen', 'reset'].includes(c.kind)) this.scheduleRetouchIndices();
@@ -1688,7 +1715,7 @@ export class App implements AppApi {
     if (c.kind === 'gm') this.keepFolderGm();
     if (['gm', 'flake', 'landmarks', 'specimen', 'reset'].includes(c.kind)) this.scheduleGm();
     this.syncAnnotations();
-    const map: Record<Change['kind'], RefreshKind> = { imports: 'arrows', gm: 'landmarks', sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', workingEdges: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', split: 'split', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
+    const map: Record<Change['kind'], RefreshKind> = { imports: 'arrows', gm: 'landmarks', sharpEdge: 'edge', flake: 'flake', scars: 'arrows', curves: 'curves', workingEdges: 'curves', measurements: 'measurements', planes: 'planes', sections: 'sections', regions: 'regions', relations: 'relations', sequences: 'sequences', landmarks: 'landmarks', nodule: 'nodule', symmetry: 'symmetry', configuration: 'configuration', specimen: 'specimen', reset: 'all' };
     this.sidebar.refresh(map[c.kind]);
     if (c.kind === 'curves' || c.kind === 'reset') this.sidebar.refresh('landmarks');
     if (c.kind === 'workingEdges' || c.kind === 'curves' || c.kind === 'sharpEdge') {
@@ -1799,6 +1826,7 @@ export class App implements AppApi {
     const layer = this.hintLayer, loaded = this.loaded;
     const key = this.hintHover ?? this.hintFocus ?? this.hintPinned;
     const hint = key && layer && loaded ? this.hintOf(key) : null;
+    this.syncSymmetryHint(hint ? key : null);
     // another measure comes into view and fades in; the same one drawn again (its inputs or the theme changed) is there at once
     const fadeIn = !!hint && this.hintShown?.key !== key;
     this.hintShown = key && hint ? { key, hint } : null;
@@ -1838,9 +1866,13 @@ export class App implements AppApi {
         const a = this.auto;
         return a && this.configBox ? boxHint(item as 'length' | 'width' | 'thickness', this.configBox, { length: a.length, width: a.width, thickness: a.thickness }, unit) : null;
       }
-      case 'split': {
-        const parts = this.split ? this.splitRaw?.value?.parts : null;
-        return parts && this.viewer ? splitHint(parts, !!st.split?.swap, loaded.offset, this.viewer.diagonal) : null;
+      // a symmetry reference (`id|volume`, `id|area`: its sides; `id|shape`, `id|deviation`: the deviation's colours) and its plane (syncSymmetryHint)
+      case 'symmetry': {
+        const [id, what] = item.split('|');
+        const ref = st.symmetry.find((s) => s.id === id);
+        const c = ref ? this.symmetry.computed(ref.id) : null;
+        if (!ref || !c || this.isHidden(ref.id)) return null;
+        return (what === 'volume' || what === 'area') && c.sides?.parts ? symmetryHint(c.sides.parts, ref.swap, loaded.offset) : [];
       }
       // (a curve hidden for the session shows nothing)
       case 'edge': {
@@ -1893,7 +1925,8 @@ export class App implements AppApi {
   private updateConfiguration(): void {
     const st = this.store.state;
     // a core's: a flake's data do not go through it
-    this.configResult = this.isCore() ? coreConfiguration(st, this.configBox, this.split) : null;
+    // (the bicone needs only the sides of its reference: it does not wait for the rest)
+    this.configResult = this.isCore() ? coreConfiguration(st, this.configBox, biconeVolumes(st, this.symmetry.values(st, this.loaded?.offset ?? null, true))) : null;
     // a face of the box with the bicone, or a cone with the box: let go
     if (this.pickedFace && !this.pickFits(this.pickedFace)) this.pickedFace = null;
     this.updateConfigPanel();
@@ -1910,32 +1943,25 @@ export class App implements AppApi {
   configStatus(): ConfigStatus | null {
     const st = this.store.state;
     if (!this.isCore() || st.configuration.model !== 'bicone' || this.configResult || !this.hasMesh()) return null;
-    if (!this.measureBase || this.splitBusy) return 'computing';
+    const ref = biconeRefOf(st);
+    if (!this.measureBase || (ref && this.symmetry.hasSource(ref.id) && !this.symmetry.shown(ref, this.loaded?.offset ?? null).done.sides)) return 'computing';
     return this.measureBase.topology.closed === false ? 'not_closed' : 'split_invalid';
   }
 
-  splitUpHint(curveId: string): Vec3 {
+  symmetryUpHint(curveId: string): Vec3 {
     const c = this.store.curve(curveId);
     return defaultUpHint(c?.points ?? [], this.store.state.scars, this.towardViewer());
   }
 
   useEdgeCurve(curveId: string): void {
-    const st = this.store.state;
-    const c = this.store.curve(curveId);
-    if (!c?.closed) return;
-    const sp = st.split;
-    if (sp?.source === 'curve' && sp.id === curveId) return setConfigModel(this.store, 'bicone');
-    const split = { source: 'curve' as const, id: curveId, upHint: this.splitUpHint(curveId), swap: false };
-    if (st.configuration.model === 'bicone') setSplit(this.store, split);
-    else setBiconeSplit(this.store, split);
-    // a plane's split has gone: say so, once
-    if (sp?.source === 'plane') this.feedback.toast(t('split.replaced', { curve: c.label }), 'info', 4000);
+    if (!this.store.curve(curveId)?.closed) return;
+    useBiconeCurve(this.store, curveId, this.symmetryUpHint(curveId));
   }
 
-  /** The points of the closed curve the volume is split along (the bicone's base), or null. */
-  private splitCurvePoints(): Vec3[] | null {
-    const sp = this.store.state.split;
-    return sp?.source === 'curve' ? (this.store.curve(sp.id)?.points ?? null) : null;
+  /** The points of the closed curve the bicone stands on (its base), or null. */
+  private biconeCurvePoints(): Vec3[] | null {
+    const ref = biconeRefOf(this.store.state);
+    return ref ? (this.store.curve(ref.source.curveId)?.points ?? null) : null;
   }
 
   /** The configuration panel and the view cube are shown: switched on, in the annotate mode, with a scar with an arrow. */
@@ -1958,7 +1984,7 @@ export class App implements AppApi {
 
   private syncConfigViews(): void {
     this.viewCube?.set(this.configResult, this.pickedFace, this.configShown());
-    this.sketch?.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar(), this.splitCurvePoints());
+    this.sketch?.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar(), this.biconeCurvePoints());
   }
 
   /** The volumetric configuration's panel over the view (made as the Harris matrix's), holding the sidebar's configuration content. */
@@ -2099,7 +2125,7 @@ export class App implements AppApi {
       this.sketch = new ConfigSketch();
       this.sketch.onPick = (face) => this.selectConfigFace(face, true);
       this.sketch.onPickScar = (id) => this.selection.set(id);
-      this.sketch.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar(), this.splitCurvePoints());
+      this.sketch.set(this.configResult, this.store.state.scars, this.pickedFace, this.selectedScar(), this.biconeCurvePoints());
     }
     return this.sketch;
   }
@@ -2252,6 +2278,11 @@ export class App implements AppApi {
         break;
       case 'height':
         void this.updateHeightShading();
+        this.sidebar.refresh('display');
+        break;
+      case 'symmetry':
+        this.symLimit = null;
+        this.updateSymmetryShading();
         this.sidebar.refresh('display');
         break;
       case 'curvature':
@@ -2731,7 +2762,7 @@ export class App implements AppApi {
   }
 
   private meshResults(): MeshResults {
-    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, split: this.split, box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves(), retouchIndices: this.retouchIndex?.indices ?? null, gm: this.gm, workingEdges: this.workingEdgeDetails().map((d) => d.row) };
+    return { measurements: this.auto, vertices: this.vertexAxes(), regions: this.regions, nodule: this.nodule, symmetry: this.symmetryValues(), box: this.configBox, flake: this.flake, regionFits: this.regionFits, edgeAngles: this.edgeAngleCurves(), retouchAngles: this.retouchAngleCurves(), retouchIndices: this.retouchIndex?.indices ?? null, gm: this.gm, workingEdges: this.workingEdgeDetails().map((d) => d.row) };
   }
 
   regionInfo(): { results: RegionResult[]; totals: RegionTotals } | null {
@@ -3024,7 +3055,10 @@ export class App implements AppApi {
     this.syncAnnotations();
     this.paintRegions();
     this.refreshHint();
+    // a symmetry reference hidden: no shading by it
+    this.updateSymmetryShading();
     this.sidebar.refresh('hidden');
+    this.sidebar.refresh('display');
   }
 
   /** The state as the layers draw it: without what is hidden (the same object when nothing is). */
@@ -5252,7 +5286,7 @@ export class App implements AppApi {
       folder: this.workspace?.name ?? null,
       kind,
       options,
-      parameters: { flake: FLAKE_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, measuredLine: MEASURED_LINE_PARAMETERS, retouchIndex: RETOUCH_INDEX_PARAMETERS, workingEdge: WORKING_EDGE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: gmConfigSummary(this.folderGm ?? this.store.state.gm), gmTemplate: GM_TEMPLATE_PARAMETERS, tps: TPS_PARAMETERS },
+      parameters: { flake: FLAKE_PARAMETERS, symmetry: SYMMETRY_PARAMETERS, edgeAngle: EDGE_ANGLE_PARAMETERS, measuredLine: MEASURED_LINE_PARAMETERS, retouchIndex: RETOUCH_INDEX_PARAMETERS, workingEdge: WORKING_EDGE_PARAMETERS, sharpEdge: { ...SHARP_EDGE_PARAMETERS, rule: this.folderSharp ?? this.store.state.sharpEdge }, gm: gmConfigSummary(this.folderGm ?? this.store.state.gm), gmTemplate: GM_TEMPLATE_PARAMETERS, tps: TPS_PARAMETERS },
       gm: this.gmManifestOfOpen(),
       duplicateNames: this.wsDuplicates,
     };
@@ -5345,7 +5379,7 @@ export class App implements AppApi {
       const live: BatchProject = {
         path: primary?.path ?? own,
         state: structuredClone(this.store.state) as ProjectState,
-        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, split: this.split, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() }, retouchIndices: this.retouchIndex?.indices ?? null, workingEdges: { edges: this.workingEdgeDetails().map((d) => d.row) }, gm: this.gm ? { config: this.store.state.gm, ...this.gm } : null },
+        derived: { regions: this.regions?.results ?? [], regionTotals: this.regions?.totals ?? null, nodule: this.nodule, symmetry: { parameters: SYMMETRY_PARAMETERS, refs: this.symmetryValues() }, planes: this.planes, flake: this.flake ? { measures: this.flake.measures } : null, edgeAngles: { curves: this.edgeAngleCurves() }, retouchAngles: { curves: this.retouchAngleCurves() }, retouchIndices: this.retouchIndex?.indices ?? null, workingEdges: { edges: this.workingEdgeDetails().map((d) => d.row) }, gm: this.gm ? { config: this.store.state.gm, ...this.gm } : null },
         appVersion: __APP_VERSION__,
       };
       projects = projects.map((p) => (p === primary ? live : p));
@@ -5509,6 +5543,8 @@ export class App implements AppApi {
                 csv('gm-csv', t('export.gmCsv'), 'gm_landmarks.csv', has, () => gmLandmarksCsv(st, this.gm!, opts)),
                 csv('gm-curves', t('export.gmCurves'), 'gm_curves.csv', has && this.gm!.curves.length > 0, () => gmCurvesCsv(this.gm!)),
                 csv('gm-surfaces', t('export.gmSurfaces'), 'gm_surfaces.csv', has && this.gm!.surfaces.length > 0, () => gmSurfacesCsv(this.gm!)),
+                // a flake's by the grid: its points left and right in pairs
+                ...(this.isFlake() && !usesTemplate(st.gm, st.specimen.type) ? [csv('gm-land-pairs', t('export.gmLandPairs'), 'gm_land_pairs.csv', has && gmLandPairs(this.gm!).length > 0, () => gmLandPairsCsv(this.gm!))] : []),
                 // (by the grid the files stay those it always had)
                 ...(usesTemplate(st.gm, st.specimen.type)
                   ? [
@@ -5547,9 +5583,10 @@ export class App implements AppApi {
               csv('working-edges', t('export.workingEdges'), 'working_edges.csv', this.workingEdgeDetails().length > 0, () => workingEdgesCsv(st, this.workingEdgeDetails().map((d) => d.row), this.edgeAngleCurves(), opts)),
             ]
           : []),
-        csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile())),
+        csv('measurements', t('export.measurements'), 'measurements.csv', !!this.auto, () => measurementsCsv(st, this.auto, opts, this.regions?.totals ?? null, this.nodule, this.currentFile())),
         csv('manual', t('export.manualMeasurements'), 'manual_measurements.csv', st.measurements.length > 0, () => manualMeasurementsCsv(st, opts)),
         csv('planes', t('export.planes'), 'planes.csv', st.planes.length > 0, () => planesCsv(st, this.planes, opts)),
+        csv('symmetry', t('export.symmetry'), 'symmetry.csv', st.symmetry.length > 0, () => symmetryCsv(st, this.symmetryValues(), opts)),
       ];
     if (this.mode === 'compare') {
       // not while it is being recomputed (the previous result would be written)
@@ -6448,68 +6485,207 @@ export class App implements AppApi {
     void this.save(`${this.stem()}_harris.svg`, harrisSvg(this.harrisLayoutNow(), this.harrisStyle(null), this.harrisPrint()), 'image/svg+xml');
   }
 
-  volumeSplit(): VolumeSplit | null {
-    return this.split;
+  /** The symmetry references' values as stored, in their order (those not computed in full yet left out). */
+  symmetryValues(): SymmetryValues[] {
+    return this.symmetry.values(this.store.state, this.loaded?.offset ?? null);
+  }
+
+  symmetryShown(id: string): SymmetryShown | null {
+    const ref = this.store.symmetryRef(id);
+    return ref ? this.symmetry.shown(ref, this.loaded?.offset ?? null) : null;
   }
 
   meshClosed(): boolean | null {
     return this.measureBase ? this.measureBase.topology.closed : null;
   }
 
-  /**
-   * Upper / lower volumes by the chosen plane or closed curve (closed meshes only; in slices),
-   * exchanged when the split is swapped. With `reuse` the last result stands if it is of the same plane or curve.
-   */
-  private updateSplit(reuse = false): void {
-    const token = ++this.splitToken;
-    const sp = this.store.state.split;
-    const base = this.measureBase;
-    const loaded = this.loaded;
-    const snap = this.surfaceSnap;
-    const key = sp ? JSON.stringify([sp.source, sp.id, sp.upHint]) : '';
-    this.splitBusy = true;
-    const done = (v: SplitResult | null) => {
-      if (token !== this.splitToken) return;
-      this.splitBusy = false;
-      this.splitRaw = { key, value: v };
-      this.split = v && sp ? swappedSplit(v, sp.swap) : null;
-      this.sidebar.refresh('split');
-      // the bicone stands on the split
+  /** Ask for the parts of the symmetry references whose inputs changed (in the worker); the values before stand, faded, meanwhile. */
+  private updateSymmetry(): void {
+    const base = this.measureBase, loaded = this.loaded, snap = this.surfaceSnap;
+    const g = loaded?.geometry;
+    const model = base && loaded && g && snap
+      ? {
+          positions: g.getAttribute('position').array as Float32Array,
+          index: g.index!.array as Uint32Array,
+          offset: loaded.offset,
+          closed: base.topology.closed,
+          chainOf: async (c: Curve): Promise<number[] | null> => {
+            await snap.prepare('off');
+            const search = snap.search(3);
+            return runSliced(
+              polylineEdgesSteps(c.points, true, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
+                if (!search) return null;
+                search.start(a, null);
+                return search.reach(b) ? search.path(b) : null;
+              }),
+            );
+          },
+        }
+      : null;
+    this.symmetry.update(this.store.state, this.planes, model);
+  }
+
+  /** A part of a reference came (or is asked for): its card, the bicone (when its volumes changed), what is shown of it. */
+  private symmetryChanged(): void {
+    this.sidebar?.refresh('symmetry');
+    // the references the shading by deviation can go by
+    this.sidebar?.refresh('display');
+    // (the deviation or the shape coming in is nothing to the bicone: its sketch is not drawn again for them)
+    const st = this.store.state, ref = biconeRefOf(st), offset = this.loaded?.offset ?? null;
+    const key = JSON.stringify([ref?.id ?? null, biconeVolumes(st, this.symmetry.values(st, offset, true)), ref ? this.symmetry.shown(ref, offset).done.sides : null]);
+    if (key !== this.biconeInputKey) {
+      this.biconeInputKey = key;
       this.updateConfiguration();
-      this.refreshHint();
-    };
-    // a core's: on another type the split stays in the file and nothing is computed
-    if (!hasVolumeSplit(this.store.state.specimen.type)) return done(null);
-    if (reuse && sp && this.splitRaw?.key === key) return done(this.splitRaw.value);
-    if (!sp || !base || !loaded || !base.topology.closed) return done(null);
-    const g = loaded.geometry;
-    const pos = g.getAttribute('position').array as Float32Array;
-    const idx = g.index!.array as Uint32Array;
-    const o = loaded.offset;
-    if (sp.source === 'plane') {
-      const r = this.planes.find((p) => p.id === sp.id);
-      if (!r?.valid) return done(null);
-      void runSliced(splitByPlaneSteps(pos, idx, [r.center![0] - o[0], r.center![1] - o[1], r.center![2] - o[2]], r.normal!)).then(done);
+    }
+    this.refreshHint();
+    this.updateSymmetryShading();
+  }
+
+  /** Only the progress moved: the card's line, the shading's legend. */
+  private symmetryProgress(): void {
+    this.sidebar?.refresh('symmetryProgress');
+    if (this.display.shading === 'symmetry') this.updateSymmetryShading();
+  }
+
+  /** The references whose deviation at every vertex is wanted: the shading's, the one pointed at. */
+  private wantSymmetryVertices(): void {
+    const ids = [this.display.shading === 'symmetry' ? this.symmetryShadingRef() : null, this.symHoverRef].filter((x): x is string => !!x);
+    this.symmetry.wantVertices([...new Set(ids)]);
+  }
+
+  /**
+   * A symmetry reference's row is pointed at (`symmetry:id|…`): its plane as a fitted plane is drawn (the disc, where it cuts the model,
+   * the normal toward side A), and over the deviation its colours. Anything else: none of it.
+   */
+  private syncSymmetryHint(key: string | null): void {
+    const group = this.symGroup, disc = this.symDisc, loaded = this.loaded, base = this.measureBase;
+    const [group0, item = ''] = key ? [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)] : [''];
+    const [id, what] = item.split('|');
+    const ref = group0 === 'symmetry' ? this.store.symmetryRef(id) : undefined;
+    const c = ref ? this.symmetry.computed(ref.id) : null;
+    // the deviation's colours: computed for it when pointed at
+    const deviation = !!ref && !!c && (what === 'deviation' || what === 'shape');
+    if ((deviation ? ref!.id : null) !== this.symHoverRef) {
+      this.symHoverRef = deviation ? ref!.id : null;
+      this.wantSymmetryVertices();
+    }
+    this.meshView?.setOverrideColors(deviation ? this.deviationColors(ref!.id) : null);
+    if (!group || !disc || !loaded || !base || !ref || !c) {
+      if (group?.visible) {
+        group.visible = false;
+        this.viewer?.requestRender();
+      }
       return;
     }
-    const c = this.store.curve(sp.id);
-    const fit = c?.closed ? fitPlane(c.points) : null;
-    if (!c || !fit || !snap) return done(null);
-    let normal = fit.normal;
-    if (normal[0] * sp.upHint[0] + normal[1] * sp.upHint[1] + normal[2] * sp.upHint[2] < 0) normal = [-normal[0], -normal[1], -normal[2]];
-    void snap.prepare('off').then(async () => {
-      if (token !== this.splitToken) return;
-      const search = snap.search(3);
-      const chain = await runSliced(
-        polylineEdgesSteps(c.points, true, (p) => snap.nearestVertex(p), base.edges, (a, b) => {
-          if (!search) return null;
-          search.start(a, null);
-          return search.reach(b) ? search.path(b) : null;
-        }),
+    const o = loaded.offset;
+    const s = ref.swap ? -1 : 1;
+    const plane = { center: [c.plane.point[0] + o[0], c.plane.point[1] + o[1], c.plane.point[2] + o[2]] as Vec3, normal: [s * c.plane.normal[0], s * c.plane.normal[1], s * c.plane.normal[2]] as Vec3 };
+    const colour = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#d98e04';
+    disc.update(plane, colour, discRadius(plane, { min: loaded.info.bboxMin, max: loaded.info.bboxMax }), (this.viewer?.diagonal ?? 1) * 0.18, true, o);
+    // where the plane cuts the model: not along a curve (the curve itself parts the sides)
+    const cutKey = c.sides?.parts?.kind === 'loop' ? '' : JSON.stringify([c.plane.point, c.plane.normal]);
+    if (cutKey !== this.symCut.key) {
+      this.symCut = { key: cutKey, lines: null };
+      if (cutKey) {
+        const g = loaded.geometry;
+        void runSliced(intersectPlaneSteps(g.getAttribute('position').array as Float32Array, g.index!.array as Uint32Array, c.plane.point, c.plane.normal, base.edges)).then((lines) => {
+          if (this.symCut.key !== cutKey || this.loaded !== loaded) return;
+          this.symCut = { key: cutKey, lines: lines.map((l) => ({ closed: l.closed, points: l.points.map((p) => [p[0] + o[0], p[1] + o[1], p[2] + o[2]] as Vec3) })) };
+          this.symDisc?.setSections(this.symCut.lines, colour, true, o);
+          this.viewer?.requestRender();
+        });
+      }
+    }
+    disc.setSections(this.symCut.lines, colour, true, o);
+    group.visible = true;
+    this.viewer?.requestRender();
+  }
+
+  /** The references the shading by deviation can go by: those with a plane, by label (not one hidden for the session). */
+  symmetryReferences(): Array<{ value: string; label: string }> {
+    return this.store.state.symmetry.filter((s) => this.symmetry.hasSource(s.id) && !this.isHidden(s.id)).map((s) => ({ value: s.id, label: s.label }));
+  }
+
+  /** The reference in use: the one chosen when there is such, else the first there is. */
+  symmetryShadingRef(): string | null {
+    const refs = this.symmetryReferences();
+    return (refs.find((r) => r.value === this.display.symmetryRef) ?? refs[0])?.value ?? null;
+  }
+
+  /** The upper end of the colours by deviation (coordinate units): as set, else the reference's 95 % quantile; and the slider's range. */
+  symmetryLimit(): { value: number; min: number; max: number; step: number; unit: string } | null {
+    const id = this.symmetryShadingRef();
+    const d = id ? this.symmetry.vertexDeviation(id) : null;
+    if (!id || !d) return null;
+    let top = 0;
+    for (let i = 0; i < d.length; i++) if (d[i] > top) top = d[i];
+    const q = this.symmetry.computed(id)?.deviation?.p95 ?? 0;
+    const p95 = q > 0 ? q : top;
+    const max = Math.max(top, p95, 1e-6 * (this.loaded?.diagonal ?? 1));
+    return { value: Math.min(max, this.symLimit ?? p95 ?? max) || max, min: max / 200, max, step: max / 200, unit: this.store.state.specimen.unit };
+  }
+
+  setSymmetryLimit(value: number): void {
+    this.symLimit = value;
+    this.updateSymmetryShading();
+  }
+
+  /** A reference's deviation in colours, 0 to the limit (the shading's when it goes by this reference, else its 95 % quantile). */
+  private deviationColors(id: string): Float32Array | null {
+    const d = this.symmetry.vertexDeviation(id);
+    if (!d) return null;
+    const limit = id === this.symmetryShadingRef() ? this.symmetryLimit()?.value : this.symmetry.computed(id)?.deviation?.p95;
+    return sequentialColors(d, limit && limit > 0 ? limit : 1);
+  }
+
+  /** Shading by mirror deviation: the chosen reference's d(v) on the sequential ramp, and its legend at the bottom left (its progress until then). */
+  private updateSymmetryShading(): void {
+    const mv = this.meshView, legend = this.symLegend;
+    const on = this.display.shading === 'symmetry';
+    const id = on ? this.symmetryShadingRef() : null;
+    this.wantSymmetryVertices();
+    const d = id ? this.symmetry.vertexDeviation(id) : null;
+    const limit = d ? this.symmetryLimit() : null;
+    if (mv && id && !d) {
+      // being computed: how far, where the scale will be
+      const share = this.symmetry.vertexProgress(id) ?? 0;
+      mv.setSymmetryColors(null);
+      this.symShadeKey = '';
+      if (legend) {
+        const text = t('symmetry.computingShare', { pct: String(Math.round(100 * share)) });
+        const now = legend.querySelector('#symmetry-legend-progress');
+        if (now) now.textContent = text;
+        else {
+          clear(legend);
+          legend.append(h('span', { class: 'busy-inline edge-legend-value', id: 'symmetry-legend-progress' }, text));
+        }
+        legend.hidden = false;
+      }
+      this.viewer?.requestRender();
+      return;
+    }
+    if (!mv || !id || !d || !limit) {
+      if (on) mv?.setSymmetryColors(null);
+      this.symShadeKey = '';
+      if (legend) legend.hidden = true;
+      this.viewer?.requestRender();
+      return;
+    }
+    const key = JSON.stringify([id, limit.value, d.length, this.symmetry.computed(id)?.plane]);
+    if (legend) {
+      const u = quantityUnit('length', this.store.state.specimen.unit);
+      clear(legend);
+      legend.append(
+        h('span', { class: 'edge-legend-value', id: 'symmetry-legend-min' }, `0${u ? ` ${u}` : ''}`),
+        h('span', { class: 'edge-legend-ramp', style: `background:linear-gradient(to right,${SEQUENTIAL_RAMP.join(',')})` }),
+        h('span', { class: 'edge-legend-value', id: 'symmetry-legend-max' }, `≥ ${fmtQuantity('length', limit.value)}${u ? ` ${u}` : ''}`),
       );
-      if (token !== this.splitToken) return;
-      void runSliced(splitByLoopSteps(pos, idx, base.edges, chain, normal)).then(done);
-    });
+      legend.hidden = false;
+    }
+    if (key === this.symShadeKey) return;
+    this.symShadeKey = key;
+    mv.setSymmetryColors(sequentialColors(d, limit.value));
+    this.viewer?.requestRender();
   }
 
   noduleFit(): (SphereFit & { regions: string[] }) | null {
@@ -6614,6 +6790,8 @@ export class App implements AppApi {
     for (const id of [...this.cuts.keys()]) if (this.store.plane(id) && !this.planes.some((p) => p.id === id && p.valid)) this.cuts.delete(id);
     if (!base || !loaded) return;
     for (const r of this.planes) if (r.valid) this.cutModel(r.id, r.center!, r.normal!);
+    // a reference on a plane goes with it
+    this.updateSymmetry();
     this.sidebar?.refresh('planes');
     // a plane the shading goes by may have moved, come or gone
     this.sidebar?.refresh('display');
@@ -6639,7 +6817,7 @@ export class App implements AppApi {
       this.updatePlanes();
       this.updateSections();
       this.updatePartition();
-      this.updateSplit();
+      this.updateSymmetry();
       this.syncAnnotations();
       this.scheduleEdgeAngles();
     });
@@ -6805,6 +6983,7 @@ export class App implements AppApi {
     if (this.mode === 'measure') {
       if (this.store.measurement(sel)) deleteMeasurement(this.store, sel);
       else if (this.store.plane(sel)) deletePlane(this.store, sel);
+      else if (this.store.symmetryRef(sel)) deleteSymmetry(this.store, sel);
       return;
     }
     if (this.mode === 'present') {
@@ -6842,6 +7021,7 @@ export class App implements AppApi {
     mv.setShading(this.display.shading);
     if (this.display.shading === 'curvature') void this.updateCurvatureColors();
     void this.updateHeightShading();
+    this.updateSymmetryShading();
     this.viewer?.requestRender();
   }
 
@@ -6995,10 +7175,10 @@ export class App implements AppApi {
     this.planes = [];
     this.borders = [];
     this.bordersToken++;
-    this.split = null;
-    this.splitRaw = null;
-    this.splitBusy = false;
-    this.splitToken++;
+    this.symmetry.reset();
+    this.symLimit = null;
+    this.symShadeKey = '';
+    this.symCut = { key: '', lines: null };
     this.configBox = null;
     this.configResult = null;
     this.pickedFace = null;
@@ -7072,6 +7252,8 @@ export class App implements AppApi {
     this.curves?.setOrigin(loaded.offset);
     this.measures?.setOrigin(loaded.offset);
     this.planesLayer?.setOrigin(loaded.offset);
+    this.symGroup?.position.set(loaded.offset[0], loaded.offset[1], loaded.offset[2]);
+    this.symGroup?.updateMatrixWorld(true);
     this.sectionLayer?.setOrigin(loaded.offset);
     this.curvBusy = false;
     v.setMesh(this.meshView.mesh, loaded.offset, loaded.diagonal);
@@ -7839,11 +8021,11 @@ export class App implements AppApi {
       /** Where the end of an arrow being dragged is shown. */
       endpointPreview: () => this.arrows?.endpointOverride?.point ?? null,
       gm: () => this.gm,
-      exportGmText: (kind: 'tps' | 'csv' | 'curves' | 'surfaces') => {
+      exportGmText: (kind: 'tps' | 'csv' | 'curves' | 'surfaces' | 'pairs') => {
         const g = this.gm;
         if (!g) return '';
         const st = this.store.state;
-        return kind === 'tps' ? landmarksTps(st, g) : kind === 'csv' ? gmLandmarksCsv(st, g, { excelBom: false }) : kind === 'curves' ? gmCurvesCsv(g) : gmSurfacesCsv(g);
+        return kind === 'tps' ? landmarksTps(st, g) : kind === 'csv' ? gmLandmarksCsv(st, g, { excelBom: false }) : kind === 'curves' ? gmCurvesCsv(g) : kind === 'pairs' ? gmLandPairsCsv(g) : gmSurfacesCsv(g);
       },
       gmTemplate: () => this.store.state.gm.template,
       gmTemplateInfo: () => this.gmTemplateInfo(),
@@ -7914,8 +8096,15 @@ export class App implements AppApi {
         const bytes = await fig.png();
         return { layout: fig.layout, data: btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join('')) };
       },
-      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule, this.split, this.currentFile()),
-      volumeSplit: () => this.split,
+      exportMeasurementsCsvText: () => measurementsCsv(this.store.state, this.auto, { excelBom: false }, this.regions?.totals ?? null, this.nodule, this.currentFile()),
+      exportSymmetryCsvText: () => symmetryCsv(this.store.state, this.symmetryValues(), { excelBom: false }),
+      /** The symmetry references' values, whether they are being computed, and the shading by deviation. */
+      symmetry: () => ({ busy: this.symmetry.busy, values: this.symmetryValues(), partial: this.symmetry.values(this.store.state, this.loaded?.offset ?? null, true), worker: this.symmetry.inWorker }),
+      /** Tests: hold back what the symmetry references ask for (they show as being computed), or let it go. */
+      symmetryHold: (on: boolean) => this.symmetry.hold(on),
+      symmetryShading: () => ({ shading: this.display.shading, reference: this.symmetryShadingRef(), limit: this.symmetryLimit(), legend: this.symLegend && !this.symLegend.hidden ? this.symLegend.textContent : null, colored: !!this.symShadeKey }),
+      /** A vertex's mirror deviation by a reference (its index in the mesh), once computed for the shading. */
+      symmetryDeviation: (id: string, vertex: number) => this.symmetry.vertexDeviation(id)?.[vertex] ?? null,
       /** The drawing of how a measure was taken: which row, what is fixed, its parts and what is on the view. */
       measureHint: () => ({
         key: this.hintShown?.key ?? null,

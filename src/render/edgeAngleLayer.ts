@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import type { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { SEQUENTIAL_RAMP } from '../compute/colormap';
 import type { Vec3 } from '../core/types';
 import { CURVE_COLORS, HALO, lineMaterial, WIDTH_SELECTED } from './curveLayer';
 import type { Viewer } from './viewer';
 
-/** One hue from light (small angles) to dark (large); no yellow: yellow means selected. */
-export const EDGE_ANGLE_RAMP = ['#cde2fb', '#86b6ef', '#3987e5', '#1c5cab', '#0d366b'];
+/** One hue from light (small angles) to dark (large); no yellow: yellow means selected (the mirror deviation's too). */
+export const EDGE_ANGLE_RAMP: readonly string[] = SEQUENTIAL_RAMP;
 
 /** Angles closer than this (degrees) are drawn in one colour: the ramp would make a pattern of the mesh's noise. */
 export const EDGE_ANGLE_FLAT_DEG = 1;

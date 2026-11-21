@@ -5412,3 +5412,137 @@ input[type="checkbox"]:disabled {
     padding-inline: 8px;
   }
 }
+
+/* ------------------------------------------------------------ symmetry */
+
+/* a group's name in a menu of sources */
+.menu-group {
+  margin: 6px 10px 2px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.menu-group:first-child {
+  margin-top: 2px;
+}
+
+/* "Computing 42 %" over the values while a reference is computed */
+.symmetry-progress {
+  margin: 8px 0 0;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+/* the three symmetries: one row of flat cells, a large number in each (no selected state, no amber) */
+.symmetry-scores {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.symmetry-score {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px 7px;
+  border-radius: var(--radius);
+  background: var(--well);
+  transition: opacity 160ms var(--ease);
+}
+
+.symmetry-score-label {
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+.symmetry-score-value {
+  font-family: var(--font-data);
+  font-size: var(--step-2);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.symmetry-score.is-missing .symmetry-score-value {
+  color: var(--ink-3);
+}
+
+.symmetry-score[data-hint] {
+  cursor: pointer;
+}
+
+.symmetry-score:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: 1px;
+}
+
+/* the values of the inputs before, while the present ones are computed */
+.symmetry-results .is-stale {
+  opacity: 0.45;
+}
+
+.symmetry-results td,
+.symmetry-results dd {
+  transition: opacity 160ms var(--ease);
+}
+
+/* the raw values: small, secondary */
+.symmetry-raw {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink-2);
+}
+
+.symmetry-raw .measure-table td,
+.symmetry-raw .num-grid dd {
+  color: var(--ink-2);
+}
+
+/* RMS and 95 %: folded away */
+.symmetry-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--step--1);
+  color: var(--ink-3);
+  border-radius: var(--radius);
+}
+
+.symmetry-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.symmetry-more > summary::before {
+  content: "";
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 160ms var(--ease);
+}
+
+.symmetry-more[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.symmetry-more > summary:hover {
+  color: var(--ink-2);
+}
+
+.symmetry-more > summary:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: 2px;
+}
+
+.symmetry-more[open] > .num-grid {
+  margin-top: 3px;
+}
+
+/* the deviation's scale over the edge angles' when both are there */
+.edge-legend:not([hidden]) + #symmetry-legend {
+  bottom: 44px;
+}

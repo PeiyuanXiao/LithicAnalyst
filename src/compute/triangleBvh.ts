@@ -23,6 +23,72 @@ export class TriangleBvh {
     private readonly counts: Uint16Array,
   ) {}
 
+  /** The nodes still to visit along a ray (the tree is built by halves: its depth stays far below this). */
+  private readonly rayStack = new Int32Array(256);
+
+  /** Whether `p` lies within the box round all the triangles. */
+  inBox(p: Vec3): boolean {
+    const b = this.boxes;
+    return this.tris.length > 0 && p[0] >= b[0] && p[1] >= b[1] && p[2] >= b[2] && p[0] <= b[3] && p[1] <= b[4] && p[2] <= b[5];
+  }
+
+  /**
+   * How many triangles the ray from `o` along `d` passes through (beyond `o`). A ray that meets an edge or a corner may count
+   * a crossing twice or not at all: the caller asks along more than one direction.
+   */
+  crossings(o: Vec3, d: Vec3): number {
+    if (!this.tris.length) return 0;
+    const boxes = this.boxes, links = this.links, counts = this.counts, tris = this.tris, pos = this.positions, idx = this.index;
+    const ox = o[0], oy = o[1], oz = o[2], dx = d[0], dy = d[1], dz = d[2];
+    const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
+    const stack = this.rayStack;
+    let sp = 0, count = 0;
+    stack[sp++] = 0;
+    while (sp) {
+      const node = stack[--sp];
+      const b = 6 * node;
+      // the slabs: where the ray is within the box along each axis
+      let t0 = (boxes[b] - ox) * ix, t1 = (boxes[b + 3] - ox) * ix;
+      let near = t0 < t1 ? t0 : t1, far = t0 < t1 ? t1 : t0;
+      t0 = (boxes[b + 1] - oy) * iy;
+      t1 = (boxes[b + 4] - oy) * iy;
+      near = Math.max(near, t0 < t1 ? t0 : t1);
+      far = Math.min(far, t0 < t1 ? t1 : t0);
+      t0 = (boxes[b + 2] - oz) * iz;
+      t1 = (boxes[b + 5] - oz) * iz;
+      near = Math.max(near, t0 < t1 ? t0 : t1);
+      far = Math.min(far, t0 < t1 ? t1 : t0);
+      if (!(far >= near && far >= 0)) continue;
+      const link = links[node];
+      if (link >= 0) {
+        stack[sp++] = link;
+        stack[sp++] = link + 1;
+        continue;
+      }
+      const first = -1 - link;
+      for (let i = 0; i < counts[node]; i++) {
+        const t = tris[first + i];
+        const a = 3 * idx[3 * t], bb = 3 * idx[3 * t + 1], c = 3 * idx[3 * t + 2];
+        const ax = pos[a], ay = pos[a + 1], az = pos[a + 2];
+        const e1x = pos[bb] - ax, e1y = pos[bb + 1] - ay, e1z = pos[bb + 2] - az;
+        const e2x = pos[c] - ax, e2y = pos[c + 1] - ay, e2z = pos[c + 2] - az;
+        // Möller–Trumbore
+        const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (det === 0) continue;
+        const inv = 1 / det;
+        const sx = ox - ax, sy = oy - ay, sz = oz - az;
+        const u = (sx * px + sy * py + sz * pz) * inv;
+        if (u < 0 || u > 1) continue;
+        const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+        const v = (dx * qx + dy * qy + dz * qz) * inv;
+        if (v < 0 || u + v > 1) continue;
+        if ((e2x * qx + e2y * qy + e2z * qz) * inv > 0) count++;
+      }
+    }
+    return count;
+  }
+
   /** The closest point on the triangles to `q`, or null when there are none. */
   closest(q: Vec3): { face: number; point: Vec3; distance: number } | null {
     if (!this.tris.length) return null;
@@ -99,27 +165,29 @@ export function* triangleBvhSteps(positions: ArrayLike<number>, index: ArrayLike
   const links = new Int32Array(maxNodes);
   const counts = new Uint16Array(maxNodes);
   let nodes = 1;
-  /** The element of rank `k` of items[lo..hi) by the centres along an axis in its place, the smaller before it. */
-  const select = (lo: number, hi: number, k: number, axis: number) => {
-    let l = lo, r = hi - 1;
-    while (l < r) {
-      const pivot = centres[3 * items[(l + r) >> 1] + axis];
-      let i = l, j = r;
-      while (i <= j) {
-        while (centres[3 * items[i] + axis] < pivot) i++;
-        while (centres[3 * items[j] + axis] > pivot) j--;
-        if (i <= j) {
-          const s = items[i];
-          items[i] = items[j];
-          items[j] = s;
-          i++;
-          j--;
-        }
+  /**
+   * One pass of putting the element of rank `k` of items[l..r] by the centres along an axis in its place, the smaller before it:
+   * l and r close in on it; false once it is there.
+   */
+  let l = 0, r = 0;
+  const pass = (k: number, axis: number): boolean => {
+    const pivot = centres[3 * items[(l + r) >> 1] + axis];
+    let i = l, j = r;
+    while (i <= j) {
+      while (centres[3 * items[i] + axis] < pivot) i++;
+      while (centres[3 * items[j] + axis] > pivot) j--;
+      if (i <= j) {
+        const s = items[i];
+        items[i] = items[j];
+        items[j] = s;
+        i++;
+        j--;
       }
-      if (k <= j) r = j;
-      else if (k >= i) l = i;
-      else break;
     }
+    if (k <= j) r = j;
+    else if (k >= i) l = i;
+    else return false;
+    return true;
   };
   const todo: Array<[number, number, number]> = n ? [[0, 0, n]] : [];
   let done = 0;
@@ -150,7 +218,13 @@ export function* triangleBvhSteps(positions: ArrayLike<number>, index: ArrayLike
     const extent = [boxes[b + 3] - boxes[b], boxes[b + 4] - boxes[b + 1], boxes[b + 5] - boxes[b + 2]];
     const axis = extent[0] >= extent[1] && extent[0] >= extent[2] ? 0 : extent[1] >= extent[2] ? 1 : 2;
     const mid = (lo + hi) >> 1;
-    select(lo, hi, mid, axis);
+    l = lo;
+    r = hi - 1;
+    while (l < r) {
+      // (a pass over many takes a while: a turn first)
+      if (r - l > 65536) yield;
+      if (!pass(mid, axis)) break;
+    }
     const left = nodes;
     nodes += 2;
     links[node] = left;

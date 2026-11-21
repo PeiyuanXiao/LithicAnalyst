@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EPA_DISTANCES_MM, flakeMeasures, FLAKE_MEASURES, morphDimensions, type FlakeMeasure, type FlakeResult } from '../src/compute/flake';
-import { arcAngle, boxHint, flakeHint, noduleHint, sharpHint, splitHint, stationsHint, wholeModelHint, type HintArc, type HintDots, type HintFaces, type HintLine, type HintPrim, type MeasureHint } from '../src/compute/measureHint';
+import { arcAngle, boxHint, flakeHint, noduleHint, sharpHint, stationsHint, symmetryHint, wholeModelHint, type HintArc, type HintDots, type HintFaces, type HintLine, type HintPrim, type MeasureHint } from '../src/compute/measureHint';
 import { buildEdges, surfaceArea, signedVolume } from '../src/compute/meshGeometry';
 import { frameMeasures, surfaceMeasures } from '../src/compute/measure';
 import { splitByLoopSteps, splitByPlaneSteps, type SplitParts } from '../src/compute/split';
@@ -271,25 +271,24 @@ describe('the other measures', () => {
     }
   });
 
-  it('the split by a plane: the plane drawn is the one split by, each triangle on its side, the two exchanged', () => {
+  it('a symmetry reference by a plane: side A tinted, each triangle on its side; swapped, the other side', () => {
     const cube = box([2, 2, 2], 4);
     const offset: Vec3 = [10, 20, 30];
     const s = runSync(splitByPlaneSteps(cube.positions, cube.index, [0, 0, 0.5], [0, 0, 1]));
     expect(s.upper).toBeCloseTo(2, 9);
+    // the areas: the part of each side, the cut triangles cut (the plane is drawn as a fitted plane's, not here)
+    expect(s.areas.upper).toBeCloseTo(4 + 4 * 0.5 * 2, 9);
+    expect(s.areas.lower).toBeCloseTo(4 + 4 * 1.5 * 2, 9);
     expect(s.parts.kind).toBe('plane');
-    const h = splitHint(s.parts, false, offset, 10);
-    const circle = line(h, 'split-plane');
-    expect(circle.closed).toBe(true);
-    for (const p of circle.points) close(p[2], 30.5);
-    const faces = (part: string) => [...((h.find((x) => x.kind === 'faces' && x.part === part) as HintFaces).faces as Uint32Array)];
+    const h = symmetryHint(s.parts, false, offset);
+    expect(h.filter((x) => x.kind === 'line')).toEqual([]);
+    const sideA = (hint: typeof h) => [...((hint.find((x) => x.kind === 'faces' && x.part === 'side-a') as HintFaces).faces as Uint32Array)];
     // a triangle goes with the side holding more of its corners
     const above = (t: number) => [0, 1, 2].filter((k) => cube.positions[3 * cube.index[3 * t + k] + 2] >= 0.5).length;
-    expect(faces('upper').length + faces('lower').length).toBe(cube.index.length / 3);
-    for (const t of faces('upper')) expect(above(t)).toBeGreaterThanOrEqual(2);
-    for (const t of faces('lower')) expect(above(t)).toBeLessThan(2);
-    // swapped: the same drawing with the two sides exchanged
-    const swapped = splitHint(s.parts, true, offset, 10);
-    expect([...((swapped.find((x) => x.kind === 'faces' && x.part === 'upper') as HintFaces).faces as Uint32Array)]).toEqual(faces('lower'));
+    const a = sideA(h);
+    for (const t of a) expect(above(t)).toBeGreaterThanOrEqual(2);
+    const all = Array.from({ length: cube.index.length / 3 }, (_, t) => t);
+    expect(sideA(symmetryHint(s.parts, true, offset))).toEqual(all.filter((t) => !a.includes(t)));
   });
 
   it('the split along a curve: the chain of mesh edges, and the volumes summed over the two sides give the numbers', () => {
@@ -313,17 +312,17 @@ describe('the other measures', () => {
     });
     close(Math.abs(upper), s.upper);
     close(Math.abs(lower), s.lower);
-    const h = splitHint(s.parts, false, [1, 1, 1], 10);
-    const chain = line(h, 'split-curve');
+    const h = symmetryHint(s.parts, false, [1, 1, 1]);
+    const chain = line(h, 'symmetry-curve');
     expect(chain.segments).toBe(true);
     expect(chain.points).toHaveLength(ring.length);
     for (const p of chain.points) close(p[2], 1.5);
   });
 
-  it('what the results keep is the volumes only', () => {
+  it('what the results keep is the volumes and areas only', () => {
     const cube = box([2, 2, 2], 2);
     const s = runSync(splitByPlaneSteps(cube.positions, cube.index, [0, 0, 0], [0, 0, 1]));
-    expect(Object.keys(s).sort()).toEqual(['lower', 'parts', 'ratio', 'upper']);
+    expect(Object.keys(s).sort()).toEqual(['areas', 'lower', 'parts', 'ratio', 'upper']);
   });
 
   it('a curve of edge angles: the curve and as many stations as the row says', () => {

@@ -37,9 +37,9 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `annotations.landmarks` | array | fixed landmarks in export order (`{ id, name, point, code? }`) |
 | `annotations.semilandmarks` | array | curve semilandmark sets (`{ id, label, curveId, count, startLandmarkId, endLandmarkId }`), see below |
 | `annotations.sections` | array | display sections (`{ id, label, point, normal, across, keep, fill, inFigure }`); no measurements. `label` is `X{n}` when made and can be changed by the user (any text; figures write it) |
-| `split` | `{ source, id, upHint, swap }` or null | upper / lower volume split by a plane (`source: "plane"`) or a closed curve (`"curve"`); `upHint` orients the curve's normal (set when the split is chosen: toward the side of the curve's plane with more scars by their ends, when even toward the viewer); `swap: true` exchanges upper and lower (files without it: `false`) |
+| `symmetry` | array | the references for measuring symmetry (`{ id, label, note, source, upHint, swap, createdAt, modifiedAt }`), see "Symmetry"; files without it: none, or the `split` of a file of before stage 34 as S1 |
 | `nodule` | `{ exclude, show }` | cortex regions left out of the sphere fit (ids), and whether the sphere is drawn |
-| `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
+| `configuration` | `{ roles, joins, surfaceType, axis, polarity, model, biconeRef, bicone }` | the model of the volumetric configuration and its manual corrections, see below; files without it: the box, no corrections |
 | `flake` | `{ axis, otherFrame, retouch }` | a flake's own data, see "Flakes" and "Retouch indices"; files without it: none |
 | `gm` | object | which points a specimen has for geometric morphometrics, see "Geometric morphometrics"; files without it: the default |
 | `sharpEdge` | `{ method, distance, threshold }` | what counts as a sharp edge, see "Sharp edge"; files without it: three points at 2 mm, no threshold |
@@ -56,6 +56,7 @@ ignore needs a new `formatVersion` and a migration in `src/core/schema.ts`.
 | `nextSequenceNumber` | integer | next sequence label (`Q{n}`) |
 | `nextLandmarkNumber` | integer | next default landmark name (`LM{n}`) |
 | `nextSemilandmarkNumber` | integer | next semilandmark set label (`SL{n}`) |
+| `nextSymmetryNumber` | integer | next symmetry reference label (`S{n}`); files without it: one more than the largest `S{n}` among the references |
 
 Readers should ignore keys they do not know. Future annotation layers will be added next to
 `scars` and `curves` inside `annotations`.
@@ -113,7 +114,7 @@ unless the user reversed them all before confirming. Undoing the import removes 
   flake's technical frame, see "Flakes"), followed by `; vertical:S3` when an arrow set the
   vertical (pointing up, origin at the bottom) or `; turned` when a technical frame was turned on the page.
 * `type`: `core`, `flake` or `generic`; files without it are read as `core`. It decides which tools, panels
-  and exports the specimen has, nothing else: the other types' data stay in the file. Edge angles and working edges are a flake's, the volume split a core's: `edgeAngle` on a curve, `workingEdges`, `sharpEdge` and `split` are kept as they are on any type and read again when the type has them, while on another type `derived.edgeAngles`, `derived.retouchAngles`, `derived.sharpEdge`, `derived.workingEdges` and `derived.split` are empty, `edge_angles.csv`, `retouch_angles.csv`, `edge_sharp.csv` and `working_edges.csv` have no rows for it and `measurements.csv` leaves `volume_upper`, `volume_lower` and `volume_ratio` empty. On a `generic` specimen curve and region types
+  and exports the specimen has, nothing else: the other types' data stay in the file. Edge angles and working edges are a flake's: `edgeAngle` on a curve, `workingEdges` and `sharpEdge` are kept as they are on any type and read again when the type has them, while on another type `derived.edgeAngles`, `derived.retouchAngles`, `derived.sharpEdge` and `derived.workingEdges` are empty and `edge_angles.csv`, `retouch_angles.csv`, `edge_sharp.csv` and `working_edges.csv` have no rows for it. The symmetry references are every type's. On a `generic` specimen curve and region types
   are the annotator's own text (a preset code from another type stays as it is); a new region's type is `region` until changed, its `scarId` is
   null and it makes no scar, whatever its text says; all regions lie in one layer, cut by all the curves (a region typed `platform` is that word, not
   an upper region, and has `parent: null`), and those with `auto: true` are left aside as on a core. `derived.configuration`, `derived.flake`, `derived.nodule` and `derived.retouchAngles` are empty. Arrows keep
@@ -160,13 +161,8 @@ fitted planes, fitted spheres, volumes ….
 * `nodule`: the sphere fitted to the chosen cortex regions: `{ center, radius, rms, count, regions }`
   (least squares on their vertices — algebraic fit, then Gauss–Newton on the distances; at most
   about 200 000 vertices, evenly picked), or null.
-* `split`: `{ upper, lower, ratio }` (unit³; ratio = upper / lower), or null (always on a flake or a generic specimen). By a plane: each side
-  is closed by the section; with a reference point on the plane the cap adds no volume, so the
-  clipped triangles on each side are summed (divergence theorem). By a closed curve: the curve's
-  mesh edges split the surface in two; each side is closed by a fan from the centre of the curve
-  (no volume with that centre as the reference point). Upper = the side the normal points to
-  (the plane's normal, or the normal of the plane fitted to the curve, oriented by `upHint`);
-  with `split.swap` the two are exchanged (also `ratio`). Closed meshes only.
+* `symmetry`: `{ parameters, refs }`, each symmetry reference's plane, its three symmetries, sides and mirror deviation, see "Symmetry"
+  (null: no references; a reference not yet computed in full is left out).
 * `relations`: checks of the relations and sequences, by scar and sequence id:
   `{ cycles, cycleEdges, sequenceConflicts, orderConflicts, unassigned, count, direct }`.
   Only `a_cuts_b` relations take part (as `{ later, earlier }`). `cycles`: groups of scars whose
@@ -190,8 +186,8 @@ fitted planes, fitted spheres, volumes ….
   with its largest component positive; +Y = Z × X).
 
 * `configuration`: the volumetric configuration of the core by the box or the bicone (null for a flake,
-  without scars with an arrow, before the mesh is measured, or for the bicone without a split by a
-  closed curve on a closed mesh), see the next section.
+  without scars with an arrow, before the mesh is measured, or for the bicone without the volumes of a
+  symmetry reference on a closed curve of a closed mesh), see "Volumetric configuration".
 * `flake`: a flake's measurements, see "Flakes" (null for a core, or before they are computed).
 * `edgeAngles`: the edge angles of the curves measured, see "Edge angles" (null: none).
 * `retouchAngles`: the retouch layers along those curves, see "Retouch layers" (null: none).
@@ -260,18 +256,19 @@ face's centre (in the face, the cosine between the scar's direction and start �
 **Corrections** (`configuration` at the top level):
 
 ```json
-{ "roles": { "back": "flaking" }, "joins": { "front|right": false }, "surfaceType": { "front": "narrow" }, "axis": {}, "polarity": null, "model": "box", "bicone": { "roles": {} } }
+{ "roles": { "back": "flaking" }, "joins": { "front|right": false }, "surfaceType": { "front": "narrow" }, "axis": {}, "polarity": null, "model": "box", "biconeRef": null, "bicone": { "roles": {} } }
 ```
 
 * `roles`: face code → role. `joins`: two adjacent face codes in face order joined by `|` →
   whether they are one surface. `surfaceType` (`wide` / `narrow`) and `axis` (`long` / `short`):
   written to every face of the surface; a surface takes the value of its first face (in face order)
   that has one, else the automatic value. `polarity`: one of the polarity codes, or null.
-* `model`: `box` (default; files without it) or `bicone`, see below. `bicone.roles`: the bicone's
+* `model`: `box` (default; files without it) or `bicone`, see below. `biconeRef`: the id of the symmetry reference the bicone
+  stands on (one with a closed curve as its source), or null. `bicone.roles`: the bicone's
   role corrections by physical side, `positive` / `negative` → `flaking` / `none`.
 * Faces follow the box's orientation, so a change of `specimen.frame` (also setting or clearing it)
-  clears `roles`, `joins`, `surfaceType` and `axis` in the same undo step; `polarity`, `model` and
-  `bicone` stay.
+  clears `roles`, `joins`, `surfaceType` and `axis` in the same undo step; `polarity`, `model`,
+  `biconeRef` and `bicone` stay.
 * Unknown faces and codes are dropped when a file is read.
 
 **Derived** (`derived.configuration`): `frame`; `axes` (X, Y, Z, unit vectors in original
@@ -287,22 +284,25 @@ autoAxis, axis }`); and `facialCharacter`, `flakingSurfaceRelation`, `platformRe
 ### The bicone model
 
 For cores made of two surfaces round one plane of intersection (Levallois, discoid, prepared,
-centripetal cores): two cones sharing one round base, as large as the volume split makes them. A
+centripetal cores): two cones sharing one round base, as large as the two sides of a closed curve make them. A
 conceptual aid only: it does not tell discoid from Levallois, gives no polarity (taken as
-centripetal) and no platforms. It can be chosen when the volume is split along a closed curve
-(`split.source: "curve"`); it uses that split's volumes and nothing else is computed for it.
+centripetal) and no platforms. It stands on a symmetry reference whose source is a closed curve
+(`configuration.biconeRef`, see "Symmetry"); it uses that reference's volumes (upper = side A, lower = side B) and nothing else is
+computed for it. Choosing the curve in the configuration panel takes the reference with that curve as its source (the one the bicone
+stood on, else the first), or makes one (side A toward the side with more scars by their ends; when even, toward the viewer), and
+sets the model, in one undo step; "swap upper and lower" is that reference's `swap`. Deleting the reference sets `biconeRef` to null.
 
-* **Base**: the plane fitted to the split curve's points (principal components, through their
-  mean), its normal pointing to the upper side of the split (oriented by `split.upHint`, the other
-  way when `split.swap`). The curve projected onto the plane gives the area A and its area centroid
+* **Base**: the plane fitted to the curve's points (principal components, through their
+  mean), its normal pointing to the upper side (oriented by the reference's `upHint`, the other
+  way when its `swap`). The curve projected onto the plane gives the area A and its area centroid
   O (shoelace formula); R = √(A / π).
 * **Heights**: h(upper) = 3 V(upper) / A, h(lower) = 3 V(lower) / A (cones on that base with the
-  split's volumes). Stored as they are; the sketch draws each at least 0.1 R high.
+  reference's volumes). Stored as they are; the sketch draws each at least 0.1 R high.
 * **Scars**: a scar is on the upper cone when its end is on the upper side of the plane through O
   (its start is on the rim and says nothing).
 * **Roles** (codes `flaking`, `none`): a cone with a scar is `flaking`, else `none`; the role used is
   the correction, else the automatic role. Corrections are kept by physical side: `positive` is the
-  side the curve's normal points to when oriented by `split.upHint` (the upper cone unless swapped),
+  side the curve's normal points to when oriented by the reference's `upHint` (the upper cone unless swapped),
   `negative` the other, so a correction stays with its cone when upper and lower are swapped.
 * **Traits**: only the facial character (one flaking cone `unifacial`, two `bifacial`, none null)
   and the flaking surfaces: the flaking cones, upper first, `F1`, `F2`.
@@ -315,6 +315,76 @@ upper cone); `centre` (O); `area`; `radius`; `upperHeight`, `lowerHeight` (true 
 `reference`; `scars` (`{ id, cone, surface }`, `cone` `upper` / `lower`, `surface` null when the cone
 is not flaking); `cones` (`{ cone, side, autoRole, role, scars }`, upper then lower); `surfaces`
 (`{ id, cone, scarIds }`); `facialCharacter`.
+
+## Symmetry
+
+A symmetry reference is a plane and the two sides it parts, A and B. The user chooses the plane for the question at hand: a flake's
+bilateral symmetry by its technical frame's mid-plane, a handaxe's bifacial symmetry by the plane of its edge curve, a core's upper and
+lower volumes by its junction curve (which the bicone stands on).
+
+```json
+{ "id": "5d0e…", "label": "S1", "note": "", "source": { "kind": "frame", "frame": "technical", "axis": "x" }, "upHint": [0, 0, 1], "swap": false, "createdAt": "…", "modifiedAt": "…" }
+```
+
+* `label`: `S{n}` when made, editable (any text; `symmetry.csv` writes it). `note`: the annotator's.
+* `source`, one of: `{ kind: "plane", planeId }`, a fitted plane (its `center` and `normal`); `{ kind: "curve", curveId }`, a closed curve:
+  the plane fitted to its points (principal components, through their mean), and the curve itself parts the two sides; `{ kind: "frame",
+  frame, axis }`, a frame's mid-plane, normal to its axis `x`, `y` or `z`: `technical` (a flake's technical frame only) through the point
+  of percussion, `specimen` (the specimen frame) through the surface centroid (the triangles' centroids weighted by their areas).
+* Side A is the side the plane's normal points to; for a curve, the normal turned toward `upHint` (set when the reference is made: toward the
+  side with more scars by their ends, when even toward the viewer; for the other sources it is kept but does not count). `swap: true`
+  exchanges A and B. A new source starts again: `upHint` anew, not swapped.
+* A reference whose source is gone (a plane or curve deleted, a frame not set) stays, with no values (`no_source`). Every change is one undo step.
+* Files of before stage 34 had `split: { source: "plane" | "curve", id, upHint, swap }` (upper / lower volume) instead: it is read as S1
+  with that source, `upHint` and `swap`; a split along a curve was the bicone's, so `configuration.biconeRef` is S1. A reference of a source
+  not understood is left out when a file is read. Stage 34 had `optimize` (a best plane of symmetry searched from the source's): it is
+  ignored when a file is read — the symmetry measured is that of the feature the user chose, not of a plane found for it.
+
+**Computed** for each reference (on the mesh as it is, in its own coordinate unit):
+
+1. The plane: point p0, unit normal n, the source's.
+2. The sides: by the plane, each triangle with its side for drawing and, for the sums below, clipped where the plane crosses it; along
+   a curve (a curve's source), the two pieces of surface its mesh edges part (each point of the curve to its nearest vertex, joined along
+   the surface); the plane fitted to the curve's points is the mirror.
+3. Volumes `volumeA`, `volumeB` (unit³): by the plane, each side closed by its section, which with the plane's point as the reference adds
+   no volume (divergence theorem); along the curve, each side closed by a fan from the curve's centre. Closed meshes only (`not_closed`).
+4. Areas `areaA`, `areaB` (unit²): the model's own surface on either side (the clipped triangles' parts on their sides; no cap); open
+   meshes too.
+5. The three symmetries, each without unit, 0 to 1, 1 symmetric:
+   * `volumeSymmetry` = min(A, B) / max(A, B) of the volumes (closed meshes only);
+   * `areaSymmetry` = min(A, B) / max(A, B) of the areas;
+   * `shapeSymmetry`, the mirror overlap V(S ∩ S′) / V(S): S the specimen as a solid, S′ its mirror image in the plane; that is, of the
+     points inside S, the share by volume whose mirror image is inside S too — the flip test in three dimensions (Hardaker, T., & Dunn,
+     S. (2005). The flip test – a new statistical measure for quantifying symmetry in stone tools. *Antiquity*, 79(306), Project Gallery).
+     Closed meshes only (`not_closed`). Computed on a regular grid laid once a model over its box: step h = (V / `SYM_OVERLAP_SAMPLES`)^(1/3),
+     V the model's volume, the first point half a step in from the box's corner on each axis (so the same each time); the grid points
+     inside S are the interior samples (about `SYM_OVERLAP_SAMPLES`), and the shape symmetry is the share of them whose mirror image is
+     inside S. Inside or not: from the point a ray along each of the three `SYM_RAY_DIRECTIONS` (none along an axis), the triangles it
+     crosses counted, odd = inside, the majority of the three.
+
+   Swapping A and B changes none of the three, only exchanges the sides' values.
+6. Mirror deviation, as a supplement (coordinate units, not scaled by size): the distance of the mirror image of a point of the surface
+   from the surface (the same as the point's distance from the mirrored surface). Over `SYM_DEVIATION_SAMPLES` points of the surface,
+   laid once a model by systematic sampling along the running sum of the triangles' areas, each point's place within its triangle from
+   the R2 low-discrepancy sequence (the same each time), each the same weight: `deviationMean`, `deviationRms` and `deviationP95` (the
+   `DEVIATION_QUANTILE` quantile). The deviation at every vertex (for the shading by it) is not stored.
+7. A plane that leaves one side empty (less than `EMPTY_SIDE_SHARE` of the surface) has no sides and none of the three symmetries
+   (`no_cut`); its mirror deviation is still computed.
+
+**Derived** (`derived.symmetry`): `parameters` (`SYM_OVERLAP_SAMPLES` 50000, `SYM_DEVIATION_SAMPLES` 50000, `DEVIATION_QUANTILE` 0.95,
+`EMPTY_SIDE_SHARE` 1e-9, `SYM_RAY_DIRECTIONS` three unit vectors; also in the exports' `manifest.json`) and `refs`: one per reference
+computed in full, in their order:
+
+```json
+{ "id": "5d0e…", "plane": { "point": [12.1, 40.3, 5.0], "normal": [1, 0, 0] }, "volumeSymmetry": 0.968, "areaSymmetry": 0.981,
+  "shapeSymmetry": 0.912, "volumeA": 15071.5, "volumeB": 14590.2, "areaA": 2614.8, "areaB": 2565.3, "deviationMean": 0.41,
+  "deviationRms": 0.62, "deviationP95": 1.37, "reasons": { "volume": null, "area": null, "shape": null, "deviation": null } }
+```
+
+`plane` is in original coordinates, the normal toward side A (after `swap`). `reasons` say why a value is empty: `volume` (the volume
+symmetry and the volumes), `area` (the area symmetry and the areas), `shape`, `deviation`; each `no_source`, `not_closed`, `no_cut` or null.
+A file of stage 34 stored no symmetries (`sourcePlane`, `optimized`, `rounds`, `angleToSourceDeg`, `offsetToSource` and `volumeRatio`
+instead): read for the summary export, its volume and area symmetries follow from its sides, its shape symmetry is empty.
 
 ## Flakes
 
@@ -983,6 +1053,28 @@ Geometric morphometrics (see "Geometric morphometrics"): the coordinates as the 
 ```
 before,slide,after      <specimen>_gm_curves.csv (by point number from 1; the ends of a curve do not slide)
 index                   <specimen>_gm_surfaces.csv
+left,right              <specimen>_gm_land_pairs.csv (a flake by the grid only: its points in left–right pairs)
+```
+
+`gm_land_pairs.csv` pairs each point of a flake's grid configuration with its mirror image across the technical frame's X = 0, by the
+same point numbers, the left point (technical X < 0 on a symmetric flake) first: the platform's two ends; along the edge (from its left
+end by the distal end to its right end) the i-th point and the i-th from the end; the platform outline's stretch from the left end to the
+point of percussion against the stretch from it to the right end, reversed; the outline's outer rim against itself, reversed; in each row
+of the ventral, dorsal and platform grids the j-th column and the j-th from the other side. Points on the middle (the point of percussion,
+a middle point of the edge or rim, a middle column) are not listed, nor are the user's own landmarks and sets. Not written by a template,
+nor for a core or a generic specimen. For Procrustes analysis of object symmetry (Klingenberg, C. P., Barluenga, M., & Meyer, A. (2002). Shape analysis of symmetric structures: quantifying variation among individuals and asymmetry. *Evolution*, 56(10), 1909–1920), e.g. in R:
+
+```r
+library(geomorph)
+lm  <- read.csv("site_gm_landmarks.csv")       # summary export: every specimen, the same points
+pairs <- as.matrix(read.csv("gm_land_pairs.csv"))
+p <- max(lm$index); ids <- unique(lm$specimen_id)
+A <- array(NA, c(p, 3, length(ids)), dimnames = list(NULL, c("x", "y", "z"), ids))
+for (s in ids) { d <- lm[lm$specimen_id == s, ]; A[d$index, , s] <- as.matrix(d[, c("x", "y", "z")]) }
+curves <- as.matrix(read.csv("gm_curves.csv")); surfaces <- read.csv("gm_surfaces.csv")$index
+gpa <- gpagen(A, curves = curves, surfaces = surfaces)
+sym <- bilat.symmetry(A = gpa$coords, ind = dimnames(gpa$coords)[[3]], object.sym = TRUE, land.pairs = pairs)
+summary(sym)   # the symmetric component and the fluctuating asymmetry
 ```
 
 By a template the table has two more columns, what is missing is `NA` in all three coordinate files, and there is what Morpho's `slider3d` takes:
@@ -1111,7 +1203,7 @@ the model, or a fresh project; `file` is the model's path), `landmarks.tps` (one
 specimen), and — with several observers per model, told apart by `specimen.annotator` —
 `icc.csv`: `measure,n_specimens,n_raters,icc` (ICC(2,1), two-way random, absolute agreement,
 single rater; over the specimens every observer measured; measures: length, width, thickness
-along each observer's frame, cortex_ratio, nodule_radius, volume_ratio from the stored derived
+along each observer's frame, cortex_ratio, nodule_radius from the stored derived
 results, manual measurements by label, and of flakes the measures of `derived.flake.measures` by their
 column names, those of flakes.csv but the retouch indices, `bsa_level_mm`, `bsa_ends_moved` and
 `pop_mesh_edge`). A model that cannot be read or measured is left out
@@ -1120,13 +1212,25 @@ reading the model when every one of them was written by the same version of the 
 `derived.measurements` (and `derived.vertices` when it has planes); the tables are the same
 either way.
 
-The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,volume_upper,volume_lower,volume_ratio,file` (`file`: the model, its path in a folder).
+The measurement CSV ends with `area_scar,area_cortex,area_joint,area_damage,cortex_ratio,nodule_radius,nodule_fit_rms,file` (`file`: the model, its path in a folder). The upper and lower volumes of before stage 34 (`volume_upper`, `volume_lower`, `volume_ratio`) are those of a symmetry reference now, in `symmetry.csv`. Symmetry is not in `icc.csv`: observers may choose different references.
+
+Symmetry (`<specimen>_symmetry.csv`, one row per symmetry reference; see "Symmetry"; the summary export merges them):
+
+```
+specimen_id,symmetry_id,source,source_id,volume_symmetry,area_symmetry,shape_symmetry,volume_a,volume_b,area_a,area_b,deviation_mean,deviation_rms,deviation_p95,unit,note
+```
+
+`symmetry_id`: its label; `source`: `plane`, `curve` or `frame`; `source_id`: the plane's or curve's label, or `technical_x`, `specimen_x`,
+`specimen_y`, `specimen_z`; `volume_symmetry`, `area_symmetry`, `shape_symmetry`: 0–1, no unit (see "Symmetry"); volumes in `unit`³, areas
+in `unit`², the deviation in `unit`; empty when not computed or as the reasons say (an open mesh has no volume or shape symmetry and no
+volumes; a plane that does not cut the mesh, none of the three and no sides). Dropped in stage 34a: `optimized`, `angle_to_source_deg`,
+`offset_to_source` (the best plane of symmetry is gone) and `volume_ratio` (A / B: from `volume_a` and `volume_b` when needed).
 
 In the summary export, `flakes.csv` holds the flakes, from the `derived.flake` their project files stored
 (the open model: as measured now). `configuration.csv` and `flaking_surfaces.csv` hold the cores that have a
 configuration (arrows on a measured model) and end with a `file` column as well. A project's stored
 box (`derived.configuration`) stands for its model like the other stored results; the bicone needs
-no box and uses the project's stored split (`derived.split`).
+no box and uses the stored volumes of its symmetry reference (`derived.symmetry`; a file of before stage 34: its stored `derived.split` as S1's).
 
 Enumerated fields are written as their codes, which are the same in every interface language.
 Numbers use `.` as the decimal separator and up to six decimals (the mean edge angles of `working_edges.csv`: ten). Text is quoted per RFC 4180.

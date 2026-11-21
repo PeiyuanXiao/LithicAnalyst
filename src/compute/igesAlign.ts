@@ -68,6 +68,9 @@ export interface Residual {
 
 const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
+/** Nearest-point queries between yields (each may take microseconds on a large mesh). */
+export const QUERY_YIELD = 1 << 9;
+
 export const placementOf = (scale = 1): Placement => ({ scale, rotation: [...IDENTITY], translation: [0, 0, 0] });
 
 const mulVec = (r: readonly number[], p: Vec3): Vec3 => [r[0] * p[0] + r[1] * p[1] + r[2] * p[2], r[3] * p[0] + r[4] * p[1] + r[5] * p[2], r[6] * p[0] + r[7] * p[1] + r[8] * p[2]];
@@ -383,7 +386,10 @@ export function* icpSteps(points: readonly Vec3[], start: Placement, surface: Su
   let last = Infinity, rms = Infinity, rounds = 0;
   for (; rounds < IGES_IMPORT.ICP_MAX_ROUNDS; rounds++) {
     const near: Array<{ x: Vec3; q: Vec3; n: Vec3; d: number }> = [];
+    let queried = 0;
     for (const p of points) {
+      // nearest points are slow on a large mesh: a turn now and then
+      if (++queried % QUERY_YIELD === 0) yield;
       const x = applyPlacement(t, p);
       const c = surface.closest(x);
       if (c) near.push({ x, q: c.point, n: c.normal, d: c.distance });

@@ -1,5 +1,5 @@
 import type { IpaBand } from '../compute/ipa';
-import { coreConfiguration, type CoreConfiguration } from '../compute/bicone';
+import { biconeVolumes, coreConfiguration, type CoreConfiguration } from '../compute/bicone';
 import type { ConfigBox } from '../compute/configuration';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { EDGE_ANGLE_PARAMETERS, type EdgeAngleResult } from '../compute/edgeAngle';
@@ -16,7 +16,7 @@ import type { RegionResult, RegionTotals } from '../compute/regions';
 import { landmarkTable, type LandmarkTable } from '../compute/landmarks';
 import { relationResults, type RelationResults } from '../compute/relations';
 import type { SphereFit } from '../compute/sphere';
-import type { VolumeSplit } from '../compute/split';
+import { SYMMETRY_PARAMETERS, type SymmetryDerived, type SymmetryValues } from '../compute/symmetry';
 import { measurementUnit, measurementValue } from './measurements';
 import type { MeasureType, ProjectState, SharpEdgeRule, Vec3 } from './types';
 
@@ -80,13 +80,13 @@ export interface DerivedResults {
   regionTotals: RegionTotals | null;
   /** Sphere fitted to the chosen cortex regions (null without cortex, or before the mesh is partitioned). */
   nodule: (SphereFit & { regions: string[] }) | null;
-  /** Upper and lower volume, exchanged when the split is swapped (null without a split, a closed mesh, or a valid plane / closed curve). */
-  split: VolumeSplit | null;
+  /** Each symmetry reference's planes, sides and mirror deviation, and the parameters (null: no references, or not yet computed). */
+  symmetry: SymmetryDerived | null;
   /** Checks of the relations and sequences (scar ids), and the direct relations. */
   relations: RelationResults;
   /** Every landmark in export order (fixed, then each set's semilandmarks), the sliders, and the sets' points. */
   landmarks: LandmarkTable;
-  /** Volumetric configuration of the core by the box or the bicone model (null without arrows, before the mesh is measured, or for the bicone without a split by a closed curve). */
+  /** Volumetric configuration of the core by the box or the bicone model (null without arrows, before the mesh is measured, or for the bicone without the volumes of a symmetry reference on a closed curve). */
   configuration: CoreConfiguration | null;
   /** A flake's measurements (null for a core, or before they are computed). */
   flake: FlakeDerived | null;
@@ -113,7 +113,8 @@ export interface MeshResults {
   vertices: PrincipalAxes | null;
   regions?: { results: RegionResult[]; totals: RegionTotals } | null;
   nodule?: (SphereFit & { regions: string[] }) | null;
-  split?: VolumeSplit | null;
+  /** The symmetry references' results, in the order of the references. */
+  symmetry?: readonly SymmetryValues[] | null;
   /** The model's box along the specimen frame or the principal axes (volumetric configuration). */
   box?: ConfigBox | null;
   /** A flake's measurements. */
@@ -175,10 +176,10 @@ export function computeDerived(state: Readonly<ProjectState>, mesh: MeshResults 
     regions: mesh?.regions?.results ?? [],
     regionTotals: mesh?.regions?.totals ?? null,
     nodule: mesh?.nodule ?? null,
-    split: mesh?.split ?? null,
+    symmetry: mesh?.symmetry?.length ? { parameters: SYMMETRY_PARAMETERS, refs: structuredClone([...mesh.symmetry]) } : null,
     relations: relationResults(state),
     landmarks: landmarkTable(state),
-    configuration: state.specimen.type === 'core' ? coreConfiguration(state, mesh?.box ?? null, mesh?.split ?? null) : null,
+    configuration: state.specimen.type === 'core' ? coreConfiguration(state, mesh?.box ?? null, biconeVolumes(state, mesh?.symmetry)) : null,
     flake: state.specimen.type === 'flake' && mesh?.flake ? { parameters: FLAKE_PARAMETERS, frameSource: frameSource(state), measures: mesh.flake.measures, geometry: mesh.flake.geometry, ipaBand: mesh.flake.ipaBand, bsaReference: mesh.flake.bsaReference } : null,
     edgeAngles: mesh?.edgeAngles?.length ? { parameters: EDGE_ANGLE_PARAMETERS, curves: [...mesh.edgeAngles] } : null,
     retouchAngles: mesh?.retouchAngles?.length ? { curves: [...mesh.retouchAngles] } : null,

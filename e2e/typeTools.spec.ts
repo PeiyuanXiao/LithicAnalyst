@@ -57,7 +57,9 @@ const helpText = async (page: Page): Promise<string> => {
   return text;
 };
 
-test('a core: no edge angles and no working edges anywhere; its volume split stays', async ({ page }) => {
+const symmetryA = (page: Page) => page.evaluate(() => window.lithicanalyst.symmetry().values[0]?.volumeA ?? null);
+
+test('a core: no edge angles and no working edges anywhere; its symmetry references', async ({ page }) => {
   await openRing(page, 'core');
   await expect(page.locator('#mode-working-edge')).toBeHidden();
   await page.keyboard.press('w');
@@ -71,19 +73,20 @@ test('a core: no edge angles and no working edges anywhere; its volume split sta
 
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#sec-edge-angle')).toBeHidden();
-  await expect(page.locator('#sec-split')).toBeVisible();
-  await page.locator('#split-source').selectOption('curve:ring');
-  await expect.poll(() => page.evaluate(() => window.lithicanalyst.volumeSplit()?.upper ?? null)).not.toBeNull();
-  await expect(page.locator('#split-upper')).toBeVisible();
+  await expect(page.locator('#sec-symmetry')).toBeVisible();
+  await page.locator('#symmetry-add').click();
+  await page.locator('#symmetry-add-curve-ring').click();
+  await expect.poll(() => symmetryA(page)).not.toBeNull();
+  await expect(page.locator('#symmetry-volume-a')).toBeVisible();
   const keys = await offered(page);
   for (const key of ['edge-angles', 'retouch-angles', 'edge-sharp', 'working-edges', 'flakes']) expect(keys).not.toContain(key);
-  for (const key of ['measurements', 'manual', 'planes']) expect(keys).toContain(key);
+  for (const key of ['measurements', 'manual', 'planes', 'symmetry']) expect(keys).toContain(key);
   // nothing computed for what it does not have
   expect(await page.evaluate(() => window.lithicanalyst.edgeAngles('ring'))).toBeNull();
   expect(await page.evaluate(() => window.lithicanalyst.workingEdges().rows)).toEqual([]);
 });
 
-test('a flake: no volume split; its edge angles and working edges stay', async ({ page }) => {
+test('a flake: symmetry too; its edge angles and working edges stay', async ({ page }) => {
   await openRing(page, 'flake');
   await expect(page.locator('#mode-working-edge')).toBeVisible();
   expect(await helpText(page)).toContain('Working edge');
@@ -91,26 +94,25 @@ test('a flake: no volume split; its edge angles and working edges stay', async (
   await openSection(page, 'curves');
   await expect(page.locator('#curve-edge-angle')).toBeChecked();
   await page.locator('#app-mode-measure').click();
-  await expect(page.locator('#sec-split')).toBeHidden();
+  await expect(page.locator('#sec-symmetry')).toBeVisible();
   await expect(page.locator('#sec-edge-angle')).toBeVisible();
-  // the column stays, with nothing in it
+  // the upper and lower volumes are in symmetry.csv now
   const row = await page.evaluate(() => window.lithicanalyst.exportMeasurementsCsvText());
-  const [head, values] = row.trim().split('\n').map((l) => l.split(','));
-  expect(head).toContain('volume_upper');
-  expect(values[head.indexOf('volume_upper')]).toBe('');
+  const [head] = row.trim().split('\n').map((l) => l.split(','));
+  for (const c of ['volume_upper', 'volume_lower', 'volume_ratio']) expect(head).not.toContain(c);
   const keys = await offered(page);
   for (const key of ['edge-angles', 'edge-sharp', 'working-edges', 'flakes', 'measurements']) expect(keys).toContain(key);
 });
 
-test('a generic specimen: none of them; sections and fitted planes stay', async ({ page }) => {
+test('a generic specimen: none of them; sections, fitted planes and symmetry stay', async ({ page }) => {
   await openRing(page, 'generic');
   await expect(page.locator('#mode-working-edge')).toBeHidden();
   await page.locator('#app-mode-measure').click();
-  for (const id of ['edge-angle', 'split']) await expect(page.locator(`#sec-${id}`)).toBeHidden();
+  await expect(page.locator('#sec-edge-angle')).toBeHidden();
   await expect(page.locator('#sec-planes')).toBeVisible();
   await page.locator('#plane-add').click();
   await expect.poll(async () => (await state(page)).planes.length).toBe(1);
-  await expect(page.locator('#sec-split')).toBeHidden();
+  await expect(page.locator('#sec-symmetry')).toBeVisible();
   await page.locator('#app-mode-present').click();
   await expect(page.locator('#present-tool-section')).toBeVisible();
   await expect(page.locator('#sec-sections')).toBeVisible();
@@ -120,20 +122,21 @@ test('a file with what its type no longer has: kept when written again, shown on
   await openRing(page, 'core', true);
   const kept = async () => {
     const f = await page.evaluate(() => window.lithicanalyst.projectJson());
-    return { edge: f.annotations.curves[0].edgeAngle, working: f.workingEdges.map((e) => [e.id, e.label, e.name]), next: f.nextWorkingEdgeNumber, split: f.split, sharp: f.sharpEdge };
+    return { edge: f.annotations.curves[0].edgeAngle, working: f.workingEdges.map((e) => [e.id, e.label, e.name]), next: f.nextWorkingEdgeNumber, symmetry: f.symmetry.map((s) => ({ label: s.label, source: s.source, upHint: s.upHint, swap: s.swap })), sharp: f.sharpEdge };
   };
-  const want = { edge: true, working: [['we1', 'E1', 'kept']], next: 2, split: { source: 'curve', id: 'ring', upHint: [0, 0, 1], swap: false }, sharp: { method: 'three_points', distance: 2, threshold: 40 } };
+  // (the old split: S1 on its curve)
+  const want = { edge: true, working: [['we1', 'E1', 'kept']], next: 2, symmetry: [{ label: 'S1', source: { kind: 'curve', curveId: 'ring' }, upHint: [0, 0, 1], swap: false }], sharp: { method: 'three_points', distance: 2, threshold: 40 } };
   expect(await kept()).toEqual(want);
   await expect(page.locator('#sec-working-edges')).toBeHidden();
   await page.locator('#app-mode-measure').click();
   await expect(page.locator('#sec-edge-angle')).toBeHidden();
-  await expect(page.locator('#sec-split')).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.lithicanalyst.volumeSplit()?.upper ?? null)).not.toBeNull();
+  await expect(page.locator('#sec-symmetry')).toBeVisible();
+  await expect.poll(() => symmetryA(page)).not.toBeNull();
 
-  // as a generic specimen: the split gone from the view and the tables, and from nothing else
+  // as a generic specimen: its symmetry as it was
   await setType(page, 'generic');
-  await expect(page.locator('#sec-split')).toBeHidden();
-  await expect.poll(() => page.evaluate(() => window.lithicanalyst.volumeSplit())).toBeNull();
+  await expect(page.locator('#sec-symmetry')).toBeVisible();
+  await expect.poll(() => symmetryA(page)).not.toBeNull();
   expect(await kept()).toEqual(want);
 
   // as a flake: its edge angles and its working edge, as they were
@@ -149,7 +152,7 @@ test('a file with what its type no longer has: kept when written again, shown on
   // and back
   await setType(page, 'core');
   await page.locator('#app-mode-measure').click();
-  await expect.poll(() => page.evaluate(() => window.lithicanalyst.volumeSplit()?.upper ?? null)).not.toBeNull();
+  await expect.poll(() => symmetryA(page)).not.toBeNull();
   await expect(page.locator('#sec-edge-angle')).toBeHidden();
   expect(await kept()).toEqual(want);
 });

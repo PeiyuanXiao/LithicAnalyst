@@ -1,9 +1,9 @@
 import { CommandHistory } from './commands';
 import { nowIso } from './ids';
-import { defaultGmConfig, DEFAULT_SHARP_EDGE, type GmConfig, type ImportRecord, type ConfigCorrections, type Curve, type FlakeData, type Landmark, type Measurement, type MeshInfo, type Plane, type ProjectState, type Region, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenInfo, type SharpEdgeRule, type WorkingEdge } from './types';
+import { defaultGmConfig, DEFAULT_SHARP_EDGE, type GmConfig, type ImportRecord, type ConfigCorrections, type Curve, type FlakeData, type Landmark, type Measurement, type MeshInfo, type Plane, type ProjectState, type Region, type Relation, type Scar, type ScarVector, type Section, type SemilandmarkSet, type Sequence, type SpecimenInfo, type SharpEdgeRule, type SymmetryRef, type WorkingEdge } from './types';
 import { distance } from './vec';
 
-export type ChangeKind = 'imports' | 'gm' | 'sharpEdge' | 'flake' | 'scars' | 'curves' | 'workingEdges' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'split' | 'configuration' | 'specimen' | 'reset';
+export type ChangeKind = 'imports' | 'gm' | 'sharpEdge' | 'flake' | 'scars' | 'curves' | 'workingEdges' | 'measurements' | 'planes' | 'sections' | 'regions' | 'relations' | 'sequences' | 'landmarks' | 'nodule' | 'symmetry' | 'configuration' | 'specimen' | 'reset';
 
 export interface Change {
   kind: ChangeKind;
@@ -27,8 +27,8 @@ export function emptyProject(): ProjectState {
     landmarks: [],
     semilandmarks: [],
     nodule: { exclude: [], show: false },
-    split: null,
-    configuration: { roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', bicone: { roles: {} } },
+    symmetry: [],
+    configuration: { roles: {}, joins: {}, surfaceType: {}, axis: {}, polarity: null, model: 'box', biconeRef: null, bicone: { roles: {} } },
     flake: { axis: null, otherFrame: null },
     sharpEdge: { ...DEFAULT_SHARP_EDGE },
     gm: defaultGmConfig(),
@@ -43,10 +43,16 @@ export function emptyProject(): ProjectState {
     nextSequenceNumber: 1,
     nextLandmarkNumber: 1,
     nextSemilandmarkNumber: 1,
+    nextSymmetryNumber: 1,
     createdAt: t,
     modifiedAt: t,
   };
 }
+
+/** The symmetry references and their label counter: changed together by SetSymmetryCommand. */
+export type SymmetryData = Pick<ProjectState, 'symmetry' | 'nextSymmetryNumber'>;
+
+export const symmetryData = (s: Readonly<ProjectState>): SymmetryData => structuredClone({ symmetry: s.symmetry, nextSymmetryNumber: s.nextSymmetryNumber });
 
 /** Landmarks, semilandmark sets and their label counters: changed together by SetLandmarksCommand. */
 export type LandmarkData = Pick<ProjectState, 'landmarks' | 'semilandmarks' | 'nextLandmarkNumber' | 'nextSemilandmarkNumber'>;
@@ -103,6 +109,10 @@ export class ProjectStore {
 
   plane(id: string): Plane | undefined {
     return this._state.planes.find((p) => p.id === id);
+  }
+
+  symmetryRef(id: string): SymmetryRef | undefined {
+    return this._state.symmetry.find((s) => s.id === id);
   }
 
   section(id: string): Section | undefined {
@@ -289,8 +299,9 @@ export class ProjectStore {
     Object.assign(this._state, d);
   }
 
-  _setSplit(s: ProjectState['split']): void {
-    this._state.split = s;
+  _setSymmetry(d: SymmetryData): void {
+    this._state.symmetry = d.symmetry;
+    this._state.nextSymmetryNumber = d.nextSymmetryNumber;
   }
 
   _setNodule(n: ProjectState['nodule']): void {

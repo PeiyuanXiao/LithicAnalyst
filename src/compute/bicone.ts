@@ -1,9 +1,10 @@
 import { BICONE_CONES, type BiconeCone, type BiconeRole, type BiconeSide } from '../core/fields';
 import { frameAxes } from '../core/frame';
-import { hasVector, type ProjectState, type Scar, type Vec3 } from '../core/types';
+import { hasVector, type ProjectState, type Scar, type SymmetryRef, type Vec3 } from '../core/types';
 import { computeConfiguration, type ConfigBox, type ConfigurationResult } from './configuration';
 import { vertexPca } from './meshGeometry';
 import type { VolumeSplit } from './split';
+import type { SymmetryValues } from './symmetry';
 
 /**
  * The bicone model of the volumetric configuration, for cores made of two
@@ -20,7 +21,7 @@ export const BICONE_MIN_HEIGHT = 0.1;
 
 export interface BiconeConeResult {
   cone: BiconeCone;
-  /** Its physical side: `positive` is the side of the split curve's plane normal oriented by `split.upHint`. */
+  /** Its physical side: `positive` is the side of the curve's plane normal oriented by its symmetry reference's `upHint`. */
   side: BiconeSide;
   autoRole: BiconeRole;
   role: BiconeRole;
@@ -112,16 +113,29 @@ export function biconeBase(points: readonly Vec3[], upHint: Vec3, swap: boolean,
   return { plane: { point: [...c] as Vec3, normal }, centre, area, radius: Math.sqrt(area / Math.PI), reference };
 }
 
+/** The symmetry reference the bicone stands on (`configuration.biconeRef`), when its source is a closed curve. */
+export function biconeRefOf(state: Pick<ProjectState, 'symmetry' | 'configuration'>): (SymmetryRef & { source: { kind: 'curve'; curveId: string } }) | null {
+  const ref = state.symmetry.find((s) => s.id === state.configuration.biconeRef);
+  return ref?.source.kind === 'curve' ? (ref as SymmetryRef & { source: { kind: 'curve'; curveId: string } }) : null;
+}
+
+/** The bicone's upper and lower volumes: sides A and B of its symmetry reference (null without them). */
+export function biconeVolumes(state: Pick<ProjectState, 'symmetry' | 'configuration'>, refs: ReadonlyArray<Pick<SymmetryValues, 'id' | 'volumeA' | 'volumeB'>> | null | undefined): VolumeSplit | null {
+  const ref = biconeRefOf(state);
+  const v = ref ? refs?.find((r) => r.id === ref.id) : undefined;
+  return v && v.volumeA !== null && v.volumeB !== null ? { upper: v.volumeA, lower: v.volumeB, ratio: v.volumeB > 0 ? v.volumeA / v.volumeB : null } : null;
+}
+
 /**
- * The bicone from the scars with an arrow, the split curve and the volumes of
- * the split (upper and lower as `split.swap` has them); null without arrows,
- * without a split by a closed curve, or without its volumes (an open mesh, a
- * curve that does not split it).
+ * The bicone from the scars with an arrow, the closed curve of its symmetry
+ * reference and the volumes of that reference's sides (upper = A, lower = B, as
+ * its `swap` has them); null without arrows, without a reference on a closed
+ * curve, or without its volumes (an open mesh, a curve that does not part it).
  */
 export function computeBicone(state: Readonly<ProjectState>, volumes: VolumeSplit | null): BiconeResult | null {
   const arrows = state.scars.filter(hasVector);
-  const sp = state.split;
-  const curve = sp?.source === 'curve' ? state.curves.find((c) => c.id === sp.id) : undefined;
+  const sp = biconeRefOf(state);
+  const curve = sp ? state.curves.find((c) => c.id === sp.source.curveId) : undefined;
   if (!arrows.length || !sp || !volumes || !curve?.closed) return null;
   const frame = state.specimen.frame;
   const base = biconeBase(curve.points, sp.upHint, sp.swap, frame ? frameAxes(frame.matrix).y : null);
@@ -186,7 +200,7 @@ export function biconePolar(r: Pick<BiconeResult, 'centre' | 'plane' | 'referenc
   };
 }
 
-/** The configuration by the model the project uses: the box (from the model's box) or the bicone (from the volume split). */
+/** The configuration by the model the project uses: the box (from the model's box) or the bicone (from its reference's volumes). */
 export function coreConfiguration(state: Readonly<ProjectState>, box: ConfigBox | null, volumes: VolumeSplit | null): CoreConfiguration | null {
   return state.configuration.model === 'bicone' ? computeBicone(state, volumes) : computeConfiguration(state.scars, state.configuration, box);
 }
@@ -208,7 +222,7 @@ export function soleEdgeCurve<T extends { closed: boolean; attributes: Record<st
 }
 
 /**
- * Which way "up" a new split along this curve points: to the side of its plane
+ * Which way "up" (side A) a new symmetry reference on this curve points: to the side of its plane
  * with more scars (by their ends, as the cones take them); when even, `view`
  * (the direction toward the viewer).
  */

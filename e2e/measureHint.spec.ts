@@ -222,7 +222,7 @@ test('an empty value draws nothing and says why, as before', async ({ page }) =>
   await expect.poll(() => shown(page)).toBe('flake:morph_length');
 });
 
-/** A closed curve round the sides of the box, in a project file: what a split goes along. */
+/** A closed curve round the sides of the box, in a project file: what a symmetry reference parts the sides along. */
 async function boxWithRing(page: Page, type: 'core' | 'generic'): Promise<void> {
   const ply = boxPly();
   await openApp(page, type);
@@ -244,7 +244,7 @@ async function boxWithRing(page: Page, type: 'core' | 'generic'): Promise<void> 
   await expect(page.locator('#auto-length')).not.toHaveText('—');
 }
 
-test('a core: the box and its three lines; the whole model; the split by its curve and two colours', async ({ page }) => {
+test('a core: the box and its three lines; the whole model; a symmetry reference by its curve, side A coloured', async ({ page }) => {
   await boxWithRing(page, 'core');
   await hover(page, 'auto-width');
   await expect.poll(() => shown(page)).toBe('auto:width');
@@ -257,21 +257,22 @@ test('a core: the box and its three lines; the whole model; the split by its cur
   await hover(page, 'auto-volume');
   await expect.poll(() => shown(page)).toBe('auto:volume');
 
-  await page.locator('#split-source').selectOption('curve:ring');
-  await expect.poll(() => page.evaluate(() => window.lithicanalyst.volumeSplit()?.upper ?? null)).not.toBeNull();
+  await page.locator('#symmetry-add').click();
+  await page.locator('#symmetry-add-curve-ring').click();
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.symmetry().values[0]?.volumeA ?? null)).not.toBeNull();
+  const id = (await state(page)).symmetry[0].id;
   await page.evaluate(() => window.lithicanalyst.view([0.5, -0.6, 0.62], [0, 0.7, 0.7]));
   await nextFrames(page);
-  await hover(page, 'split-upper');
-  await expect.poll(() => shown(page)).toBe('split:upper');
-  expect(await parts(page)).toEqual(['faces:upper', 'faces:lower', 'line:split-curve']);
-  expect((await hint(page)).drawn).toMatchObject({ faces: 2, lines: 1 });
-  await page.screenshot({ path: `${SHOTS}/hint-split.png` });
-  // the values come from the split as it stands: exchanged, the two sides change places
-  const before = (await hint(page)).prims;
-  await page.locator('#split-swap').click();
-  await hover(page, 'split-lower');
-  await expect.poll(() => shown(page)).toBe('split:lower');
-  expect((await hint(page)).prims.map((p) => p.part)).toEqual(before.map((p) => p.part));
+  await hover(page, 'symmetry-volume-a');
+  await expect.poll(() => shown(page)).toBe(`symmetry:${id}|volume`);
+  expect(await parts(page)).toEqual(['faces:side-a', 'line:symmetry-curve']);
+  expect((await hint(page)).drawn).toMatchObject({ faces: 1, lines: 1 });
+  await page.screenshot({ path: `${SHOTS}/hint-symmetry.png` });
+  // the values come from the reference as it stands: swapped, the same drawing of the other side
+  await page.locator('#symmetry-swap').click();
+  await hover(page, 'symmetry-volume-b');
+  await expect.poll(() => shown(page)).toBe(`symmetry:${id}|volume`);
+  expect(await parts(page)).toEqual(['faces:side-a', 'line:symmetry-curve']);
 });
 
 test('a generic specimen: the same box, and the same for the whole model', async ({ page }) => {

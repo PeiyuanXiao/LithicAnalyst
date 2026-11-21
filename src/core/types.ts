@@ -182,6 +182,29 @@ export interface Plane {
   modifiedAt: string;
 }
 
+/** Where a symmetry reference's plane comes from: a fitted plane, a closed curve (which also parts the two sides), or a frame's mid-plane. */
+export type SymmetrySource =
+  | { kind: 'plane'; planeId: string }
+  | { kind: 'curve'; curveId: string }
+  | { kind: 'frame'; frame: 'technical' | 'specimen'; axis: 'x' | 'y' | 'z' };
+
+/**
+ * A reference for measuring symmetry: a plane and the two sides A and B it parts. Side A is the side the plane's normal
+ * points to (for a curve, the normal of the plane fitted to its points, turned toward `upHint`); `swap` exchanges A and B.
+ * Only the inputs are stored; the results are derived (compute/symmetry.ts).
+ */
+export interface SymmetryRef {
+  id: string;
+  /** "S1", "S2", … (editable). */
+  label: string;
+  note: string;
+  source: SymmetrySource;
+  upHint: Vec3;
+  swap: boolean;
+  createdAt: string;
+  modifiedAt: string;
+}
+
 /**
  * A section for display (no measurements come from it): the plane through a
  * line drawn on screen and the view direction.
@@ -332,8 +355,10 @@ export interface ConfigCorrections {
   surfaceType: Partial<Record<ConfigFace, 'wide' | 'narrow'>>;
   axis: Partial<Record<ConfigFace, 'long' | 'short'>>;
   polarity: Polarity | null;
-  /** The model: the box (default) or the bicone on the split curve. */
+  /** The model: the box (default) or the bicone on the closed curve of `biconeRef`. */
   model: ConfigModel;
+  /** The symmetry reference the bicone stands on (one with a closed curve as its source); null: none chosen. */
+  biconeRef: string | null;
   /** The bicone's corrections by physical side (they stay with their side when upper and lower are swapped). */
   bicone: { roles: Partial<Record<BiconeSide, BiconeRole>> };
 }
@@ -553,12 +578,8 @@ export interface ProjectState {
   semilandmarks: SemilandmarkSet[];
   /** Sphere fitted to the cortex: cortex regions left out, and whether the sphere is drawn. */
   nodule: { exclude: string[]; show: boolean };
-  /**
-   * Upper / lower volume split: by a fitted plane (upper = its normal's side)
-   * or a closed curve (upper = the side its fitted plane's normal points to,
-   * oriented by `upHint`). `swap` exchanges upper and lower. Null when not used.
-   */
-  split: { source: 'plane' | 'curve'; id: string; upHint: Vec3; swap: boolean } | null;
+  /** References for measuring symmetry (S1, S2, …); the bicone stands on one of them (`configuration.biconeRef`). */
+  symmetry: SymmetryRef[];
   /** Manual corrections to the volumetric configuration (none by default). */
   configuration: ConfigCorrections;
   flake: FlakeData;
@@ -587,6 +608,8 @@ export interface ProjectState {
   nextLandmarkNumber: number;
   /** Next number used for semilandmark set labels (SL1, SL2, …). */
   nextSemilandmarkNumber: number;
+  /** Next number used for symmetry reference labels (S1, S2, …). */
+  nextSymmetryNumber: number;
   createdAt: string;
   modifiedAt: string;
 }

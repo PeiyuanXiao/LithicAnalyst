@@ -22,8 +22,6 @@ export const MEASURE_HINT_PARAMETERS = {
   ARC_SHARE: 0.35,
   /** The arrow head of the technical axis, as a share of its length. */
   AXIS_HEAD_SHARE: 0.06,
-  /** The circle standing for a splitting plane, as a share of the model's diagonal. */
-  SPLIT_DISC_SHARE: 0.55,
   /** Points of a circle. */
   CIRCLE_SEGMENTS: 96,
 };
@@ -450,20 +448,15 @@ function circle(centre: Vec3, normal: Vec3, radius: number): Vec3[] {
 }
 
 /**
- * The upper and lower volumes: what the split went along, and the two sides in two light colours. `parts` are in the mesh's
- * coordinates (relative to `offset`); `swap`: upper and lower are exchanged; `diagonal`: how large to draw a plane.
+ * A symmetry reference's sides: side A in a light colour and, parted along a closed curve, the curve (the plane, its disc and
+ * where it cuts the model are drawn as a fitted plane's). `parts` are in the mesh's coordinates (relative to `offset`); `swap`: A and
+ * B are exchanged.
  */
-export function splitHint(parts: SplitParts, swap: boolean, offset: Vec3, diagonal: number): MeasureHint {
+export function symmetryHint(parts: SplitParts, swap: boolean, offset: Vec3): MeasureHint {
   const { on, off } = splitFaces(parts.upper);
-  const faces: MeasureHint = [
-    { kind: 'faces', part: 'upper', tint: 'upper', faces: swap ? off : on, through: false },
-    { kind: 'faces', part: 'lower', tint: 'lower', faces: swap ? on : off, through: false },
-  ];
-  if (parts.kind === 'plane') {
-    const points = circle(add(parts.point, offset), parts.normal, diagonal * MEASURE_HINT_PARAMETERS.SPLIT_DISC_SHARE);
-    return [...faces, { kind: 'line', part: 'split-plane', role: 'current', points, closed: true }];
-  }
-  return [...faces, { kind: 'line', part: 'split-curve', role: 'current', points: parts.segments.map((p) => add(p, offset)), segments: true }];
+  const faces: MeasureHint = [{ kind: 'faces', part: 'side-a', tint: 'upper', faces: swap ? off : on, through: false }];
+  if (parts.kind === 'plane') return faces;
+  return [...faces, { kind: 'line', part: 'symmetry-curve', role: 'current', points: parts.segments.map((p) => add(p, offset)), segments: true }];
 }
 
 /** A curve measured for edge angles and its stations. */
