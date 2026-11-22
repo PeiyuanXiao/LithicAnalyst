@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   addCurve,
   addScarVector,
@@ -14,6 +14,7 @@ import {
   setSectionLabel,
   updateSpecimen,
 } from '../src/core/actions';
+import { MERGE_WINDOW_MS } from '../src/core/commands';
 import { assembleCurve, curveLength, curveSegments, isValidShape, midPointIndex } from '../src/core/curveGeometry';
 import { CURVE_FIELDS, customValue, defaultAttributes, defaultCurveAttributes, fieldLocked, isCustomValue, numberKeyField, offeredOptions, keyedOptions, SCAR_FIELDS, shiftNumberKeyField, TERMINATION_MISSING, withAttribute } from '../src/core/fields';
 import { parseProjectFile, ProjectFileError, serializeProject } from '../src/core/schema';
@@ -139,6 +140,38 @@ describe('commands and undo', () => {
     setScarAttribute(s, a.id, 'completeness', 'bulb_truncated');
     s.history.undo();
     expect(s.scar(a.id)!.attributes.completeness).toBe('bulb_complete');
+  });
+
+  it('merges typing while it goes on, however long it takes; a pause, an undo or a redo starts a new step', () => {
+    vi.useFakeTimers();
+    try {
+      const s = new ProjectStore();
+      const a = add(s, [0, 0, 0], [3, 0, 0]);
+      const note = () => s.scar(a.id)!.attributes.note;
+      // a letter a second: 11 s in all, each well within MERGE_WINDOW_MS of the one before
+      let text = '';
+      for (const ch of 'a slow note') {
+        vi.advanceTimersByTime(1000);
+        setScarAttribute(s, a.id, 'note', (text += ch));
+      }
+      s.history.undo();
+      expect(note()).toBe('');
+      s.history.redo();
+      expect(note()).toBe('a slow note');
+      // after a redo the next letter is a step of its own
+      vi.advanceTimersByTime(100);
+      setScarAttribute(s, a.id, 'note', 'a slow note.');
+      s.history.undo();
+      expect(note()).toBe('a slow note');
+      // and after a pause longer than the window
+      setScarAttribute(s, a.id, 'note', 'a slow note!');
+      vi.advanceTimersByTime(MERGE_WINDOW_MS + 1);
+      setScarAttribute(s, a.id, 'note', 'a slow note!!');
+      s.history.undo();
+      expect(note()).toBe('a slow note!');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('notifies subscribers', () => {

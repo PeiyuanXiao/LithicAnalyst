@@ -221,7 +221,9 @@ test('a core\'s length, width and thickness: the longest measure and the widths 
   await page.locator('#measure-auto .num-row[data-hint="auto:width"]').click();
   const h = await hint(page);
   expect(h.prims.filter((p) => p.kind === 'line').map((p) => [p.part, p.role])).toEqual([['length', 'other'], ['thickness', 'other'], ['width', 'current']]);
-  expect(h.labels).toEqual(['39.036 mm']);
+  expect(h.drawn!.labels).toBe(1);
+  // (a label joins the page when the view is next drawn)
+  await expect.poll(async () => (await hint(page)).labels).toEqual(['39.036 mm']);
   await page.keyboard.press('Escape');
 
   // a specimen frame from the view, turned: the same values

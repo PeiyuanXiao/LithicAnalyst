@@ -93,7 +93,8 @@ test('a flake: technical axis, platform outline and ends give the measurements; 
 
   // the edge gives the ventral face, and IPA: T1's ventral face is flat (no bulb), so the band from 0.25 to 0.75 of the length; on the profile its marks, its line and the angle
   await drawEdge(page);
-  await expect.poll(async () => (await measures(page))?.platform_width_path ?? null).not.toBeNull();
+  // (the faces, then the measures, follow the edge a little later)
+  await expect.poll(async () => (await measures(page))?.ipa ?? null).not.toBeNull();
   expect(Math.abs((await measures(page))!.ipa! - 101.31)).toBeLessThan(1);
   expect((await page.evaluate(() => window.lithicanalyst.flake()))!.ipaBand).toMatchObject({ fallback: true, from: expect.closeTo(15, 0), to: expect.closeTo(45, 0) });
   await displayPanel(page);

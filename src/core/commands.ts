@@ -12,11 +12,15 @@ export interface Command {
   readonly createdAt: number;
   apply(store: ProjectStore): void;
   revert(store: ProjectStore): void;
-  /** Absorb a following command of the same kind (e.g. typing in a note). */
+  /** Absorb a following command of the same kind (e.g. typing in a note); the history offers it only while they keep coming (MERGE_WINDOW_MS). */
   merge?(next: Command): boolean;
 }
 
-const MERGE_WINDOW_MS = 1500;
+/**
+ * Commands that merge do so while they keep coming: each within this long of the one before. Typing a note is one undo step
+ * however long it takes, on a slow computer too, as long as it does not pause.
+ */
+export const MERGE_WINDOW_MS = 1500;
 
 /** How the state last changed: a new command, a step back or forward, or a fresh start (a model or project opened). */
 export type HistoryStep = 'execute' | 'undo' | 'redo' | 'clear';
@@ -35,6 +39,8 @@ export class CommandHistory {
   private baseId = 0;
   private savedId = 0;
   private step: HistoryStep = 'clear';
+  /** When the command on top last took one in (its own `createdAt` or a merged one's); none after an undo, a redo or a fresh start. */
+  private lastAt = -Infinity;
 
   constructor(private readonly store: ProjectStore) {}
 
@@ -42,12 +48,13 @@ export class CommandHistory {
     this.step = 'execute';
     cmd.apply(this.store);
     const last = this.undoStack[this.undoStack.length - 1];
-    if (last && last.merge && last.merge(cmd)) this.ids.set(last, this.nextId++);
+    if (last && last.merge && cmd.createdAt - this.lastAt <= MERGE_WINDOW_MS && last.merge(cmd)) this.ids.set(last, this.nextId++);
     else {
       this.undoStack.push(cmd);
       this.ids.set(cmd, this.nextId++);
       if (this.undoStack.length > this.limit) this.baseId = this.ids.get(this.undoStack.shift()!) ?? this.nextId++;
     }
+    this.lastAt = cmd.createdAt;
     this.redoStack = [];
     this.emit();
   }
@@ -56,6 +63,7 @@ export class CommandHistory {
     const cmd = this.undoStack.pop();
     if (!cmd) return null;
     this.step = 'undo';
+    this.lastAt = -Infinity;
     cmd.revert(this.store);
     this.redoStack.push(cmd);
     this.emit();
@@ -66,6 +74,7 @@ export class CommandHistory {
     const cmd = this.redoStack.pop();
     if (!cmd) return null;
     this.step = 'redo';
+    this.lastAt = -Infinity;
     cmd.apply(this.store);
     this.undoStack.push(cmd);
     this.emit();
@@ -114,6 +123,7 @@ export class CommandHistory {
     this.redoStack = [];
     this.baseId = this.savedId = this.nextId++;
     this.step = 'clear';
+    this.lastAt = -Infinity;
     this.emit();
   }
 
@@ -215,7 +225,6 @@ export class UpdateScarCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof UpdateScarCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = cloneScar(next.after);
     return true;
   }
@@ -278,7 +287,6 @@ export class UpdateCurveCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof UpdateCurveCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = cloneCurve(next.after);
     return true;
   }
@@ -304,7 +312,6 @@ export class SetWorkingEdgesCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof SetWorkingEdgesCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     return true;
   }
@@ -464,7 +471,6 @@ export class SetSectionLabelCommand implements Command {
   }
   merge(next: Command): boolean {
     if (!(next instanceof SetSectionLabelCommand) || next.after.id !== this.after.id) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     return true;
   }
@@ -538,7 +544,6 @@ export class UpdateRegionCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof UpdateRegionCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     return true;
   }
@@ -587,7 +592,6 @@ export class SetSequencesCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof SetSequencesCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     return true;
   }
@@ -613,7 +617,6 @@ export class SetLandmarksCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof SetLandmarksCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     return true;
   }
@@ -639,7 +642,6 @@ export class SetSymmetryCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof SetSymmetryCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     return true;
   }
@@ -683,7 +685,6 @@ export class SetFlakeCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof SetFlakeCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     return true;
   }
@@ -773,7 +774,6 @@ export class SetSpecimenCommand implements Command {
   merge(next: Command): boolean {
     if (!(next instanceof SetSpecimenCommand)) return false;
     if (!this.mergeKey || next.mergeKey !== this.mergeKey) return false;
-    if (next.createdAt - this.createdAt > MERGE_WINDOW_MS) return false;
     this.after = structuredClone(next.after);
     if (next.config) this.config = { before: this.config?.before ?? next.config.before, after: next.config.after };
     return true;

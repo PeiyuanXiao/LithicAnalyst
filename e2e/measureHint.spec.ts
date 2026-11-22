@@ -255,7 +255,7 @@ test('a core: its three lines (as a flake\'s morphological ones); the whole mode
   expect(await parts(page)).toEqual(expect.arrayContaining(['line:length', 'line:width', 'line:thickness', 'dots:extremes']));
   expect(await parts(page)).not.toContain('line:box');
   expect((await hint(page)).prims.find((p) => p.part === 'width')?.role).toBe('current');
-  expect((await hint(page)).labels).toHaveLength(1);
+  await expect.poll(async () => (await hint(page)).labels.length).toBe(1);
   await hover(page, 'auto-area');
   await expect.poll(() => shown(page)).toBe('auto:area');
   expect((await hint(page)).prims).toMatchObject([{ kind: 'faces', part: 'model', role: 'current' }]);

@@ -268,6 +268,10 @@ the workspace but loading, and the 3D view asks for frames only while a tween ru
   marks the state captured before a save once the save has gone through (Save, the folder's copy) and
   shows a dot on Save (`data-dirty`). `lastStep` says whether the last change was a command, an undo or
   redo, or a fresh start: only the first makes things flash (`App.userChanged`).
+* **Merging** (`core/commands.ts`): a command with `merge` (a note or a label typed, the BSA's level stepped) takes in the next one of
+  its kind while they keep coming: `CommandHistory.execute` offers it only within `MERGE_WINDOW_MS` (1.5 s) of the last one it took in,
+  so typing is one undo step however long it takes on a slow computer, until it pauses. After an undo, a redo or a fresh start
+  nothing merges into the command on top.
 * **CSS motion**: cards open by `::details-content` with `interpolate-size` (`folding` keeps their
   content cut while they move); the mode's block (`.mode-thumb`, placed by `buildModeSwitch`, at once
   when it first shows or changes size); popovers, float panels and the display panel come in by
@@ -639,7 +643,7 @@ The depth runs from S₀ (`FlakeConstruction.depth.S`), the vertex of the bulb a
 * **Mesh at P** (`meshEdgeNearSteps`): the mean length of the mesh's edges with both ends within `POP_MESH_RADIUS_MM` of P, from the edge table
   built once a model. It says how far the bulb's numbers can be trusted; the list shows it receding.
 * **Settings**: `setBsaLevel` (clamped to `BSA_LEVEL_RANGE_MM`, `BSA_LEVEL_STEP_MM`) and `setBsaEnds` are `SetFlakeCommand`s; changes of the
-  level within `MERGE_WINDOW_MS` make one undo step. A flake without `bsa` uses `defaultBsaSettings()`.
+  level less than `MERGE_WINDOW_MS` apart make one undo step. A flake without `bsa` uses `defaultBsaSettings()`.
 * **Measure list**: the flake's groups are technical axis, morphology, whole, proximal end; the proximal end lists platform width and depth,
   platform area, EPA, IPA, PSIA, the bulb angle (a table: three points, two lines), BSA with its level before it, VI (a table: 0.5, 1.0,
   1.5 mm) and the mesh's edge at P. Each cell's hint draws only the returned geometry: PSIA's lines and arc; the bulb angle's points, chord and
