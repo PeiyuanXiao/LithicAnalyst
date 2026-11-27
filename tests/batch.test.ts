@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { computeConfiguration } from '../src/compute/configuration';
 import { autoMeasurements, frameMeasures, surfaceMeasures } from '../src/compute/measure';
 import { runSync } from '../src/compute/steps';
-import { addLandmark, addPlane, addScarVector, updateSpecimen } from '../src/core/actions';
+import { addLandmark, addMeasurement, addPlane, addScarVector, updateSpecimen } from '../src/core/actions';
 import { fmtDuration } from '../src/core/format';
 import { frameFromView } from '../src/core/frame';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
-import { batchOutputs, batchSpecimen, failuresCsv, iccCsv, mergeCsv, savedMeasures, savedResultsUsable, type BatchProject, type BatchSpecimen } from '../src/io/batch';
+import { batchOutputs, batchSpecimen, batchSpecimens, failuresCsv, gmOutputs, iccCsv, mergeCsv, savedMeasures, savedResultsUsable, withAnnotator, type BatchProject, type BatchSpecimen } from '../src/io/batch';
+import { measurementsCsv } from '../src/io/csv';
 import { MeshJobs } from '../src/io/meshJobs';
 import { ProjectIndex } from '../src/io/projectIndex';
 import { classify, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromHandle, type DirectoryHandle } from '../src/io/workspace';
@@ -47,13 +48,14 @@ describe('batch outputs', () => {
     const rows = out[0].text.trim().split('\n');
     expect(rows).toHaveLength(3);
     expect(rows[0].endsWith(',nodule_fit_rms,file')).toBe(true);
-    // length, width and thickness: the longest measure (a box's space diagonal) and the widths across it, no frame column
+    // length, width and thickness: the longest measure (a box's space diagonal) and the widths across it, no frame column; the
+    // annotator after the specimen (34d)
     const cells = (row: string) => row.split(',');
-    expect(cells(rows[0]).slice(0, 5)).toEqual(['specimen_id', 'unit', 'length', 'width', 'thickness']);
-    expect(cells(rows[1]).slice(0, 2)).toEqual(['A', 'mm']);
-    expect(Number(cells(rows[1])[2])).toBeCloseTo(Math.hypot(40, 20, 10), 4);
+    expect(cells(rows[0]).slice(0, 6)).toEqual(['specimen_id', 'annotator', 'unit', 'length', 'width', 'thickness']);
+    expect(cells(rows[1]).slice(0, 3)).toEqual(['A', '', 'mm']);
+    expect(Number(cells(rows[1])[3])).toBeCloseTo(Math.hypot(40, 20, 10), 4);
     expect(rows[1].endsWith(',site/A.ply')).toBe(true);
-    expect(Number(cells(rows[2])[2])).toBeCloseTo(Math.hypot(30, 20, 10), 4);
+    expect(Number(cells(rows[2])[3])).toBeCloseTo(Math.hypot(30, 20, 10), 4);
     expect(out[1].text.trim().split('\n')).toHaveLength(3);
     expect(out[3].text).toBe('LM3=1\n0 0 0\nID=A\n');
   });
@@ -68,15 +70,19 @@ describe('batch outputs', () => {
       [10, 5, 6, 9],
       [6, 2, 4, 7],
     ];
-    const specimens = data.map((row, i) => specimen(`S${i}`, [3, 2, 1], Object.fromEntries(row.map((v, k) => [`J${k + 1}`, { length: v }]))));
-    specimens.push(specimen('S6', [3, 2, 1], { J1: { length: 1 }, J2: { length: 2 } }));
+    // (a manual measurement M1 of each observer)
+    const specimens = data.map((row, i) => specimen(`S${i}`, [3, 2, 1], Object.fromEntries(row.map((v, k) => [`J${k + 1}`, { M1: v }]))));
+    specimens.push(specimen('S6', [3, 2, 1], { J1: { M1: 1 }, J2: { M1: 2 } }));
     const csv = iccCsv(specimens)!.split('\n');
     expect(csv[0]).toBe('measure,n_specimens,n_raters,icc');
     const [m, n, k, icc] = csv[1].split(',');
-    expect([m, n, k]).toEqual(['length', '6', '4']);
+    expect([m, n, k]).toEqual(['M1', '6', '4']);
     expect(Number(icc)).toBeCloseTo(0.29, 2);
     // one observer: no ICC
-    expect(iccCsv([specimen('X', [1, 1, 1], { J1: { length: 1 } }), specimen('Y', [1, 1, 1], { J1: { length: 2 } })])).toBeNull();
+    expect(iccCsv([specimen('X', [1, 1, 1], { J1: { M1: 1 } }), specimen('Y', [1, 1, 1], { J1: { M1: 2 } })])).toBeNull();
+    // a model's other project files are no specimens of their own for it
+    const other = { ...specimen('S0', [3, 2, 1], { J1: { M1: 100 } }), primary: false };
+    expect(iccCsv([...specimens, other])).toBe(iccCsv(specimens));
   });
 
   it('the volumetric configuration: one row per configured specimen, with its file', () => {
@@ -85,8 +91,8 @@ describe('batch outputs', () => {
     a.configuration = computeConfiguration(a.state.scars, a.state.configuration, frameMeasures(mesh.positions, surfaceMeasures(mesh.positions, mesh.index), null).box);
     const out = batchOutputs([a, b], { excelBom: false });
     const text = (suffix: string) => out.find((f) => f.suffix === suffix)!.text.trim().split('\n');
-    expect(text('configuration.csv')).toEqual(['specimen_id,model,frame,facial_character,flaking_surface_relation,platform_relation,polarity,file', 'A,box,principal,unifacial,,single,unipolar_longitudinal,site/A.ply']);
-    expect(text('flaking_surfaces.csv')[0]).toBe('specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis,file');
+    expect(text('configuration.csv')).toEqual(['specimen_id,annotator,model,frame,facial_character,flaking_surface_relation,platform_relation,polarity,file', 'A,,box,principal,unifacial,,single,unipolar_longitudinal,site/A.ply']);
+    expect(text('flaking_surfaces.csv')[0]).toBe('specimen_id,annotator,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis,file');
     expect(text('scar_vectors.csv')[0].endsWith(',note,platform_face,flaking_surface,unit,tech_angle_deg,source')).toBe(true);
   });
 
@@ -134,9 +140,53 @@ describe('batch outputs', () => {
     expect(batchOutputs([fromSaved], opts)).toEqual(batchOutputs([fromMesh], opts));
     const tables = batchOutputs([fromSaved], opts).map((f) => f.suffix);
     expect(tables).toEqual(expect.arrayContaining(['measurements.csv', 'planes.csv', 'scar_vectors.csv', 'configuration.csv', 'flaking_surfaces.csv']));
-    // the two observers' frames differ: length, width and thickness do not
-    expect(fromSaved.observers.get('A')!.length).toBeCloseTo(Math.hypot(40, 20, 10), 4);
-    expect(fromSaved.observers.get('B')!.length).toBe(fromSaved.observers.get('A')!.length);
+    // the observers of the ICC: their manual measurements only (none here), not length, width and thickness (34d)
+    expect([...fromSaved.observers.keys()]).toEqual(['A', 'B']);
+    expect(fromSaved.observers.get('A')).toEqual({});
+  });
+
+  it('a column after specimen_id, quoted cells and all; a table without specimen_id stays', () => {
+    expect(withAnnotator('specimen_id,x\nA,1\n', 'Ann')).toBe('specimen_id,annotator,x\nA,Ann,1\n');
+    expect(withAnnotator('\uFEFFspecimen_id,x\n"A,1","a\nb"\nB,2\n', 'x,y')).toBe('\uFEFFspecimen_id,annotator,x\n"A,1","x,y","a\nb"\nB,"x,y",2\n');
+    expect(withAnnotator('specimen_id\nA\n', '')).toBe('specimen_id,annotator\nA,\n');
+    expect(withAnnotator('measure,n\nM1,2\n', 'Ann')).toBe('measure,n\nM1,2\n');
+  });
+
+  it('one set of rows per project file (34d): the model\'s own first, the others by annotator; the points of GM once', () => {
+    const mesh = box([40, 20, 10], 2);
+    const auto = autoMeasurements(mesh.positions, surfaceMeasures(mesh.positions, mesh.index)).auto;
+    const project = (annotator: string, path: string, length: number): BatchProject => {
+      const s = new ProjectStore(emptyProject());
+      updateSpecimen(s, { id: 'box', annotator });
+      addLandmark(s, [0, 0, 0], 'apex');
+      addMeasurement(s, { type: 'distance', points: [[0, 0, 0], [length, 0, 0]] });
+      return { path, state: s.state, derived: {}, appVersion: 'x' };
+    };
+    const own = project('Wang', 'LithicAnalyst/projects/box.ply.lithicanalyst.json', 10);
+    const ps = [project('Zhou', 'z.json', 11), own, project('Li', 'l.json', 12)];
+    const measures = { auto, vertices: null, box: null };
+    const all = batchSpecimens('box.ply', { project: own, measures }, ps.map((p) => ({ project: p, measures })));
+    expect(all.map((s) => [s.state.specimen.annotator, s.primary])).toEqual([['Wang', true], ['Li', false], ['Zhou', false]]);
+    // the ICC's observers on the first only, by model
+    expect([...all[0].observers.keys()]).toEqual(['Zhou', 'Wang', 'Li']);
+    expect(all[1].observers.size).toBe(0);
+    const out = batchOutputs(all, { excelBom: false });
+    const text = (suffix: string) => out.find((f) => f.suffix === suffix)?.text.trim().split('\n') ?? [];
+    expect(text('measurements.csv').map((l) => l.split(',').slice(0, 2).join(','))).toEqual(['specimen_id,annotator', 'box,Wang', 'box,Li', 'box,Zhou']);
+    expect(text('manual_measurements.csv').map((l) => l.split(',').slice(0, 4).join(','))).toEqual(['specimen_id,annotator,measure_id,type', 'box,Wang,M1,distance', 'box,Li,M1,distance', 'box,Zhou,M1,distance']);
+    expect(text('landmarks.csv').filter((l) => l.startsWith('box,'))).toHaveLength(3);
+    // the TPS once per model: the first project file's
+    expect(out.find((f) => f.suffix === 'landmarks.tps')!.text).toBe('LM3=1\n0 0 0\nID=box\n');
+    // one model has no ICC (two models at least)
+    expect(out.some((f) => f.suffix === 'icc.csv')).toBe(false);
+    // GM: the first only (here none is complete: listed once)
+    expect(gmOutputs(all.map((s) => ({ ...s, state: { ...s.state, specimen: { ...s.state.specimen, type: 'flake' as const } } })), { excelBom: false }).skipped.map((x) => x.id)).toEqual(['box']);
+    // with one project file: the same tables but the annotator column
+    const one = batchSpecimens('box.ply', { project: own, measures }, [{ project: own, measures }]);
+    expect(one).toHaveLength(1);
+    const drop = (t: string) => t.split('\n').map((l) => l.split(',').filter((_, i) => i !== 1).join(',')).join('\n');
+    const single = batchOutputs(one, { excelBom: false }).find((f) => f.suffix === 'measurements.csv')!.text;
+    expect(drop(single)).toBe(measurementsCsv(own.state, auto, { excelBom: false }, null, null, 'box.ply'));
   });
 });
 

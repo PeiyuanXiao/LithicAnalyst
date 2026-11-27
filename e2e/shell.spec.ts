@@ -147,15 +147,14 @@ test('compares only what the observers drew: no curve group without curves', asy
   await expect(page.locator('#agreement-empty')).toBeHidden();
 });
 
-test('with nothing drawn, only the measurements are compared', async ({ page }) => {
+test('with nothing drawn, nothing is compared (34d: no length, width and thickness)', async ({ page }) => {
   await openApp(page);
   await loadMesh(page, boxPly());
   const other = await page.evaluate(() => window.lithicanalyst.projectJson());
   other.specimen.annotator = 'Bo';
   await page.locator('#app-mode-compare').click();
   await addObserver(page, other);
-  // length, width and thickness are always there; no arrow or curve group with "0 / 0"
-  await expect(page.locator('#agreement-table tbody')).toHaveCount(1);
-  await expect(page.locator('#agreement-table tbody')).toHaveAttribute('data-group', 'measurement');
-  await expect(page.locator('#agreement-empty')).toBeHidden();
+  // no arrow or curve group with "0 / 0", no measurement group
+  await expect(page.locator('#agreement-table tbody')).toHaveCount(0);
+  await expect(page.locator('#agreement-empty')).toBeVisible();
 });

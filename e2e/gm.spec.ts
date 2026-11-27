@@ -12,7 +12,7 @@ async function setFlake(page: Page): Promise<void> {
   await page.keyboard.press('Escape');
 }
 
-/** The technical axis on T1, from the ventral side. */
+/** The technological axis on T1, from the ventral side. */
 async function drawAxis(page: Page): Promise<void> {
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
   await nextFrames(page);

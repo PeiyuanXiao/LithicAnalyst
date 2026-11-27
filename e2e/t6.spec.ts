@@ -29,7 +29,7 @@ async function openT6(page: Page, K = 14): Promise<void> {
   await page.evaluate(() => window.lithicanalyst.snap.prepare('ridge'));
 }
 
-/** Draw the technical axis: press at `from`, let go toward the distal end. */
+/** Draw the technological axis: press at `from`, let go toward the distal end. */
 async function drawAxis(page: Page, from: Vec3, opts: { shift?: boolean } = {}): Promise<void> {
   await fromVentral(page);
   await page.keyboard.press('t');

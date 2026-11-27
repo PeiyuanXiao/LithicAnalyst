@@ -229,21 +229,21 @@ test('S2: computing shows, the values before fade; back to a source used before,
   expect(pageErrors).toEqual([]);
 });
 
-test('a flake: the technical frame’s X mid-plane, through the point of percussion; T1 alike on both sides', async ({ page, pageErrors }) => {
+test('a flake: the technological frame’s X mid-plane, through the point of percussion; T1 alike on both sides', async ({ page, pageErrors }) => {
   await openApp(page, 'flake');
   await loadMesh(page, t1Ply());
   await page.locator('#app-mode-measure').click();
-  // no technical frame yet: its mid-plane cannot be chosen
+  // no technological frame yet: its mid-plane cannot be chosen
   await page.locator('#symmetry-add').click();
-  await expect(page.locator('#symmetry-add-frame-technical-x')).toBeDisabled();
+  await expect(page.locator('#symmetry-add-frame-technological-x')).toBeDisabled();
   await page.keyboard.press('Escape');
   await page.locator('#app-mode-annotate').click();
   await annotate(page);
   await page.locator('#app-mode-measure').click();
   await page.locator('#symmetry-add').click();
   // (the platform outline is a closed curve too)
-  await expect(page.locator('#symmetry-add-menu .menu-item')).toHaveText(['C1', 'Technical X', 'Specimen X', 'Specimen Y', 'Specimen Z']);
-  await page.locator('#symmetry-add-frame-technical-x').click();
+  await expect(page.locator('#symmetry-add-menu .menu-item')).toHaveText(['C1', 'Technological X', 'Specimen X', 'Specimen Y', 'Specimen Z']);
+  await page.locator('#symmetry-add-frame-technological-x').click();
   const [v] = await settled(page, 1);
   // T1 is a prism across X from −15 to 15: the plane x = 0 through P
   expect(v.plane!.point[0]).toBeCloseTo(0, 1);
@@ -254,10 +254,10 @@ test('a flake: the technical frame’s X mid-plane, through the point of percuss
   expect(v.deviationMean!).toBeLessThan(0.05);
   // the size of T1 says the units are right
   expect(v.areaA! + v.areaB!).toBeGreaterThan(2 * 30 * 40);
-  await expect(page.locator('#symmetry-list li .arrow-meta')).toHaveText(['Technical X']);
+  await expect(page.locator('#symmetry-list li .arrow-meta')).toHaveText(['Technological X']);
   const [row] = parseCsv(await page.evaluate(() => window.lithicanalyst.exportSymmetryCsvText()));
-  expect([row.source, row.source_id]).toEqual(['frame', 'technical_x']);
+  expect([row.source, row.source_id]).toEqual(['frame', 'technological_x']);
   await page.locator('#symmetry-area-cell').hover();
-  await page.screenshot({ path: 'test-results/34a/t1-technical-x.png' });
+  await page.screenshot({ path: 'test-results/34a/t1-technological-x.png' });
   expect(pageErrors).toEqual([]);
 });

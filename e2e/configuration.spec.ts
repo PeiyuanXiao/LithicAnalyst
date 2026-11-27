@@ -25,7 +25,7 @@ async function showConfig(page: Page, on: boolean): Promise<void> {
   await expect(page.locator('#display-panel')).toBeHidden();
 }
 
-test('a columnar core: the seven traits in the panel, the view cube and the face card', async ({ page }) => {
+test('a columnar core: the six traits in the panel, the view cube and the face card', async ({ page }) => {
   await threeScars(page);
   const r = (await config(page))!;
   // no specimen frame: the principal axes (their signs decide which face is "front")

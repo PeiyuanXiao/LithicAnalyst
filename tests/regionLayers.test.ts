@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildEdges, type EdgeTable } from '../src/compute/meshGeometry';
 import { flakeFacePieces, overPiecesSteps, polylineEdges, regionsSteps, resolveRegions, type Partition } from '../src/compute/regions';
 import { runSync } from '../src/compute/steps';
-import { addCurve, addRegion, addScarVector, deleteCurve, deleteTechnicalAxis, setCurveAttribute, setCurveEdgeAngle, setRegionScar, setRegionType, setSpecimenType, setTechnicalAxis } from '../src/core/actions';
+import { addCurve, addRegion, addScarVector, deleteCurve, deleteTechnologicalAxis, setCurveAttribute, setCurveEdgeAngle, setRegionScar, setRegionType, setSpecimenType, setTechnologicalAxis } from '../src/core/actions';
 import { customValue, isBoundaryCurve, isUpperRegion, keyedOptions, measuresEdgeAngle, numberKeyField, REGION_FIELDS } from '../src/core/fields';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -169,13 +169,13 @@ describe('the regions that follow other annotations', () => {
   };
   const autos = (s: ProjectStore) => s.state.regions.filter((r) => r.auto).map((r) => r.type).sort();
 
-  it('the faces come with an edge and a technical frame, in the step that completes them', () => {
+  it('the faces come with an edge and a technological frame, in the step that completes them', () => {
     const s = new ProjectStore(emptyProject());
     setSpecimenType(s, 'flake');
     const edge = addCurve(s, shape());
     setCurveAttribute(s, edge.id, 'type', 'edge');
     expect(autos(s)).toEqual([]);
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     expect(autos(s)).toEqual(['dorsal', 'ventral']);
     s.history.undo();
     expect(autos(s)).toEqual([]);
@@ -187,7 +187,7 @@ describe('the regions that follow other annotations', () => {
     expect(autos(s)).toEqual(['platform']);
     s.history.undo();
     expect(autos(s)).toEqual(['dorsal', 'platform', 'ventral']);
-    deleteTechnicalAxis(s);
+    deleteTechnologicalAxis(s);
     expect(autos(s)).toEqual(['platform']);
   });
   it('a type given by hand makes one the user\'s', () => {
@@ -195,7 +195,7 @@ describe('the regions that follow other annotations', () => {
     setSpecimenType(s, 'flake');
     const edge = addCurve(s, shape());
     setCurveAttribute(s, edge.id, 'type', 'edge');
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     const v = s.state.regions.find((r) => r.type === 'ventral')!;
     setRegionType(s, v.id, 'retouch', null, [3, 3, 3]);
     expect(s.state.regions.find((r) => r.id === v.id)).toMatchObject({ type: 'retouch', seed: [3, 3, 3] });
@@ -212,7 +212,7 @@ describe('the regions that follow other annotations', () => {
     setSpecimenType(s, 'flake');
     const edge = addCurve(s, shape());
     setCurveAttribute(s, edge.id, 'type', 'edge');
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     const results = s.state.regions.map((r) => ({ id: r.id, label: r.label, type: r.type, scarId: null, area: 1, conflict: false, parent: null, retouchLayer: null }));
     const rows = () => regionsCsv(s.state, results, { excelBom: false }).trim().split('\n').length - 1;
     expect(rows()).toBe(2);

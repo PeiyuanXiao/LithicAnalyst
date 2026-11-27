@@ -186,7 +186,7 @@ export function* overPiecesSteps(lower: Partition, upper: Partition): Steps<Int3
 }
 
 /**
- * A flake's faces among the pieces of the upper layer: the ventral face is the piece under the technical axis
+ * A flake's faces among the pieces of the upper layer: the ventral face is the piece under the technological axis
  * (`ventral`), the dorsal face the largest other than it and the platform. None when the two are not apart: the edge and
  * the platform outline together leave a way round (nothing else of a size is left, at least 5 % of the surface).
  */

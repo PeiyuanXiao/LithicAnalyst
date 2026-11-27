@@ -138,7 +138,7 @@ export interface LandmarkTable {
   sets: SemilandmarkResult[];
 }
 
-/** The platform's two ends as left and right of the technical frame (−X left, +X right; two ends on one side: the one further to that side); ids. */
+/** The platform's two ends as left and right of the technological frame (−X left, +X right; two ends on one side: the one further to that side); ids. */
 export function platformSides(matrix: readonly number[] | null | undefined, landmarks: readonly Landmark[]): { left: string | null; right: string | null } {
   const ends = landmarks.filter((l) => l.code === 'platform_end');
   if (!matrix || !ends.length) return { left: null, right: null };
@@ -154,7 +154,7 @@ type TableInput = Pick<ProjectState, 'landmarks' | 'semilandmarks' | 'curves'> &
 /** The landmarks a specimen shows and exports: those of a flake's own (`code`) only on a flake. */
 export const shownLandmarks = (state: Pick<TableInput, 'landmarks' | 'specimen'>): Landmark[] => (state.specimen?.type === 'flake' ? [...state.landmarks] : state.landmarks.filter((l) => !l.code));
 
-/** The name a landmark is exported with: a platform end's follows its side of the technical frame. */
+/** The name a landmark is exported with: a platform end's follows its side of the technological frame. */
 export function landmarkName(l: Landmark, sides: { left: string | null; right: string | null }): string {
   return l.id === sides.left ? 'platform_left' : l.id === sides.right ? 'platform_right' : l.name;
 }

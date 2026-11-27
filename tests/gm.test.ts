@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GM_OUTLINE_SETS, gmCounts, gmMissingInputs, gmPoints, gmTotal, type GmResult } from '../src/compute/gm';
-import { addCurve, addLandmark, addSemilandmarkSet, placePlatformEnd, setCurveAttribute, setGmConfig, setSpecimenType, setTechnicalAxis } from '../src/core/actions';
+import { addCurve, addLandmark, addSemilandmarkSet, placePlatformEnd, setCurveAttribute, setGmConfig, setSpecimenType, setTechnologicalAxis } from '../src/core/actions';
 import { frameAxes, frameMatrix } from '../src/core/frame';
 import { parseGmConfig, parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -37,7 +37,7 @@ function t1Scene(f: (p: Vec3) => Vec3 = id3, opts: { closedEdge?: boolean; ends?
   };
   const matrix = frameMatrix({ origin: o, x: dir([1, 0, 0]), y: dir([0, 1, 0]), z: dir([0, 0, 1]) });
   const n: Vec3 = dir([0, 0, 1]);
-  setTechnicalAxis(s, { start: o, end: f(T1.A), startNormal: n, endNormal: n, matrix, failure: null });
+  setTechnologicalAxis(s, { start: o, end: f(T1.A), startNormal: n, endNormal: n, matrix, failure: null });
   const corner = (x: number, k: number): Vec3 => f([x, -2 * k, 10 * k]);
   if (opts.outline !== false) {
     const c = addCurve(s, shape([f([-15, 0, 0]), f([0, 0, 0]), f([15, 0, 0]), corner(15, 1), corner(-15, 1)], true));
@@ -66,7 +66,7 @@ function t1Scene(f: (p: Vec3) => Vec3 = id3, opts: { closedEdge?: boolean; ends?
   return { s, m, run, platformFaces };
 }
 
-/** In the specimen's technical frame. */
+/** In the specimen's technological frame. */
 const inFrame = (s: ProjectStore, p: Vec3): Vec3 => {
   const f = frameAxes(s.state.flake.axis!.matrix!);
   const d: Vec3 = [p[0] - f.origin[0], p[1] - f.origin[1], p[2] - f.origin[2]];
@@ -286,7 +286,7 @@ describe('the surface grids', () => {
     // Y along the long axis, Z toward the model's +z, X = Y × Z
     const matrix = frameMatrix({ origin: P, x: dir([0, -1, 0]), y: dir([1, 0, 0]), z: dir([0, 0, 1]) });
     const n = norm(dir([-1, 0, 0]));
-    setTechnicalAxis(s, { start: P, end: f([T3.a, 0, 0]), startNormal: n, endNormal: n, matrix, failure: null });
+    setTechnologicalAxis(s, { start: P, end: f([T3.a, 0, 0]), startNormal: n, endNormal: n, matrix, failure: null });
     const ring = Array.from({ length: 128 }, (_, k): Vec3 => f([T3.a * Math.cos(Math.PI + (2 * Math.PI * k) / 128), T3.b * Math.sin(Math.PI + (2 * Math.PI * k) / 128), 0]));
     const c = addCurve(s, shape(ring, true));
     setCurveAttribute(s, c.id, 'type', 'edge');
@@ -411,7 +411,7 @@ describe('what a specimen lacks', () => {
     expect(t1Scene(id3, { edge: false }).run().missing).toEqual(['edge']);
     const empty = new ProjectStore(emptyProject());
     setSpecimenType(empty, 'flake');
-    expect(gmMissingInputs(empty.state)).toEqual(['technical_axis', 'platform_ends', 'edge', 'platform_outline']);
+    expect(gmMissingInputs(empty.state)).toEqual(['technological_axis', 'platform_ends', 'edge', 'platform_outline']);
   });
 
   it('nothing asked for: nothing lacks', () => {

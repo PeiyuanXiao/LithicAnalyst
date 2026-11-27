@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
-import { boxPly, boxPoint, spherePly, type Vec3 } from './fixtures/meshes';
-import { counts, curveClick, download, dragArrow, expect, exportAvailable, exportFile, loadMesh, openApp, parseCsv, setAnnotator, state, test, toScreen, viewFromTop } from './helpers';
+import { boxPly, boxPoint, spherePly, t8Ply, type Vec3 } from './fixtures/meshes';
+import { counts, curveClick, download, dragArrow, expect, exportAvailable, exportFile, folderPaths, folderText, loadMesh, mockFolder, openApp, openMockFolder, parseCsv, setAnnotator, state, test, toScreen, viewFromTop } from './helpers';
+import { t8Project } from './t8Setup';
 
 const agreement = (page: Page) => page.evaluate(() => window.lithicanalyst.agreement());
 const value = async (page: Page, itemType: string, itemKey: string, metric: string) =>
@@ -73,7 +74,10 @@ test('compares the open project with other observers\' files of the same model',
   expect(await value(page, 'region', 'scar', 'iou')).toBe(0);
   expect(await value(page, 'region_type', 'all', 'agreement')).toBe(0);
   expect(await value(page, 'region_type', 'all', 'area')).toBeCloseTo(200, 2);
-  expect(await value(page, 'measurement', 'area_cortex', 'difference')).toBeCloseTo(200, 2);
+  // what is computed from the annotations is not compared (34d): no region areas, no length
+  const rows = (await agreement(page))!.rows;
+  expect(rows.filter((r) => r.itemType === 'measurement')).toEqual([]);
+  expect(rows.some((r) => r.itemType === 'plane')).toBe(false);
   await expect(page.locator('#agreement-table tbody tr[data-item="arrow"][data-metric="angle_deg"]')).toHaveCount(1);
 
   const long = await exportFile(page, 'agreement');
@@ -130,4 +134,98 @@ test('three observers: Fleiss\' κ on what all of them share', async ({ page }) 
   expect(byMetric.n_items).toBe(2);
   expect(byMetric.agreement).toBeCloseTo((1 + 1 / 3) / 2, 9);
   expect(await page.locator('#observer-list .observer-row').count()).toBe(3);
+});
+
+/** The files of the newest export folder of the mock folder that has `file`: its path, and the files below it. */
+async function newestExport(page: Page, file: RegExp, not: string[] = []): Promise<{ base: string; files: string[] }> {
+  let base = '';
+  await expect
+    .poll(async () => {
+      const hit = (await folderPaths(page)).filter((p) => /^LithicAnalyst\/exports\/[^/]+\//.test(p) && file.test(p.split('/').pop()!)).map((p) => p.slice(0, p.lastIndexOf('/'))).find((b) => !not.includes(b));
+      base = hit ?? '';
+      return base;
+    }, { timeout: 60_000 })
+    .not.toBe('');
+  return { base, files: (await folderPaths(page)).filter((p) => p.startsWith(`${base}/`)).map((p) => p.slice(base.length + 1)).sort() };
+}
+
+test('two observers of a flake (34d): the technological axis, platform ends by side, nothing computed; the manifest; the summary one set of rows per project file', async ({ page, pageErrors }) => {
+  // B put P 0.4 mm to the side and listed its two platform ends the other way round (both are named platform_end)
+  const a = t8Project('A');
+  const bFile = JSON.parse(t8Project('B', { P: [0.4, 0, 0] }).text);
+  const lms = bFile.annotations.landmarks as Array<{ code?: string }>;
+  const ends = lms.filter((l) => l.code === 'platform_end').reverse();
+  bFile.annotations.landmarks = [...lms.filter((l) => l.code !== 'platform_end'), ...ends];
+  await mockFolder(page, 'flakes', {
+    't8.ply': t8Ply().buffer,
+    'LithicAnalyst/projects/t8.ply.lithicanalyst.json': Buffer.from(a.text),
+    'others/t8.B.lithicanalyst.json': Buffer.from(JSON.stringify(bFile)),
+  });
+  await openApp(page, 'flake');
+  await openMockFolder(page);
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.state().specimen.annotator)).toBe('A');
+  await expect.poll(() => page.evaluate(() => window.lithicanalyst.flake()?.measures?.psia ?? null), { timeout: 30_000 }).not.toBeNull();
+
+  await page.locator('#app-mode-compare').click();
+  await page.locator('#compare-add-folder').click();
+  await expect(page.locator('#observer-list .observer-row')).toHaveCount(2);
+  await expect.poll(() => value(page, 'technological_axis', 'axis', 'pop_distance')).toBeCloseTo(0.4, 6);
+  expect(await value(page, 'technological_axis', 'axis', 'angle_deg')).toBeCloseTo(0, 6);
+  const rows = (await agreement(page))!.rows;
+  // by side: left with left, right with right, though B listed them the other way round
+  expect(rows.filter((r) => r.itemType === 'landmark').map((r) => [r.itemKey, +r.value.toFixed(6)])).toEqual([
+    ['pop', 0.4],
+    ['platform_left', 0],
+    ['platform_right', 0],
+  ]);
+  // no planes, no length, width and thickness, no flake measures
+  expect(rows.some((r) => r.itemType === 'plane' || r.itemType === 'measurement')).toBe(false);
+  await expect(page.locator('#agreement-table tbody[data-group="technological_axis"]')).toHaveCount(1);
+  await expect(page.locator('#agreement-table tbody[data-group="technological_axis"] tr[data-metric="pop_distance"]')).toHaveCount(1);
+  // one axis each: no pairing line
+  await expect(page.locator('#agreement-table tbody[data-group="technological_axis"] .agree-pairing')).toHaveCount(0);
+  await expect(page.locator('#agreement-table tbody[data-group="plane"], #agreement-table tbody[data-group="measurement"]')).toHaveCount(0);
+  await expect(page.locator('#sec-agreement')).toContainText('Technological axis');
+  await expect(page.locator('#sec-agreement')).not.toContainText('PSIA');
+  await page.screenshot({ path: 'test-results/34d/compare-flake.png' });
+
+  // the export: the manifest says how the pairing was made
+  await page.locator('#btn-export').click();
+  await page.locator('.modal [data-choice="export"]').click();
+  const one = await newestExport(page, /_agreement\.csv$/);
+  expect(one.files.some((f) => f.endsWith('_agreement_summary.csv'))).toBe(true);
+  const m1 = JSON.parse((await folderText(page, `${one.base}/manifest.json`))!);
+  expect(m1.options.agreement).toEqual({ distanceLimit: await page.evaluate(() => window.lithicanalyst.compareGate()), curveSamples: 128, curveMatchSamples: 32 });
+  expect(m1.options.agreement.distanceLimit).toBeGreaterThan(0);
+
+  // the summary export: a set of rows per project file, the model's own first; the points of GM and the TPS once
+  await page.locator('#btn-export').click();
+  await page.locator('#export-scope-folder').click();
+  await page.locator('.modal [data-choice="export"]').click();
+  const all = await newestExport(page, /^measurements\.csv$/);
+  await expect(page.locator('#batch-progress')).toBeHidden({ timeout: 60_000 });
+  const table = async (name: string) => parseCsv((await folderText(page, `${all.base}/${name}`))!);
+  expect((await table('measurements.csv')).map((r) => [r.specimen_id, r.annotator, r.file])).toEqual([
+    ['T8', 'A', 't8.ply'],
+    ['T8', 'B', 't8.ply'],
+  ]);
+  const flakes = await table('flakes.csv');
+  expect(flakes.map((r) => [r.annotator, r.frame_source])).toEqual([
+    ['A', 'technological_axis'],
+    ['B', 'technological_axis'],
+  ]);
+  expect(Object.keys(flakes[0]).slice(0, 3)).toEqual(['specimen_id', 'annotator', 'unit']);
+  // each its own: B's PSIA from its own P
+  expect(Number(flakes[0].psia)).not.toBeCloseTo(Number(flakes[1].psia), 3);
+  expect((await table('landmarks.csv')).filter((r) => r.name === 'pop').map((r) => r.annotator)).toEqual(['A', 'B']);
+  expect(((await folderText(page, `${all.base}/landmarks.tps`))!.match(/^ID=/gm) ?? []).length).toBe(1);
+  // no manual measurement: no icc.csv
+  expect(all.files).not.toContain('icc.csv');
+  const m2 = JSON.parse((await folderText(page, `${all.base}/manifest.json`))!);
+  expect(m2.specimens.map((x: { file: string; project: string; annotator: string }) => [x.file, x.project, x.annotator])).toEqual([
+    ['t8.ply', 'LithicAnalyst/projects/t8.ply.lithicanalyst.json', 'A'],
+    ['t8.ply', 'others/t8.B.lithicanalyst.json', 'B'],
+  ]);
+  expect(m2.duplicateNames).toEqual([]);
+  expect(pageErrors).toEqual([]);
 });

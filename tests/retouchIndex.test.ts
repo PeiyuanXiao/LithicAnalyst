@@ -132,7 +132,7 @@ describe('T7, the retouch prism', () => {
     nearAbs(x.edge_curvature, 0, 0.005);
     near(x.edge_curvature_chord, 30);
     nearAbs(x.edge_curvature_depth, 0, 0.01);
-    expect(x.axis).toBe('technical');
+    expect(x.axis).toBe('technological');
     expect(reasons).toEqual({});
   };
 
@@ -260,8 +260,8 @@ describe('T7, the retouch prism', () => {
     const none = run(m, prismEdge(), false, new Uint8Array(faceOf.length), pieceOf, pieces, { matrix: identity });
     for (const k of ['removed_volume', 'erp', 'giur', 'invasiveness', 'invasiveness_continuous', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral'] as const) expect(none.reasons[k]).toBe('no_faces');
     expect(none.indices.retouch_perimeter).toBeCloseTo(1, 9);
-    // a technical frame asked for, and none there
-    const axisless = run(m, prismEdge(), false, faceOf, pieceOf, pieces, { matrix: null, settings: { axis: 'technical' } });
+    // a technological frame asked for, and none there
+    const axisless = run(m, prismEdge(), false, faceOf, pieceOf, pieces, { matrix: null, settings: { axis: 'technological' } });
     expect(axisless.indices.axis).toBeNull();
     expect(axisless.reasons.invasiveness).toBe('no_axis');
     expect(axisless.reasons.edge_curvature).toBe('no_axis');
@@ -541,14 +541,14 @@ describe('the frame of the plan', () => {
   const frameOf = (settings: Partial<RetouchSettings>, matrix: readonly number[] | null = null, specimenFrame: readonly number[] | null = null, faces: ArrayLike<number> = faceOf, dir: Vec3 = morph.lengthDir) =>
     segmentFrame({ positions: m.positions, index: m.index, faceOf: faces, settings: { ...defaultRetouchSettings(), ...settings }, matrix, morph: { ...morph, lengthDir: dir }, specimenFrame });
 
-  it('auto: the technical axis when there is one, else the longest', () => {
-    expect(frameOf({}, identity).frame?.kind).toBe('technical');
+  it('auto: the technological axis when there is one, else the longest', () => {
+    expect(frameOf({}, identity).frame?.kind).toBe('technological');
     expect(frameOf({}).frame?.kind).toBe('longest');
     expect(frameOf({ axis: 'longest' }, identity).frame?.kind).toBe('longest');
-    expect(frameOf({ axis: 'technical' }).reason).toBe('no_axis');
+    expect(frameOf({ axis: 'technological' }).reason).toBe('no_axis');
   });
 
-  it('the technical axis: from 0 to its length', () => {
+  it('the technological axis: from 0 to its length', () => {
     const f = frameOf({}, identity).frame!;
     expect(f.y0).toBe(0);
     expect(f.y1).toBeCloseTo(40, 5);
@@ -622,11 +622,11 @@ describe('the settings in the project', () => {
   it('through the file, what it does not understand taking its default', () => {
     const s = store();
     setRetouchFitLength(s, 12.5);
-    setRetouchAxis(s, 'technical');
+    setRetouchAxis(s, 'technological');
     setRetouchFlip(s, true);
     const file = JSON.parse(JSON.stringify(serializeProject(s.state, '0.2.0')));
-    expect(file.flake.retouch).toEqual({ fitLength: 12.5, axis: 'technical', flip: true });
-    expect(retouchSettingsOf(parseProjectFile(file).flake)).toEqual({ fitLength: 12.5, axis: 'technical', flip: true });
+    expect(file.flake.retouch).toEqual({ fitLength: 12.5, axis: 'technological', flip: true });
+    expect(retouchSettingsOf(parseProjectFile(file).flake)).toEqual({ fitLength: 12.5, axis: 'technological', flip: true });
     file.flake.retouch = { fitLength: 99, axis: 'sideways', flip: 'yes' };
     expect(retouchSettingsOf(parseProjectFile(file).flake)).toEqual({ fitLength: 20, axis: 'auto', flip: false });
   });
@@ -643,7 +643,7 @@ describe('the settings in the project', () => {
     s.state.specimen.type = 'flake';
     const file = JSON.parse(JSON.stringify(serializeProject(s.state, '0.2.0', { measurements: null, vertices: null, retouchIndices: r.indices })));
     expect(file.derived.retouchIndices.fitLength).toBe(5);
-    expect(file.derived.retouchIndices.axis).toBe('technical');
+    expect(file.derived.retouchIndices.axis).toBe('technological');
     expect(file.derived.retouchIndices.parameters.ORIGINAL_FIT_MM).toBe(5);
     expect(file.derived.retouchIndices.stations.length).toBe(31);
     expect(file.derived.retouchIndices.penetration.length).toBe(16);
@@ -667,7 +667,7 @@ describe('the tables', () => {
     expect(names.slice(-25, -10)).toEqual(['retouch_axis', 'retouch_fit_length', 'removed_volume', 'erp', 'erp_filled_share', 'giur', 'giur_stations', 'invasiveness', 'invasiveness_continuous', 'retouch_perimeter', 'retouch_perimeter_dorsal', 'retouch_perimeter_ventral', 'edge_curvature', 'edge_curvature_chord', 'edge_curvature_depth']);
     expect(RETOUCH_FLAKE_COLUMNS.length).toBe(15);
     const cells = Object.fromEntries(names.map((n, i) => [n, row.split(',')[i]]));
-    expect(cells.retouch_axis).toBe('technical');
+    expect(cells.retouch_axis).toBe('technological');
     expect(cells.retouch_fit_length).toBe('5');
     near(Number(cells.erp), 0.0303);
     expect(cells.giur_stations).toBe('31');

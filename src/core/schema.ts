@@ -159,13 +159,40 @@ function parseScar(raw: unknown, i: number): Scar {
   };
 }
 
+/**
+ * Codes of before 34d, which said "technical" for "technological": the frame made from the technological axis (`technical_axis`,
+ * also `technical_axis; turned`), a symmetry reference's frame and the retouch indices' axis (`technical`), and in the stored
+ * results what geometric morphometrics missed (`technical_axis`). Read as the new codes.
+ */
+export function upgradeTechnical<T>(v: T): T {
+  if (v === 'technical') return 'technological' as T;
+  if (typeof v === 'string' && v.startsWith('technical_axis')) return `technological_axis${v.slice('technical_axis'.length)}` as T;
+  return v;
+}
+
+/**
+ * A project file's stored results (`derived`) with the codes of before 34d made new (`upgradeTechnical`): the frame's source, the
+ * retouch indices' axis, what geometric morphometrics missed. The rest as written.
+ */
+export function upgradeDerived(derived: Record<string, unknown>): Record<string, unknown> {
+  const d = { ...derived };
+  const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+  const flake = obj(d.flake);
+  if (flake && 'frameSource' in flake) d.flake = { ...flake, frameSource: upgradeTechnical(flake.frameSource) };
+  const retouch = obj(d.retouchIndices);
+  if (retouch && 'axis' in retouch) d.retouchIndices = { ...retouch, axis: upgradeTechnical(retouch.axis) };
+  const gm = obj(d.gm);
+  if (gm && Array.isArray(gm.missing)) d.gm = { ...gm, missing: gm.missing.map(upgradeTechnical) };
+  return d;
+}
+
 function parseFrame(raw: unknown): SpecimenFrame | null {
   if (raw === null || raw === undefined) return null;
   const r = raw as Record<string, unknown>;
   const m = r && typeof r === 'object' ? r.matrix : undefined;
   if (!Array.isArray(m) || m.length !== 16 || !m.every((x) => typeof x === 'number' && Number.isFinite(x)))
     throw new ProjectFileError('"specimen.frame.matrix" needs 16 numbers (a row-major 4×4 matrix).');
-  return { matrix: [...(m as number[])], source: str(r.source) };
+  return { matrix: [...(m as number[])], source: upgradeTechnical(str(r.source)) };
 }
 
 function parseCurve(raw: unknown, i: number): Curve {
@@ -432,7 +459,7 @@ function parseSemilandmarkSet(raw: unknown, i: number, landmarkIds: Set<string>)
   };
 }
 
-const SYMMETRY_FRAMES = ['technical', 'specimen'] as const;
+const SYMMETRY_FRAMES = ['technological', 'specimen'] as const;
 const SYMMETRY_AXES = ['x', 'y', 'z'] as const;
 
 /** A symmetry reference's source; null when it is not understood. */
@@ -440,7 +467,7 @@ function parseSymmetrySource(raw: unknown): SymmetrySource | null {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   if (r.kind === 'plane' && typeof r.planeId === 'string') return { kind: 'plane', planeId: r.planeId };
   if (r.kind === 'curve' && typeof r.curveId === 'string') return { kind: 'curve', curveId: r.curveId };
-  const frame = SYMMETRY_FRAMES.find((f) => f === r.frame), axis = SYMMETRY_AXES.find((a) => a === r.axis);
+  const frame = SYMMETRY_FRAMES.find((f) => f === upgradeTechnical(r.frame)), axis = SYMMETRY_AXES.find((a) => a === r.axis);
   if (r.kind === 'frame' && frame && axis) return { kind: 'frame', frame, axis };
   return null;
 }
@@ -509,7 +536,7 @@ function parseConfiguration(raw: unknown): ConfigCorrections {
 function parseRetouchSettings(raw: unknown): RetouchSettings | null {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const fitLength = typeof r.fitLength === 'number' && Number.isFinite(r.fitLength) ? clampFitLength(r.fitLength) : null;
-  const axis = RETOUCH_AXES.find((x) => x === r.axis) ?? 'auto';
+  const axis = RETOUCH_AXES.find((x) => x === upgradeTechnical(r.axis)) ?? 'auto';
   const flip = r.flip === true;
   return fitLength === null && axis === 'auto' && !flip ? null : { fitLength, axis, flip };
 }
@@ -589,6 +616,8 @@ function parseImports(raw: unknown, scarIds: Set<string>): ImportRecord[] {
       residual: { median: num(res.median), p90: num(res.p90), max: num(res.max) },
       arrows: ids(r.arrows),
       review: ids(r.review),
+      // (a file of before 34d did not record them)
+      parameters: r.parameters && typeof r.parameters === 'object' && !Array.isArray(r.parameters) ? structuredClone(r.parameters as Record<string, unknown>) : null,
     }];
   });
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { platformSides, landmarkTable } from '../src/compute/landmarks';
 import { emptyFlakeMeasures, FLAKE_MEASURES, FLAKE_PROXIMAL_COLUMNS } from '../src/compute/flake';
-import { addCurve, addLandmark, addScarVector, deleteCurve, deleteLandmark, deleteTechnicalAxis, moveLandmark, placePlatformEnd, renameLandmark, setCurveAttribute, setRegionType, setSpecimenType, setTechnicalAxis, updateSpecimen } from '../src/core/actions';
+import { addCurve, addLandmark, addScarVector, deleteCurve, deleteLandmark, deleteTechnologicalAxis, moveLandmark, placePlatformEnd, renameLandmark, setCurveAttribute, setRegionType, setSpecimenType, setTechnologicalAxis, updateSpecimen } from '../src/core/actions';
 import { keyedOptions, numberKeyField, offeredOptions, REGION_FIELDS } from '../src/core/fields';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -40,15 +40,15 @@ describe('the type of specimen', () => {
     setSpecimenType(s, 'flake');
     expect(s.state.specimen.frame).toBeNull();
     expect(s.state.flake.otherFrame).toEqual(coreFrame);
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     addScarVector(s, { start: [0, 0, 0], end: [0, 1, 0], startNormal: n, endNormal: n });
-    expect(s.state.specimen.frame?.source).toBe('technical_axis');
+    expect(s.state.specimen.frame?.source).toBe('technological_axis');
     setSpecimenType(s, 'core');
     expect(s.state.specimen.frame).toEqual(coreFrame);
     expect(s.state.flake.axis).not.toBeNull();
     expect(s.state.scars.length).toBe(1);
     setSpecimenType(s, 'flake');
-    expect(s.state.specimen.frame?.source).toBe('technical_axis');
+    expect(s.state.specimen.frame?.source).toBe('technological_axis');
     s.history.undo();
     expect(s.state.specimen.type).toBe('core');
     expect(s.state.specimen.frame).toEqual(coreFrame);
@@ -59,13 +59,13 @@ describe('the type of specimen', () => {
     const s = new ProjectStore(emptyProject());
     s.state.configuration.roles.front = 'flaking';
     setSpecimenType(s, 'flake');
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     updateSpecimen(s, { frame: null });
     expect(s.state.configuration.roles.front).toBe('flaking');
   });
   it('round trip of a flake', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     placePlatformEnd(s, [5, 0, 0]);
     const c = addCurve(s, shape(true));
     setCurveAttribute(s, c.id, 'type', 'platform_outline');
@@ -87,10 +87,10 @@ describe('types offered', () => {
   });
 });
 
-describe('the technical axis', () => {
+describe('the technological axis', () => {
   it('brings the point of percussion, which follows it and cannot be moved or deleted alone', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     const pop = s.state.landmarks[0];
     expect(pop).toMatchObject({ code: 'pop', name: 'pop', point: [0, 0, 0] });
     moveLandmark(s, pop.id, [9, 9, 9]);
@@ -98,42 +98,42 @@ describe('the technical axis', () => {
     deleteLandmark(s, pop.id);
     expect(s.state.landmarks[0]).toMatchObject({ point: [0, 0, 0], name: 'pop' });
     // replaced: one axis, one point, moved along
-    setTechnicalAxis(s, { ...axis, start: [1, 1, 0] });
+    setTechnologicalAxis(s, { ...axis, start: [1, 1, 0] });
     expect(s.state.landmarks.filter((l) => l.code === 'pop').length).toBe(1);
     expect(s.state.landmarks[0].point).toEqual([1, 1, 0]);
     // in one step
     s.history.undo();
     expect(s.state.landmarks[0].point).toEqual([0, 0, 0]);
     expect(s.state.flake.axis?.start).toEqual([0, 0, 0]);
-    expect(s.state.specimen.frame?.source).toBe('technical_axis');
+    expect(s.state.specimen.frame?.source).toBe('technological_axis');
   });
   it('without a frame: the specimen frame goes back to none, the arrow stays', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
-    setTechnicalAxis(s, { ...axis, matrix: null, failure: 'few' });
+    setTechnologicalAxis(s, axis);
+    setTechnologicalAxis(s, { ...axis, matrix: null, failure: 'few' });
     expect(s.state.specimen.frame).toBeNull();
     expect(s.state.flake.axis?.failure).toBe('few');
   });
   it('a frame set by hand stays when the axis gives none, or goes', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     const hand = { matrix: identity, source: 'view' };
     updateSpecimen(s, { frame: hand });
-    setTechnicalAxis(s, { ...axis, matrix: null, failure: 'short' });
+    setTechnologicalAxis(s, { ...axis, matrix: null, failure: 'short' });
     expect(s.state.specimen.frame).toEqual(hand);
-    deleteTechnicalAxis(s);
+    deleteTechnologicalAxis(s);
     expect(s.state.specimen.frame).toEqual(hand);
     expect(s.state.flake.axis).toBeNull();
     expect(s.state.landmarks).toEqual([]);
   });
   it('deleted: back to the principal axes, one undo step brings everything back', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
-    deleteTechnicalAxis(s);
+    setTechnologicalAxis(s, axis);
+    deleteTechnologicalAxis(s);
     expect(s.state.specimen.frame).toBeNull();
     expect(s.state.landmarks).toEqual([]);
     s.history.undo();
-    expect(s.state.specimen.frame?.source).toBe('technical_axis');
+    expect(s.state.specimen.frame?.source).toBe('technological_axis');
     expect(s.state.landmarks.length).toBe(1);
   });
 });
@@ -170,7 +170,7 @@ describe('the platform', () => {
   });
   it('at most two ends; a third moves the nearer; named by their side of the frame', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     placePlatformEnd(s, [12, 0, 0]);
     placePlatformEnd(s, [-15, 0, 0]);
     placePlatformEnd(s, [15, 0, 0]);
@@ -187,7 +187,7 @@ describe('the platform', () => {
   });
   it('a core shows and exports none of the flake\'s landmarks', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     addLandmark(s, [1, 2, 3], 'apex');
     setSpecimenType(s, 'core');
     expect(landmarkTable(s.state).rows.map((r) => r.name)).toEqual(['apex']);
@@ -202,13 +202,13 @@ describe('the exports of a flake', () => {
     const m = emptyFlakeMeasures();
     m.tech_length = 60;
     m.ipa = 101.25;
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     const [head, row] = flakesCsv(s.state, m, { excelBom: false }).trim().split('\n');
     expect(head).toBe(`specimen_id,unit,frame_source,${FLAKE_MEASURES.join(',')},${FLAKE_PROXIMAL_COLUMNS.join(',')}`);
     expect(head.split(',').slice(3, 22)).toEqual(['tech_length', 'tech_width', 'tech_thickness', 'morph_length', 'morph_width', 'morph_thickness', 'morph_tech_angle_deg', 'platform_width_chord', 'platform_width_path', 'platform_depth_chord', 'platform_depth_path', 'platform_area', 'epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm', 'ipa']);
     expect(row.split(',')[0]).toBe('F1');
     expect(row.split(',')[1]).toBe('mm');
-    expect(row.split(',')[2]).toBe('technical_axis');
+    expect(row.split(',')[2]).toBe('technological_axis');
     expect(row.split(',')[3]).toBe('60');
     expect(row.split(',')[21]).toBe('101.25');
     // then the proximal measures: empty here, but the BSA's level and whether its ends were moved
@@ -218,7 +218,7 @@ describe('the exports of a flake', () => {
   });
   it('scar_vectors.csv: the angle in the frame for a flake, nothing for a core', () => {
     const s = flakeStore();
-    setTechnicalAxis(s, axis);
+    setTechnologicalAxis(s, axis);
     addScarVector(s, { start: [0, 0, 0], end: [-3, 0, 0], startNormal: n, endNormal: n });
     expect(scarVectorCsv(s.state, { excelBom: false }).trim().split('\n')[1].split(',').at(-2)).toBe('90');
     setSpecimenType(s, 'core');

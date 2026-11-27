@@ -19,7 +19,7 @@ function svg(tag: string, attrs: Record<string, string | number> = {}): SVGEleme
 
 /** What the longitudinal drawing needs. */
 export interface ProfileContent {
-  /** The technical frame, its origin in the coordinates of `section`. */
+  /** The technological frame, its origin in the coordinates of `section`. */
   frame: FrameAxes;
   section: SectionLine | null;
   /** The measurements' points, in original coordinates; `offset` takes them to the section's. */
@@ -41,7 +41,7 @@ const TICK_PX = 6;
 
 /**
  * The two sections of a flake, to one scale: on the left the longitudinal one (X = 0 of the
- * technical frame, platform down, drawn as the figure's left view), on the right the one across
+ * technological frame, platform down, drawn as the figure's left view), on the right the one across
  * (dorsal face up, X to the right, as the front view), a slider and readings for where it is.
  */
 export class ProfilePanel {
@@ -57,7 +57,7 @@ export class ProfilePanel {
   /** Page position of Y = 0 and the marker on the longitudinal drawing. */
   private y0 = 0;
   private marker: SVGElement | null = null;
-  /** The slider, the marker or a click on the drawing moved the section (fraction of the technical length). */
+  /** The slider, the marker or a click on the drawing moved the section (fraction of the technological length). */
   onMove: (fraction: number) => void = () => {};
 
   constructor() {
@@ -92,7 +92,7 @@ export class ProfilePanel {
     this.drawCross();
   }
 
-  /** The section across at `fraction` of the technical length. */
+  /** The section across at `fraction` of the technological length. */
   setCross(fraction: number, cross: CrossSection | null): void {
     this.fraction = fraction;
     this.cross = cross;
@@ -163,7 +163,7 @@ export class ProfilePanel {
       const cx = x(p[2]), cy = y(p[1]);
       s.append(svg('path', { d: `M${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)}A${r} ${r} 0 0 ${sweep > 0 ? 1 : 0} ${cx + r * Math.cos(a0 + sweep)} ${cy + r * Math.sin(a0 + sweep)}`, class: cls, id }));
     };
-    /** A short mark across the section at a point, level with it (its technical Y). */
+    /** A short mark across the section at a point, level with it (its technological Y). */
     const tick = (p: Vec3 | null | undefined, id: string) => {
       if (!p) return;
       const q = local(p);

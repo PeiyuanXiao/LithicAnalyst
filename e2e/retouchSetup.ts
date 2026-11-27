@@ -62,7 +62,7 @@ export async function annotatedTool(page: Page, file: MeshFile = toolPly(), inve
   const second = await regionAt(page, onTool(18, 45), '9');
   await page.keyboard.press('Shift+Digit2');
   await expect.poll(async () => (await state(page)).regions[1].retouchLayer).toBe(2);
-  // the two faces, by hand: there is no technical axis to tell them
+  // the two faces, by hand: there is no technological axis to tell them
   await regionAt(page, onTool(5, 45), inverse ? '6' : '7');
   await look(page, [0, 0, -1], [0, 1, 0]);
   await regionAt(page, [10, 10, 0], inverse ? '7' : '6');

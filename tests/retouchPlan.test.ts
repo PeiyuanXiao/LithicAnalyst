@@ -61,7 +61,7 @@ function plate(): { m: Mesh; faceOf: Uint8Array } {
   return { m: { positions: new Float32Array(pos), index: new Uint32Array(idx) }, faceOf: Uint8Array.from(face) };
 }
 
-const PLATE_FRAME: SegmentFrame = { kind: 'technical', origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], y0: 0, y1: 40 };
+const PLATE_FRAME: SegmentFrame = { kind: 'technological', origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], y0: 0, y1: 40 };
 
 describe('the lines of the segments', () => {
   const { m, faceOf } = plate();
@@ -214,7 +214,7 @@ describe('the plan', () => {
   });
 
   const drawing = (face: 'dorsal' | 'ventral', extra: Partial<Parameters<typeof planDrawing>[0]> = {}) =>
-    planDrawing({ shape, loops: [], face, station: { at: [-10, 20], index: 7 }, longest: null, highlight: null, tag: 'Technical axis', palette: PRINT_PALETTE, unit: 'mm', width: 300, height: 400, ...extra });
+    planDrawing({ shape, loops: [], face, station: { at: [-10, 20], index: 7 }, longest: null, highlight: null, tag: 'Technological axis', palette: PRINT_PALETTE, unit: 'mm', width: 300, height: 400, ...extra });
   const textAt = (d: ReturnType<typeof drawing>, text: string) => d.prims.find((p) => p.kind === 'text' && p.text === text) as { x: number; y: number } | undefined;
 
   it('the proximal end down and X to the right, the ventral face not mirrored', () => {

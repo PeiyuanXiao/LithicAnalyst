@@ -52,7 +52,7 @@ test('a flake from blank: each pill turns as what it stands for is made, and a c
   await done(page, 'unit');
   await expect(pill(page, 'unit')).toContainText('✓');
 
-  // the technical axis
+  // the technological axis
   await pill(page, 'axis').click();
   await toolIs(page, 'axis');
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));

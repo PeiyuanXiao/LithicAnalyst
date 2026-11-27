@@ -49,7 +49,7 @@ const AREAS: Record<string, string> = {
   hover: '选择工具的悬停提示 Hover tips',
   count: '计数 Counts',
   color: '箭头着色 Arrow colours',
-  axis: '技术轴 Technical axis',
+  axis: '技术轴 Technological axis',
   arrows: '片疤箭头 Scar arrows',
   curves: '曲线 Curves',
   region: '区域 Regions',

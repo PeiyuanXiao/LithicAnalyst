@@ -105,5 +105,5 @@ test('the results and their parameters go into the project file', async ({ page 
   const id = await drawEdge(page);
   await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.projectJson())).derived.edgeAngles?.curves[0]?.curveId ?? null).toBe(id);
   const file = await page.evaluate(() => window.lithicanalyst.projectJson());
-  expect(file.derived.edgeAngles?.parameters).toEqual({ SMOOTH_WINDOW_MM: 5, EDGE_ANGLE_STEP_MM: 1, EDGE_ANGLE_DISTANCES_MM: [2, 5, 10], TWO_LINES_LENGTH_MM: 0.5 });
+  expect(file.derived.edgeAngles?.parameters).toEqual({ SMOOTH_WINDOW_MM: 5, EDGE_ANGLE_STEP_MM: 1, EDGE_ANGLE_DISTANCES_MM: [2, 5, 10], TWO_LINES_LENGTH_MM: 0.5, LINE_REACH_EDGES: 3 });
 });

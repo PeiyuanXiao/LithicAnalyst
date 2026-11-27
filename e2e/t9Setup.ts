@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Page } from '@playwright/test';
-import { addCurveOfType, setTechnicalAxis, updateSpecimen } from '../src/core/actions';
+import { addCurveOfType, setTechnologicalAxis, updateSpecimen } from '../src/core/actions';
 import { frameMatrix } from '../src/core/frame';
 import { serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -8,7 +8,7 @@ import { flakeT9 } from '../tests/meshes';
 import { T9, t9Ply, type Vec3 } from './fixtures/meshes';
 import { expect, fileMenu, loadMesh, openApp } from './helpers';
 
-/** T9 annotated as a flake, as a project file of t9.ply: its platform outline A–B–C, its edge A–F–B, and the technical axis; no back ridge yet. */
+/** T9 annotated as a flake, as a project file of t9.ply: its platform outline A–B–C, its edge A–F–B, and the technological axis; no back ridge yet. */
 
 /** A curve through these points, traced about half a millimetre apart as the app traces one. */
 const traced = (corners: Vec3[], closed: boolean) => {
@@ -44,7 +44,7 @@ export function t9Project(): { name: string; text: string } {
   addCurveOfType(s, traced([A, B, C], true), 'platform_outline');
   addCurveOfType(s, traced([A, F, B], false), 'edge');
   const P: Vec3 = [-2.5, 0, 0];
-  setTechnicalAxis(s, { start: P, end: [5, 30, 0], startNormal: [0, 0, -1], endNormal: [0, 0, -1], matrix: frameMatrix({ origin: P, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
+  setTechnologicalAxis(s, { start: P, end: [5, 30, 0], startNormal: [0, 0, -1], endNormal: [0, 0, -1], matrix: frameMatrix({ origin: P, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
   return { name: 't9.A.lithicanalyst.json', text: JSON.stringify(serializeProject(s.state, 'test')) };
 }
 

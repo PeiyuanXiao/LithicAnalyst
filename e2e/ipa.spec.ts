@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import { displayPanel, expect, openSection, state, test } from './helpers';
 import { openT8 } from './t8Setup';
 
-/** IPA (32a) on T8: the plane of a band of the ventral face, from the bulb's far end to 0.75 of the technical length. */
+/** IPA (32a) on T8: the plane of a band of the ventral face, from the bulb's far end to 0.75 of the technological length. */
 
 const flake = (page: Page) => page.evaluate(() => window.lithicanalyst.flake());
 const hint = (page: Page) => page.evaluate(() => window.lithicanalyst.measureHint());

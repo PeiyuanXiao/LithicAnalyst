@@ -5,7 +5,7 @@ import { buildEdges, surfaceArea, signedVolume } from '../src/compute/meshGeomet
 import { autoMeasurements, surfaceMeasures } from '../src/compute/measure';
 import { splitByLoopSteps, splitByPlaneSteps, type SplitParts } from '../src/compute/split';
 import { runSync } from '../src/compute/steps';
-import { technicalFrame } from '../src/compute/technicalFrame';
+import { technologicalFrame } from '../src/compute/technologicalFrame';
 import type { Vec3 } from '../src/core/types';
 import { box, facesFacing, flakeT1, mapped, rigid, sphere, T1, type Mesh } from './meshes';
 
@@ -66,7 +66,7 @@ function measured(): { r: FlakeResult; m: Mesh; offset: Vec3 } {
   const offset: Vec3 = [120, -40, 15];
   const local: Mesh = { positions: m.positions.map((x, i) => x - offset[i % 3]), index: m.index };
   const edge = meanEdge(m);
-  const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, f(T1.P), f(T1.A));
+  const fr = technologicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, f(T1.P), f(T1.A));
   if (!fr.ok) throw new Error('no frame');
   const plat = platformOf(m, f);
   // the ventral face: facing −Z, turned with the mesh
@@ -89,7 +89,7 @@ describe('what the hints draw comes back to the numbers', () => {
     for (const k of FLAKE_MEASURES) expect(flakeHint(k, r, 'mm'), k).not.toBeNull();
   });
 
-  it('technical length, width and thickness: the three lines, the box, the axis, the vertices that reached them', () => {
+  it('technological length, width and thickness: the three lines, the box, the axis, the vertices that reached them', () => {
     for (const k of ['tech_length', 'tech_width', 'tech_thickness'] as const) {
       const h = hint(k);
       close(lengthOf(line(h, 'length')), v.tech_length!);
@@ -141,7 +141,7 @@ describe('what the hints draw comes back to the numbers', () => {
 
   it('the angle of the two axes: from one point, the arc between them', () => {
     const h = hint('morph_tech_angle_deg');
-    const tech = line(h, 'technical-axis'), morph = line(h, 'morphological-axis');
+    const tech = line(h, 'technological-axis'), morph = line(h, 'morphological-axis');
     expect(tech.points[0]).toEqual(morph.points[0]);
     close(arcAngle(arcOf(h))!, v.morph_tech_angle_deg!);
     expect(arcOf(h).at).toEqual(tech.points[0]);
@@ -225,7 +225,7 @@ describe('what the hints draw comes back to the numbers', () => {
     const empty: FlakeResult = flakeMeasures({ positions: m.positions, index: m.index, matrix: null, P: null, ends: [], platformFaces: null, platformArea: null, unit: 'mm', meanEdge: 1, morph: null });
     for (const k of FLAKE_MEASURES) expect(flakeHint(k, empty, 'mm')).toBeNull();
     // with the axis and no platform: the box, and nothing of the platform
-    const fr = technicalFrame({ positions: flakeT1().positions, index: flakeT1().index, meanEdge: meanEdge(flakeT1()) }, T1.P, T1.A);
+    const fr = technologicalFrame({ positions: flakeT1().positions, index: flakeT1().index, meanEdge: meanEdge(flakeT1()) }, T1.P, T1.A);
     if (!fr.ok) throw new Error('no frame');
     const noPlatform = flakeMeasures({ positions: flakeT1().positions, index: flakeT1().index, matrix: fr.matrix, P: T1.P, ends: [], platformFaces: null, platformArea: null, unit: 'mm', meanEdge: 1, morph: null });
     expect(flakeHint('tech_length', noPlatform, 'mm')).not.toBeNull();
@@ -276,7 +276,7 @@ describe('the other measures', () => {
     // three lines carry values; only the current one's is written
     expect(h.filter((p) => p.kind === 'line' && p.label).length).toBe(3);
     expect(looks.filter((l) => l.label).map((l) => l.part)).toEqual(['length']);
-    // the box of a flake's technical dimensions: its edges and the others' dots are faint too
+    // the box of a flake's technological dimensions: its edges and the others' dots are faint too
     const tech = flakeHint('tech_width', measured().r, 'mm')!;
     expect(hintLook(line(tech, 'box')).opacity).toBe(HINT_LOOK.OTHER_OPACITY);
     expect(tech.filter((p) => hintLook(p).label).map((p) => p.part)).toEqual(['width']);

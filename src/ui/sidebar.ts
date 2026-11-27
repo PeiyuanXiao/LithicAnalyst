@@ -1,6 +1,6 @@
 import {
   setRetouchFitLength,
-  deleteTechnicalAxis,
+  deleteTechnologicalAxis,
   setCurveEdgeAngle,
   setPlaneRegion,
   setRegionRetouchLayer, otherRetouchSide, setRegionScar, setGmConfig, setSharpEdge,
@@ -64,7 +64,7 @@ import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, type EdgeAngleMean, type E
 import { RETOUCH_ANGLE_METHODS, type RetouchAngleResult } from '../compute/retouchAngle';
 import { FIT_LENGTH_RANGE_MM, FIT_LENGTH_STEP_MM, ORIGINAL_FIT_MM, type RetouchSummaryKey } from '../compute/retouchIndex';
 import { edgeAxis, rangeOf, type EdgeRetouchKey } from '../compute/workingEdge';
-import { AGREEMENT_FLAKE_MEASURES, EPA_DISTANCES_MM, meshSparseNearP, type FlakeMeasure } from '../compute/flake';
+import { EPA_DISTANCES_MM, meshSparseNearP, type FlakeMeasure } from '../compute/flake';
 import { bsaSettingsOf, VI_WIDTHS_MM } from '../compute/bulb';
 import { gmCounts, gmListTotal, gmMissingInputs, gmTotal, type GmAnchor } from '../compute/gm';
 import { FLAKE_TEMPLATE_PATCHES, gmConfigSummary, GM_TEMPLATE_PARAMETERS, usesTemplate } from '../compute/gmTemplate';
@@ -821,7 +821,7 @@ function displaySection(api: AppApi): Section {
     colorMode.set(arrowColorModeOf(api.display.arrows.colorMode, type));
     config.input.checked = api.display.configuration;
     harris.input.checked = api.display.harris;
-    // a flake's: it needs the technical axis
+    // a flake's: it needs the technological axis
     profile.el.hidden = !flake || api.mode === 'retouch';
     profile.input.checked = api.display.profile;
     profile.input.disabled = !api.store.state.flake.axis?.matrix;
@@ -1160,7 +1160,7 @@ function flakeSection(api: AppApi): Section {
   return { el, refresh, visible: () => ofType(api.store.state.specimen.type), ofType };
 }
 
-/** A flake's technical axis (annotate mode): one row as any other object's (a chip, its name, why it gives no frame, delete). */
+/** A flake's technological axis (annotate mode): one row as any other object's (a chip, its name, why it gives no frame, delete). */
 function axisSection(api: AppApi): Section {
   const { el, body } = section('axis', t('sec.axis'));
   const list = h('ol', { class: 'arrow-list', id: 'axis-list' });
@@ -1174,7 +1174,7 @@ function axisSection(api: AppApi): Section {
     const selected = api.selection.id === a.id;
     const status = a.failure ? h('span', { class: 'pill pill-warn', id: 'axis-status' }, t(`axis.${a.failure}`)) : null;
     // (deleting it does not select it first)
-    const del = deleteButton('axis-delete', () => deleteTechnicalAxis(api.store));
+    const del = deleteButton('axis-delete', () => deleteTechnologicalAxis(api.store));
     del.addEventListener('click', (e) => e.stopPropagation());
     list.append(
       h(
@@ -1845,7 +1845,7 @@ function planesSection(api: AppApi): Section {
 /** Where the specimen frame came from, in words: "Plane P1 · Arrow S1" (stored as `plane:P1; vertical:S1`). */
 function frameSourceText(source: string): string {
   const part = (s: string): string | null =>
-    s === 'view' ? t('frame.src.view') : s === 'technical_axis' ? t('frame.src.technical') : s === 'turned' ? t('frame.src.turned') : s.startsWith('plane:') ? t('frame.src.plane', { label: s.slice(6) }) : s.startsWith('vertical:') ? t('frame.src.vertical', { label: s.slice(9) }) : null;
+    s === 'view' ? t('frame.src.view') : s === 'technological_axis' ? t('frame.src.technological') : s === 'turned' ? t('frame.src.turned') : s.startsWith('plane:') ? t('frame.src.plane', { label: s.slice(6) }) : s.startsWith('vertical:') ? t('frame.src.vertical', { label: s.slice(9) }) : null;
   const parts = source.split('; ').map(part);
   return parts.every((p) => p !== null) ? parts.join(' · ') : t('frame.src.other');
 }
@@ -2145,7 +2145,7 @@ const coneSurfaces = (r: BiconeResult) =>
 
 /**
  * The volumetric configuration, for the panel over the view: the model (box or bicone, when the
- * volume is split along a closed curve), the sketch, the traits (seven for the box, two for the
+ * volume is split along a closed curve), the sketch, the traits (six for the box, two for the
  * bicone), the picked face's or cone's card; and the title bar's pill.
  */
 function configurationPanel(api: AppApi): Section & { pill: HTMLElement } {
@@ -2991,7 +2991,7 @@ function noduleSection(api: AppApi): Section {
 
 const FRAME_AXES = ['x', 'y', 'z'] as const;
 
-/** A source as the list says it: "P1", "C3", "Technical X", "Specimen Y" (a plane or curve that is gone: "?"). */
+/** A source as the list says it: "P1", "C3", "Technological X", "Specimen Y" (a plane or curve that is gone: "?"). */
 function symmetrySourceText(api: AppApi, s: SymmetryRef): string {
   const src = s.source;
   if (src.kind === 'plane') return api.store.plane(src.planeId)?.label ?? '?';
@@ -3004,9 +3004,9 @@ function symmetrySources(api: AppApi): Array<{ group: string; items: Array<{ val
   const st = api.store.state;
   const planes = api.planeResults().filter((p) => p.valid).map((p) => ({ value: `plane:${p.id}`, label: p.label, source: { kind: 'plane', planeId: p.id } as SymmetrySource, disabled: false }));
   const curves = st.curves.filter((c) => c.closed).map((c) => ({ value: `curve:${c.id}`, label: c.label, source: { kind: 'curve', curveId: c.id } as SymmetrySource, disabled: false }));
-  const frame = (f: 'technical' | 'specimen', axis: (typeof FRAME_AXES)[number], ok: boolean) => ({ value: `frame:${f}:${axis}`, label: t(`symmetry.frame.${f}`, { axis: axis.toUpperCase() }), source: { kind: 'frame', frame: f, axis } as SymmetrySource, disabled: !ok });
+  const frame = (f: 'technological' | 'specimen', axis: (typeof FRAME_AXES)[number], ok: boolean) => ({ value: `frame:${f}:${axis}`, label: t(`symmetry.frame.${f}`, { axis: axis.toUpperCase() }), source: { kind: 'frame', frame: f, axis } as SymmetrySource, disabled: !ok });
   const frames = [
-    ...(st.specimen.type === 'flake' ? [frame('technical', 'x', !!st.flake.axis?.matrix)] : []),
+    ...(st.specimen.type === 'flake' ? [frame('technological', 'x', !!st.flake.axis?.matrix)] : []),
     ...FRAME_AXES.map((a) => frame('specimen', a, !!st.specimen.frame)),
   ];
   return [
@@ -3454,10 +3454,10 @@ function observersSection(api: AppApi): Section {
 
 /** The groups of the agreement table, in order; region rows include the per-triangle type agreement. */
 const AGREE_GROUPS: Array<[string, string[]]> = [
+  ['technological_axis', ['technological_axis']],
   ['arrow', ['arrow']],
   ['scar_attribute', ['scar_attribute']],
   ['curve', ['curve']],
-  ['plane', ['plane']],
   ['region', ['region', 'region_type']],
   ['landmark', ['landmark']],
   ['semilandmark', ['semilandmark']],
@@ -3488,10 +3488,10 @@ function agreementSection(api: AppApi): Section {
     /** What kind of quantity a metric is (its decimals and unit). */
     const kindOf = (metric: string, itemType: string, key: string): Quantity => {
       if (metric.endsWith('_deg')) return 'angle';
-      if (metric === 'area' || (itemType === 'measurement' && key.startsWith('area_'))) return 'area';
-      if (['start_distance', 'end_distance', 'mean_distance', 'hausdorff', 'center_distance', 'distance'].includes(metric)) return 'length';
-      if (itemType === 'measurement' && ['length', 'width', 'thickness'].includes(key)) return 'length';
-      if (itemType === 'measurement' && key !== 'cortex_ratio') {
+      if (metric === 'area') return 'area';
+      if (['start_distance', 'end_distance', 'mean_distance', 'hausdorff', 'pop_distance', 'distance'].includes(metric)) return 'length';
+      // manual measurements, by label
+      if (itemType === 'measurement') {
         const m = api.store.state.measurements.find((x) => x.label === key);
         if (m) return m.type === 'angle' ? 'angle' : 'length';
       }
@@ -3506,7 +3506,7 @@ function agreementSection(api: AppApi): Section {
       if (itemType === 'region' && !key.includes('|')) return fieldText(REGION_FIELDS[0], key);
       if (itemType === 'region') return t('agree.scarRegions');
       if (itemType === 'region_type') return t('agree.regionTypes');
-      if (itemType === 'measurement') return ['length', 'width', 'thickness', 'cortex_ratio'].includes(key) || key.startsWith('area_') ? t(`agree.measure.${key}`) : (AGREEMENT_FLAKE_MEASURES as readonly string[]).includes(key) ? t(`flake.${key}`) : key;
+      if (itemType === 'measurement') return key;
       return '';
     };
     const focus = api.agreementFocus();
@@ -3531,6 +3531,9 @@ function agreementSection(api: AppApi): Section {
           const n = new Set(rows.filter((r) => r.itemType === 'region' && r.itemKey.includes('|')).map((r) => r.itemKey)).size;
           const area = value('region_type', 'all', 'area');
           pairing = [n ? t('agree.paired', { n }) : '', area !== undefined ? `${t('agree.metric.area')} ${fmtQuantity('area', area)} ${unitOf('area', 'region_type', 'all')}`.trim() : ''].filter(Boolean).join(' · ');
+        } else if (group === 'technological_axis') {
+          // one axis each: nothing to pair
+          pairing = '';
         } else {
           const n = rows.find((r) => r.metric === 'n_items')?.value ?? new Set(rows.filter((r) => r.itemKey !== 'all').map((r) => r.itemKey)).size;
           pairing = t('agree.paired', { n });

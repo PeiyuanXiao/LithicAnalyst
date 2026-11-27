@@ -664,7 +664,7 @@ export class SetNoduleCommand implements Command {
   }
 }
 
-/** Replace the flake's own data (the technical axis, the frame of the other type). */
+/** Replace the flake's own data (the technological axis, the frame of the other type). */
 export class SetFlakeCommand implements Command {
   readonly createdAt = Date.now();
   constructor(

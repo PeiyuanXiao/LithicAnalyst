@@ -134,7 +134,7 @@ test('pointed at, a row gets a neutral ground, fixed one pale amber in a ring; a
   await expect(page.locator('#flake-measures th.is-lit')).toHaveCount(0);
 });
 
-test('the tool without a technical axis: empty groups in one line each; the retouch card\'s four indices; the exports unchanged', async ({ page }) => {
+test('the tool without a technological axis: empty groups in one line each; the retouch card\'s four indices; the exports unchanged', async ({ page }) => {
   test.setTimeout(180_000);
   await openApp(page);
   await annotatedTool(page);
@@ -302,9 +302,9 @@ for (const lang of ['en', 'zh'] as const)
     }
   });
 
-test('small fixes: the technical axis is one row; a region type with one region has no total; the edge list counts stations', async ({ page }) => {
+test('small fixes: the technological axis is one row; a region type with one region has no total; the edge list counts stations', async ({ page }) => {
   await openT8(page);
-  // the technical axis: chip, name, delete, in one row; no coordinates
+  // the technological axis: chip, name, delete, in one row; no coordinates
   const row = page.locator('#axis-row');
   await expect(row).toHaveClass(/arrow-row/);
   await expect(row.locator('.chip')).toHaveCount(1);

@@ -186,7 +186,7 @@ export interface Plane {
 export type SymmetrySource =
   | { kind: 'plane'; planeId: string }
   | { kind: 'curve'; curveId: string }
-  | { kind: 'frame'; frame: 'technical' | 'specimen'; axis: 'x' | 'y' | 'z' };
+  | { kind: 'frame'; frame: 'technological' | 'specimen'; axis: 'x' | 'y' | 'z' };
 
 /**
  * A reference for measuring symmetry: a plane and the two sides A and B it parts. Side A is the side the plane's normal
@@ -248,7 +248,7 @@ export interface Region {
   retouchLayer?: number;
   /**
    * A part of a flake that follows from other annotations (the seed is not used): the platform is the smaller of the two pieces
-   * the platform outline makes, the ventral face the piece under the technical axis, the dorsal face the largest other one, and a
+   * the platform outline makes, the ventral face the piece under the technological axis, the dorsal face the largest other one, and a
    * retouch region what lies between its curve and the edge. Gone once the user gives it a type.
    */
   auto?: boolean;
@@ -316,7 +316,7 @@ export interface Landmark {
   /** Name or meaning, e.g. "LM1" or "apex". */
   name: string;
   point: Vec3;
-  /** A landmark of the flake's own: `pop` (the technical axis's start, locked), `platform_end`. Only flakes show them. */
+  /** A landmark of the flake's own: `pop` (the technological axis's start, locked), `platform_end`. Only flakes show them. */
   code?: LandmarkCode;
   /** A platform end that follows the curves: where the edge meets the platform outline. Moved by hand, it stays where it was put. */
   auto?: true;
@@ -364,11 +364,11 @@ export interface ConfigCorrections {
 }
 
 /**
- * The technical axis of a flake: an arrow on the ventral face from the point of percussion
- * toward the distal end. Its frame (matrix, see compute/technicalFrame.ts) is kept with it,
+ * The technological axis of a flake: an arrow on the ventral face from the point of percussion
+ * toward the distal end. Its frame (matrix, see compute/technologicalFrame.ts) is kept with it,
  * since the mesh does not change; `failure` says why there is none.
  */
-export interface TechnicalAxis {
+export interface TechnologicalAxis {
   id: string;
   start: Vec3;
   end: Vec3;
@@ -380,8 +380,8 @@ export interface TechnicalAxis {
   modifiedAt: string;
 }
 
-/** Which frame the retouch indices are laid out on: the technical axis when there is one (`auto`), or as chosen. */
-export const RETOUCH_AXES = ['auto', 'technical', 'longest'] as const;
+/** Which frame the retouch indices are laid out on: the technological axis when there is one (`auto`), or as chosen. */
+export const RETOUCH_AXES = ['auto', 'technological', 'longest'] as const;
 export type RetouchAxisChoice = (typeof RETOUCH_AXES)[number];
 
 /** A specimen's settings of the retouch indices. */
@@ -397,7 +397,7 @@ export const defaultRetouchSettings = (): RetouchSettings => ({ fitLength: null,
 
 /** A flake's own data; kept when the specimen is switched to a core, and shown again when it is switched back. */
 export interface FlakeData {
-  axis: TechnicalAxis | null;
+  axis: TechnologicalAxis | null;
   /** The specimen frame of the type not in use (each type keeps its own orientation). */
   otherFrame: SpecimenFrame | null;
   /** The settings of the retouch indices; absent while they are the default (a file always has them). */
@@ -544,6 +544,8 @@ export interface ImportRecord {
   arrows: string[];
   /** Those with an end that lay too far from the surface: to be checked. */
   review: string[];
+  /** The constants of the import when it was made (`IGES_IMPORT`, compute/igesAlign.ts); null: not recorded (a file of before 34d). */
+  parameters: Record<string, unknown> | null;
 }
 
 /** Scars of an import that are to be checked and have not been edited since (an edit takes the mark away). */

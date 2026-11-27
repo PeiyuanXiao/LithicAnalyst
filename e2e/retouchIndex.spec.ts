@@ -86,7 +86,7 @@ test('the stepped tool: the indices of two layers and of one, and of another fit
   expect((await retouch(page))!.erp).toBeCloseTo(erp5, 6);
 });
 
-test('the frame: the technical axis while there is one, then the longest axis', async ({ page }) => {
+test('the frame: the technological axis while there is one, then the longest axis', async ({ page }) => {
   await openApp(page);
   await loadMesh(page, t1Ply());
   await setType(page, 'flake');
@@ -119,7 +119,7 @@ test('the frame: the technical axis while there is one, then the longest axis', 
   // without an axis the longest serves, as soon as the faces say which way is up
   await expect.poll(async () => (await retouch(page))?.axis).toBe('longest');
 
-  // the technical axis
+  // the technological axis
   await look(page, [0, 0, -1], [0, 1, 0]);
   await page.evaluate(() => window.lithicanalyst.snap.prepare('ridge'));
   await page.keyboard.press('t');
@@ -130,13 +130,13 @@ test('the frame: the technical axis while there is one, then the longest axis', 
   await page.mouse.move(e.x, e.y, { steps: 8 });
   await page.mouse.up();
   await expect.poll(async () => (await state(page)).flake.axis?.matrix ?? null).not.toBeNull();
-  await expect.poll(async () => (await retouch(page))?.axis).toBe('technical');
+  await expect.poll(async () => (await retouch(page))?.axis).toBe('technological');
   r = (await retouch(page))!;
   expect(r.frame!.y0).toBe(0);
   expect(r.frame!.y1).toBeCloseTo(60, 0);
   await page.keyboard.press('v');
   await page.locator('#app-mode-measure').click();
-  expect(parseCsv((await exportFile(page, 'flakes')).text)[0].retouch_axis).toBe('technical');
+  expect(parseCsv((await exportFile(page, 'flakes')).text)[0].retouch_axis).toBe('technological');
 
   // asked for by name: the longest, and the other way round
   await page.evaluate(() => window.lithicanalyst.retouchSettings({ axis: 'longest' }));
@@ -145,7 +145,7 @@ test('the frame: the technical axis while there is one, then the longest axis', 
   await page.evaluate(() => window.lithicanalyst.retouchSettings({ flip: true }));
   await expect.poll(async () => (await retouch(page))?.frame?.y[1]).toBeCloseTo(-up[1], 6);
   await page.evaluate(() => window.lithicanalyst.retouchSettings({ axis: 'auto', flip: false }));
-  await expect.poll(async () => (await retouch(page))?.axis).toBe('technical');
+  await expect.poll(async () => (await retouch(page))?.axis).toBe('technological');
 
   // the axis gone
   await page.locator('#app-mode-annotate').click();

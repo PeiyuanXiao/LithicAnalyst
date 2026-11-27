@@ -1,14 +1,22 @@
 /**
  * Agreement between observers who annotated the same model: matching of
  * their annotations, agreement statistics (Cohen's and Fleiss' κ, ICC) and
- * the long table of differences. Pure functions; the app supplies what needs
- * the mesh (planes, per-triangle region labels, frame-dependent measurements).
+ * the long table of differences. Only what the observers annotated is
+ * compared (arrows, scar attributes, relations, curves, regions, landmarks,
+ * semilandmarks, the technological axis, manual measurements); what is
+ * computed from it is not (fitted planes, the automatic measurements): those
+ * can be compared in R from the summary export, one set of rows per project
+ * file. Pure functions; the app supplies what needs the mesh (per-triangle
+ * region labels).
  */
 
 import { SCAR_FIELDS } from '../core/fields';
 import { hasVector, type ProjectState, type Vec3 } from '../core/types';
-import { arcLengths, landmarkTable, pointAtArc } from './landmarks';
-import type { PlaneResult } from './planes';
+import { arcLengths, landmarkName, landmarkTable, platformSides, pointAtArc, shownLandmarks } from './landmarks';
+
+/** Points each curve is resampled to (at equal arc length) for its distances; and, coarser, for the cost of pairing the curves. */
+export const AGREEMENT_CURVE_SAMPLES = 128;
+export const AGREEMENT_CURVE_MATCH_SAMPLES = 32;
 
 /** An enumerated attribute as its code; '' when not filled in. */
 const attrCode = (v: unknown): string => (v === null || v === undefined ? '' : String(v));
@@ -189,7 +197,7 @@ function toPolyline(p: Vec3, line: readonly Vec3[], closed: boolean): number {
  * Distance between two curves, both resampled at equal arc length: the mean of
  * the two directed mean closest-point distances, and the Hausdorff distance.
  */
-export function curveDistance(a: { points: readonly Vec3[]; closed: boolean }, b: { points: readonly Vec3[]; closed: boolean }, samples = 128): { mean: number; hausdorff: number } {
+export function curveDistance(a: { points: readonly Vec3[]; closed: boolean }, b: { points: readonly Vec3[]; closed: boolean }, samples = AGREEMENT_CURVE_SAMPLES): { mean: number; hausdorff: number } {
   const ra = resample(a.points, a.closed, samples), rb = resample(b.points, b.closed, samples);
   const directed = (from: Vec3[], to: Vec3[], closed: boolean) => {
     let sum = 0, max = 0;
@@ -219,14 +227,10 @@ export interface FaceLabels {
 export interface ObserverData {
   label: string;
   state: Readonly<ProjectState>;
-  /** The observer's fitted planes, computed from its inputs. */
-  planes: PlaneResult[];
   /** Region of each triangle, lower layer (null without regions or before the mesh is partitioned). */
   faces: FaceLabels | null;
   /** The same for the upper layer; compared by type (null: none). */
   upper?: FaceLabels | null;
-  /** Values that depend on the observer: length, width, thickness (its frame), region areas, cortex ratio. */
-  measures: Record<string, number | null>;
 }
 
 export interface AgreementRow {
@@ -268,6 +272,21 @@ function relationOf(s: Readonly<ProjectState>, x: string, y: string): string {
   if (!r) return 'none';
   if (r.kind === 'indeterminate') return 'indeterminate';
   return r.a === x ? 'x_cuts_y' : 'y_cuts_x';
+}
+
+/**
+ * A specimen's fixed landmarks by the name they are exported with (`landmarks.csv`), the first of each name: a flake's platform ends
+ * as platform_left and platform_right, each observer's by its own technological frame (without one, by their own names).
+ */
+export function landmarksByName(s: Readonly<ProjectState>): Map<string, { id: string; point: Vec3 }> {
+  const fixed = shownLandmarks(s);
+  const sides = platformSides(s.flake?.axis?.matrix, fixed);
+  const out = new Map<string, { id: string; point: Vec3 }>();
+  for (const l of fixed) {
+    const name = landmarkName(l, sides);
+    if (!out.has(name)) out.set(name, { id: l.id, point: l.point });
+  }
+  return out;
 }
 
 function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): PairResult {
@@ -414,7 +433,7 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
     const ca = sa.curves.filter((c) => String(c.attributes.type ?? '') === type);
     const cb = sb.curves.filter((c) => String(c.attributes.type ?? '') === type);
     if (!ca.length || !cb.length) continue;
-    const m = assign(ca.map((x) => cb.map((y) => curveDistance(x, y, 32).mean)), opts.gate);
+    const m = assign(ca.map((x) => cb.map((y) => curveDistance(x, y, AGREEMENT_CURVE_MATCH_SAMPLES).mean)), opts.gate);
     m.forEach((j, i) => {
       if (j < 0) return;
       curvesMatched++;
@@ -428,31 +447,17 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
   row('curve', 'all', 'unmatched_a', sa.curves.length - curvesMatched);
   row('curve', 'all', 'unmatched_b', sb.curves.length - curvesMatched);
 
-  // planes of the same method
-  const planeAngle = (x: PlaneResult, y: PlaneResult) => {
-    const t = angleBetween(x.normal!, y.normal!);
-    return Math.min(t, 180 - t);
-  };
-  for (const method of new Set(A.planes.map((p) => p.method))) {
-    const pa = A.planes.filter((p) => p.method === method && p.valid);
-    const pb = B.planes.filter((p) => p.method === method && p.valid);
-    if (!pa.length || !pb.length) continue;
-    assign(pa.map((x) => pb.map((y) => planeAngle(x, y)))).forEach((j, i) => {
-      if (j < 0) return;
-      const key = `${pa[i].label}|${pb[j].label}`;
-      row('plane', key, 'normal_angle_deg', planeAngle(pa[i], pb[j]));
-      row('plane', key, 'center_distance', dist(pa[i].center!, pb[j].center!));
-    });
+  // the technological axis (flakes): its start, the point of percussion, and its direction (the end only sets the direction)
+  const xa = sa.specimen?.type === 'flake' ? sa.flake?.axis : null;
+  const xb = sb.specimen?.type === 'flake' ? sb.flake?.axis : null;
+  if (xa && xb) {
+    row('technological_axis', 'axis', 'pop_distance', dist(xa.start, xb.start));
+    row('technological_axis', 'axis', 'angle_deg', angleBetween(sub(xa.end, xa.start), sub(xb.end, xb.start)));
   }
 
-  // landmarks by name, semilandmarks by set and number
-  const firstByName = (s: Readonly<ProjectState>) => {
-    const m = new Map<string, Vec3>();
-    for (const l of s.landmarks) if (!m.has(l.name)) m.set(l.name, l.point);
-    return m;
-  };
-  const la = firstByName(sa), lb = firstByName(sb);
-  for (const [name, p] of la) if (lb.has(name)) row('landmark', name, 'distance', dist(p, lb.get(name)!));
+  // landmarks by the name they are exported with (a flake's platform ends by side), semilandmarks by set and number
+  const la = landmarksByName(sa), lb = landmarksByName(sb);
+  for (const [name, p] of la) if (lb.has(name)) row('landmark', name, 'distance', dist(p.point, lb.get(name)!.point));
   const ta = landmarkTable(sa), tb = landmarkTable(sb);
   for (const x of ta.sets) {
     const y = tb.sets.find((q) => q.label === x.label);
@@ -460,11 +465,7 @@ function comparePair(A: ObserverData, B: ObserverData, opts: CompareOptions): Pa
     x.points.forEach((p, k) => row('semilandmark', `${x.label}_${k + 1}`, 'distance', dist(p, y.points[k])));
   }
 
-  // measurements: differences (b − a)
-  for (const [key, va] of Object.entries(A.measures)) {
-    const vb = B.measures[key];
-    if (va !== null && vb !== null && vb !== undefined) row('measurement', key, 'difference', vb - va);
-  }
+  // manual measurements, by label: differences (b − a)
   for (const m of sa.measurements) {
     const n = sb.measurements.find((x) => x.label === m.label && x.type === m.type);
     if (n) row('measurement', m.label, 'difference', manualValue(n) - manualValue(m));

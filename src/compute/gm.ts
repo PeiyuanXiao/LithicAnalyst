@@ -21,7 +21,7 @@ export const GM_ANCHORS = ['pop', 'platform_left', 'platform_right'] as const;
 export type GmAnchor = (typeof GM_ANCHORS)[number];
 
 /** Why a specimen cannot have all its points. These codes are written to the manifest; keep them. */
-export const GM_MISSING = ['technical_axis', 'platform_ends', 'edge', 'platform_outline', 'platform_region', 'ventral_miss', 'dorsal_miss', 'platform_miss', 'point_count', 'landmark_missing', 'landmark_ambiguous', 'curve_missing', 'curve_ambiguous', 'curve_ends', 'region_missing', 'region_ambiguous', 'no_template', 'template_missing', 'template_stale', 'too_few_anchors', 'no_fit'] as const;
+export const GM_MISSING = ['technological_axis', 'platform_ends', 'edge', 'platform_outline', 'platform_region', 'ventral_miss', 'dorsal_miss', 'platform_miss', 'point_count', 'landmark_missing', 'landmark_ambiguous', 'curve_missing', 'curve_ambiguous', 'curve_ends', 'region_missing', 'region_ambiguous', 'no_template', 'template_missing', 'template_stale', 'too_few_anchors', 'no_fit'] as const;
 export type GmMissing = (typeof GM_MISSING)[number];
 
 /** The three stretches of the platform outline, in their order. */
@@ -248,7 +248,7 @@ export function gmMissingInputs(state: Pick<GmState, 'gm' | 'landmarks' | 'curve
   }
   const byTemplate = c.surfaceMethod === 'template';
   const wants = GM_ANCHORS.some((a) => c.fixed[a]) || c.edge.on || c.platformOutline.on || (!byTemplate && (c.ventral.on || c.dorsal.on || c.platform.on));
-  if (wants && !state.flake.axis?.matrix) out.add('technical_axis');
+  if (wants && !state.flake.axis?.matrix) out.add('technological_axis');
   const ends = state.landmarks.filter((l) => l.code === 'platform_end').length;
   const grid = !byTemplate && (c.ventral.on || c.dorsal.on);
   const platform = !byTemplate && c.platform.on;
@@ -641,7 +641,7 @@ export function* gmSteps(state: GmState, mesh: GmMesh): Steps<GmResult> {
  * A flake's points by the grid in left–right pairs, by point number (as gm_landmarks.csv and gm_curves.csv), the left one first:
  * the platform's two ends; along the edge (from its left end) the i-th point and the i-th from its right end; the outline's stretch
  * from the left end to the point of percussion against the one from it to the right end, reversed; its outer rim against itself,
- * reversed; in each row of the ventral, dorsal and platform grids (columns across the technical X) the j-th column and the j-th from
+ * reversed; in each row of the ventral, dorsal and platform grids (columns across the technological X) the j-th column and the j-th from
  * the other side. What lies on the middle (the point of percussion, a middle point or column) has no pair, nor have the user's own
  * landmarks and sets. For a bilateral object symmetry analysis (Klingenberg et al. 2002) in R.
  */

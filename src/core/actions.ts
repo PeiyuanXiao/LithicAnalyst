@@ -38,12 +38,13 @@ import { clampFitLength } from '../compute/retouchIndex';
 import { BSA_LEVEL_DEFAULT_MM, bsaSettingsOf, clampBsaLevel } from '../compute/bulb';
 import { measuredLine, platformEndsOf } from '../compute/measuredLine';
 import { autoRetouchCurves } from '../compute/retouchBand';
+import { IGES_IMPORT } from '../compute/igesAlign';
 import { edgeAxis, refusalOf, retouchRunEdges, type WorkingEdgeRefusal } from '../compute/workingEdge';
 import { backRidges, curveFieldByKey, defaultAttributes, defaultCurveAttributes, fieldByKey, measuresEdgeAngle, PLATFORM_OUTLINE, withAttribute, type BiconeRole, type BiconeSide, type ConfigFace, type ConfigModel, type ConfigRole, type Polarity, type SpecimenType } from './fields';
 import { curveLabelForNumber, labelForNumber, nowIso, uuid } from './ids';
 import { landmarkData, symmetryData, type LandmarkData, type ProjectStore, type SymmetryData } from './store';
 import { retouchSettingsOf, type BsaSettings, type RetouchAxisChoice, type RetouchSettings } from './types';
-import type { GmConfig, ImportRecord, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, SymmetryRef, SymmetrySource, TechnicalAxis, Vec3, WorkingEdge } from './types';
+import type { GmConfig, ImportRecord, SharpEdgeRule, AttributeValue, ConfigCorrections, Curve, CurveCompletion, Landmark, Measurement, MeasureType, Plane, PlaneMethod, ProjectState, Region, RegionType, Relation, RelationKind, Scar, ScarWithVector, Section, SemilandmarkSet, Sequence, SpecimenFrame, SpecimenInfo, SymmetryRef, SymmetrySource, TechnologicalAxis, Vec3, WorkingEdge } from './types';
 import { copy, distance } from './vec';
 
 /** High-level, undoable operations. UI code calls these, never the store's "_" methods. */
@@ -92,7 +93,7 @@ export interface ImportedArrow {
  * Scar vectors from a file: new scars after those there are, labelled on from them, with nothing else filled in, and the record of
  * the import (`imports`). One undo step, which takes the record away too.
  */
-export function importScars(store: ProjectStore, arrows: readonly ImportedArrow[], record: Omit<ImportRecord, 'arrows' | 'review' | 'date'>, date = nowIso()): ImportRecord {
+export function importScars(store: ProjectStore, arrows: readonly ImportedArrow[], record: Omit<ImportRecord, 'arrows' | 'review' | 'date' | 'parameters'>, date = nowIso()): ImportRecord {
   let n = store.state.nextLabelNumber;
   const scars: ScarWithVector[] = arrows.map((a) => ({
     id: uuid(),
@@ -102,7 +103,7 @@ export function importScars(store: ProjectStore, arrows: readonly ImportedArrow[
     createdAt: date,
     modifiedAt: date,
   }));
-  const full: ImportRecord = { ...structuredClone(record), date, arrows: scars.map((s) => s.id), review: scars.filter((_, i) => arrows[i].review).map((s) => s.id) };
+  const full: ImportRecord = { ...structuredClone(record), date, arrows: scars.map((s) => s.id), review: scars.filter((_, i) => arrows[i].review).map((s) => s.id), parameters: JSON.parse(JSON.stringify(IGES_IMPORT)) };
   store.history.execute(new ImportScarsCommand(scars, full, n));
   return full;
 }
@@ -237,10 +238,10 @@ export function addCurveOfType(store: ProjectStore, input: NewCurveInput, type: 
 
 /**
  * The commands that bring a flake's regions that follow other annotations in line with `after`: the platform comes with a
- * platform outline, the ventral and dorsal faces with an edge and a technical frame, a retouch region with a retouch curve that has
+ * platform outline, the ventral and dorsal faces with an edge and a technological frame, a retouch region with a retouch curve that has
  * both ends on an edge, a back with each back ridge. `seed`: any point, for those that are new (their pieces are worked out from what they follow).
  */
-function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[]; axis: TechnicalAxis | null }, seed: Vec3): Command[] {
+function autoRegionChanges(store: ProjectStore, after: { curves: readonly Curve[]; axis: TechnologicalAxis | null }, seed: Vec3): Command[] {
   const st = store.state;
   const wanted: RegionType[] = [];
   if (st.specimen.type === 'flake') {
@@ -941,7 +942,7 @@ function removeLandmark(d: LandmarkData, id: string): void {
 }
 
 /**
- * Delete a landmark. The point of percussion goes only with the technical axis. A platform end that follows the curves
+ * Delete a landmark. The point of percussion goes only with the technological axis. A platform end that follows the curves
  * goes with them, and one moved by hand goes back to following them (it goes only if they have no place for it).
  */
 export const deleteLandmark = (store: ProjectStore, id: string): void =>
@@ -1248,12 +1249,12 @@ export function setBsaEnds(store: ProjectStore, ends: [Vec3, Vec3] | null): void
   setBsaSettings(store, ends ? 'cmd.bsaEnds' : 'cmd.bsaReset', { ends: ends ? [copy(ends[0]), copy(ends[1])] : null });
 }
 
-// ---------------------------------------------------------------- technical axis
+// ---------------------------------------------------------------- technological axis
 
-/** The frame source of a frame made from the technical axis. */
-export const TECHNICAL_FRAME = 'technical_axis';
+/** The frame source of a frame made from the technological axis. */
+export const TECHNOLOGICAL_FRAME = 'technological_axis';
 
-const isTechnicalFrame = (f: SpecimenFrame | null): boolean => !!f && f.source.startsWith(TECHNICAL_FRAME);
+const isTechnologicalFrame = (f: SpecimenFrame | null): boolean => !!f && f.source.startsWith(TECHNOLOGICAL_FRAME);
 
 const roundedMatrix = (m: readonly number[]): number[] => m.map((x) => Math.round(x * 1e9) / 1e9);
 
@@ -1263,18 +1264,18 @@ export interface NewAxisInput {
   startNormal: Vec3;
   endNormal: Vec3;
   matrix: number[] | null;
-  failure: TechnicalAxis['failure'];
+  failure: TechnologicalAxis['failure'];
 }
 
 /**
- * Draw (or replace, or move an end of) the technical axis, in one undo step: the axis, the point of
+ * Draw (or replace, or move an end of) the technological axis, in one undo step: the axis, the point of
  * percussion at its start, and the specimen frame from it — back to none when no frame could be made.
  */
-export function setTechnicalAxis(store: ProjectStore, input: NewAxisInput): TechnicalAxis {
+export function setTechnologicalAxis(store: ProjectStore, input: NewAxisInput): TechnologicalAxis {
   const st = store.state;
   const t = nowIso();
   const old = st.flake.axis;
-  const axis: TechnicalAxis = {
+  const axis: TechnologicalAxis = {
     id: old?.id ?? uuid(),
     start: copy(input.start),
     end: copy(input.end),
@@ -1294,14 +1295,14 @@ export function setTechnicalAxis(store: ProjectStore, input: NewAxisInput): Tech
   parts.push(new SetLandmarksCommand('cmd.setAxis', lmBefore, lmAfter));
   parts.push(...autoRegionChanges(store, { curves: st.curves, axis }, input.start));
   const before = st.specimen;
-  const frame: SpecimenFrame | null = axis.matrix ? { matrix: [...axis.matrix], source: TECHNICAL_FRAME } : isTechnicalFrame(before.frame) ? null : before.frame;
+  const frame: SpecimenFrame | null = axis.matrix ? { matrix: [...axis.matrix], source: TECHNOLOGICAL_FRAME } : isTechnologicalFrame(before.frame) ? null : before.frame;
   if (JSON.stringify(frame) !== JSON.stringify(before.frame)) parts.push(new SetSpecimenCommand(structuredClone(before), { ...structuredClone(before), frame: structuredClone(frame) }));
   store.history.execute(new CompoundCommand('cmd.setAxis', parts));
   return axis;
 }
 
-/** Delete the technical axis with the point of percussion; the frame made from it goes too (back to the principal axes). */
-export function deleteTechnicalAxis(store: ProjectStore): void {
+/** Delete the technological axis with the point of percussion; the frame made from it goes too (back to the principal axes). */
+export function deleteTechnologicalAxis(store: ProjectStore): void {
   const st = store.state;
   if (!st.flake.axis) return;
   const parts: Command[] = [new SetFlakeCommand('cmd.deleteAxis', structuredClone(st.flake), { ...structuredClone(st.flake), axis: null })];
@@ -1317,7 +1318,7 @@ export function deleteTechnicalAxis(store: ProjectStore): void {
     parts.push(new SetLandmarksCommand('cmd.deleteAxis', lmBefore, lmAfter));
   }
   parts.push(...autoRegionChanges(store, { curves: st.curves, axis: null }, st.flake.axis.start));
-  if (isTechnicalFrame(st.specimen.frame)) parts.push(new SetSpecimenCommand(structuredClone(st.specimen), { ...structuredClone(st.specimen), frame: null }));
+  if (isTechnologicalFrame(st.specimen.frame)) parts.push(new SetSpecimenCommand(structuredClone(st.specimen), { ...structuredClone(st.specimen), frame: null }));
   store.history.execute(new CompoundCommand('cmd.deleteAxis', parts));
 }
 

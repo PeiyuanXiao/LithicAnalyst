@@ -6,7 +6,7 @@ import { landmarkTable } from '../compute/landmarks';
 import type { PrincipalAxes } from '../compute/meshGeometry';
 import { computePlane, type PlaneResult } from '../compute/planes';
 import type { RegionResult, RegionTotals } from '../compute/regions';
-import { AGREEMENT_FLAKE_MEASURES, storedFlakeMeasures, type FlakeMeasures, type FlakeResult } from '../compute/flake';
+import type { FlakeMeasures, FlakeResult } from '../compute/flake';
 import type { RetouchIndices } from '../compute/retouchIndex';
 import type { WorkingEdgesDerived, WorkingEdgeRow } from '../compute/workingEdge';
 import { gmLandPairs, gmMissingInputs, type GmMissing } from '../compute/gm';
@@ -46,8 +46,13 @@ export interface BatchSpecimen {
   workingEdges?: readonly WorkingEdgeRow[];
   /** The points for geometric morphometrics, from the project file's derived results; those of another configuration are made anew before the tables. */
   gm: GmDerived | null;
-  /** Each observer's values (annotator → measure → value), from every project file of the model, for the ICC. */
+  /** Each observer's manual measurements (annotator → label → value), from every project file of the model, for the ICC; empty but on the model's first. */
   observers: Map<string, Record<string, number>>;
+  /**
+   * Whether this is the model's first project file (its own, else the first found; or a fresh project): a model has one set of rows per
+   * project file, but only the first gives the points of geometric morphometrics and the ICC's observers. Absent: the first.
+   */
+  primary?: boolean;
 }
 
 /** A project of a model in a batch: its annotations and the results it stored. */
@@ -180,44 +185,44 @@ export function savedResultsUsable(p: BatchProject, appVersion: string): boolean
 export const savedMeasures = (p: BatchProject): ModelMeasures => ({ auto: storedAuto(p.derived.measurements)!, vertices: storedAxes(p.derived.vertices), box: storedBox(p.derived.configuration) });
 
 /**
- * One specimen of a batch export: the row comes from `primary` (the model's own
- * project, or a fresh one) and its measures; every project of the model is an
- * observer for the ICC (told apart by annotator, else by file). The same for
- * stored and recomputed measures, so both give the same tables.
+ * The specimens of one model in a batch export, one per project file (each with the results it stored, or those measured for it): the
+ * model's own project (or a fresh one) first, the others by annotator. Every project of the model is an observer for the ICC (told apart
+ * by annotator, else by file), with its manual measurements: what is computed from the annotations is not compared (34d), and can be
+ * from the rows of each project. The same for stored and recomputed measures, so both give the same tables.
  */
-export function batchSpecimen(file: string, primary: { project: BatchProject; measures: ModelMeasures }, projects: ReadonlyArray<{ project: BatchProject; measures: ModelMeasures }>): BatchSpecimen {
+export function batchSpecimens(file: string, primary: { project: BatchProject; measures: ModelMeasures }, projects: ReadonlyArray<{ project: BatchProject; measures: ModelMeasures }>): BatchSpecimen[] {
   const observers = new Map<string, Record<string, number>>();
-  for (const { project: p, measures } of projects) {
+  for (const { project: p } of projects) {
     const st = p.state;
     const who = st.specimen.annotator || p.path || '';
     if (observers.has(who)) continue;
-    const a = measures.auto;
-    const values: Record<string, number> = { length: a.length, width: a.width, thickness: a.thickness };
-    const totals = p.derived.regionTotals as { cortexRatio?: number } | null | undefined;
-    if (typeof totals?.cortexRatio === 'number') values.cortex_ratio = totals.cortexRatio;
-    const nod = p.derived.nodule as { radius?: number } | null | undefined;
-    if (typeof nod?.radius === 'number') values.nodule_radius = nod.radius;
+    const values: Record<string, number> = {};
     for (const m of st.measurements) values[m.label] = measurementValue(m);
-    // a flake's own measures, as the project stored them
-    if (st.specimen.type === 'flake') {
-      const flake = storedFlakeMeasures(p.derived);
-      for (const k of AGREEMENT_FLAKE_MEASURES) {
-        const v = flake?.[k];
-        if (typeof v === 'number') values[k] = v;
-      }
-    }
     observers.set(who, values);
   }
-  const { state, derived } = primary.project;
+  const others = projects
+    .filter((x) => x.project !== primary.project)
+    .sort((x, y) => compareText(x.project.state.specimen.annotator, y.project.state.specimen.annotator) || compareText(x.project.path ?? '', y.project.path ?? ''));
+  return [{ ...specimenOf(file, primary.project, primary.measures), observers, primary: true }, ...others.map((x) => ({ ...specimenOf(file, x.project, x.measures), observers: new Map(), primary: false }))];
+}
+
+/** The model's first specimen of a batch export (`batchSpecimens`). */
+export const batchSpecimen = (file: string, primary: { project: BatchProject; measures: ModelMeasures }, projects: ReadonlyArray<{ project: BatchProject; measures: ModelMeasures }>): BatchSpecimen => batchSpecimens(file, primary, projects)[0];
+
+const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** One project file's rows of a batch export: its annotations, the results it stored, and its model's measures. */
+function specimenOf(file: string, project: BatchProject, measures: ModelMeasures): Omit<BatchSpecimen, 'observers' | 'primary'> {
+  const { state, derived } = project;
   // what a file stored under another type is not exported under this one
   const symmetry = storedSymmetry(derived, state);
   const edges = hasEdgeAngles(state.specimen.type);
   return {
     file,
     state,
-    auto: primary.measures.auto,
-    planes: state.planes.map((p) => computePlane(p, state, primary.measures.vertices, storedRegionFit(derived.planes, p.id))),
-    configuration: state.specimen.type === 'core' ? coreConfiguration(state, primary.measures.box, biconeVolumes(state, symmetry)) : null,
+    auto: measures.auto,
+    planes: state.planes.map((p) => computePlane(p, state, measures.vertices, storedRegionFit(derived.planes, p.id))),
+    configuration: state.specimen.type === 'core' ? coreConfiguration(state, measures.box, biconeVolumes(state, symmetry)) : null,
     regions: (derived.regions as BatchSpecimen['regions']) ?? [],
     regionTotals: (derived.regionTotals as BatchSpecimen['regionTotals']) ?? null,
     nodule: (derived.nodule as BatchSpecimen['nodule']) ?? null,
@@ -228,8 +233,46 @@ export function batchSpecimen(file: string, primary: { project: BatchProject; me
     retouchIndices: state.specimen.type === 'flake' ? ((derived.retouchIndices as RetouchIndices | null | undefined) ?? null) : null,
     workingEdges: edges ? ((derived.workingEdges as WorkingEdgesDerived | null | undefined)?.edges ?? []) : [],
     gm: (derived.gm as GmDerived | null | undefined) ?? null,
-    observers,
   };
+}
+
+/** Whether a specimen of a batch is its model's first (`BatchSpecimen.primary`). */
+export const isPrimary = (s: BatchSpecimen): boolean => s.primary !== false;
+
+/**
+ * A table of the summary export with `annotator` (the project's `specimen.annotator`, empty when not filled in) put in after its
+ * `specimen_id` column; a table that does not start with `specimen_id` stays as it is.
+ */
+export function withAnnotator(text: string, annotator: string): string {
+  const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const body = bom ? text.slice(1) : text;
+  if (!/^specimen_id(,|\r?\n|$)/.test(body)) return text;
+  const cell = csvCell(annotator);
+  let out = '', i = 0, header = true;
+  while (i < body.length) {
+    if (body[i] === '\n') {
+      out += '\n';
+      i++;
+      continue;
+    }
+    // the record's first field (quoted or not), then the column, then the rest of the record up to a line end outside quotes
+    let j = i;
+    if (body[j] === '"') {
+      j++;
+      while (j < body.length && !(body[j] === '"' && body[j + 1] !== '"')) j += body[j] === '"' ? 2 : 1;
+      j++;
+    } else while (j < body.length && body[j] !== ',' && body[j] !== '\r' && body[j] !== '\n') j++;
+    out += body.slice(i, j) + ',' + (header ? 'annotator' : cell);
+    header = false;
+    let k = j, quoted = false;
+    while (k < body.length && (quoted || body[k] !== '\n')) {
+      if (body[k] === '"') quoted = !quoted;
+      k++;
+    }
+    out += body.slice(j, k + 1);
+    i = k + 1;
+  }
+  return bom + out;
 }
 
 /** A model a batch could not read or measure. */
@@ -280,8 +323,10 @@ export interface GmSkipped {
  * points; those with another number (the user's own landmarks) are skipped. By the grid only complete specimens are written, the rest listed; by a template every specimen
  * has the same rows, and what one lacks is written as NA and listed apart, unless it has nothing at all to give.
  */
-export function gmOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions): { files: Array<{ suffix: string; text: string }>; skipped: GmSkipped[]; incomplete: GmSkipped[] } {
+export function gmOutputs(all: readonly BatchSpecimen[], opts: CsvOptions): { files: Array<{ suffix: string; text: string }>; skipped: GmSkipped[]; incomplete: GmSkipped[] } {
   const plain = { excelBom: false };
+  // one set of points per model: its first project file's
+  const specimens = all.filter(isPrimary);
   const skipped: GmSkipped[] = [];
   const incomplete: GmSkipped[] = [];
   const kept: Array<BatchSpecimen & { gm: GmDerived }> = [];
@@ -306,7 +351,7 @@ export function gmOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions)
   if (!kept.length) return { files: [], skipped, incomplete };
   const first = kept[0].gm;
   const files = [
-    { suffix: 'gm_landmarks.csv', text: mergeCsv(kept.map((s) => gmLandmarksCsv(s.state, s.gm, plain)), opts.excelBom) },
+    { suffix: 'gm_landmarks.csv', text: mergeCsv(kept.map((s) => withAnnotator(gmLandmarksCsv(s.state, s.gm, plain), s.state.specimen.annotator)), opts.excelBom) },
     { suffix: 'gm_landmarks.tps', text: kept.map((s) => landmarksTps(s.state, s.gm)).join('') },
   ];
   // by the grid the files stay those it always had; by a template Morpho's definitions as well
@@ -317,7 +362,7 @@ export function gmOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions)
   // a flake's points by the grid: left and right in pairs
   if (!morpho && kept[0].state.specimen.type === 'flake' && gmLandPairs(first).length) files.push({ suffix: 'gm_land_pairs.csv', text: gmLandPairsCsv(first) });
   if (first.surfaces.length && morpho) files.push({ suffix: 'gm_surp.csv', text: gmSurpCsv(first) });
-  if (morpho) files.push({ suffix: 'gm_models.csv', text: gmModelsCsv(kept.map((s) => ({ id: s.state.specimen.id, file: s.file }))) });
+  if (morpho) files.push({ suffix: 'gm_models.csv', text: mergeCsv(kept.map((s) => withAnnotator(gmModelsCsv([{ id: s.state.specimen.id, file: s.file }]), s.state.specimen.annotator)), false) });
   return { files, skipped, incomplete };
 }
 
@@ -332,11 +377,11 @@ export function mergeCsv(texts: readonly string[], bom: boolean): string {
 const hasRows = (csv: string) => csv.replace(/^﻿/, '').trim().split('\n').length > 1;
 
 /**
- * ICC(2,1) of each measure over the specimens that every observer measured
- * (observers by annotator name). Null with fewer than two observers or
- * nothing measured by all of them on two specimens or more.
+ * ICC(2,1) of each manual measurement (by label) over the models that every observer measured (observers by annotator name; each
+ * model once, by its first specimen). Null with fewer than two observers or nothing measured by all of them on two models or more.
  */
-export function iccCsv(specimens: readonly BatchSpecimen[]): string | null {
+export function iccCsv(all: readonly BatchSpecimen[]): string | null {
+  const specimens = all.filter(isPrimary);
   const raters = [...new Set(specimens.flatMap((s) => [...s.observers.keys()]))].sort();
   if (raters.length < 2) return null;
   const measures = [...new Set(specimens.flatMap((s) => [...s.observers.values()].flatMap((o) => Object.keys(o))))];
@@ -353,7 +398,8 @@ export function iccCsv(specimens: readonly BatchSpecimen[]): string | null {
 /** Every CSV kind merged over the specimens (kinds without rows are left out), and one TPS file. */
 export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptions): Array<{ suffix: string; text: string }> {
   const plain = { excelBom: false };
-  const merged = (make: (s: BatchSpecimen) => string, among: readonly BatchSpecimen[] = specimens) => mergeCsv(among.map(make), opts.excelBom);
+  // one set of rows per project file, told apart by annotator
+  const merged = (make: (s: BatchSpecimen) => string, among: readonly BatchSpecimen[] = specimens) => mergeCsv(among.map((s) => withAnnotator(make(s), s.state.specimen.annotator)), opts.excelBom);
   // what a generic specimen does not have, whatever it held on another type
   const typed = specimens.filter((s) => s.state.specimen.type !== 'generic');
   const out: Array<{ suffix: string; text: string }> = [
@@ -383,15 +429,16 @@ export function batchOutputs(specimens: readonly BatchSpecimen[], opts: CsvOptio
   }
   // flakes only here, and the volumetric configuration only of cores
   const flakes = specimens.filter((s) => s.state.specimen.type === 'flake');
-  if (flakes.length) out.push({ suffix: 'flakes.csv', text: mergeCsv(flakes.map((s) => flakesCsv(s.state, s.flake, plain, s.retouchIndices ?? null)), opts.excelBom) });
+  if (flakes.length) out.push({ suffix: 'flakes.csv', text: merged((s) => flakesCsv(s.state, s.flake, plain, s.retouchIndices ?? null), flakes) });
   // the volumetric configuration: specimens that have one (arrows on a measured model)
   const configured = specimens.filter((s) => s.configuration);
   if (configured.length) {
-    out.push({ suffix: 'configuration.csv', text: mergeCsv(configured.map((s) => configurationCsv(s.state, s.configuration, plain, s.file)), opts.excelBom) });
-    const surfaces = mergeCsv(configured.map((s) => flakingSurfacesCsv(s.state, s.configuration, plain, s.file)), opts.excelBom);
+    out.push({ suffix: 'configuration.csv', text: merged((s) => configurationCsv(s.state, s.configuration, plain, s.file), configured) });
+    const surfaces = merged((s) => flakingSurfacesCsv(s.state, s.configuration, plain, s.file), configured);
     if (hasRows(surfaces)) out.push({ suffix: 'flaking_surfaces.csv', text: surfaces });
   }
-  const tps = specimens.filter((s) => s.state.landmarks.length || s.state.semilandmarks.length).map((s) => landmarksTps(s.state, landmarkTable(s.state)));
+  // the points once per model: its first project file's (observers differ in the agreement, not here)
+  const tps = specimens.filter((s) => isPrimary(s) && (s.state.landmarks.length || s.state.semilandmarks.length)).map((s) => landmarksTps(s.state, landmarkTable(s.state)));
   if (tps.length) out.push({ suffix: 'landmarks.tps', text: tps.join('') });
   const icc = iccCsv(specimens);
   if (icc) out.push({ suffix: 'icc.csv', text: (opts.excelBom ? '﻿' : '') + icc });

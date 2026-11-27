@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { angleBetween, assign, cohenKappa, compareObservers, curveDistance, fleissKappa, icc21, summarize, type ObserverData } from '../src/compute/agreement';
-import { addCurve, addLandmark, addMeasurement, addScarVector, addSemilandmarkSet, setCurveAttribute, setRelation, setScarAttribute } from '../src/core/actions';
+import { addCurve, addLandmark, addMeasurement, addPlane, addScarVector, addSemilandmarkSet, setCurveAttribute, setRelation, setScarAttribute } from '../src/core/actions';
+import { frameMatrix } from '../src/core/frame';
 import { ProjectStore } from '../src/core/store';
-import type { Vec3 } from '../src/core/types';
+import type { ProjectState, Vec3 } from '../src/core/types';
 
 describe('assignment', () => {
   it('finds the cheapest pairs, also for rectangular matrices and with a limit', () => {
@@ -83,7 +84,7 @@ describe('agreement statistics', () => {
 
 describe('comparing observers', () => {
   const arrow = (s: ProjectStore, start: Vec3, end: Vec3) => addScarVector(s, { start, end, startNormal: [0, 0, 1], endNormal: [0, 0, 1] });
-  const observer = (label: string, s: ProjectStore, measures: Record<string, number | null> = {}): ObserverData => ({ label, state: s.state, planes: [], faces: null, measures });
+  const observer = (label: string, s: ProjectStore): ObserverData => ({ label, state: s.state, faces: null });
 
   it('compares the termination like the completeness, over the scars both observers judged', () => {
     const a = new ProjectStore(), b = new ProjectStore(), c = new ProjectStore();
@@ -122,7 +123,10 @@ describe('comparing observers', () => {
     arrow(c, [0, 0, 0], [10, 0, 0]);
     arrow(c, [0, 20, 0], [10, 20, 0]);
 
-    const rows = compareObservers([observer('A', a, { length: 40 }), observer('B', b, { length: 41.5 }), observer('C', c)], { gate: 5, faceArea: null });
+    // (planes are computed from the annotations: not compared, 34d)
+    addPlane(a, 'all_vertices', [0, 0, 1]);
+    addPlane(b, 'all_vertices', [0, 0, 1]);
+    const rows = compareObservers([observer('A', a), observer('B', b), observer('C', c)], { gate: 5, faceArea: null });
     const get = (type: string, key: string, metric: string, x = 'A', y = 'B') => rows.find((r) => r.itemType === type && r.itemKey === key && r.metric === metric && r.a === x && r.b === y)?.value;
     expect(get('arrow', 'S1|S2', 'angle_deg')).toBeCloseTo(45, 9);
     expect(get('arrow', 'S1|S2', 'end_distance')).toBeCloseTo(10, 9);
@@ -132,7 +136,9 @@ describe('comparing observers', () => {
     expect(get('scar_attribute', 'completeness', 'n_items')).toBe(2);
     // the "cannot tell" relation involves an unmatched scar: only S2 cuts S1 counts, and both agree
     expect([get('relation', 'all', 'agreement'), get('relation', 'all', 'n_items')]).toEqual([1, 1]);
-    expect(get('measurement', 'length', 'difference')).toBeCloseTo(1.5, 12);
+    // only what was annotated: no planes, no measures computed from the annotations
+    expect(rows.some((r) => r.itemType === 'plane')).toBe(false);
+    expect(rows.filter((r) => r.itemType === 'measurement')).toEqual([]);
     // three observers: Fleiss on the scars all of them share
     expect(rows.find((r) => r.a === 'all' && r.itemKey === 'completeness' && r.metric === 'n_items')?.value).toBe(2);
     expect(rows.filter((r) => r.a === 'A' && r.b === 'C' && r.itemType === 'arrow' && r.metric === 'angle_deg').map((r) => r.value)).toEqual([0, 0]);
@@ -184,7 +190,7 @@ describe('comparing observers', () => {
     const a = new ProjectStore(), b = new ProjectStore();
     // four triangles of areas 1, 1, 2, 4; A: cortex, cortex, scar(R1), scar(R2); B: cortex, joint, scar(R1), scar(R1)
     const area = [1, 1, 2, 4];
-    const obs = (label: string, s: ProjectStore, type: number[], region: number[]): ObserverData => ({ label, state: s.state, planes: [], faces: { type: Uint8Array.from(type), region: Int32Array.from(region) }, measures: {} });
+    const obs = (label: string, s: ProjectStore, type: number[], region: number[]): ObserverData => ({ label, state: s.state, faces: { type: Uint8Array.from(type), region: Int32Array.from(region) } });
     for (const s of [a, b]) for (let i = 0; i < 2; i++) s.history.execute({ labelKey: 'x', createdAt: 0, apply: () => s._insertRegion({ id: `${s === a ? 'a' : 'b'}${i}`, label: `R${i + 1}`, seed: [0, 0, 0], type: 'scar', scarId: null, note: '', createdAt: '', modifiedAt: '' }), revert: () => {} });
     const rows = compareObservers([obs('A', a, [2, 2, 1, 1], [0, 0, 0, 1]), obs('B', b, [2, 3, 1, 1], [0, 1, 0, 0])], { gate: 1, faceArea: area });
     const get = (key: string, metric: string, type = 'region') => rows.find((r) => r.itemType === type && r.itemKey === key && r.metric === metric)?.value;
@@ -197,5 +203,58 @@ describe('comparing observers', () => {
     expect(get('R1|R1', 'iou')).toBeUndefined();
     expect(get('all', 'agreement', 'region_type')).toBeCloseTo(7 / 8, 12);
     expect(get('all', 'area', 'region_type')).toBe(8);
+  });
+
+  /** A flake whose technological axis runs from `start` toward `end` on the plane z = 0 (its ventral face, the dorsal +Z), and its platform ends in this order. */
+  const flake = (start: Vec3, end: Vec3, ends: Vec3[] = []): ProjectStore => {
+    const s = new ProjectStore();
+    const st = s.state as ProjectState;
+    st.specimen.type = 'flake';
+    const d: Vec3 = [end[0] - start[0], end[1] - start[1], 0];
+    const l = Math.hypot(d[0], d[1]);
+    const y: Vec3 = [d[0] / l, d[1] / l, 0];
+    const z: Vec3 = [0, 0, 1];
+    const x: Vec3 = [y[1] * z[2] - y[2] * z[1], y[2] * z[0] - y[0] * z[2], y[0] * z[1] - y[1] * z[0]];
+    const t = new Date(0).toISOString();
+    st.flake.axis = { id: 'axis', start, end, startNormal: z, endNormal: z, matrix: frameMatrix({ x, y, z, origin: start }), failure: null, createdAt: t, modifiedAt: t };
+    st.landmarks = ends.map((p, i) => ({ id: `end${i}`, name: 'platform_end', point: p, code: 'platform_end' as const, note: '', createdAt: t, modifiedAt: t }));
+    return s;
+  };
+
+  it('the technological axis (34d): the distance between the points of percussion and the angle between the directions; not the ends', () => {
+    const r30 = (30 * Math.PI) / 180;
+    // B's starts 5 away (3, 4) and turns 30°; its end is twice as far, which does not count
+    const a = flake([0, 0, 0], [0, 10, 0]);
+    const b = flake([3, 4, 0], [3 + 20 * Math.sin(r30), 4 + 20 * Math.cos(r30), 0]);
+    const rows = compareObservers([observer('A', a), observer('B', b)], { gate: 1, faceArea: null });
+    const axis = rows.filter((r) => r.itemType === 'technological_axis');
+    expect(axis.map((r) => [r.itemKey, r.metric])).toEqual([['axis', 'pop_distance'], ['axis', 'angle_deg']]);
+    expect(axis[0].value).toBeCloseTo(5, 12);
+    expect(axis[1].value).toBeCloseTo(30, 9);
+    // one without an axis, or not a flake: no row
+    const none = new ProjectStore();
+    none.state.specimen.type = 'flake';
+    expect(compareObservers([observer('A', a), observer('B', none)], { gate: 1, faceArea: null }).some((r) => r.itemType === 'technological_axis')).toBe(false);
+    const core = flake([0, 0, 0], [0, 10, 0]);
+    core.state.specimen.type = 'core';
+    expect(compareObservers([observer('A', a), observer('B', core)], { gate: 1, faceArea: null }).some((r) => r.itemType === 'technological_axis')).toBe(false);
+    // three observers: no joint row (no κ of a continuous measure)
+    const three = compareObservers([observer('A', a), observer('B', b), observer('C', flake([0, 1, 0], [0, 11, 0]))], { gate: 1, faceArea: null });
+    expect(three.filter((r) => r.itemType === 'technological_axis').map((r) => `${r.a}-${r.b}`)).toEqual(['A-B', 'A-B', 'A-C', 'A-C', 'B-C', 'B-C']);
+    expect(summarize(three).filter((r) => r.itemType === 'technological_axis')).toHaveLength(6);
+  });
+
+  it('platform ends by side (34d): the same name, listed the other way round, still paired left with left', () => {
+    // A lists the left end first, B the right end first (both named platform_end), 0.1 off
+    const a = flake([0, 0, 0], [0, 10, 0], [[-5, 0, 0], [5, 0, 0]]);
+    const b = flake([0, 0, 0], [0, 10, 0], [[5.1, 0, 0], [-5.1, 0, 0]]);
+    const rows = compareObservers([observer('A', a), observer('B', b)], { gate: 1, faceArea: null });
+    const lm = rows.filter((r) => r.itemType === 'landmark');
+    expect(lm.map((r) => r.itemKey)).toEqual(['platform_left', 'platform_right']);
+    for (const r of lm) expect(r.value).toBeCloseTo(0.1, 9);
+    // without a frame there is no side, and the name pairs them (the first of each): 10.1 apart
+    for (const s of [a, b]) s.state.flake.axis!.matrix = null;
+    const byName = compareObservers([observer('A', a), observer('B', b)], { gate: 1, faceArea: null }).filter((r) => r.itemType === 'landmark');
+    expect(byName.map((r) => [r.itemKey, +r.value.toFixed(9)])).toEqual([['platform_end', 10.1]]);
   });
 });

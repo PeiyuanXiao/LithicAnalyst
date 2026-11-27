@@ -4715,7 +4715,7 @@ input[type="checkbox"]:disabled {
   height: 13px;
 }
 
-/* the technical axis: one row as any object's (chip, name, why it gives no frame, delete) */
+/* the technological axis: one row as any object's (chip, name, why it gives no frame, delete) */
 .axis-row {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { annotationStatus } from '../src/core/annotationStatus';
 import { emptyProject } from '../src/core/store';
-import type { Curve, ProjectState, Region, Scar, TechnicalAxis, Vec3 } from '../src/core/types';
+import type { Curve, ProjectState, Region, Scar, TechnologicalAxis, Vec3 } from '../src/core/types';
 import { defaultAttributes, type SpecimenType } from '../src/core/fields';
 
 const project = (type: SpecimenType, unit = ''): ProjectState => {
@@ -19,7 +19,7 @@ const along = (a: Vec3, b: Vec3): Vec3[] => {
 const RIM: Vec3[] = [...along([-15, 0, 0], [15, 0, 0]), ...along([15, 0, 0], [15, -2, 10]), ...along([15, -2, 10], [-15, -2, 10]), ...along([-15, -2, 10], [-15, 0, 0])];
 const edgeLine = (short = 0): Vec3[] => [...along([-15, short, 0], [-15, 60, 0]), ...along([-15, 60, 0], [15, 60, 0]), ...along([15, 60, 0], [15, short, 0]), [15, short, 0]];
 const onCurve = (c: Curve, points: Vec3[]): Curve => ({ ...c, points });
-const axis = (matrix: number[] | undefined): TechnicalAxis => ({ id: 'a', start: [0, 0, 0], end: [0, 1, 0], startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix }) as unknown as TechnicalAxis;
+const axis = (matrix: number[] | undefined): TechnologicalAxis => ({ id: 'a', start: [0, 0, 0], end: [0, 1, 0], startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix }) as unknown as TechnologicalAxis;
 const scar = (vector: Scar['vector']): Scar => ({ id: 's', label: 'S1', vector, attributes: defaultAttributes(), createdAt: '', modifiedAt: '' });
 const VECTOR = { start: [0, 0, 0], end: [1, 0, 0], startNormal: [0, 0, 1], endNormal: [0, 0, 1] } as Scar['vector'];
 

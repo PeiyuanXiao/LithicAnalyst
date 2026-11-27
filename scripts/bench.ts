@@ -23,7 +23,7 @@ import { flakeMeasuresSteps, morphDimensionsSteps, techDimensionsSteps } from '.
 import { crossSectionAt, lineNear, sectionByPlane } from '../src/compute/meshSection';
 import { regionPlaneSteps } from '../src/compute/planes';
 import { regionPathSteps } from '../src/compute/regionPath';
-import { technicalFrameSteps } from '../src/compute/technicalFrame';
+import { technologicalFrameSteps } from '../src/compute/technologicalFrame';
 import { frameAxes } from '../src/core/frame';
 import { bvhPlaneCandidates, bvhRayCandidates } from '../src/render/bvhPlane';
 import { layPatchSteps } from '../src/compute/gmTemplate';
@@ -249,12 +249,12 @@ async function benchGenerated(triangles: number): Promise<void> {
   // ⑥ a flake: the frame, the dimensions, the sections and the paths on a piece of the surface
   const P = snap.point(mesh.vertex(Math.floor(mesh.lat * 0.6), 0));
   const A = snap.point(mesh.vertex(Math.floor(mesh.lat * 0.9), 0));
-  const frameResult = steps('6a technical frame (strip along the axis)', technicalFrameSteps({ positions: pos, index: idx, offset: o, orientationSign: loaded.orientationSign, meanEdge: base.meanEdge }, P, A));
+  const frameResult = steps('6a technological frame (strip along the axis)', technologicalFrameSteps({ positions: pos, index: idx, offset: o, orientationSign: loaded.orientationSign, meanEdge: base.meanEdge }, P, A));
   if (!frameResult.ok) throw new Error(`no frame: ${frameResult.reason}`);
   const axes = frameAxes(frameResult.matrix);
   const frame = { ...axes, origin: [axes.origin[0] - o[0], axes.origin[1] - o[1], axes.origin[2] - o[2]] as Vec3 };
   const morph = steps('6b morphological dimensions (convex hull)', morphDimensionsSteps(pos));
-  const tech = steps('6c technical dimensions', techDimensionsSteps(pos, frame));
+  const tech = steps('6c technological dimensions', techDimensionsSteps(pos, frame));
   const candidates = bvhPlaneCandidates(loaded.geometry);
   const section = once('6d longitudinal section (BVH)', () => lineNear(sectionByPlane(pos, idx, frame.origin, frame.x, candidates), [P[0] - o[0], P[1] - o[1], P[2] - o[2]]));
   once('6e one cross-section (BVH): at most once a frame', () => crossSectionAt(pos, idx, frame, tech.tech_length * 0.5, candidates));

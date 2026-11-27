@@ -149,25 +149,29 @@ test('summary export and figures for the whole folder: new export folders, broke
   await expect(page.locator('#batch-progress')).toBeHidden({ timeout: 60_000 });
   expect(all.base).not.toBe(one.base);
   const files = (await folderPaths(page)).filter((p) => p.startsWith(`${all.base}/`)).map((p) => p.slice(all.base.length + 1)).sort();
-  expect(files).toEqual(['configuration.csv', 'failures.csv', 'flaking_surfaces.csv', 'icc.csv', 'manifest.json', 'measurements.csv', 'scar_vectors.csv']);
+  // (no icc.csv: nobody measured by hand, and only that is compared, 34d)
+  expect(files).toEqual(['configuration.csv', 'failures.csv', 'flaking_surfaces.csv', 'manifest.json', 'measurements.csv', 'scar_vectors.csv']);
   // the volumetric configuration: only the model with arrows, with its file
   expect(parseCsv((await folderText(page, `${all.base}/configuration.csv`))!).map((r) => [r.specimen_id, r.facial_character, r.file])).toEqual([['box', 'unifacial', 'a/box.ply']]);
   const measured = parseCsv((await folderText(page, `${all.base}/measurements.csv`))!);
-  expect(measured.map((r) => [r.specimen_id, r.file, r.closed])).toEqual([
-    ['box', 'a/box.ply', 'true'],
-    ['nodule', 'b/nodule.ply', 'true'],
+  // one set of rows per project file (34d): the model's own first, then the others by annotator
+  expect(measured.map((r) => [r.specimen_id, r.annotator, r.file, r.closed])).toEqual([
+    ['box', 'Ann', 'a/box.ply', 'true'],
+    ['box', 'Bo', 'a/box.ply', 'true'],
+    ['nodule', 'Ann', 'b/nodule.ply', 'true'],
+    ['nodule', 'Bo', 'b/nodule.ply', 'true'],
   ]);
   // the box 40 × 20 × 10: its longest measure, the space diagonal
   expect(Number(measured[0].length)).toBeCloseTo(Math.hypot(40, 20, 10), 3);
   expect(Object.keys(measured[0])).not.toContain('frame');
   expect(parseCsv((await folderText(page, `${all.base}/failures.csv`))!).map((r) => r.file)).toEqual(['broken.ply']);
-  const icc = parseCsv((await folderText(page, `${all.base}/icc.csv`))!);
-  expect(icc.find((r) => r.measure === 'length')).toMatchObject({ n_specimens: '2', n_raters: '2', icc: '1' });
   const m2 = JSON.parse((await folderText(page, `${all.base}/manifest.json`))!);
   expect(m2).toMatchObject({ scope: 'folder', kind: 'tables', failures: [{ file: 'broken.ply' }] });
   expect(m2.specimens.map((s: { file: string; project: string | null }) => [s.file, s.project])).toEqual([
     ['a/box.ply', 'LithicAnalyst/projects/a/box.ply.lithicanalyst.json'],
+    ['a/box.ply', 'bo/box.bo.lithicanalyst.json'],
     ['b/nodule.ply', 'LithicAnalyst/projects/b/nodule.ply.lithicanalyst.json'],
+    ['b/nodule.ply', 'bo/nodule.bo.lithicanalyst.json'],
   ]);
   await expect(page.locator('.toast').last()).toContainText(/2 done, 1 failed.*Written to LithicAnalyst\/exports\//);
 

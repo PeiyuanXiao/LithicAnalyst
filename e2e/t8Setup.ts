@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Page } from '@playwright/test';
-import { addCurveOfType, moveLandmark, placePlatformEnd, setTechnicalAxis, updateSpecimen } from '../src/core/actions';
+import { addCurveOfType, moveLandmark, placePlatformEnd, setTechnologicalAxis, updateSpecimen } from '../src/core/actions';
 import { frameMatrix } from '../src/core/frame';
 import { serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -8,7 +8,7 @@ import { T8, t8Arcs, t8Dorsal, t8Mesh, t8Ply, t8Rings, type Vec3 } from './fixtu
 import type { T8Variant } from '../tests/meshes';
 import { expect, fileMenu, loadMesh, openApp } from './helpers';
 
-/** T8 annotated as a flake, as a project file of t8.ply: its platform outline, its edge, the technical axis and two platform ends by hand. */
+/** T8 annotated as a flake, as a project file of t8.ply: its platform outline, its edge, the technological axis and two platform ends by hand. */
 
 /** The platform ends, 6 mm either side on the platform's dorsal edge. */
 export const T8_ENDS: [Vec3, Vec3] = [[-6, 0, t8Dorsal(6)], [6, 0, t8Dorsal(6)]];
@@ -41,9 +41,9 @@ export function t8Project(annotator: string, o: { P?: Vec3; ends?: [Vec3, Vec3];
     return [R * Math.sin(f), R * Math.cos(f), 0];
   });
   addCurveOfType(s, { anchors: [rim[0], rim[(arcs - 1) / 2], rim[arcs]], points: rim, anchorIndex: [0, (arcs - 1) / 2, arcs], closed: false }, 'edge');
-  // the technical axis from P (the exact frame of T8), and the platform ends by hand
+  // the technological axis from P (the exact frame of T8), and the platform ends by hand
   const P = o.P ?? [0, 0, 0];
-  setTechnicalAxis(s, { start: P, end: [P[0], 15, 0], startNormal: [0, 0, -1], endNormal: [0, 0, -1], matrix: frameMatrix({ x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], origin: P }), failure: null });
+  setTechnologicalAxis(s, { start: P, end: [P[0], 15, 0], startNormal: [0, 0, -1], endNormal: [0, 0, -1], matrix: frameMatrix({ x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1], origin: P }), failure: null });
   // the ends the curves gave (at the platform's corners), each moved by hand on its own side
   const ends = o.ends ?? T8_ENDS;
   const auto = s.state.landmarks.filter((l) => l.code === 'platform_end').sort((a, b) => a.point[0] - b.point[0]);

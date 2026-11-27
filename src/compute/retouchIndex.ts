@@ -47,6 +47,8 @@ export const RETOUCH_INDEX_PARAMETERS = {
   OUTLINE_BINS,
   INVASIVE_BOUNDARY,
   RETOUCH_MERGE_GAP_MM,
+  /** (also where the retouch layers of retouch_angles.csv end: compute/retouchAngle.ts) */
+  SLIVER_EDGES,
 };
 
 /** Why a value is empty: for the screen, neither stored nor exported. */
@@ -134,7 +136,7 @@ export function chordDepth(points: ReadonlyArray<readonly [number, number]>, ins
 
 // ---------------------------------------------------------------- the frame of the plan
 
-export type SegmentAxis = 'technical' | 'longest';
+export type SegmentAxis = 'technological' | 'longest';
 
 /** The plan the segments are laid on. `origin`: in the coordinates of the positions. */
 export interface SegmentFrame {
@@ -160,7 +162,7 @@ export interface SegmentFrameInput {
   /** The part of the flake each triangle lies in (`FACE_…`). */
   faceOf: ArrayLike<number>;
   settings: RetouchSettings;
-  /** The technical frame (null: none). */
+  /** The technological frame (null: none). */
   matrix: readonly number[] | null;
   /** The longest distance's direction (null: none). */
   morph: Pick<MorphDimensions, 'lengthDir'> | null;
@@ -168,13 +170,13 @@ export interface SegmentFrameInput {
   specimenFrame: readonly number[] | null;
 }
 
-/** By the axis asked for; `auto`: the technical axis when there is one, else the longest. */
+/** By the axis asked for; `auto`: the technological axis when there is one, else the longest. */
 export function* segmentFrameSteps(input: SegmentFrameInput): Steps<SegmentFrameResult> {
   const { positions: p, index, faceOf, settings, matrix, morph } = input;
   const o: Vec3 = input.offset ?? [0, 0, 0];
-  const kind: SegmentAxis = settings.axis === 'auto' ? (matrix ? 'technical' : 'longest') : settings.axis;
+  const kind: SegmentAxis = settings.axis === 'auto' ? (matrix ? 'technological' : 'longest') : settings.axis;
   const n = Math.floor(p.length / 3);
-  if (kind === 'technical') {
+  if (kind === 'technological') {
     if (!matrix) return { frame: null, reason: 'no_axis' };
     const f = frameAxes(matrix);
     const origin = sub(f.origin, o);

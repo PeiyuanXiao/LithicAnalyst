@@ -4,7 +4,7 @@ import { curveClick, expect, nextFrames, state, toScreen } from './helpers';
 
 /** T1 annotated as a flake, as the flake tests and the hints' use it. */
 
-/** Draw the technical axis on T1: from the ventral side, the start snapped onto the ridge at P. */
+/** Draw the technological axis on T1: from the ventral side, the start snapped onto the ridge at P. */
 export async function drawAxis(page: Page): Promise<void> {
   await page.evaluate(() => window.lithicanalyst.view([0, 0, -1], [0, 1, 0]));
   await nextFrames(page);

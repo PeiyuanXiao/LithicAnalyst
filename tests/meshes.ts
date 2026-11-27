@@ -430,7 +430,7 @@ export function flakeT6(K = 14): Mesh {
 // ------------------------------------------------------------ T8, the bulb
 
 /**
- * T8: a flake whose ventral face carries a bulb of percussion of known shape. Coordinates are the technical frame's: P at the origin,
+ * T8: a flake whose ventral face carries a bulb of percussion of known shape. Coordinates are the technological frame's: P at the origin,
  * +Y distal, +Z dorsal. The ventral face is the half disc y ≥ 0 of radius R, at z = −b(r, φ) (φ from +Y toward +X, degrees): flat
  * but for a fan from P, |φ| ≤ φ2, whose height along it rises from P and falls to nothing at Rb, its sides narrow smooth bands
  * (φ1 to φ2), a little lower toward them so that its top is on φ = 0. The platform is the plane y = 0, from the ventral edge up to the
@@ -475,7 +475,7 @@ export function t8Rings(fine: boolean): number[] {
 export const t8Arcs = (fine: boolean): number => (fine ? 241 : 145);
 
 /**
- * T8's variants for IPA's band (32a), on the ventral face between the bulb and 0.75 of the technical length (y = 15):
+ * T8's variants for IPA's band (32a), on the ventral face between the bulb and 0.75 of the technological length (y = 15):
  * `retouch`, a patch (`T8_RETOUCH`) slanted up toward the dorsal face along +Y, by `rise` at its far side and back down beyond it, its
  * sides eased in over 1 mm; `ripple`, a small wave over the face beyond y = 8 and a few sharp bumps outward (`T8_SPIKES`).
  */

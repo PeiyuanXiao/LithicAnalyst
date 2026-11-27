@@ -84,6 +84,7 @@ they were placed can be traced and done again:
 | `residual` | `{ median, p90, max }` | the placed ends' distances to the surface (model units) before they were put on it |
 | `arrows` | array of scar ids | the scars made, in the order of the file's segments |
 | `review` | array of scar ids | those with an end further than three times the tolerance (0.5 % of the model's box diagonal) from the surface: to be checked. The app marks such a scar until it is edited once (its `modifiedAt` no longer equals its `createdAt`) |
+| `parameters` | object or `null` | the import's constants when it was made, all of `IGES_IMPORT` (`compute/igesAlign.ts`): `SAME_SHARE`, `TOL_SHARE`, `QUANTILE`, `P90_TOLS`, `REVIEW_TOLS`, `SIZE_RATIO`, `UNIT_FACTORS`, `GRAB_PX`, `MOVE_MS`, `ICP_KEEP`, `ICP_MAX_ROUNDS`, `ICP_STOP_SHARE`; `null` in a record of before 34d, which did not keep them |
 
 The scars themselves are ordinary scars: `vector.start` and `vector.end` the surface points nearest the placed ends,
 `startNormal` and `endNormal` both the outward normal at the surface point nearest the arrow's middle, every attribute not filled
@@ -110,9 +111,9 @@ unless the user reversed them all before confirming. Undoing the import removes 
   volumetric configuration, or `null` when none is set (length, width and thickness do not use it). `matrix` is a row-major 4×4 matrix (16 numbers) that
   maps original coordinates to specimen coordinates: +Z points toward the viewer of the main
   face, +Y is up on the page, +X is to the right; the origin is the centre of the mesh's
-  bounding box. `source` records how it was set: `view`, or `plane:P1`, or `technical_axis` (a
-  flake's technical frame, see "Flakes"), followed by `; vertical:S3` when an arrow set the
-  vertical (pointing up, origin at the bottom) or `; turned` when a technical frame was turned on the page.
+  bounding box. `source` records how it was set: `view`, or `plane:P1`, or `technological_axis` (a
+  flake's technological frame, see "Flakes"), followed by `; vertical:S3` when an arrow set the
+  vertical (pointing up, origin at the bottom) or `; turned` when a technological frame was turned on the page.
 * `type`: `core`, `flake` or `generic`; files without it are read as `core`. It decides which tools, panels
   and exports the specimen has, nothing else: the other types' data stay in the file. Edge angles and working edges are a flake's: `edgeAngle` on a curve, `workingEdges` and `sharpEdge` are kept as they are on any type and read again when the type has them, while on another type `derived.edgeAngles`, `derived.retouchAngles`, `derived.sharpEdge` and `derived.workingEdges` are empty and `edge_angles.csv`, `retouch_angles.csv`, `edge_sharp.csv` and `working_edges.csv` have no rows for it. The symmetry references are every type's. On a `generic` specimen curve and region types
   are the annotator's own text (a preset code from another type stays as it is); a new region's type is `region` until changed, its `scarId` is
@@ -201,7 +202,7 @@ fitted planes, fitted spheres, volumes ….
 
 ## Volumetric configuration
 
-After the Logical Analytical System (Carbonell et al. 1999; Lombao et al. 2023), seven basic traits
+After the Logical Analytical System (Carbonell et al. 1999; Lombao et al. 2023), six basic traits
 of a core. The automatic values are a starting point with no thresholds for counting a face (one
 scar makes a flaking surface); every one can be corrected by hand. Only scars with an arrow take part.
 
@@ -322,17 +323,17 @@ is not flaking); `cones` (`{ cone, side, autoRole, role, scars }`, upper then lo
 ## Symmetry
 
 A symmetry reference is a plane and the two sides it parts, A and B. The user chooses the plane for the question at hand: a flake's
-bilateral symmetry by its technical frame's mid-plane, a handaxe's bifacial symmetry by the plane of its edge curve, a core's upper and
+bilateral symmetry by its technological frame's mid-plane, a handaxe's bifacial symmetry by the plane of its edge curve, a core's upper and
 lower volumes by its junction curve (which the bicone stands on).
 
 ```json
-{ "id": "5d0e…", "label": "S1", "note": "", "source": { "kind": "frame", "frame": "technical", "axis": "x" }, "upHint": [0, 0, 1], "swap": false, "createdAt": "…", "modifiedAt": "…" }
+{ "id": "5d0e…", "label": "S1", "note": "", "source": { "kind": "frame", "frame": "technological", "axis": "x" }, "upHint": [0, 0, 1], "swap": false, "createdAt": "…", "modifiedAt": "…" }
 ```
 
 * `label`: `S{n}` when made, editable (any text; `symmetry.csv` writes it). `note`: the annotator's.
 * `source`, one of: `{ kind: "plane", planeId }`, a fitted plane (its `center` and `normal`); `{ kind: "curve", curveId }`, a closed curve:
   the plane fitted to its points (principal components, through their mean), and the curve itself parts the two sides; `{ kind: "frame",
-  frame, axis }`, a frame's mid-plane, normal to its axis `x`, `y` or `z`: `technical` (a flake's technical frame only) through the point
+  frame, axis }`, a frame's mid-plane, normal to its axis `x`, `y` or `z`: `technological` (a flake's technological frame only) through the point
   of percussion, `specimen` (the specimen frame) through the surface centroid (the triangles' centroids weighted by their areas).
 * Side A is the side the plane's normal points to; for a curve, the normal turned toward `upHint` (set when the reference is made: toward the
   side with more scars by their ends, when even toward the viewer; for the other sources it is kept but does not count). `swap: true`
@@ -391,7 +392,7 @@ instead): read for the summary export, its volume and area symmetries follow fro
 
 ## Flakes
 
-A specimen of type `flake` has a technical axis, a platform and the measurements below. Switching
+A specimen of type `flake` has a technological axis, a platform and the measurements below. Switching
 the type deletes nothing: the other type's data stay in the file and come back with it.
 
 ```json
@@ -406,25 +407,25 @@ the type deletes nothing: the other type's data stay in the file and come back w
 
 * `axis` (null without one; one per flake): the arrow on the ventral face from the point of percussion
   P (`start`) toward the distal end A (`end`).
-* `matrix`: the **technical frame**, row-major, from original to technical coordinates (null when none
+* `matrix`: the **technological frame**, row-major, from original to technological coordinates (null when none
   could be made; then `failure`: `short` — |PA| under 5 mean edge lengths of the mesh —, or `few` —
   fewer than 10 triangles left below). Origin P. n = the mean outward normal of the ventral strip:
   the triangles whose centroid is within `STRIP_HALF_WIDTH_RATIO` × |PA| of the segment PA, weighted by
   area; again without those at `STRIP_NORMAL_OUTLIER_DEG` or more from that mean. **Z** = −n (toward the
   dorsal face), **Y** = A − P without its Z component (distal), **X** = Y × Z (to the right when the dorsal face
   is toward the viewer and the platform down). It is stored because it needs the mesh; the mesh does not change.
-* `specimen.frame` is set to it (`source: "technical_axis"`) when the axis is drawn or moved, and back
+* `specimen.frame` is set to it (`source: "technological_axis"`) when the axis is drawn or moved, and back
   to null when the axis is deleted or gives no frame. The standard views then show the dorsal face in
   front, the ventral at the back and the platform from below. `otherFrame`: the frame of the type not in use (a flake has its own; `core` and `generic` share one).
 * The landmark `pop` (`code: "pop"`, named `pop`) is the arrow's start: it moves and goes with the axis
   and cannot be moved or deleted by itself.
 * Platform ends: landmarks with `code: "platform_end"`, at most two, on the platform outline. With `auto: true` one follows the curves: it is the point of the outline nearest an end of the edge, off what runs along the outline (see "The line measured"; an end counts within 4 mean segments of the two curves; with several edges, the two points furthest apart), and it moves or goes with them in the same step. Moved by hand it loses the key and stays where it was put; a file without the key has its ends placed by hand, which take the nearest such point, and the rest come when the file is opened. No edge or no closed outline: none. In the landmark
-  exports they are named `platform_left` (−X) and `platform_right` (+X) of the technical frame (with both on one
+  exports they are named `platform_left` (−X) and `platform_right` (+X) of the technological frame (with both on one
   side, by X), without an axis `platform_end`. Landmarks with a `code` are shown and exported only for flakes.
 * The platform: the curve of type `platform_outline` (one per flake; a new one takes the place of the old in
   one step; closed) parts the surface in two. The region of type `platform` with `auto: true` is the smaller of the two. All
   regions of type `platform` make the platform region.
-* The faces: with an `edge` curve and a technical frame, the regions of type `ventral` and `dorsal` with `auto: true`: among the pieces of the
+* The faces: with an `edge` curve and a technological frame, the regions of type `ventral` and `dorsal` with `auto: true`: among the pieces of the
   upper layer, the one under the axis's end, and the largest other than it and the platform (at least 5 % of the surface; else the edge and
   the platform outline leave a way round, and neither is assigned). So the edge is open with its ends on a platform outline, and closed where there is none.
 * The back (33): a core-edge (débordant) flake's back, the face of the former core's edge, beside a curve of type `back_ridge` (open,
@@ -447,13 +448,13 @@ the type deletes nothing: the other type's data stay in the file and come back w
 profile panel and external readers, original coordinates: `P`, `E`, `platformLine`, `epaPoints`, `ipaFrom`, `ipaTo`, `ipaLine`,
 `bulbAt`, `bulbQ`, `bulbChord`), `ipaBand` and `bsaReference`.
 
-* `geometry.ipaFrom`, `ipaTo`: where S's ventral side reaches the band's two ends (technical Y `from`, `to`); `ipaLine`: where the band's
+* `geometry.ipaFrom`, `ipaTo`: where S's ventral side reaches the band's two ends (technological Y `from`, `to`); `ipaLine`: where the band's
   plane meets the plane of S, from Y `from` to `to`; null while IPA is empty. Files from before 32a have `ventral` and `ventralLine` (the
   old IPA's line) in their place; they are not read.
-* `ipaBand` (null when no band was fitted): `{ from, to, area, fallback, trimmed }` — the band's technical Y range (coordinate units), the
+* `ipaBand` (null when no band was fitted, as without a stated unit): `{ from, to, area, fallback, trimmed }` — the band's technological Y range (coordinate units), the
   area of the triangles the plane was fitted to at last (unit²), `true` when it started at `IPA_BAND_FALLBACK_START` for want of a bulb, and
   how many triangles the trim left out. It is not in the CSV.
-* `bsaReference` (null without a ventral region near P): `{ radius, noise }` — how far round P the BSA's reference plane was fitted, and the
+* `bsaReference` (null without a ventral region near P, or without a stated unit): `{ radius, noise }` — how far round P the BSA's reference plane was fitted, and the
   surface's robust deviation from it there (σ̂ as last taken; coordinate units). It is not in the CSV.
 
 Lengths are in the coordinate unit. Millimetre parameters are converted by `specimen.unit`; without a stated unit
@@ -466,7 +467,7 @@ what needs them is not measured.
 | `morph_length` | the largest distance between two vertices (found on the convex hull's vertices) |
 | `morph_width` | every vertex projected onto the plane perpendicular to `morph_length`: the largest distance in it |
 | `morph_thickness` | the range perpendicular to both |
-| `morph_tech_angle_deg` | the `morph_length` direction projected onto the technical XY plane: its angle with the Y axis, 0–90° |
+| `morph_tech_angle_deg` | the `morph_length` direction projected onto the technological XY plane: its angle with the Y axis, 0–90° |
 | `platform_width_chord`, `platform_width_path` | between the two ends: the straight distance; the shortest path along the surface within the platform region |
 | `platform_depth_chord`, `platform_depth_path` | between S₀ (where the platform stretch starts, at the platform's edge) and E: the same |
 | `platform_area` | the area of the platform region's triangles |
@@ -493,46 +494,48 @@ what needs them is not measured.
 * **Q_d**: from E along S away from the stretch (the dorsal side), arc length d in `EPA_DISTANCES_MM`. **The tangent** at Q_d:
   the chord between the points `TWO_LINES_LENGTH_MM` / 2 before and after it along S. Empty when S ends first.
 * A line takes `MIN_FIT_POINTS` (2) points before resampling: a platform stretch always gives one. Fewer than two ends: the two widths are empty.
-* **IPA's band** (from 32a): the triangles of the ventral region whose centroid has technical Y from `from` to `to` = `IPA_BAND_END` (0.75)
-  × `tech_length`. `from` is the largest technical Y of the main bulb's vertices when it is a bulb (found, above the noise, closed at the
-  sides; the bulb as the BSA takes it, at the specimen's level, so changing the level moves it); otherwise, or without a unit,
+* **IPA's band** (from 32a): the triangles of the ventral region whose centroid has technological Y from `from` to `to` = `IPA_BAND_END` (0.75)
+  × `tech_length`. `from` is the largest technological Y of the main bulb's vertices when it is a bulb (found, above the noise, closed at the
+  sides; the bulb as the BSA takes it, at the specimen's level, so changing the level moves it); otherwise
   `IPA_BAND_FALLBACK_START` (0.25) × `tech_length`. Left out: the triangles with a vertex in the main bulb (only when it is a bulb), and
   those of the lower layer's `retouch` and `damage` regions (other types, custom ones included, stay in). IPA needs the platform line and
   the ventral region, not a BSA. **Its plane**: those triangles' least-squares plane, each by its area (as the BSA's plane), its normal away
   from the dorsal face; then, once, each triangle's centroid's signed distance to it, their median m and σ̂ = 1.4826 × the median of
   |distance − m|; the triangles farther than `IPA_TRIM_SIGMA` (3) × σ̂ from m left out, and the plane fitted again. **IPA**: the angle between
   the platform line (P→E) and normalize(normal × X), the line where the plane meets S's plane, directed +Y.
-* IPA is empty without a ventral region (`no_ventral`), and when the triangles fitted at last cover less than `IPA_MIN_BAND_SHARE` (0.05) of
+* IPA is empty without a stated unit (`no_unit`: the bulb its band starts from is sought in mm, so the band would start elsewhere
+  without one), without a ventral region (`no_ventral`), and when the triangles fitted at last cover less than `IPA_MIN_BAND_SHARE` (0.05) of
   the ventral region's area (`band_too_small`: a band all retouch, say).
 * **Q_v**: from the platform stretch's near end along S away from it (the ventral side), arc length `BULB_ANGLE_DISTANCE_MM` (1.0);
   the tangent there as for Q_d. Empty when S ends first.
 * **The proximal ventral plane** (the BSA's reference, from 32b; also "Proximal ventral" in shading by height): the triangles of the
-  ventral region whose centroid lies within R = min(`BSA_REF_RADIUS_MM` (10), 0.5 × `tech_length`) of P (without a unit: 0.5 ×
-  `tech_length`), less the lower layer's `retouch` and `damage` triangles; their least-squares plane (each triangle by its area and its own
+  ventral region whose centroid lies within R = min(`BSA_REF_RADIUS_MM` (10), 0.5 × `tech_length`) of P (without a stated unit there is
+  none: it serves only the BSA, the VI and where IPA's band starts), less the lower layer's `retouch` and `damage` triangles; their least-squares plane (each triangle by its area and its own
   second moments), normal away from the dorsal face; then at most `BSA_REF_ITERATIONS` (3) times: each centroid's signed distance r over
   it (outward positive), their median m and σ̂ = 1.4826 × the median of |r − m| (both weighted by the triangles' areas); left out those
   with r − m > `BSA_REF_TRIM_UP` (2) × σ̂ (the bulb) or |r − m| > 3 × σ̂; the rest fitted again; stopping when the rest stays the same. The
-  last σ̂ is the surface's noise there (`bsaReference.noise`). **Height**: the distance above that plane, outward positive.
+  last σ̂ is the surface's noise there (`bsaReference.noise`). `BSA_REF_TRIM` (3) is that 3. **Height**: the distance above that plane, outward positive.
 * **The main bulb**: the ventral vertices at or above the level (`bsa.level`) joined along the triangles' edges into parts; the part that
   comes nearest P, within `BSA_NEAR_POP_MM` (2) (of two as near, the larger). **Its outline**: where the triangles round it cross the level.
-  **Its ends**: seen from P laid onto the plane, the outline's points farthest round from the technical +Y (laid onto the plane) each way;
+  **Its ends**: seen from P laid onto the plane, the outline's points farthest round from the technological +Y (laid onto the plane) each way;
   both must lie on their own side of +Y. **Its top**: its highest vertex.
 * **A bulb**: the main bulb is no bulb when its top is lower than `BSA_MIN_PROMINENCE` (3) × the noise. It is **not closed at the sides**
   when one of its vertices lies on the ventral region's border (an edge of one ventral triangle only) farther than `BSA_OPEN_REACH_MM` (2)
   from P.
 * **VI's strips**: on the plane, from P to the top, `VI_WIDTHS_MM` [0.5, 1.0, 1.5] wide, sampled every `VI_SAMPLE_MM` (0.02) (where
   several layers of the surface lie over a sample, the outermost).
-* Empty: without a unit, the bulb angle, BSA, VI and `pop_mesh_edge` (`no_unit`); without a ventral region near P, BSA and VI
+* Empty: without a unit, the bulb angle, BSA, VI, IPA and `pop_mesh_edge` (`no_unit`); without a ventral region near P, BSA and VI
   (`no_ventral`); with no part near P, no outline or a top under the noise, BSA and VI (`no_bulb`, whatever the ends: the index is of a
   bulb); not closed at the sides, BSA and VI (`bulb_open`) unless the ends were set by hand; with both ends on one side, BSA
   (`bulb_one_side`) unless the ends were set by hand.
 * **Paths** run on the region's triangles only: the shortest way over its mesh edges; then, on the triangles that way passes
   through, over 3 points on each side, those crossings pulled taut.
-* `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `FIT_RESAMPLE_COUNT` 200,
+* `parameters`: `STRIP_HALF_WIDTH_RATIO` 0.1, `STRIP_NORMAL_OUTLIER_DEG` 60, `MIN_AXIS_EDGES` 5 and `MIN_STRIP_TRIANGLES` 10 (the
+  technological frame's `short` and `few`), `FIT_RESAMPLE_COUNT` 200,
   `EPA_DISTANCES_MM` [1, 2, 3], `TWO_LINES_LENGTH_MM` 0.5, `IPA_BAND_END` 0.75, `IPA_BAND_FALLBACK_START` 0.25, `IPA_TRIM_SIGMA` 3,
   `IPA_MIN_BAND_SHARE` 0.05, `MIN_FIT_POINTS` 2, `PLATFORM_REACH_MM` 1, `PLATFORM_REACH_EDGES` 5,
   `BULB_ANGLE_DISTANCE_MM` 1, `BSA_LEVEL_DEFAULT_MM` 0.1, `BSA_LEVEL_RANGE_MM` [−1, 1], `BSA_NEAR_POP_MM` 2, `BSA_REF_RADIUS_MM` 10,
-  `BSA_REF_ITERATIONS` 3, `BSA_REF_TRIM_UP` 2, `BSA_MIN_PROMINENCE` 3, `BSA_OPEN_REACH_MM` 2, `VI_WIDTHS_MM` [0.5, 1, 1.5],
+  `BSA_REF_ITERATIONS` 3, `BSA_REF_TRIM_UP` 2, `BSA_REF_TRIM` 3, `BSA_MIN_PROMINENCE` 3, `BSA_OPEN_REACH_MM` 2, `VI_WIDTHS_MM` [0.5, 1, 1.5],
   `VI_SAMPLE_MM` 0.02, `POP_MESH_RADIUS_MM` 2.
 
 ## Edge angles
@@ -551,7 +554,7 @@ Lengths are in the coordinate unit; without a stated unit nothing is measured.
 * Empty (null) where the line ends before d, or, on a closed line, where the two ways would meet.
 
 **Derived** (`derived.edgeAngles`): `parameters` (`SMOOTH_WINDOW_MM` 5, `EDGE_ANGLE_STEP_MM` 1, `EDGE_ANGLE_DISTANCES_MM` [2, 5, 10],
-`TWO_LINES_LENGTH_MM` 0.5); `curves`: `{ curveId, distances, length, stations }`, `distances` and `length` (of the reference curve) in the coordinate unit, each station `{ position, point, three_points, two_lines }` (`position`
+`TWO_LINES_LENGTH_MM` 0.5, `LINE_REACH_EDGES` 3: the 3 mean edge lengths above); `curves`: `{ curveId, distances, length, stations }`, `distances` and `length` (of the reference curve) in the coordinate unit, each station `{ position, point, three_points, two_lines }` (`position`
 along the reference curve, `point` A in original coordinates, the angles in the order of `distances`).
 
 ## Retouch layers
@@ -560,7 +563,7 @@ On a flake, an open curve of type `retouch` with both ends within reach of an `e
 
 A region of type `retouch` has a `retouchLayer` (integer from 1; 1 is the layer nearest the edge). Along the curves measured for edge angles, at the same
 stations: the whole section by the same plane, followed from A both ways across the retouch regions it meets, without leaving them. A stretch shorter than
-2 mean edge lengths is no layer, and two regions of one layer in a row are one (region borders follow mesh edges, so the points are good to about one edge).
+`SLIVER_EDGES` (2) mean edge lengths is no layer (the constant is recorded with the retouch indices' parameters, which use it too), and two regions of one layer in a row are one (region borders follow mesh edges, so the points are good to about one edge).
 For each layer: Pk its outer end, s the length from A along the section, Q the point at s on the other side.
 
 * `three_points`: the angle Pk A Q. `two_lines`: the angle between the chords `TWO_LINES_LENGTH_MM` long centred on Pk and Q, pointing away from A.
@@ -578,7 +581,7 @@ Worked out from the retouch regions and the edge, with no further annotation; fl
 "flake": { "retouch": { "fitLength": null, "axis": "auto", "flip": false } }
 ```
 
-`fitLength`: w below, in mm (1 to 20, in steps of 0.5, out of range the nearest; null: the default, 5). `axis`: the frame of the plan, `auto` (the technical frame when there is one, else the longest axis), `technical` or `longest`. `flip`: the longest axis the other way round, the two ends exchanged. Files without it: these defaults.
+`fitLength`: w below, in mm (1 to 20, in steps of 0.5, out of range the nearest; null: the default, 5). `axis`: the frame of the plan, `auto` (the technological frame when there is one, else the longest axis), `technological` or `longest`. `flip`: the longest axis the other way round, the two ends exchanged. Files without it: these defaults.
 
 Lengths are in the coordinate unit, millimetre parameters converted by `specimen.unit`. Without a stated unit there are no stations, and what needs them is empty.
 
@@ -595,7 +598,7 @@ The two lines meet at A0. Each runs from F (R, or A without retouch) toward the 
 
 **GIUR** (Kuhn 1990). The stations with retouch on one side only, dorsal or ventral (both sides: `bifacial`). The reference line: fitted to the ventral side, from R (A when it has no retouch) to where it leaves the ventral face; no such stretch: `no_original_surface`. t (`retouch_height`): the thickness where the retouch ends, from R on the dorsal side to that line; with the retouch on the ventral side, from the first point of the dorsal side straight above R. T (`thickness`): the largest distance to the line of the dorsal side, from A to where it leaves the dorsal face. `giur`: the mean of t/T over those stations, of both faces; `giur_stations`: how many.
 
-**The plan.** `technical`: the technical frame, Y from 0 to the technical length (what lies below 0 goes to the first row). `longest`: Y along the morphological length, so that its dot product with the specimen frame's +Y is not negative (as the length's direction falls without a specimen frame), the other way with `flip`; Z the area-weighted mean normal of the dorsal triangles without its Y component (no dorsal face: of the ventral ones, turned round); X = Y × Z; Y from the vertices' smallest to their largest, the origin the origin of the file's coordinates. Fails (`frame_failed`) without a dorsal or a ventral face. Y: the range [y0, y1], L = y1 − y0.
+**The plan.** `technological`: the technological frame, Y from 0 to the technological length (what lies below 0 goes to the first row). `longest`: Y along the morphological length, so that its dot product with the specimen frame's +Y is not negative (as the length's direction falls without a specimen frame), the other way with `flip`; Z the area-weighted mean normal of the dorsal triangles without its Y component (no dorsal face: of the ventral ones, turned round); X = Y × Z; Y from the vertices' smallest to their largest, the origin the origin of the file's coordinates. Fails (`frame_failed`) without a dorsal or a ventral face. Y: the range [y0, y1], L = y1 − y0.
 
 **Invasiveness** (Clarkson 2002). Rows: ⌊5(y − y0)/L⌋, from 0 at the proximal end. The outline: the vertices in `OUTLINE_BINS` cells along y give xL and xR (mid, half width), along x they give yTop and yBot; empty cells between their neighbours. Each retouch triangle on the dorsal or ventral face goes by its centroid to a segment: row 1 is segment 1, row 5 segment 8, rows 2 to 4 left and right of mid(y) by the plan's X, 2 / 4 / 6 and 3 / 5 / 7. The ventral face is not mirrored: its segments are 8 more, 9 to 16. How far in (p, 0 to 1): from the sides, 1 − |x − mid(y)| / half width(y), which is p in rows 2 to 4; in row 5 the lesser of that and (yTop(x) − y) / (yTop(x) − (y0 + 0.8 L)); in row 1 the lesser of that and (y − yBot(x)) / ((y0 + 0.2 L) − yBot(x)); each limited to [0, 1], 1 where the divisor is not positive. A segment's p_max (`penetration`) is the largest of its triangles (none: 0). `score`: 0 without retouch, 0.5 up to `INVASIVE_BOUNDARY`, else 1. `invasiveness`: the sum of the scores / 16. `invasiveness_continuous`: the sum of p_max / 16.
 
@@ -607,9 +610,9 @@ The two lines meet at A0. Each runs from F (R, or A without retouch) toward the 
 
 **Not retouched.** A flake without any retouch region has 0 for all of these but the curvature, whatever else is missing, and sixteen rows of 0.
 
-**Empty values.** The reasons are for the screen: neither in the file nor in the tables. In order: the reduction: `no_unit`, `no_retouch_on_edge`, `no_faces` (no retouched station is told), `too_many_gaps` (`erp_filled_share` above `ERP_MAX_FILLED_SHARE`), and for `erp` alone `mesh_open`. GIUR: `no_unit`, `no_retouch_on_edge`, `no_faces`, `no_unifacial_station`. Invasiveness: `no_faces`, `no_axis` (`technical` chosen, no technical frame), `frame_failed`. The perimeter: `no_unit`, `no_edge`; the two faces also `no_faces`. The curvature: `no_unit`, `no_retouch_on_edge`, `whole_edge`, `no_axis`, `frame_failed`.
+**Empty values.** The reasons are for the screen: neither in the file nor in the tables. In order: the reduction: `no_unit`, `no_retouch_on_edge`, `no_faces` (no retouched station is told), `too_many_gaps` (`erp_filled_share` above `ERP_MAX_FILLED_SHARE`), and for `erp` alone `mesh_open`. GIUR: `no_unit`, `no_retouch_on_edge`, `no_faces`, `no_unifacial_station`. Invasiveness: `no_faces`, `no_axis` (`technological` chosen, no technological frame), `frame_failed`. The perimeter: `no_unit`, `no_edge`; the two faces also `no_faces`. The curvature: `no_unit`, `no_retouch_on_edge`, `whole_edge`, `no_axis`, `frame_failed`.
 
-**Derived** (`derived.retouchIndices`): `parameters` (`FIT_RESAMPLE_COUNT` 200, `ORIGINAL_FIT_MM` 5, `ORIGINAL_FIT_MIN_SHARE` 0.5, `MIN_MEET_DEG` 1, `MEET_TOLERANCE_EDGES` 1, `FIT_LENGTH_RANGE_MM` [1, 20], `ERP_MAX_FILLED_SHARE` 0.25, `OUTLINE_BINS` 200, `INVASIVE_BOUNDARY` 0.5, `RETOUCH_MERGE_GAP_MM` 2); `fitLength` (mm) and `axis` (`technical`, `longest` or null) as used; `frame` (`{ origin, x, y, z, y0, y1 }`, original coordinates; null: none); the values `removed_volume`, `erp`, `erp_filled_share`, `giur`, `giur_stations`, `invasiveness`, `invasiveness_continuous`, `retouch_perimeter`, `retouch_perimeter_dorsal`, `retouch_perimeter_ventral`, `edge_curvature`, `edge_curvature_chord`, `edge_curvature_depth`; `stations` (`{ curveId, station, position, segment, x, y, depth_dorsal, depth_ventral, removed_area, filled, original_angle_deg, recession, retouch_height, thickness, giur }`, the retouched ones); `segments` (`{ curveId, region, layer, face, start_position, end_position, length, chord, depth, middle }`, `region` by id; `middle`: where its middle station is along the curve); `penetration` (`{ face, segment, penetration, score }`, sixteen; none when they cannot be told).
+**Derived** (`derived.retouchIndices`): `parameters` (`FIT_RESAMPLE_COUNT` 200, `ORIGINAL_FIT_MM` 5, `ORIGINAL_FIT_MIN_SHARE` 0.5, `MIN_MEET_DEG` 1, `MEET_TOLERANCE_EDGES` 1, `FIT_LENGTH_RANGE_MM` [1, 20], `ERP_MAX_FILLED_SHARE` 0.25, `OUTLINE_BINS` 200, `INVASIVE_BOUNDARY` 0.5, `RETOUCH_MERGE_GAP_MM` 2, `SLIVER_EDGES` 2: a stretch of section shorter than so many mean edge lengths is no piece of a face, and no layer of `retouch_angles.csv`, see "Retouch layers"); `fitLength` (mm) and `axis` (`technological`, `longest` or null) as used; `frame` (`{ origin, x, y, z, y0, y1 }`, original coordinates; null: none); the values `removed_volume`, `erp`, `erp_filled_share`, `giur`, `giur_stations`, `invasiveness`, `invasiveness_continuous`, `retouch_perimeter`, `retouch_perimeter_dorsal`, `retouch_perimeter_ventral`, `edge_curvature`, `edge_curvature_chord`, `edge_curvature_depth`; `stations` (`{ curveId, station, position, segment, x, y, depth_dorsal, depth_ventral, removed_area, filled, original_angle_deg, recession, retouch_height, thickness, giur }`, the retouched ones); `segments` (`{ curveId, region, layer, face, start_position, end_position, length, chord, depth, middle }`, `region` by id; `middle`: where its middle station is along the curve); `penetration` (`{ face, segment, penetration, score }`, sixteen; none when they cannot be told).
 
 ## Working edges
 
@@ -707,7 +710,7 @@ The points, in their order. None can be moved on its own; a change of the config
    * `platform_left_pop`, `platform_pop_right` (the inner rim), `platform_right_left` (the outer rim): the closed platform outline, parted at the points nearest the three landmarks; each part ends on its landmark.
    * Then the user's own sets of semilandmarks.
 3. **Surfaces**, row by row:
-   * `ventral`, `dorsal`: in the technical frame (the lines are cast at the whole mesh, so a back, told apart or not, gives the dorsal face the same points). The polygon of the edge and the inner rim (a point platform: the edge alone) in the XY plane. Row i of R at Y = Ymin + i/(R+1) × (Ymax − Ymin); between the row's leftmost and rightmost crossings of the polygon, column j of C at i/(C+1). A line along Z there: the lowest crossing of the mesh for the ventral face, the highest for the dorsal.
+   * `ventral`, `dorsal`: in the technological frame (the lines are cast at the whole mesh, so a back, told apart or not, gives the dorsal face the same points). The polygon of the edge and the inner rim (a point platform: the edge alone) in the XY plane. Row i of R at Y = Ymin + i/(R+1) × (Ymax − Ymin); between the row's leftmost and rightmost crossings of the polygon, column j of C at i/(C+1). A line along Z there: the lowest crossing of the mesh for the ventral face, the highest for the dorsal.
    * `platform`: the plane fitted to the platform region's vertices, weighted by area, its normal n away from the flake's middle; u the direction from the left end to the right in it, v = n × u from the inner rim to the outer. Column j of C at j/(C+1) between the two ends' u; row i of R at i/(R+1) from the inner rim to the outer along v; down n onto the region's triangles.
 
 **By a template** (a core, a general specimen, a flake by `template`): the fixed and curve points as above, or as the lists say, then the patches. A flake's anchors are its fixed landmarks and the curve points of the edge and the outline.
@@ -720,7 +723,7 @@ The points, in their order. None can be moved on its own; a change of the config
 
 **Derived** (`derived.gm`): `config` (as above, of `template` only `file`, `sha256`, `seed`, the two hashes and `points`, how many), `complete`, `missing` (codes, below), `rows` (`{ index, name, kind, setId, point }`, original coordinates; `kind`: `fixed`, `curve` or `surface`), `curves` (`[before, slide, after]` by point number from 1), `surfaces` (point numbers). A result saved before the lists has in `config` the grid's fields alone. By a template also: `method: "template"`, `details` (`{ code, name }`: which landmark, curve or region a code is about), `flagged` (point numbers), `key` (a hash of what the points are made from: the template's points and anchors, the specimen's anchors, regions and mesh, the configuration's version; while it is the same a summary uses them), and in `rows` `setIndex` (the number within its curve), `flagged` and `missing`. By the grid `method: "grid"`.
 
-`missing`: `technical_axis`, `platform_ends`, `edge`, `platform_outline` (a closed one), `platform_region`, `ventral_miss`, `dorsal_miss`, `platform_miss` (a point finds no triangle), `point_count`; `landmark_missing`, `landmark_ambiguous`, `curve_missing`, `curve_ambiguous`, `curve_ends` (a row without its ends), `region_missing`, `region_ambiguous`, `no_template`, `template_missing` (its model is not in the folder: nothing is passed on), `template_stale` (the lists no longer match what was laid), `too_few_anchors`, `no_fit`. By the grid a specimen lacking any of them has no GM exports; in a summary it is listed instead, with `point_count` for one whose number of points differs from the others' (the user's own landmarks). By a template it is exported with `NA` where it lacks, and listed in the manifest's `gmIncomplete`; only a specimen with no point at all is left out.
+`missing`: `technological_axis`, `platform_ends`, `edge`, `platform_outline` (a closed one), `platform_region`, `ventral_miss`, `dorsal_miss`, `platform_miss` (a point finds no triangle), `point_count`; `landmark_missing`, `landmark_ambiguous`, `curve_missing`, `curve_ambiguous`, `curve_ends` (a row without its ends), `region_missing`, `region_ambiguous`, `no_template`, `template_missing` (its model is not in the folder: nothing is passed on), `template_stale` (the lists no longer match what was laid), `too_few_anchors`, `no_fit`. By the grid a specimen lacking any of them has no GM exports; in a summary it is listed instead, with `point_count` for one whose number of points differs from the others' (the user's own landmarks). By a template it is exported with `NA` where it lacks, and listed in the manifest's `gmIncomplete`; only a specimen with no point at all is left out.
 
 ## Surface region
 
@@ -953,7 +956,7 @@ One row per scar that has a direction arrow (scars with `"vector": null` are lef
 `termination` is empty when not judged yet; `platform_face` is the scar's platform in the volumetric
 configuration, a face code, and `flaking_surface` its flaking surface, e.g. `F1` — empty when the
 scar's face is no flaking surface, and both empty before the mesh is measured or for a flake;
-`tech_angle_deg`, for a flake with a technical frame: the arrow projected onto the frame's XY plane, +Y
+`tech_angle_deg`, for a flake with a technological frame: the arrow projected onto the frame's XY plane, +Y
 being 0° and counter-clockwise as seen from the dorsal side positive, in (−180°, 180°]; else empty;
 `source`: where an imported arrow came from, `iges:<file name>` (see "Imports"), empty for one drawn in the app):
 
@@ -968,7 +971,7 @@ Flakes (`<specimen>_flakes.csv`, one row per flake, empty where there is no valu
 specimen_id,unit,frame_source,tech_length,tech_width,tech_thickness,morph_length,morph_width,morph_thickness,morph_tech_angle_deg,platform_width_chord,platform_width_path,platform_depth_chord,platform_depth_path,platform_area,epa_3pt_1mm,epa_3pt_2mm,epa_3pt_3mm,epa_2ln_1mm,epa_2ln_2mm,epa_2ln_3mm,ipa,retouch_axis,retouch_fit_length,removed_volume,erp,erp_filled_share,giur,giur_stations,invasiveness,invasiveness_continuous,retouch_perimeter,retouch_perimeter_dorsal,retouch_perimeter_ventral,edge_curvature,edge_curvature_chord,edge_curvature_depth,psia,bulb_angle_3pt_1mm,bulb_angle_2ln_1mm,bsa,bsa_level_mm,bsa_ends_moved,vi_0_5mm,vi_1_0mm,vi_1_5mm,pop_mesh_edge
 ```
 
-The fifteen from `retouch_axis` to `edge_curvature_depth` are the retouch indices, see "Retouch indices": `retouch_axis` `technical` or `longest`, empty without a frame; `retouch_fit_length` in mm; lengths in the unit, `removed_volume` in unit³; shares as decimals from 0 to 1.
+The fifteen from `retouch_axis` to `edge_curvature_depth` are the retouch indices, see "Retouch indices": `retouch_axis` `technological` or `longest`, empty without a frame; `retouch_fit_length` in mm; lengths in the unit, `removed_volume` in unit³; shares as decimals from 0 to 1.
 
 The last ten are the proximal end, see "Flakes": `psia`, `bulb_angle_3pt_1mm`, `bulb_angle_2ln_1mm`, `bsa` in degrees; `bsa_level_mm` the level the BSA was taken at (mm); `bsa_ends_moved` `true` when its ends were set by hand, else `false`; `vi_0_5mm`, `vi_1_0mm`, `vi_1_5mm` in mm; `pop_mesh_edge` in the unit.
 
@@ -1008,7 +1011,7 @@ another surface's scars; for the bicone, one row per flaking cone, upper first, 
 specimen_id,surface_id,faces,platforms,also_platform,n_scars,surface_type,exploitation_axis
 ```
 
-One row per curve point (curve CSV), in order along each curve:
+Curves (`<specimen>_curves.csv`, one row per curve point, in order along each curve; `type` and `note` are the curve's attributes, `closed` `true` or `false`; the summary export merges them):
 
 ```
 specimen_id,curve_id,point_index,x,y,z,arc_length,anchor,closed,length,type,note,unit
@@ -1059,8 +1062,8 @@ index                   <specimen>_gm_surfaces.csv
 left,right              <specimen>_gm_land_pairs.csv (a flake by the grid only: its points in left–right pairs)
 ```
 
-`gm_land_pairs.csv` pairs each point of a flake's grid configuration with its mirror image across the technical frame's X = 0, by the
-same point numbers, the left point (technical X < 0 on a symmetric flake) first: the platform's two ends; along the edge (from its left
+`gm_land_pairs.csv` pairs each point of a flake's grid configuration with its mirror image across the technological frame's X = 0, by the
+same point numbers, the left point (technological X < 0 on a symmetric flake) first: the platform's two ends; along the edge (from its left
 end by the distal end to its right end) the i-th point and the i-th from the end; the platform outline's stretch from the left end to the
 point of percussion against the stretch from it to the right end, reversed; the outline's outer rim against itself, reversed; in each row
 of the ventral, dorsal and platform grids the j-th column and the j-th from the other side. Points on the middle (the point of percussion,
@@ -1149,20 +1152,29 @@ Observer agreement (compare mode; not part of the project file):
   `matched`, `unmatched_a`, `unmatched_b`), `scar_attribute` (field key, e.g. `completeness`,
   `termination`: `agreement`, `cohen_kappa` / `fleiss_kappa`, `n_items`; scars an observer left
   unfilled are left out), `relation` (`all`: same), `curve` (pairs:
-  `mean_distance`, `hausdorff`; `all`: counts), `plane` (pairs: `normal_angle_deg` 0–90,
-  `center_distance`), `region` (type: `iou`, `dice` by area; scar region pairs likewise),
-  `region_type` (`all`: `agreement`, kappa, `area` typed by both), `landmark` (name:
-  `distance`), `semilandmark` (`<set>_<k>`: `distance`), `measurement` (`length`, `width`,
-  `thickness`, `area_<type>`, `cortex_ratio`, manual labels: `difference` = b − a). Empty values
-  are undefined (e.g. κ when only one category occurs).
+  `mean_distance`, `hausdorff`; `all`: counts), `technological_axis` (flakes where both drew one, `item_key = axis`:
+  `pop_distance`, between the two points of percussion, in the coordinate unit, and `angle_deg`, between the two axes' directions
+  start → end, 0–180°; the ends are not compared, they only set the direction; no `all` row), `region` (type: `iou`, `dice` by area;
+  scar region pairs likewise), `region_type` (`all`: `agreement`, kappa, `area` typed by both), `landmark` (by the name
+  `landmarks.csv` gives it: `distance`), `semilandmark` (`<set>_<k>`: `distance`), `measurement` (manual measurements, by label:
+  `difference` = b − a). Empty values are undefined (e.g. κ when only one category occurs).
+
+Only what the observers annotated is compared: arrows, scar attributes, relations, curves, regions, landmarks, semilandmarks, the
+technological axis and manual measurements. What is computed from them is not (fitted planes, which come from arrows, curves and
+regions compared already; the automatic measurements and a flake's measures; region areas and the cortex ratio); for those, the
+summary export has each project file's rows, told apart by `annotator`, to compare in R. Before 34d the table also had `plane` rows
+(`normal_angle_deg`, `center_distance`) and `measurement` rows of `length`, `width`, `thickness`, `area_<type>`, `cortex_ratio` and a
+flake's measures.
 * `<specimen>_agreement_summary.csv`: `specimen_id,item_type,metric,annotator_a,annotator_b,n,mean,sd,min,max`
   — the long table grouped by item type, metric and pair.
 
 Matching: arrows by the mean distance of their two ends, curves (same type) by their mean
-distance, both with the Hungarian method and a distance limit (default a tenth of the model's
-diagonal); planes by method and angle; scars known only by their regions through the scar
-regions' largest overlaps; landmarks by name; semilandmarks by set label and number; manual
-measurements by label and type. Kappas: Cohen for two observers, Fleiss for all of them on
+distance (both resampled to `AGREEMENT_CURVE_MATCH_SAMPLES`, 32 points, for the pairing, and to
+`AGREEMENT_CURVE_SAMPLES`, 128, for the distances written), both with the Hungarian method and a distance limit (default a tenth of
+the model's diagonal); scars known only by their regions through the scar regions' largest overlaps; fixed landmarks by the name they
+are exported with — a flake's two platform ends as `platform_left` and `platform_right`, each observer's by its own technological
+frame, so that two ends of the same name listed the other way round still pair by side (without a frame, by name); semilandmarks by
+set label and number; manual measurements by label and type. The technological axis needs no pairing (one per flake). Kappas: Cohen for two observers, Fleiss for all of them on
 the scars of the first that every other has matched (relations: pairs of those scars that
 someone related; regions: triangles typed by all, weighted by area).
 
@@ -1196,20 +1208,25 @@ Folders. When a folder is open, the app keeps its own files in `LithicAnalyst/` 
   exports, and "Download all project files" (`LithicAnalyst/projects/…`).
 * `manifest.json`: `app` (`name`, `version`, `author`: the authors, joined with commas, `license`, `repository`, `citation`: how to cite
   this version, APA style), `createdAt`, `scope` (`specimen` or `folder`), `folder`, `kind`
-  (`tables` or `figures`), `options` (figures: `format` and `figure`, the figure settings: `views`, `lightElevation`, `overlays` — `arrows`, `curves`, `planes`, `regions`, `landmarks`, `scaleBar`, `sections` (where the sections cut the model, marked on the views), `legend` (what the colours drawn stand for; `false` by default) —, `scale`, `dpi` and `background`: `white` or `transparent`), `parameters` (`flake`, `edgeAngle`, `retouchIndex`, `sharpEdge`: the named parameters of the flake measurements, the edge angles, the retouch indices and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
-  = the project file used, `annotator`), `duplicateNames`, `failures` (`file`, `reason`) and
+  (`tables` or `figures`), `options` (figures: `format` and `figure`, the figure settings: `views`, `lightElevation`, `overlays` — `arrows`, `curves`, `planes`, `regions`, `landmarks`, `scaleBar`, `sections` (where the sections cut the model, marked on the views), `legend` (what the colours drawn stand for; `false` by default) —, `scale`, `dpi` and `background`: `white` or `transparent`), `parameters` (`flake`, `symmetry`, `edgeAngle`, `measuredLine`, `retouchIndex`, `workingEdge`, `sharpEdge`: the named parameters of the flake measurements, the symmetry references, the edge angles, the line measured, the retouch indices, the working edges and the sharp edge, with its `rule`; `gm`: the configuration; `gmTemplate`, `tps`: the laying's and the spline's; from 34d `flake` has `MIN_AXIS_EDGES`, `MIN_STRIP_TRIANGLES` and `BSA_REF_TRIM`, `edgeAngle` `LINE_REACH_EDGES`, `retouchIndex` `SLIVER_EDGES`), an export of the compare mode `options.agreement` (`distanceLimit`: the distance limit of the pairing, coordinate units, as it was set; `curveSamples` 128 and `curveMatchSamples` 32: how the curves were resampled), `gm` (`surfaceMethod`, `configVersion`, `template`: the template's model, `seed`), `gmSkipped` (`file`, `id`, `missing`: specimens left out of the coordinates of a summary), `gmIncomplete` (the same: those in it with `NA` where they lack), `specimens` (`id`, `file` = model path, `sha256`, `project`
+  = the project file used, `annotator`; a summary export lists each project file of a model, as its rows), `duplicateNames`, `failures` (`file`, `reason`) and
   `files` (the files of the export). `failures.csv`: `file,reason`.
 
-Summary export (the whole folder): one file per kind with the same columns as the per-specimen
-files (one measurement row per model, from its own project file, or from another project file of
-the model, or a fresh project; `file` is the model's path), `landmarks.tps` (one block per
-specimen), and — with several observers per model, told apart by `specimen.annotator` —
+Summary export (the whole folder): one file per kind with the columns of the per-specimen files and, after `specimen_id`, `annotator`
+(the project file's `specimen.annotator`, empty when not filled in; a table without `specimen_id`, such as `icc.csv` or `failures.csv`,
+has none, and the per-specimen files have none: their manifest names the annotator). One set of rows per project file of a model (from
+34d; before, only the model's own project file's): the model's own project file first, else the first found, then the model's other
+project files (other observers) by `annotator`; each with the results it stored, by the same rules; a model without a project file gets
+a fresh project's rows. `file` is the model's path. With one project file per model the tables are as before but for the `annotator`
+column. **The points of geometric morphometrics** (`gm_landmarks.csv`, `gm_landmarks.tps` and the other `gm_*` files, and
+`landmarks.tps`) stay one set per model, its first project file's: an analysis takes one configuration per specimen, and how observers'
+landmarks differ is the agreement's (`landmarks.csv`, a table, has each project file's rows). And — with several observers per model,
+told apart by `specimen.annotator` (else by the project file) —
 `icc.csv`: `measure,n_specimens,n_raters,icc` (ICC(2,1), two-way random, absolute agreement,
-single rater; over the specimens every observer measured; measures: length, width, thickness
-along each observer's frame, cortex_ratio, nodule_radius from the stored derived
-results, manual measurements by label, and of flakes the measures of `derived.flake.measures` by their
-column names, those of flakes.csv but the retouch indices, `bsa_level_mm`, `bsa_ends_moved` and
-`pop_mesh_edge`). A model that cannot be read or measured is left out
+single rater; over the models every observer measured; measures: the manual measurements, by label; written only when there is a
+row). From 34d only what was annotated by hand: before, it also had length, width, thickness, `cortex_ratio`, `nodule_radius` and a
+flake's measures, which are computed from the annotations (and length, width and thickness the same for every observer); their
+agreement can be had from each project file's rows. A model that cannot be read or measured is left out
 and listed in `failures`. The stored results of a model's project files are used instead of
 reading the model when every one of them was written by the same version of the app and holds
 `derived.measurements` (and `derived.vertices` when it has planes); the tables are the same
@@ -1223,7 +1240,7 @@ Symmetry (`<specimen>_symmetry.csv`, one row per symmetry reference; see "Symmet
 specimen_id,symmetry_id,source,source_id,volume_symmetry,area_symmetry,shape_symmetry,volume_a,volume_b,area_a,area_b,deviation_mean,deviation_rms,deviation_p95,unit,note
 ```
 
-`symmetry_id`: its label; `source`: `plane`, `curve` or `frame`; `source_id`: the plane's or curve's label, or `technical_x`, `specimen_x`,
+`symmetry_id`: its label; `source`: `plane`, `curve` or `frame`; `source_id`: the plane's or curve's label, or `technological_x`, `specimen_x`,
 `specimen_y`, `specimen_z`; `volume_symmetry`, `area_symmetry`, `shape_symmetry`: 0–1, no unit (see "Symmetry"); volumes in `unit`³, areas
 in `unit`², the deviation in `unit`; empty when not computed or as the reasons say (an open mesh has no volume or shape symmetry and no
 volumes; a plane that does not cut the mesh, none of the three and no sides). Dropped in stage 34a: `optimized`, `angle_to_source_deg`,
@@ -1242,6 +1259,15 @@ The optional UTF-8 byte-order mark helps Excel read non-ASCII notes.
 Notes on regions, landmarks and working edges (`note`) came without a new format version: a file without them reads as one with empty notes, and a reader that ignores unknown keys reads the new files.
 
 A region exported as a mesh (the region's details, "PLY"; a download, not part of the project or of a folder's exports): `<specimen>_<region>_<type>.ply`, binary little-endian PLY with `element vertex` (`float x, y, z`, the model file's own coordinates; the vertices the region's triangles use, each once) and `element face` (`list uchar int vertex_indices`), no colours or normals. Its header comments: `LithicAnalyst <version>`, `specimen <id>`, `region <label> <type>`, `unit <unit>` (`unit unspecified` without one), `source <model file> sha256 <checksum>`.
+
+## Codes renamed in 34d (format version 3 still)
+
+"Technical" became "technological" wherever it named a flake's technological axis or frame. A file written before reads with the new
+codes: `specimen.frame.source` (and `flake.otherFrame.source`) `technical_axis` → `technological_axis` (with `; turned` and the like
+kept), a symmetry reference's `source.frame` `technical` → `technological`, `flake.retouch.axis` `technical` → `technological`; in the
+stored results read for a summary export, `derived.flake.frameSource`, `derived.retouchIndices.axis` and `derived.gm.missing` likewise.
+The exports follow: `flakes.csv`'s `frame_source` `technological_axis`, its `retouch_axis` `technological`, `symmetry.csv`'s
+`source_id` `technological_x`, the manifest's `gmSkipped` / `gmIncomplete` `technological_axis`.
 
 ## Changes from format version 2
 

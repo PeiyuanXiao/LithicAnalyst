@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { displayPanel, expect, openSection, state, test } from './helpers';
 import { t8Bulb } from './fixtures/meshes';
-import { openT8, t8Project, T8_ENDS } from './t8Setup';
+import { openT8, T8_ENDS } from './t8Setup';
 
 /** T8 (tests/meshes.ts) coarse: rings of 0.2 mm near P and 145 steps of the half circle; its values are checked loosely here, exactly in tests/bulb.test.ts. */
 
@@ -174,26 +174,21 @@ test('the bulb page: the level moves the BSA; an end dragged moves it and can be
   expect(pageErrors).toEqual([]);
 });
 
-test('the compare mode: another observer\'s flake measures, from its own annotations, in the agreement table', async ({ page, pageErrors }) => {
-  await openT8(page);
-  await page.locator('#app-mode-compare').click();
-  // B put P 0.4 mm to the side; its file stores no results, so they are computed from its annotations
-  const b = t8Project('B', { P: [0.4, 0, 0] });
-  const chooser = page.waitForEvent('filechooser');
-  await page.locator('#compare-add').click();
-  await (await chooser).setFiles({ name: b.name, mimeType: 'application/json', buffer: Buffer.from(b.text) });
-  const row = (key: string) => page.evaluate((k) => window.lithicanalyst.agreement()?.rows.find((r) => r.itemType === 'measurement' && r.itemKey === k) ?? null, key);
-  await expect.poll(() => row('psia'), { timeout: 30_000 }).not.toBeNull();
-  for (const k of ['tech_length', 'bulb_angle_3pt_1mm', 'bsa', 'vi_1_0mm']) expect(await row(k), k).not.toBeNull();
-  for (const k of ['bsa_level_mm', 'pop_mesh_edge']) expect(await row(k), k).toBeNull();
-  // P moved: PSIA differs
-  expect(Math.abs((await row('psia'))!.value)).toBeGreaterThan(0.1);
-  // named as the measure list names them
-  await expect(page.locator('#sec-agreement')).toContainText('PSIA');
-  await expect(page.locator('#sec-agreement')).toContainText('BSA');
+test('without a stated unit (34d): no IPA, and why; nor the BSA and VI, and no ventral reference to shade by', async ({ page, pageErrors }) => {
+  await openT8(page, { unit: '' });
+  const f = await page.evaluate(() => window.lithicanalyst.flake());
+  expect(f!.measures!.ipa).toBeNull();
+  expect(f!.reasons!.ipa).toBe('no_unit');
+  for (const k of ['bsa', 'vi_1_0mm', 'epa_3pt_1mm'] as const) expect(f!.reasons![k]).toBe('no_unit');
+  // PSIA needs no unit
+  expect(f!.measures!.psia).not.toBeNull();
+  await page.locator('#app-mode-measure').click();
+  await expect(page.locator('#flake-ipa')).toHaveText('—');
+  await page.locator('#flake-ipa').hover();
+  await expect(page.locator('.tip')).toHaveText('No coordinate unit stated');
+  await page.screenshot({ path: 'test-results/34d/ipa-no-unit.png' });
   expect(pageErrors).toEqual([]);
 });
-
 test('the platform\'s depth from S (32b): P a little onto the ventral face, the depth and its drawing still from the platform\'s edge', async ({ page, pageErrors }) => {
   // P 0.5 mm onto the ventral face, within 1 mm of the platform: S, where the section meets the platform's edge, stays at (0, 0, 0)
   await openT8(page, { P: [0, 0.5, -t8Bulb(0.5, 0)] });

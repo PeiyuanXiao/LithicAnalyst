@@ -8,7 +8,7 @@ import { regionPlane } from '../src/compute/planes';
 import { regionPath } from '../src/compute/regionPath';
 import { polylineEdges, regionsSteps, smallerPieceSteps } from '../src/compute/regions';
 import { runSync } from '../src/compute/steps';
-import { techAngleDeg, technicalFrame, MIN_AXIS_EDGES } from '../src/compute/technicalFrame';
+import { techAngleDeg, technologicalFrame, MIN_AXIS_EDGES } from '../src/compute/technologicalFrame';
 import { frameAxes, frameMatrix, type FrameAxes } from '../src/core/frame';
 import type { Vec3 } from '../src/core/types';
 import { symmetricEigen3 } from '../src/compute/linalg';
@@ -64,7 +64,7 @@ function measure(m: Mesh, opts: { f?: (p: Vec3) => Vec3; unit?: string; platform
   const f = opts.f ?? ((p: Vec3) => p);
   const edge = meanEdge(m);
   const P = f(T1.P), A = f(T1.A);
-  const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
+  const fr = technologicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
   expect(fr.ok).toBe(true);
   if (!fr.ok) return emptyFlakeMeasures();
   const plat = opts.platform === false ? null : platformOf(m, f);
@@ -86,11 +86,11 @@ function measure(m: Mesh, opts: { f?: (p: Vec3) => Vec3; unit?: string; platform
 const T1_TURN = rigid([1, 2, -0.5], 73, [120, -40, 15]);
 const T3_TURN = rigid([-2, 1, 3], 137, [-5, 60, 22]);
 
-describe('the technical frame', () => {
+describe('the technological frame', () => {
   const m = flakeT1();
   const input = { positions: m.positions, index: m.index, meanEdge: meanEdge(m) };
   it('T1: origin P, +Z toward the dorsal face, +Y distal, +X = Y × Z', () => {
-    const fr = technicalFrame(input, T1.P, T1.A);
+    const fr = technologicalFrame(input, T1.P, T1.A);
     expect(fr.ok).toBe(true);
     if (!fr.ok) return;
     const err = (u: Vec3, v: Vec3) => deg(Math.acos(Math.min(1, u[0] * v[0] + u[1] * v[1] + u[2] * v[2])));
@@ -103,18 +103,18 @@ describe('the technical frame', () => {
   });
   it('a triangle facing inward (a mesh turned inside out) gives the same frame', () => {
     const flipped = { positions: m.positions, index: m.index.map((_, i, a) => (i % 3 === 1 ? a[i + 1] : i % 3 === 2 ? a[i - 1] : a[i])), meanEdge: input.meanEdge, orientationSign: -1 };
-    const fr = technicalFrame(flipped, T1.P, T1.A);
+    const fr = technologicalFrame(flipped, T1.P, T1.A);
     expect(fr.ok && fr.axes.z[2]).toBeCloseTo(1, 6);
   });
   it('no frame from an arrow under five mean edges, nor with fewer than ten triangles', () => {
     const short: Vec3 = [0, (MIN_AXIS_EDGES - 1) * input.meanEdge, 0];
-    expect(technicalFrame(input, T1.P, short)).toEqual({ ok: false, reason: 'short' });
+    expect(technologicalFrame(input, T1.P, short)).toEqual({ ok: false, reason: 'short' });
     const coarse = box([40, 40, 10], 1);
-    const fr = technicalFrame({ positions: coarse.positions, index: coarse.index, meanEdge: 1 }, [-20, -20, -5], [20, 20, -5]);
+    const fr = technologicalFrame({ positions: coarse.positions, index: coarse.index, meanEdge: 1 }, [-20, -20, -5], [20, 20, -5]);
     expect(fr).toEqual({ ok: false, reason: 'few' });
   });
   it('the scars\' angle: +Y is 0°, −X is +90° (counter-clockwise from the dorsal side), in (−180°, 180°]', () => {
-    const fr = technicalFrame(input, T1.P, T1.A);
+    const fr = technologicalFrame(input, T1.P, T1.A);
     if (!fr.ok) throw new Error('no frame');
     const a = (d: Vec3) => techAngleDeg(fr.matrix, [0, 0, 0], d)!;
     expect(a([0, 5, 0])).toBeCloseTo(0, 5);
@@ -139,7 +139,7 @@ describe('dimensions', () => {
     const ends = [...convexHull(grid)].map((v) => [grid[3 * v], grid[3 * v + 1]].join());
     for (const corner of ['0,0', '4,0', '0,4', '4,4']) expect(ends).toContain(corner);
   });
-  it('T1: technical length, width and thickness 60, 30, 10', () => {
+  it('T1: technological length, width and thickness 60, 30, 10', () => {
     const r = measure(flakeT1());
     closeTo(r.tech_length, 60, 0.3);
     closeTo(r.tech_width, 30, 0.15);
@@ -163,7 +163,7 @@ describe('dimensions', () => {
   });
   it('the cross-section at Y = t · 80 of T3 has the width and thickness of the ellipse there', () => {
     const m = mapped(ellipsoid(40, 25, 8), T3_TURN);
-    // the technical axis along the long axis, from one end to the other
+    // the technological axis along the long axis, from one end to the other
     const P = T3_TURN([-40, 0, 0]);
     const at = (v: Vec3): Vec3 => {
       const o = T3_TURN([0, 0, 0]), q = T3_TURN(v);
@@ -261,10 +261,10 @@ describe('the platform (T1)', () => {
     for (const k of ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const) closeTo(r[k], EPA, 0.5);
     closeTo(r.ipa, IPA, 0.5);
   });
-  it('without a stated unit there is no EPA, and the rest is measured', () => {
+  it('without a stated unit there is no EPA and no IPA, and the rest is measured', () => {
     const r = measure(m, { unit: '' });
     for (const k of ['epa_3pt_1mm', 'epa_3pt_2mm', 'epa_3pt_3mm', 'epa_2ln_1mm', 'epa_2ln_2mm', 'epa_2ln_3mm'] as const) expect(r[k]).toBeNull();
-    closeTo(r.ipa, IPA, 0.5);
+    expect(r.ipa).toBeNull();
     closeTo(r.platform_width_chord, 30, 0.15);
     closeTo(r.platform_depth_chord, Math.sqrt(104), 0.05);
   });
@@ -287,7 +287,7 @@ describe('the platform (T1)', () => {
     closeTo(r.platform_depth_chord, Math.sqrt(104), 0.05);
   });
   it('a stretch too far from P is not the platform', () => {
-    const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: meanEdge(m) }, T1.P, T1.A);
+    const fr = technologicalFrame({ positions: m.positions, index: m.index, meanEdge: meanEdge(m) }, T1.P, T1.A);
     if (!fr.ok) throw new Error('no frame');
     const plat = platformOf(m);
     // P moved 20 along the ventral face: the section's platform stretch now starts far from it
@@ -295,7 +295,7 @@ describe('the platform (T1)', () => {
     expect(r.platform_depth_chord).toBeNull();
     expect(r.ipa).toBeNull();
   });
-  it('T2 (a bulb, a curved distal end): IPA as on T1, technical length 60', () => {
+  it('T2 (a bulb, a curved distal end): IPA as on T1, technological length 60', () => {
     const r = measure(flakeT2());
     closeTo(r.ipa, IPA, 0.5);
     closeTo(r.tech_length, 60, 0.3);
@@ -346,7 +346,7 @@ describe('a rigid movement changes nothing', () => {
       else closeTo(b[k], a[k]!, k.includes('path') ? 0.3 : k === 'platform_area' ? 1 : k.includes('deg') || k.includes('pa') ? 0.5 : 0.3);
     }
   });
-  it('T3: morphological dimensions, and the technical ones in a frame moved with it', () => {
+  it('T3: morphological dimensions, and the technological ones in a frame moved with it', () => {
     const m = ellipsoid(40, 25, 8);
     const moved = mapped(m, T3_TURN);
     const a = morphDimensions(m.positions)!, b = morphDimensions(moved.positions)!;
@@ -374,7 +374,7 @@ describe('a rigid movement changes nothing', () => {
 
 /**
  * T6's IPA worked out from its surface alone, not by the code under test: the ventral face sampled densely over (s, y), each sample by
- * its area; those with technical Y in the band (0.25 to 0.75 of the technical length: P is on the platform's edge, 1 mm above where the
+ * its area; those with technological Y in the band (0.25 to 0.75 of the technological length: P is on the platform's edge, 1 mm above where the
  * bump rises past the level, so there is no bulb to start from) fitted with a plane (area-weighted total least squares), trimmed once by
  * the method's rule (3 × 1.4826 × MAD of the residuals from their median), fitted again; where that plane meets the section x = 0,
  * toward +Y, against the platform line P→E (E: the dorsal edge above P; the platform is straight in the section).
@@ -486,7 +486,7 @@ describe('T6, a flake of realistic shape', () => {
     const m = flakeT6(14);
     const P: Vec3 = [0, 0, t6Zv(0, 0)], A: Vec3 = [0, 40, t6Zv(0, 40)];
     const edge = meanEdge(m);
-    const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
+    const fr = technologicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
     if (!fr.ok) throw new Error('no frame');
     const ends: Vec3[] = [[-T6.w0, 0, t6Zv(-T6.w0, 0)], [T6.w0, 0, t6Zv(T6.w0, 0)]];
     const plat = platformOfT6(m);
@@ -567,7 +567,7 @@ describe('T6, a flake of realistic shape', () => {
     const m = flakeT6(K);
     const P: Vec3 = [0, 0, t6Zv(0, 0)], A: Vec3 = [0, 40, t6Zv(0, 40)];
     const edge = meanEdge(m);
-    const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
+    const fr = technologicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, A);
     expect(fr.ok).toBe(true);
     if (!fr.ok) return;
     const plat = platformOfT6(m);
@@ -604,7 +604,7 @@ describe('why a measure is empty', () => {
     const m = flakeT1();
     const edge = meanEdge(m);
     const P = opts.P === undefined ? T1.P : opts.P;
-    const fr = P && !opts.matrix ? technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, T1.A) : null;
+    const fr = P && !opts.matrix ? technologicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, P, T1.A) : null;
     const plat = opts.platform === false ? null : platformOf(m);
     return flakeMeasures({
       positions: m.positions,
@@ -629,11 +629,23 @@ describe('why a measure is empty', () => {
     for (const k of ['psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'pop_mesh_edge'] as const) expect(r.measures[k]).not.toBeNull();
   });
 
-  it('no stated unit: the EPAs, not the IPA', () => {
+  it('no stated unit: the EPAs and the IPA (34d), and no ventral reference plane', () => {
     const r = run({ unit: '' });
     for (const k of EPA_KEYS) expect(r.reasons[k]).toBe('no_unit');
-    expect(r.measures.ipa).not.toBeNull();
-    expect(r.reasons.ipa).toBeUndefined();
+    expect(r.measures.ipa).toBeNull();
+    expect(r.reasons.ipa).toBe('no_unit');
+    expect(r.ipaBand).toBeNull();
+    expect(r.construction.plane).toBeNull();
+    expect(r.bsaReference).toBeNull();
+  });
+
+  it('T1 with and without a unit (34d): IPA 101.31° with one, empty without (no_unit)', () => {
+    const withUnit = run();
+    expect(withUnit.measures.ipa!).toBeCloseTo(101.31, 1);
+    expect(IPA).toBeCloseTo(101.31, 2);
+    const without = run({ unit: '' });
+    expect(without.measures.ipa).toBeNull();
+    expect(without.reasons.ipa).toBe('no_unit');
   });
 
   it('no platform outline: everything of the platform', () => {
@@ -655,7 +667,7 @@ describe('why a measure is empty', () => {
     for (const k of ['platform_area', 'platform_width_chord', 'platform_width_path'] as const) expect(r.measures[k], k).not.toBeNull();
   });
 
-  it('no axis: the technical dimensions, not the morphological ones', () => {
+  it('no axis: the technological dimensions, not the morphological ones', () => {
     const r = run({ P: null });
     for (const k of ['tech_length', 'tech_width', 'tech_thickness', 'morph_tech_angle_deg'] as const) expect(r.reasons[k]).toBe('no_axis');
     for (const k of PLATFORM_KEYS) expect(r.reasons[k]).toBe('no_axis');
@@ -673,7 +685,7 @@ describe('why a measure is empty', () => {
     const scale = (p: Vec3): Vec3 => [p[0] / 60, p[1] / 60, p[2] / 60];
     const m = mapped(flakeT1(), scale);
     const edge = meanEdge(m);
-    const fr = technicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, scale(T1.P), scale(T1.A));
+    const fr = technologicalFrame({ positions: m.positions, index: m.index, meanEdge: edge }, scale(T1.P), scale(T1.A));
     expect(fr.ok).toBe(true);
     if (!fr.ok) return;
     const plat = platformOf(m, scale);

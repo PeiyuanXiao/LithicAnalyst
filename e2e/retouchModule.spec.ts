@@ -264,12 +264,12 @@ test('the frame and its direction: the ends exchanged on the plan and in invasiv
   await expect.poll(async () => (await retouch(page))?.penetration.some((p) => p.score > 0) ?? false).toBe(true);
   await expect.poll(async () => (await view(page)).segments?.length ?? 0).toBe(8);
 
-  // the longest axis, as there is no technical one
+  // the longest axis, as there is no technological one
   await expect(page.locator('#retouch-plan-axis')).toHaveValue('auto');
   await expect(page.locator('#retouch-plan-tag')).toHaveText('Longest axis');
   await expect(page.locator('#retouch-plan-flip')).toBeVisible();
-  // the technical axis, asked for: there is none
-  await page.locator('#retouch-plan-axis').selectOption('technical');
+  // the technological axis, asked for: there is none
+  await page.locator('#retouch-plan-axis').selectOption('technological');
   await expect(page.locator('#retouch-plan-empty')).toContainText('Technological axis');
   await expect(page.locator('#retouch-plan-flip')).toBeHidden();
   await expect.poll(async () => (await retouch(page))?.reasons.invasiveness).toBe('no_axis');

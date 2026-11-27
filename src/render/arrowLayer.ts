@@ -31,7 +31,7 @@ export const ARROW_COLORS = {
   uniform: UNIFORM,
   selected: '#ffc61a',
   draft: UNIFORM,
-  /** The flake's technical axis. */
+  /** The flake's technological axis. */
   axis: '#2563c9',
   palette: ['#1f9e89', '#3a7fd5', '#7b5cd6', '#c8611f', '#d6336c', '#8a8f98'],
 };
@@ -241,7 +241,7 @@ export class ArrowLayer {
   dimmed = false;
   /** Draw these scars' arrows faded (e.g. scars in no sequence while sequences are being made), from the next sync. */
   faded: ReadonlySet<string> | null = null;
-  /** The flake's technical axis, drawn and handled as an arrow of its own colour, from the next sync. */
+  /** The flake's technological axis, drawn and handled as an arrow of its own colour, from the next sync. */
   axis: { id: string; label: string; vector: ScarVector } | null = null;
   onLabelClick: (id: string) => void = () => {};
 
@@ -332,7 +332,7 @@ export class ArrowLayer {
     if (this.last) this.sync(this.last.state, this.last.selected, this.last.display, this.last.handles);
   }
 
-  /** The scars whose arrows are drawn (for tests; not the technical axis). */
+  /** The scars whose arrows are drawn (for tests; not the technological axis). */
   drawnIds(): string[] {
     return [...this.visuals.keys()].filter((id) => id !== this.axis?.id);
   }

@@ -70,13 +70,13 @@ off the interaction path (after loading, in idle time or a worker), never per po
   the cursor is cheap), snapping a picked vertex onto a nearby crest, and `relaxPath`, which
   pulls a traced chain taut along the surface while holding feature points. Curve points snap with
   `snapToFeature`, which climbs along a feature to its most pronounced place; things that are points (the
-  technical axis's start, fixed landmarks) with `snapToFeaturePoint`, which keeps abreast of the press: it takes
+  technological axis's start, fixed landmarks) with `snapToFeaturePoint`, which keeps abreast of the press: it takes
   the feature from `snapToFeature`, then the nearest vertex of its band, then goes uphill across it only.
 * `tools/surfaceSnap.ts` ties these to one loaded mesh: adjacency and curvature come from the
   `CurvatureService` at the shading scale (what you see is what snaps), closest points from the BVH.
 * `tools/drawCurveTool.ts` places points and shows the live stretch; `tools/selectTool.ts`
   drags curve points and retraces the two neighbouring stretches. It drags landmarks as well: a platform end along the outline (`ToolContext.onPlatformOutline`),
-  the others to what `landmarkTarget` in `tools/landmarkTool.ts` finds; not `pop`, which goes with the technical axis.
+  the others to what `landmarkTarget` in `tools/landmarkTool.ts` finds; not `pop`, which goes with the technological axis.
 * `render/curveLayer.ts` draws curves as screen-space lines (`Line2`) with a dark halo; the
   stretch a loop was completed with (`autoEdges` in `core/curveGeometry.ts`) is a second, dashed
   set of segments (`LineSegments2`) for the core line.
@@ -325,7 +325,7 @@ A row of a measure in the measure mode shows on the model how it was taken. What
 * `compute/measureHint.ts` (pure) turns those into a `MeasureHint`: lines, dots, arcs and pieces of surface, each `current` (the measure of the row) or `other` (the rest of the drawing). An arc carries its vertex and its two directions, so the tests can read the angle back. An empty value gives null. `MEASURE_HINT_PARAMETERS` holds the delay and the shares that size arcs and such.
 * `render/hintLayer.ts` draws one in the overlay (so figures leave it out): `Line2` lines of a constant width on the screen, point sprites, CSS labels that let the pointer through, all without a depth test and over everything else. Pieces of surface share the mesh's vertex buffer; the platform shows through the model, a whole model or a symmetry reference's side A is tinted where it is seen (seen through, it would only add up to a blur). A symmetry reference's plane is drawn by the fitted planes' own `PlaneVisual` (`render/planeLayer.ts`: disc, normal toward side A, and where it cuts the model), so the two look alike whatever the planes' look becomes; over the deviation the mesh shows its colours for a while (`MeshView.setOverrideColors`).
 * `App`: `hoverHint` (after `HOVER_MS`), `focusHint` (the keyboard's, `:focus-visible`), `pinHint`; the first of hover, focus and pinned is drawn (`syncHint`, from `hintOf`, which goes by the key `group:item` the row has in `data-hint`). `refreshHint` runs when what it draws from changes; `clearHints` on another mode, specimen or type. `hintMuted` keeps a row just let go from coming straight back under the pointer. A curve's row of edge angles has no pin: a click selects the curve, as ever.
-* `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks). The automatic measures are in groups (`measureGroup`; a flake's: technical axis, morphology, whole, proximal end; a core's and a generic specimen's: dimensions, whole); platform width and depth, the EPA, the bulb angle and VI are small tables (`measureTable`), each cell a measure of its own with its key and its focus. The export order is the order on screen.
+* `ui/sidebar.ts`: `hintRow` marks the cells of a row, `watchHints` listens on the list (rows are made anew on every refresh, so `rebuildHints` keeps the focus and `App.paintHintRows` the marks). The automatic measures are in groups (`measureGroup`; a flake's: technological axis, morphology, whole, proximal end; a core's and a generic specimen's: dimensions, whole); platform width and depth, the EPA, the bulb angle and VI are small tables (`measureTable`), each cell a measure of its own with its key and its focus. The export order is the order on screen.
 
 ## Specimen frame
 
@@ -499,7 +499,7 @@ pHYs chunk with the dpi (`io/png.ts`); SVG files are sized in millimetres.
   component along the arrow, platform = the adjacent face facing back along the arrow),
   `computeConfiguration` (which faces are flaking surfaces first, with the corrections, so that
   only their scars make platforms; then the roles, joins of adjacent flaking faces by a shared
-  platform, flaking surfaces by union–find with `alsoPlatform`, the seven traits) and
+  platform, flaking surfaces by union–find with `alsoPlatform`, the six traits) and
   `storedBox` (the box a project file kept, for the batch). The thresholds are named constants and
   are written with the result. The app recomputes it (cheap) on every change of scars, corrections
   or box (`App.updateConfiguration`).
@@ -561,9 +561,9 @@ tools, panels and exports; nothing loads or goes when it changes. `setSpecimenTy
 `specimen.frame` with `flake.otherFrame`, so a flake and the others each keep their orientation and the core's corrections by face stay right
 (`updateSpecimen` leaves them alone on a flake).
 
-* **Technical axis** (`ProjectState.flake.axis`): the tool is a `DrawArrowTool` with options (the start goes to a mesh vertex by `pointVertex`, as it does when the select tool drags it);
+* **Technological axis** (`ProjectState.flake.axis`): the tool is a `DrawArrowTool` with options (the start goes to a mesh vertex by `pointVertex`, as it does when the select tool drags it);
   the select tool drags its ends through `ToolContext.moveAxisEnd`. `ArrowLayer.axis` draws and handles it like a scar's arrow, in a colour of
-  its own. `App.applyAxis` finds the frame on the mesh (`compute/technicalFrame.ts`, in slices), then `setTechnicalAxis` makes one step of the
+  its own. `App.applyAxis` finds the frame on the mesh (`compute/technologicalFrame.ts`, in slices), then `setTechnologicalAxis` makes one step of the
   axis with its matrix, the `pop` landmark and `specimen.frame`. The matrix is stored with the axis, so undo, the CSV angle (`techAngleDeg`) and
   left and right of the platform ends (`platformSides`) need no mesh.
 * **Platform ends**: landmarks with a `code`, so the exports, the measurements and GM read them as ever. `platformEndsOf(curves)` (`compute/measuredLine.ts`, pure, no unit or mesh) says where the edge meets the outline. `syncPlatformEnds` keeps those with `auto: true` there, by id; the commands that change what they follow (`typeChanges`, `deleteCurve`, `reshapeCurve`, `setSpecimenType` to a flake) add it to their step through `endChanges`, as they do the regions that follow (`autoRegionChanges`), and `applyProject` calls `withPlatformEnds` for files from before. `moveLandmark` takes the mark off; `deleteLandmark` on an end moved by hand puts it back and places it again. There is no tool: the select tool moves them (`ToolContext.onPlatformOutline`), as the landmark tool does.
@@ -606,13 +606,13 @@ The depth runs from S₀ (`FlakeConstruction.depth.S`), the vertex of the bulb a
   line's direction, as IPA. The profile panel draws them on the long section.
 * **Reference plane** (`proximalPlaneSteps`, from 32b): the ventral face's plane near P, not the whole face's (on a twisted or curved flake
   that one is tilted against the proximal end, which then stands above it as a false bulb). The ventral triangles whose centroid lies
-  within R = min(`BSA_REF_RADIUS_MM`, half the technical length) of P, but the retouch and damage ones (`FlakeInput.leftOutFaces`), fitted
+  within R = min(`BSA_REF_RADIUS_MM`, half the technological length) of P, but the retouch and damage ones (`FlakeInput.leftOutFaces`), fitted
   by `referencePlaneSteps` (least squares over the surface, each triangle by its area and its own second moments), normal away from the
-  dorsal face (−Z of the technical frame), `y` the technical +Y laid on it, `x` = normal × `y`; then robustly: each centroid's height over
+  dorsal face (−Z of the technological frame), `y` the technological +Y laid on it, `x` = normal × `y`; then robustly: each centroid's height over
   the plane, their median and σ̂ = 1.4826 × MAD, both weighted by area (`compute/robust.ts`, `weightedMedian`: a three-way quickselect, so
   no sort blocks, and a mesh finer on the bulb, as decimated scans are, does not weigh more there); the bulb (more than
   `BSA_REF_TRIM_UP` σ̂ above) and the outliers (3 σ̂ either way) out, fitted again, at most `BSA_REF_ITERATIONS` times, until what is kept
-  stays the same. σ̂ is the surface's noise (`FlakeResult.bsaReference`, stored). The ventral face is the upper-layer region of that type,
+  stays the same (`BSA_REF_TRIM` σ̂). σ̂ is the surface's noise (`FlakeResult.bsaReference`, stored). The ventral face is the upper-layer region of that type,
   as the regions cut it (`App.ventralFaces`).
 * **The main bulb** (`bulbSteps`): the heights of the ventral vertices over the plane; the vertices at or above the level L
   (`state.flake.bsa.level`, mm) joined along the triangles' edges (union–find) into parts; the main bulb is the part that comes nearest P,
@@ -629,9 +629,10 @@ The depth runs from S₀ (`FlakeConstruction.depth.S`), the vertex of the bulb a
   the strip are rasterised onto samples `VI_SAMPLE_MM` apart (the outermost surface where several lie over a sample), and VI is the range of
   the heights. Each strip returns its corners and its highest and lowest samples, for the hint and the bulb page.
 * **IPA** (`compute/ipa.ts`, `ipaSteps`; from 32a): computed after the bulb, since its band starts where the bulb ends, and after the
-  profile, since it takes the platform line from it. The band: the ventral triangles whose centroid's technical Y lies from the main bulb's
-  farthest vertex (`BulbResult.region`, of a bulb that is one; else, or without a unit, `IPA_BAND_FALLBACK_START` of the technical length) to `IPA_BAND_END` of
-  it. Left out: the triangles touching the bulb, and those of the lower layer's retouch and damage regions (`FlakeInput.leftOutFaces`:
+  profile, since it takes the platform line from it. The band: the ventral triangles whose centroid's technological Y lies from the main bulb's
+  farthest vertex (`BulbResult.region`, of a bulb that is one; else `IPA_BAND_FALLBACK_START` of the technological length) to `IPA_BAND_END` of
+  it. Without a stated unit there is no IPA (`no_unit`, 34d): the bulb is sought in mm, and the reference plane is not fitted at all
+  without one (it serves only the BSA, the VI and the band's start), so shading by height offers no ventral reference then. Left out: the triangles touching the bulb, and those of the lower layer's retouch and damage regions (`FlakeInput.leftOutFaces`:
   `App.updateFlake` gathers their pieces with `facesOfPiecesSteps`, as it does the upper layer's; the compare mode takes them from an
   observer's face labels). The rest are fitted by `referencePlaneSteps`; the residuals of their centroids give a median and a MAD (by
   quickselect, so no sort blocks), those beyond `IPA_TRIM_SIGMA` robust deviations go, and the rest are fitted again; under
@@ -644,7 +645,7 @@ The depth runs from S₀ (`FlakeConstruction.depth.S`), the vertex of the bulb a
   built once a model. It says how far the bulb's numbers can be trusted; the list shows it receding.
 * **Settings**: `setBsaLevel` (clamped to `BSA_LEVEL_RANGE_MM`, `BSA_LEVEL_STEP_MM`) and `setBsaEnds` are `SetFlakeCommand`s; changes of the
   level less than `MERGE_WINDOW_MS` apart make one undo step. A flake without `bsa` uses `defaultBsaSettings()`.
-* **Measure list**: the flake's groups are technical axis, morphology, whole, proximal end; the proximal end lists platform width and depth,
+* **Measure list**: the flake's groups are technological axis, morphology, whole, proximal end; the proximal end lists platform width and depth,
   platform area, EPA, IPA, PSIA, the bulb angle (a table: three points, two lines), BSA with its level before it, VI (a table: 0.5, 1.0,
   1.5 mm) and the mesh's edge at P. Each cell's hint draws only the returned geometry: PSIA's lines and arc; the bulb angle's points, chord and
   arc; BSA's plane (a `patch` prim: a disc of radius R round P, as far as it was fitted), outline, ends, lines and arc; VI's strip, its top
@@ -780,7 +781,7 @@ stored coordinates never do, and each import is recorded in the project (`Projec
 * `App`: File ▸ Import scar vectors (IGES) (`importIgesFile`, a file of the same checksum asked about first) → `startAlign` (into
   the annotate mode and the `align` tool; another tool, mode or model leaves it, as Esc does; while it lasts the keys are its own
   but Space and L) → `confirmAlign`, which calls `importScars` (`core/actions.ts`): one `ImportScarsCommand` with the scars and
-  the record. `scarsToCheck` gives the arrows marked to check and not edited since (`modifiedAt === createdAt`), shown as
+  the record, and the record's `parameters` (all of `IGES_IMPORT`, as they were). `scarsToCheck` gives the arrows marked to check and not edited since (`modifiedAt === createdAt`), shown as
   `.check-dot` in the list; `scarSources` the `source` column of `scar_vectors.csv`.
 * **A folder** (`App.importFolderIges`): `Workspace.iges` lists the folder's IGES files and `igesFor` finds a model's (same folder,
   same name, any case). Each model is hashed and judged in the batch worker (`MeshJobs.iges`, job `iges`), passed by when its
@@ -814,8 +815,14 @@ stored coordinates never do, and each import is recorded in the project (`Projec
   one at a time and in a try/catch of its own (failures are listed, the rest goes on), the
   checksum finds its projects in the index. When all of them were written by this version and
   stored their measurements (and the vertices' axes for planes: `derived.vertices`), those are
-  used (`savedResultsUsable`); else the model is parsed and measured along each project's frame.
-  Both go through `batchSpecimen`, so they give the same tables. Hashing, parsing, joining
+  used (`savedResultsUsable`); else the model is parsed and measured once (length, width and
+  thickness do not depend on a frame), with the configuration's box along each project's frame.
+  Both go through `batchSpecimens`, so they give the same tables: one `BatchSpecimen` per project file
+  of the model (34d; the model's own first, `primary`, the others by annotator), and `batchOutputs` puts
+  `annotator` after `specimen_id` in every table (`withAnnotator`). The first of each model alone gives
+  the points of geometric morphometrics (`gmOutputs`, `App.gmOfFolder`, `landmarks.tps`) and the ICC's
+  observers (their manual measurements). `io/projectIndex.ts` reads the stored results through
+  `upgradeDerived` (`core/schema.ts`), which makes the codes of before 34d new. Hashing, parsing, joining
   vertices and measuring run in the batch worker (`io/batchWorker.ts`, imported with
   `?worker&inline` into the single file; `io/meshJobs.ts` is the shared work, `io/meshMeasurer.ts`
   the client); where no worker can be made or it does not answer, the same jobs run on the page in
@@ -842,19 +849,22 @@ stored coordinates never do, and each import is recorded in the project (`Projec
 * The sidebar groups the long table by object and observer pair. A click on a row of arrows,
   curves, landmarks or semilandmarks calls `App.focusAgreement`, which finds the pair (or point)
   with the largest value of that metric and draws it selected in both observers' layers.
-* `App.updateAgreement` gathers what needs the mesh — fitted planes, length / width / thickness
-  along each observer's frame, and the region type of every triangle (`partitionFor` with the
-  observer's curves, cached by curves and seeds) — and hands it to `compute/agreement.ts`:
-  `assign` (Hungarian method with a distance limit), `cohenKappa`, `fleissKappa`, `icc21`,
-  `curveDistance`, `compareObservers` (the long table) and `summarize`. It reruns, debounced,
-  after any change while the mode is shown.
-* A flake's own measures (`AGREEMENT_FLAKE_MEASURES`: those of flakes.csv but the retouch indices,
-  the BSA's level and moved ends and the mesh's edge at P) are measurement rows after length, width,
-  thickness, the region areas and the cortex ratio, in that order, named as the measure list names
-  them (`flake.<key>`). The open project's are its latest; another observer's are those its file
-  stored (`storedFlakeMeasures`), else `App.observerFlake` computes them from its own axis, ends,
-  regions, unit and BSA settings, in slices, and keeps them while those stay the same. icc.csv takes the
-  same keys from each file's `derived.flake.measures`.
+* Only what the observers annotated is compared (34d): arrows, scar attributes, relations, curves,
+  regions, landmarks, semilandmarks, the technological axis and manual measurements. What is computed
+  from them (fitted planes, the automatic measurements, a flake's measures, region areas) is not, in
+  the comparison or in `icc.csv`: the summary export has each project file's rows (`annotator`
+  column) for comparing those in R.
+* `App.updateAgreement` gathers what needs the mesh — the region type of every triangle
+  (`partitionFor` with the observer's curves, cached by curves and seeds) — and hands it to
+  `compute/agreement.ts`: `assign` (Hungarian method with a distance limit), `cohenKappa`,
+  `fleissKappa`, `icc21`, `curveDistance` (resampled to `AGREEMENT_CURVE_SAMPLES`, and to
+  `AGREEMENT_CURVE_MATCH_SAMPLES` for the pairing), `compareObservers` (the long table) and
+  `summarize`. It reruns, debounced, after any change while the mode is shown. `landmarksByName`
+  gives a specimen's fixed landmarks by the names they are exported with (a flake's platform ends by
+  side, `platformSides` on its own technological frame), for the pairing and for `focusAgreement`.
+  The technological axis rows (`pop_distance`, `angle_deg`) need no pairing. An export of the mode
+  writes `options.agreement` (`App.agreementParameters`: the distance limit and the resampling) into
+  the manifest.
 
 ## Cortex sphere
 
@@ -963,7 +973,9 @@ sections on the views (see "Figures"). The label ("X1", …) can be changed in t
 * **Orientation is metadata.** `specimen.frame` is a matrix from original to specimen
   coordinates; nothing transforms stored coordinates.
 * The project file format and its migrations live in `core/schema.ts`
-  (`docs/project-format.md`); format 1 files are converted when read.
+  (`docs/project-format.md`); format 1 files are converted when read. Codes renamed without a new
+  format (34d: "technical" → "technological") are mapped where they are parsed (`upgradeTechnical`;
+  `upgradeDerived` for the stored results the summary export reads).
 
 ## Data flow
 

@@ -49,7 +49,7 @@ export interface ToolContext {
   editable: () => boolean;
   /** The item under the select tool's cursor and where the cursor is (null: none); the app shows its name after a pause. */
   hovered: (item: { id: string; x: number; y: number } | null) => void;
-  /** An end of the technical axis was dragged to here. */
+  /** An end of the technological axis was dragged to here. */
   moveAxisEnd: (which: 'start' | 'end', point: Vec3, normal: Vec3) => void;
   edgeEnds: EdgeEnds;
 }

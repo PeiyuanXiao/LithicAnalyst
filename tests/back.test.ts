@@ -8,7 +8,7 @@ import { retouchSections, type RetouchPiece } from '../src/compute/retouchAngle'
 import { FACE_DORSAL, FACE_NONE, faceCodeOf, retouchIndices, segmentFrame } from '../src/compute/retouchIndex';
 import { defaultRetouchSettings } from '../src/core/types';
 import { runSync } from '../src/compute/steps';
-import { addCurveOfType, addRegion, setRegionType, setSpecimenType, setTechnicalAxis } from '../src/core/actions';
+import { addCurveOfType, addRegion, setRegionType, setSpecimenType, setTechnologicalAxis } from '../src/core/actions';
 import { CURVE_FIELDS, isBoundaryCurve, keyedOptions, keyIndex, numberKeyField, optionKey, REGION_FIELDS } from '../src/core/fields';
 import { frameMatrix } from '../src/core/frame';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
@@ -45,7 +45,7 @@ function t9(o: { ridges?: Vec3[][]; lower?: Array<{ type: string; seed: Vec3 }> 
   const s = new ProjectStore(emptyProject());
   setSpecimenType(s, 'flake');
   const P: Vec3 = [-2.5, 0, 0];
-  setTechnicalAxis(s, { start: P, end: [5, 30, 0], startNormal: [0, 0, -1], endNormal: [0, 0, -1], matrix: frameMatrix({ origin: P, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
+  setTechnologicalAxis(s, { start: P, end: [5, 30, 0], startNormal: [0, 0, -1], endNormal: [0, 0, -1], matrix: frameMatrix({ origin: P, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
   addCurveOfType(s, shape([A, B, C], true), 'platform_outline');
   addCurveOfType(s, shape([A, F, B], false), 'edge');
   for (const r of o.ridges ?? [[C, F]]) addCurveOfType(s, shape(r, false), 'back_ridge');
@@ -215,8 +215,8 @@ describe('the back ridge and the back (33)', () => {
     const a = t9(), b = t9({ ridges: [[C, F], [M1, M2]] });
     const area = new Float64Array(m.index.length / 3).fill(1);
     const rows = compareObservers([
-      { label: 'A', state: a.state, planes: [], faces: null, upper: labels(a.state), measures: {} },
-      { label: 'B', state: b.state, planes: [], faces: null, upper: labels(b.state), measures: {} },
+      { label: 'A', state: a.state, faces: null, upper: labels(a.state) },
+      { label: 'B', state: b.state, faces: null, upper: labels(b.state) },
     ], { gate: 1, faceArea: area });
     const iou = rows.find((x) => x.itemType === 'region' && x.itemKey === 'back' && x.metric === 'iou');
     expect(iou).toBeDefined();

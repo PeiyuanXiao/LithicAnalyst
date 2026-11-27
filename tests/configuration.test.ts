@@ -31,7 +31,7 @@ const FRONT: Vec3 = [0, 0, 1], BACK: Vec3 = [0, 0, -1], RIGHT: Vec3 = [1, 0, 0];
 
 const config = (scars: Scar[], b: ConfigBox, c: Partial<ConfigCorrections> = {}): ConfigurationResult => computeConfiguration(scars, { ...emptyCorrections(), ...c }, b)!;
 
-/** The seven traits (face names left out: they follow the orientation). */
+/** The six traits, and how many faces each surface has (face names left out: they follow the orientation). */
 const traits = (r: ConfigurationResult) => ({
   facial: r.facialCharacter,
   surfaces: r.surfaces.map((s) => s.faces.length),

@@ -1,4 +1,4 @@
-import { parseProjectFile, PROJECT_FORMAT } from '../core/schema';
+import { parseProjectFile, PROJECT_FORMAT, upgradeDerived } from '../core/schema';
 import type { ProjectState } from '../core/types';
 
 /** A project file of the folder, read once. */
@@ -56,7 +56,7 @@ export class ProjectIndex {
       path,
       sha256: typeof r.mesh?.sha256 === 'string' ? r.mesh.sha256 : null,
       state: parseProjectFile(r),
-      derived: r.derived && typeof r.derived === 'object' ? (r.derived as Record<string, unknown>) : {},
+      derived: r.derived && typeof r.derived === 'object' ? upgradeDerived(r.derived as Record<string, unknown>) : {},
       appVersion: typeof r.app?.version === 'string' ? r.app.version : '',
     };
     this.byPath.set(path, entry);

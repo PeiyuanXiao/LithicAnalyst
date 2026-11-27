@@ -2,14 +2,14 @@ import { frameAxes, type FrameAxes } from '../core/frame';
 import { mmPerUnit } from '../core/format';
 import type { Vec3 } from '../core/types';
 import { convexHullSteps } from './convexHull';
-import { BSA_LEVEL_DEFAULT_MM, BSA_LEVEL_RANGE_MM, BSA_MIN_PROMINENCE, BSA_NEAR_POP_MM, BSA_OPEN_REACH_MM, BSA_REF_ITERATIONS, BSA_REF_RADIUS_MM, BSA_REF_TRIM_UP, BULB_ANGLE_DISTANCE_MM, bulbSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, POP_MESH_WARN_MM, proximalPlaneSteps, VI_SAMPLE_MM, VI_WIDTHS_MM, type BulbPlane, type ViStrip } from './bulb';
+import { BSA_LEVEL_DEFAULT_MM, BSA_LEVEL_RANGE_MM, BSA_MIN_PROMINENCE, BSA_NEAR_POP_MM, BSA_OPEN_REACH_MM, BSA_REF_ITERATIONS, BSA_REF_RADIUS_MM, BSA_REF_TRIM, BSA_REF_TRIM_UP, BULB_ANGLE_DISTANCE_MM, bulbSteps, meshEdgeNearSteps, POP_MESH_RADIUS_MM, POP_MESH_WARN_MM, proximalPlaneSteps, VI_SAMPLE_MM, VI_WIDTHS_MM, type BulbPlane, type ViStrip } from './bulb';
 import { IPA_BAND_END, IPA_BAND_FALLBACK_START, IPA_MIN_BAND_SHARE, IPA_TRIM_SIGMA, ipaSteps, type IpaBand } from './ipa';
 import { arcLengths, pointAtArc } from './landmarks';
 import { symmetricEigen3 } from './linalg';
 import { inFrame, lineNear, sectionByPlane, type PlaneCandidates, type SectionLine } from './meshSection';
 import { closestOnTriangle, regionPathSteps } from './regionPath';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
-import { STRIP_HALF_WIDTH_RATIO, STRIP_NORMAL_OUTLIER_DEG } from './technicalFrame';
+import { MIN_AXIS_EDGES, MIN_STRIP_TRIANGLES, STRIP_HALF_WIDTH_RATIO, STRIP_NORMAL_OUTLIER_DEG } from './technologicalFrame';
 
 /** Points each stretch is resampled to before a line is fitted. */
 export const FIT_RESAMPLE_COUNT = 200;
@@ -30,6 +30,8 @@ export const PLATFORM_REACH_EDGES = 5;
 export const FLAKE_PARAMETERS = {
   STRIP_HALF_WIDTH_RATIO,
   STRIP_NORMAL_OUTLIER_DEG,
+  MIN_AXIS_EDGES,
+  MIN_STRIP_TRIANGLES,
   FIT_RESAMPLE_COUNT,
   EPA_DISTANCES_MM: [...EPA_DISTANCES_MM],
   TWO_LINES_LENGTH_MM,
@@ -47,6 +49,7 @@ export const FLAKE_PARAMETERS = {
   BSA_REF_RADIUS_MM,
   BSA_REF_ITERATIONS,
   BSA_REF_TRIM_UP,
+  BSA_REF_TRIM,
   BSA_MIN_PROMINENCE,
   BSA_OPEN_REACH_MM,
   VI_WIDTHS_MM: [...VI_WIDTHS_MM],
@@ -85,8 +88,6 @@ export type FlakeMeasure = (typeof ALL_FLAKE_MEASURES)[number];
 export type FlakeMeasures = Record<FlakeMeasure, number | null>;
 /** The columns flakes.csv ends with, after the retouch indices (or after the measurements without them). */
 export const FLAKE_PROXIMAL_COLUMNS = ['psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'bsa', 'bsa_level_mm', 'bsa_ends_moved', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm', 'pop_mesh_edge'] as const;
-/** The measures of a flake compared between observers (agreement, ICC): all but the settings and the mesh's resolution. */
-export const AGREEMENT_FLAKE_MEASURES: readonly FlakeMeasure[] = [...FLAKE_MEASURES, 'psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm'];
 /** The vertical intervals, by `VI_WIDTHS_MM`. */
 export const VI_MEASURES = ['vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm'] as const;
 
@@ -331,7 +332,7 @@ export function* morphDimensionsSteps(positions: ArrayLike<number>): Steps<Morph
 
 export const morphDimensions = (positions: ArrayLike<number>): MorphDimensions | null => runSync(morphDimensionsSteps(positions));
 
-/** How the technical dimensions were taken: for drawing, in the coordinates of the positions. A point of the box is `origin` + X·axes[0] + Y·axes[1] + Z·axes[2]. */
+/** How the technological dimensions were taken: for drawing, in the coordinates of the positions. A point of the box is `origin` + X·axes[0] + Y·axes[1] + Z·axes[2]. */
 export interface TechConstruction {
   origin: Vec3;
   axes: [Vec3, Vec3, Vec3];
@@ -350,7 +351,7 @@ export interface TechDimensions {
 }
 
 /**
- * Length, width and thickness in the technical frame: the vertices' largest Y (P is at
+ * Length, width and thickness in the technological frame: the vertices' largest Y (P is at
  * 0), and the ranges of X and Z. `frame`: its origin in the coordinates of `positions`.
  */
 export function* techDimensionsSteps(positions: ArrayLike<number>, frame: FrameAxes): Steps<TechDimensions> {
@@ -391,7 +392,7 @@ export function* techDimensionsSteps(positions: ArrayLike<number>, frame: FrameA
   };
 }
 
-/** The morphological length's direction, projected onto the technical frame's XY plane: its angle with the Y axis, 0–90°. */
+/** The morphological length's direction, projected onto the technological frame's XY plane: its angle with the Y axis, 0–90°. */
 export function morphTechAngle(lengthDir: Vec3, frame: FrameAxes): number | null {
   const x = dot(lengthDir, frame.x), y = dot(lengthDir, frame.y);
   if (!(Math.hypot(x, y) > 1e-12)) return null;
@@ -557,7 +558,7 @@ export function platformProfile(line: SectionLine, P: Vec3, inPlatform: (face: n
   return { stretch, E, lineDir, line: segment, epa3, epa2, q, chords, ventralWalk, bulbAt, bulbQ, bulbChord, bulb3, bulb2 };
 }
 
-/** Where a walk along the section first reaches the technical Y `y` (null: it never does). */
+/** Where a walk along the section first reaches the technological Y `y` (null: it never does). */
 function reachingY(walk: Vec3[], frame: FrameAxes, y: number): Vec3 | null {
   for (let i = 0; i + 1 < walk.length; i++) {
     const a = inFrame(frame, walk[i])[1], b = inFrame(frame, walk[i + 1])[1];
@@ -576,7 +577,7 @@ export interface FlakeInput {
   positions: ArrayLike<number>;
   index: ArrayLike<number>;
   offset?: Vec3;
-  /** Row-major matrix of the technical frame (null: no technical axis, or no frame could be made). */
+  /** Row-major matrix of the technological frame (null: no technological axis, or no frame could be made). */
   matrix: readonly number[] | null;
   /** The point of percussion. */
   P: Vec3 | null;
@@ -662,7 +663,7 @@ export interface FlakeConstruction {
   psia: { P: Vec3; ends: [Vec3, Vec3] } | null;
   /** The mesh's edges round P that its mean edge length there was taken over (ends by twos). */
   popEdges: { P: Vec3; segments: Vec3[] } | null;
-  /** The ventral reference plane (from the ventral face and the frame, with or without a unit), and the bulb when it was measured. */
+  /** The ventral reference plane (from the ventral face and the frame; only with a stated unit), and the bulb when it was measured. */
   plane: BulbPlane | null;
   bulb: BulbConstruction | null;
   ipa: IpaConstruction | null;
@@ -787,7 +788,8 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   // the proximal ventral plane (robust, within R of P, retouch and damage left out), and the bulb on it
   const ventral = input.ventralFaces?.length ? input.ventralFaces : null;
   const leftOut = input.leftOutFaces ?? null;
-  const radius = Math.min(mm !== null ? BSA_REF_RADIUS_MM / mm : Infinity, 0.5 * tech.tech_length);
+  // (it serves the BSA, the VI and where IPA's band starts, all in mm: without a unit there is none)
+  const radius = mm !== null ? Math.min(BSA_REF_RADIUS_MM / mm, 0.5 * tech.tech_length) : 0;
   const near = ventral && radius > 0 ? yield* proximalPlaneSteps(positions, index, ventral, leftOut, localP, radius, [-frame.z[0], -frame.z[1], -frame.z[2]], frame.y) : null;
   const plane = near?.plane ?? null;
   const planeOriginal = (p: BulbPlane): BulbPlane => ({ ...p, point: toOriginal(p.point) });
@@ -797,8 +799,8 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   }
   /** The main bulb's vertices, when it is a bulb (IPA's band starts at its far end). */
   let bulbRegion: Uint32Array | null = null;
-  if (!plane) why('no_ventral', BSA_MEASURES);
-  else if (mm === null) why('no_unit', BSA_MEASURES);
+  if (mm === null) why('no_unit', BSA_MEASURES);
+  else if (!plane) why('no_ventral', BSA_MEASURES);
   else {
     const settings = input.bsa ?? { level: BSA_LEVEL_DEFAULT_MM, ends: null };
     const r = yield* bulbSteps({ positions, index, faces: ventral!, plane, P: localP, mm, level: settings.level, ends: settings.ends ? [toLocal(settings.ends[0]), toLocal(settings.ends[1])] : null, noise: near!.noise });
@@ -880,8 +882,10 @@ export function* flakeMeasuresSteps(input: FlakeInput): Steps<FlakeResult> {
   geometry.E = toOriginal(profile.E);
   geometry.platformLine = pair(profile.line);
   geometry.epaPoints = profile.q.map((x) => (x ? toOriginal(x) : null));
-  // IPA: the platform line against the plane of a band of the ventral face, from the bulb's far end on
-  if (!ventral) why('no_ventral', ['ipa']);
+  // IPA: the platform line against the plane of a band of the ventral face, from the bulb's far end on (where the bulb is sought, so
+  // only with a stated unit)
+  if (mm === null) why('no_unit', ['ipa']);
+  else if (!ventral) why('no_ventral', ['ipa']);
   else if (!profile.lineDir) why('section_misses_platform', ['ipa']);
   else {
     const r = yield* ipaSteps({ positions, index, ventral, leftOut: input.leftOutFaces ?? null, bulb: bulbRegion, frame, techLength: tech.tech_length, lineDir: profile.lineDir });

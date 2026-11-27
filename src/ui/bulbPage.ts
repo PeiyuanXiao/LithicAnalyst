@@ -49,7 +49,7 @@ export interface BulbEndDrop {
 const css = (c: [number, number, number]) => `rgb(${c.map((x) => Math.round(x * 255)).join(',')})`;
 
 /**
- * The bulb seen square on the ventral reference plane (P at the origin, the technical axis up): lines of equal height coloured by
+ * The bulb seen square on the ventral reference plane (P at the origin, the technological axis up): lines of equal height coloured by
  * height, the level's line thicker, P, the two ends and the lines to them with the angle, the bulb's top, the three strips of the
  * vertical interval, a scale bar. The ends can be dragged: onto the outline, or with Shift anywhere.
  */

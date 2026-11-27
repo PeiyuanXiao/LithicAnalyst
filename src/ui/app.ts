@@ -14,7 +14,7 @@ import { bandPiecesSteps, mergePieces, retouchSideSteps, type RetouchSide } from
 import { computePlane, regionPlaneSteps, type PlaneResult } from '../compute/planes';
 import { runSliced, runSync } from '../compute/steps';
 import { SNAP_MODES, type SnapMode } from '../compute/surfacePath';
-import { importScars, addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnicalAxis, setBsaEnds, setBsaLevel, TECHNICAL_FRAME, useBiconeCurve, deleteSymmetry, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
+import { importScars, addWorkingEdge, deleteWorkingEdge, generateWorkingEdges, otherWorkingEdgeStretch, updateWorkingEdge, addLandmark, completeCurveLoop, withPlatformEnds, withRetouchCurvesKept, deleteTechnologicalAxis, setGmConfig, setRegionRetouchLayer, setRetouchAxis, setRetouchFitLength, setRetouchFlip, setSharpEdge, placePlatformEnd, setSpecimenType, setTechnologicalAxis, setBsaEnds, setBsaLevel, TECHNOLOGICAL_FRAME, useBiconeCurve, deleteSymmetry, deleteLandmark, deleteSemilandmarkSet, addPlane, addRegion, addSequence, deleteCurve, deleteMeasurement, deletePlane, deleteRegion, deleteRelation, deleteScar, deleteSection, deleteSequence, relationBetween, setCurveAttribute, setRegionType, setRelation, setScarAttribute, setScarSequence, updateSpecimen } from '../core/actions';
 import type { AutoMeasurements, GmDerived, MeshResults } from '../core/derived';
 import { frameAxes, frameFromView, frameWithVertical, rotateFrame } from '../core/frame';
 import { measurementUnit, measurementValue } from '../core/measurements';
@@ -22,12 +22,12 @@ import { annotationStatus, type StatusKey } from '../core/annotationStatus';
 import { backRidges, keyIndex, CURVE_FIELDS, GENERIC_REGION_TYPE, isBoundaryCurve, isCustomValue, isUpperRegion, keyedOptions, layerCurves, measuresEdgeAngle, numberKeyField, PLATFORM_OUTLINE, REGION_FIELDS, RETOUCH_LAYERS, SCAR_FIELDS, shiftNumberKeyField, SPECIMEN_TYPES, type ConfigFace, type FieldDef, type SpecimenType } from '../core/fields';
 import { parseGmConfig, parseProjectFile, parseSharpEdge, serializeProject, type ProjectFile } from '../core/schema';
 import { emptyProject, ProjectStore, type Change } from '../core/store';
-import { hasVector, retouchSettingsOf, scarsToCheck, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Scar, type Section, type GmConfig, type MeshInfo, type SharpEdgeRule, type TechnicalAxis, type Vec3 } from '../core/types';
+import { hasVector, retouchSettingsOf, scarsToCheck, type RetouchAxisChoice, type Curve, type Measurement, type ProjectState, type RegionType, type Scar, type Section, type GmConfig, type MeshInfo, type SharpEdgeRule, type TechnologicalAxis, type Vec3 } from '../core/types';
 import { autosaveAvailable, readAutosave, readPref, writeAutosave, writePref } from '../io/autosave';
 import { configurationCsv, curveCsv, edgeAnglesCsv, edgeSharpCsv, invasivenessCsv, retouchAnglesCsv, retouchSectionsCsv, retouchSegmentsCsv, flakesCsv, flakingSurfacesCsv, manualMeasurementsCsv, measurementsCsv, planesCsv, regionsCsv, relationsCsv, scarVectorCsv, seriesCsv, symmetryCsv, workingEdgesCsv } from '../io/csv';
 import { buildLoadedMesh, extensionOf, MeshLoadError, readMeshFile, type LoadedMesh } from '../io/loadMesh';
 import { APP_DIR, GM_CONFIG_FILE, SHARP_EDGE_FILE, folderPicker, igesFor, freshFolder, legacyProjectPathFor, projectPathFor, specimenIds, timeStamp, workspaceFromFiles, workspaceFromHandle, type DirectoryHandle, type Workspace } from '../io/workspace';
-import { batchOutputs, gmOutputs, batchSpecimen, storedMeshResults, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
+import { batchOutputs, gmOutputs, batchSpecimens, isPrimary, storedMeshResults, failuresCsv, manifestJson, savedMeasures, savedResultsUsable, type BatchFailure, type BatchProject, type BatchSpecimen, type Manifest, type ModelMeasures } from '../io/batch';
 import { ProjectIndex, type IndexedProject } from '../io/projectIndex';
 import { createMeasurer, type MeshMeasurer } from '../io/meshMeasurer';
 import type { IgesCheck } from '../io/meshJobs';
@@ -55,7 +55,7 @@ import { SequenceTool } from '../tools/sequenceTool';
 import { chainEdges, scarBordersSteps, type ScarBorder } from '../compute/adjacency';
 import { BorderLayer } from '../render/borderLayer';
 import { arcLengths, landmarkName, landmarkTable, nearestArc, platformSides, pointAtArc, shownLandmarks, type LandmarkTable } from '../compute/landmarks';
-import { AGREEMENT_FLAKE_MEASURES, FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, storedFlakeMeasures, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphConstruction, type MorphDimensions } from '../compute/flake';
+import { FLAKE_PARAMETERS, flakeMeasuresSteps, morphDimensionsSteps, type FlakeMeasure, type FlakeMeasures, type FlakeResult, type MorphConstruction, type MorphDimensions } from '../compute/flake';
 import { EDGE_ANGLE_DISTANCES_MM, EDGE_ANGLE_METHODS, EDGE_ANGLE_PARAMETERS, edgeAngleMeans, edgeAnglesSteps, valuesAlongCurve, type EdgeAngleMeans, type EdgeAngleMethod, type EdgeAngleResult } from '../compute/edgeAngle';
 import { gmAnchorRows, gmLandPairs, gmMissingInputs, gmSteps, type GmMissing, type GmResult } from '../compute/gm';
 import { anchorsHashOf, gmCacheKey, gmConfigSummary, gmInUse, gmManifest, gmStanding, GM_TEMPLATE_PARAMETERS, layPatchSteps, regionsHashOf, sameGmConfig, usesTemplate } from '../compute/gmTemplate';
@@ -75,7 +75,7 @@ import { faceCodeOf, faceOfTrianglesSteps, onPlan, removedVolumeCurveSteps, RETO
 import { ruleValues, SHARP_EDGE_PARAMETERS, sharpOfCurve, suggestThreshold, type SharpResult } from '../compute/sharpEdge';
 import { EDGE_ANGLE_FLAT_DEG, EDGE_ANGLE_RAMP, EdgeAngleLayer, rampPaint, SHARP_COLORS, sharpPaint } from '../render/edgeAngleLayer';
 import { crossSectionAt, type CrossSection, type SectionLine } from '../compute/meshSection';
-import { technicalFrameSteps } from '../compute/technicalFrame';
+import { technologicalFrameSteps } from '../compute/technologicalFrame';
 import { frameSource } from '../core/derived';
 import { bvhPlaneCandidates, bvhRayCandidates, bvhSurface } from '../render/bvhPlane';
 import { headerFactor, judgeUnits, placeArrows, placementMatrix, placementOf, startPlacement, type Placement, type SurfaceQuery } from '../compute/igesAlign';
@@ -91,7 +91,7 @@ import { GmLayer } from '../render/gmLayer';
 import { LANDMARK_COLORS, LandmarkLayer } from '../render/landmarkLayer';
 import { declutterLabels } from '../render/labelLayout';
 import { LandmarkTool } from '../tools/landmarkTool';
-import { compareObservers, FACE_TYPES, summarize, type AgreementRow, type FaceLabels, type ObserverData, type SummaryRow } from '../compute/agreement';
+import { AGREEMENT_CURVE_MATCH_SAMPLES, AGREEMENT_CURVE_SAMPLES, compareObservers, FACE_TYPES, landmarksByName, summarize, type AgreementRow, type FaceLabels, type ObserverData, type SummaryRow } from '../compute/agreement';
 import { uuid } from '../core/ids';
 import { agreementCsv, agreementSummaryCsv } from '../io/csv';
 import type { HitProvider } from '../tools/tool';
@@ -212,10 +212,6 @@ interface Observer {
   /** Region of each triangle, and what it was computed from. */
   faces: { key: string; labels: FaceLabels | null; upper: FaceLabels | null } | null;
   table: LandmarkTable | null;
-  /** A flake's measures as its file stored them (the file is this model's), or null. */
-  stored?: Partial<FlakeMeasures> | null;
-  /** The same computed from its own annotations, and what from (when the file has none). */
-  flake?: { key: string; measures: FlakeMeasures } | null;
 }
 
 /** Arrow settings as saved, without the thickness earlier versions kept. */
@@ -572,7 +568,7 @@ export class App implements AppApi {
   private bulbToken = 0;
   /** The ventral face's triangles as last measured (the bulb page's lines and an end let go off the outline). */
   private ventralFaces: Uint32Array | null = null;
-  /** The profile panel's section across, as a share of the technical length (a view state, never in the file). */
+  /** The profile panel's section across, as a share of the technological length (a view state, never in the file). */
   private profileAt = 0.5;
   private profileCross: CrossSection | null = null;
   private profileFrame = 0;
@@ -1177,12 +1173,12 @@ export class App implements AppApi {
     softSet(r.id, st.specimen.id);
     if (r.unit.value !== st.specimen.unit) r.unit.value = st.specimen.unit;
     r.type.value = st.specimen.type;
-    // a flake's orientation: the technical axis, the principal axes before there is one, or why there is no frame
+    // a flake's orientation: the technological axis, the principal axes before there is one, or why there is no frame
     const flake = st.specimen.type === 'flake';
     r.framePill.hidden = !flake;
     if (flake) {
       const failed = st.flake.axis?.failure;
-      r.framePill.textContent = failed ? t('axis.noFrame') : st.specimen.frame?.source.startsWith(TECHNICAL_FRAME) ? t('frame.src.technical') : st.specimen.frame ? t('frame.src.other') : t('config.principal');
+      r.framePill.textContent = failed ? t('axis.noFrame') : st.specimen.frame?.source.startsWith(TECHNOLOGICAL_FRAME) ? t('frame.src.technological') : st.specimen.frame ? t('frame.src.other') : t('config.principal');
       r.framePill.classList.toggle('pill-warn', !!failed);
     }
     softSet(r.annotator, st.specimen.annotator);
@@ -1591,7 +1587,7 @@ export class App implements AppApi {
     this.updateMeshDependentUi();
     this.updateCursor();
     this.queueCoords();
-    // the view's own labels (the technical axis, a flake's landmarks, a measure's drawing) in the new language too
+    // the view's own labels (the technological axis, a flake's landmarks, a measure's drawing) in the new language too
     if (this.hasMesh()) {
       this.syncAnnotations();
       this.refreshHint();
@@ -1716,7 +1712,7 @@ export class App implements AppApi {
       if (this.isGeneric() && this.selection.id && (this.store.relation(this.selection.id) || this.store.sequence(this.selection.id))) this.selection.set(null);
       this.paintRegions();
     }
-    // technical axis, platform outline, platform region or ends: measured again
+    // technological axis, platform outline, platform region or ends: measured again
     // (of the specimen's details, its type and unit count)
     const specimenKey = `${this.store.state.specimen.type}|${this.store.state.specimen.unit}`;
     const specimenCounts = c.kind === 'specimen' && specimenKey !== this.specimenKey;
@@ -2506,8 +2502,8 @@ export class App implements AppApi {
   turnFrame(deg: number, base?: number[]): void {
     const f = this.store.state.specimen.frame;
     if (!f) return;
-    // fine turning (from a fixed start) is one undo step; a turned technical frame says so
-    const source = f.source === TECHNICAL_FRAME ? `${TECHNICAL_FRAME}; turned` : f.source;
+    // fine turning (from a fixed start) is one undo step; a turned technological frame says so
+    const source = f.source === TECHNOLOGICAL_FRAME ? `${TECHNOLOGICAL_FRAME}; turned` : f.source;
     this.setFrame(rotateFrame(base ?? f.matrix, deg), source, !!base);
   }
 
@@ -3154,7 +3150,7 @@ export class App implements AppApi {
     return this.meshWarn;
   }
 
-  /** Look at the flake as the technical frame says, the whole of it: the dorsal face toward the viewer, the platform down. Only the camera moves. */
+  /** Look at the flake as the technological frame says, the whole of it: the dorsal face toward the viewer, the platform down. Only the camera moves. */
   private orientToAxis(): void {
     const m = this.isFlake() ? this.store.state.flake.axis?.matrix : null;
     if (!m || !this.viewer) return;
@@ -3162,7 +3158,7 @@ export class App implements AppApi {
     this.viewer.viewFrom(a.z, a.y, undefined, undefined, true);
   }
 
-  /** The technical axis drawn: its frame found on the mesh (in slices), then one undo step with the arrow. */
+  /** The technological axis drawn: its frame found on the mesh (in slices), then one undo step with the arrow. */
   private drawAxis(s: { p: Vec3; n: Vec3 }, e: { p: Vec3; n: Vec3 }): void {
     void this.applyAxis({ start: s.p, startNormal: s.n, end: e.p, endNormal: e.n });
   }
@@ -3173,14 +3169,14 @@ export class App implements AppApi {
     void this.applyAxis(which === 'start' ? { start: point, startNormal: normal, end: a.end, endNormal: a.endNormal } : { start: a.start, startNormal: a.startNormal, end: point, endNormal: normal });
   }
 
-  private async applyAxis(v: Pick<TechnicalAxis, 'start' | 'end' | 'startNormal' | 'endNormal'>): Promise<void> {
+  private async applyAxis(v: Pick<TechnologicalAxis, 'start' | 'end' | 'startNormal' | 'endNormal'>): Promise<void> {
     const base = this.measureBase, loaded = this.loaded;
     if (!base || !loaded) return;
     const g = loaded.geometry;
-    const fr = await runSliced(technicalFrameSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, orientationSign: loaded.orientationSign, meanEdge: base.meanEdge }, v.start, v.end));
+    const fr = await runSliced(technologicalFrameSteps({ positions: g.getAttribute('position').array as Float32Array, index: g.index!.array as Uint32Array, offset: loaded.offset, orientationSign: loaded.orientationSign, meanEdge: base.meanEdge }, v.start, v.end));
     if (this.loaded !== loaded || !this.isFlake()) return;
     const first = !this.store.state.flake.axis?.matrix;
-    const axis = setTechnicalAxis(this.store, { ...v, matrix: fr.ok ? fr.matrix : null, failure: fr.ok ? null : fr.reason });
+    const axis = setTechnologicalAxis(this.store, { ...v, matrix: fr.ok ? fr.matrix : null, failure: fr.ok ? null : fr.reason });
     this.selection.set(axis.id);
     // the first frame opens the profile panel
     if (first && axis.matrix && !this.display.profile) this.setDisplay((d) => (d.profile = true), 'profile');
@@ -4489,7 +4485,7 @@ export class App implements AppApi {
 
   // ------------------------------------------------------------ profile panel
 
-  /** The technical frame in the mesh's own coordinates (they are re-centred). */
+  /** The technological frame in the mesh's own coordinates (they are re-centred). */
   private localFrame(): { frame: ReturnType<typeof frameAxes>; offset: Vec3 } | null {
     const m = this.isFlake() ? this.store.state.flake.axis?.matrix : null;
     const o = this.loaded?.offset;
@@ -5359,9 +5355,9 @@ export class App implements AppApi {
         if (batch.cancelled) break;
         // each model on its own: one that cannot be read or measured is listed and left out
         try {
-          const { specimen, entry } = await this.folderSpecimen(i, path, index, measurer);
-          specimens.push(specimen);
-          listed.push(entry);
+          const { specimens: rows, entries } = await this.folderSpecimen(i, path, index, measurer);
+          specimens.push(...rows);
+          listed.push(...entries);
         } catch (e) {
           failures.push({ file: path, reason: e instanceof Error ? e.message : String(e) });
           measurer.drop(i);
@@ -5376,14 +5372,14 @@ export class App implements AppApi {
       const sharp = this.folderSharp;
       const judged = sharp ? specimens.map((s) => ({ ...s, state: { ...s.state, sharpEdge: sharp } })) : specimens;
       for (const f of batchOutputs(judged, { excelBom: bom })) await sink.put(f.suffix, f.text);
-      // the same points on every flake
-      await this.gmOfFolder(judged, this.folderGm ?? this.store.state.gm, measurer);
+      // the same points on every flake (each model's first project file)
+      await this.gmOfFolder(judged.filter(isPrimary), this.folderGm ?? this.store.state.gm, measurer);
       const gm = gmOutputs(judged, { excelBom: bom });
       for (const f of gm.files) await sink.put(f.suffix, f.text);
       if (failures.length) await sink.put('failures.csv', failuresCsv(failures, bom));
       const config = this.folderGm ?? this.store.state.gm;
       const where = await sink.finish({ ...this.manifestBase('folder', 'tables', { excelBom: bom, worker: measurer.inWorker }), specimens: listed, failures, gmSkipped: gm.skipped, gmIncomplete: gm.incomplete, gm: gmManifest(config, judged.some((s) => s.gm?.method === 'template')) });
-      this.batchToast(specimens.length, failures, where);
+      this.batchToast(specimens.filter(isPrimary).length, failures, where);
     } catch (e) {
       this.feedback.toast((e as Error).message, 'error');
     } finally {
@@ -5393,11 +5389,11 @@ export class App implements AppApi {
   }
 
   /**
-   * One model of a summary export: its checksum finds its projects (the index); their stored
-   * results are used when they can stand for the model, else the model is read and measured (in
-   * the worker). The open model uses what is on screen.
+   * One model of a summary export: its checksum finds its projects (the index), one set of rows each (its own project first); their
+   * stored results are used when they can stand for the model, else the model is read and measured (in the worker). The open model
+   * uses what is on screen.
    */
-  private async folderSpecimen(i: number, path: string, index: ProjectIndex, measurer: MeshMeasurer): Promise<{ specimen: BatchSpecimen; entry: Manifest['specimens'][number] }> {
+  private async folderSpecimen(i: number, path: string, index: ProjectIndex, measurer: MeshMeasurer): Promise<{ specimens: BatchSpecimen[]; entries: Manifest['specimens'] }> {
     const ws = this.workspace!;
     const sha = await measurer.hash(i, await ws.read(path));
     const own = projectPathFor(path), old = legacyProjectPathFor(path);
@@ -5439,8 +5435,10 @@ export class App implements AppApi {
       }
     }
     const rows = projects.map((p, k) => ({ project: p, measures: measure(p, k) }));
-    const specimen = batchSpecimen(path, { project: primary, measures: measure(primary, -1) }, rows);
-    return { specimen, entry: { id: primary.state.specimen.id, file: path, sha256: sha, project: primary.path, annotator: primary.state.specimen.annotator } };
+    const specimens = batchSpecimens(path, { project: primary, measures: measure(primary, -1) }, rows);
+    // one entry per project file, as the rows
+    const of = new Map(rows.map((r) => [r.project.state, r.project.path]));
+    return { specimens, entries: specimens.map((x) => ({ id: x.state.specimen.id, file: path, sha256: sha, project: x.state === primary.state ? primary.path : (of.get(x.state) ?? null), annotator: x.state.specimen.annotator })) };
   }
 
   /** Wait until what a figure shows is computed (measurements, regions, sections). */
@@ -5702,7 +5700,7 @@ export class App implements AppApi {
           for (const f of chosen) await sink.put(f.name, f.text());
           const st = this.store.state;
           const where = await sink.finish({
-            ...this.manifestBase('specimen', 'tables', { excelBom: bom.checked, files: chosen.map((f) => f.key) }),
+            ...this.manifestBase('specimen', 'tables', { excelBom: bom.checked, files: chosen.map((f) => f.key), ...(this.mode === 'compare' ? { agreement: this.agreementParameters() } : {}) }),
             specimens: [{ id: st.specimen.id, file: this.currentFile(), sha256: st.mesh?.sha256 ?? null, project: ws.has(projectPathFor(this.currentFile())) ? projectPathFor(this.currentFile()) : null, annotator: st.specimen.annotator }],
             failures: [],
           });
@@ -5764,7 +5762,7 @@ export class App implements AppApi {
       const st = structuredClone(p.state);
       const used = new Set(this.observers.map((o) => o.color));
       const color = OBSERVER_COLORS.find((c) => !used.has(c)) ?? OBSERVER_COLORS[this.observers.length % OBSERVER_COLORS.length];
-      this.observers.push({ id: uuid(), label: st.specimen.annotator || p.path, fileName: p.path, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st), stored: storedFlakeMeasures(p.derived) });
+      this.observers.push({ id: uuid(), label: st.specimen.annotator || p.path, fileName: p.path, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st) });
       added++;
     }
     if (!added) this.feedback.toast(t('compare.noneInFolder'), 'info', 2500);
@@ -5776,11 +5774,8 @@ export class App implements AppApi {
     if (!sha) return;
     for (const f of files) {
       let st: ProjectState;
-      let stored: Partial<FlakeMeasures> | null = null;
       try {
-        const raw = JSON.parse(await f.text());
-        st = parseProjectFile(raw);
-        stored = storedFlakeMeasures((raw as { derived?: unknown })?.derived);
+        st = parseProjectFile(JSON.parse(await f.text()));
       } catch (err) {
         this.feedback.toast(`${f.name}: ${err instanceof Error ? err.message : String(err)}`, 'error');
         continue;
@@ -5792,7 +5787,7 @@ export class App implements AppApi {
       const used = new Set(this.observers.map((o) => o.color));
       const color = OBSERVER_COLORS.find((c) => !used.has(c)) ?? OBSERVER_COLORS[this.observers.length % OBSERVER_COLORS.length];
       const label = st.specimen.annotator || f.name.replace(/\.json$/i, '').replace(/\.lithicanalyst$/i, '');
-      this.observers.push({ id: uuid(), label, fileName: f.name, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st), stored });
+      this.observers.push({ id: uuid(), label, fileName: f.name, state: st, included: true, color, layers: null, faces: null, table: landmarkTable(st) });
     }
     this.observersChanged();
   }
@@ -5828,6 +5823,11 @@ export class App implements AppApi {
     this.agreementStale = true;
     this.scheduleAgreement();
     this.sidebar.refresh('compare');
+  }
+
+  /** What the comparison was made with, for the manifest: the distance limit of the pairing (coordinate units) and the curves' resampling. */
+  private agreementParameters(): { distanceLimit: number; curveSamples: number; curveMatchSamples: number } {
+    return { distanceLimit: this.compareGate(), curveSamples: AGREEMENT_CURVE_SAMPLES, curveMatchSamples: AGREEMENT_CURVE_MATCH_SAMPLES };
   }
 
   compareGate(): number {
@@ -5886,7 +5886,7 @@ export class App implements AppApi {
             : itemType === 'curve'
               ? st.curves.find((x) => x.label === k)?.id
               : itemType === 'landmark'
-                ? st.landmarks.find((x) => x.name === k)?.id
+                ? landmarksByName(st).get(k)?.id
                 : semilandmarkPoint(st, k);
         if (id) items.set(o.id, id);
       }
@@ -5950,57 +5950,6 @@ export class App implements AppApi {
   }
 
   /** Region of each triangle by an observer's curves and region seeds, in the two layers (cached until they change). */
-  /**
-   * An observer's flake measures: those its file stored when it has them all, else computed from its own annotations (its axis, platform
-   * ends, platform and ventral faces as its regions cut them, its unit and BSA settings), in slices, kept while they stay the same.
-   */
-  private async observerFlake(o: Observer, st: Readonly<ProjectState>, layers: { labels: FaceLabels | null; upper: FaceLabels | null } | null): Promise<Partial<FlakeMeasures> | null> {
-    if (o.stored && AGREEMENT_FLAKE_MEASURES.every((k) => k in o.stored!)) return o.stored;
-    const base = this.measureBase, loaded = this.loaded;
-    if (!base || !loaded) return null;
-    const upper = layers?.upper ?? null, lower = layers?.labels ?? null;
-    /** The triangles of these types in one of its layers. */
-    const of = (labels: FaceLabels | null, ...types: string[]): Uint32Array | null => {
-      if (!labels) return null;
-      const want = new Set(types.map((x) => this.faceTypes.indexOf(x)));
-      const out: number[] = [];
-      for (let f = 0; f < labels.type.length; f++) if (want.has(labels.type[f])) out.push(f);
-      return out.length ? Uint32Array.from(out) : null;
-    };
-    const platform = of(upper, 'platform'), ventral = of(upper, 'ventral'), leftOut = of(lower, 'retouch', 'damage');
-    const ends = st.landmarks.filter((l) => l.code === 'platform_end').map((l) => l.point);
-    const bsa = bsaSettingsOf(st.flake);
-    const key = JSON.stringify([st.flake.axis?.matrix, st.flake.axis?.start, ends, st.specimen.unit, bsa, platform?.length, ventral?.length, leftOut?.length, upper ? Array.from(upper.type.subarray(0, 64)) : null]);
-    if (o.flake?.key === key) return o.flake.measures;
-    const morph = await this.morphOf(loaded);
-    const areas = this.triangleAreas();
-    let platformArea = 0;
-    if (platform && areas) for (const f of platform) platformArea += areas[f];
-    const g = loaded.geometry;
-    const r = await runSliced(
-      flakeMeasuresSteps({
-        positions: g.getAttribute('position').array as Float32Array,
-        index: g.index!.array as Uint32Array,
-        offset: loaded.offset,
-        matrix: st.flake.axis?.matrix ?? null,
-        P: st.flake.axis?.start ?? null,
-        ends,
-        platformFaces: platform,
-        platformArea: platform ? platformArea : null,
-        unit: st.specimen.unit,
-        meanEdge: base.meanEdge,
-        morph,
-        candidates: bvhPlaneCandidates(g),
-        ventralFaces: ventral,
-        leftOutFaces: leftOut,
-        bsa: { level: bsa.level, ends: bsa.ends },
-        edges: base.edges,
-      }),
-    );
-    o.flake = { key, measures: r.measures };
-    return r.measures;
-  }
-
   private async observerFaces(o: Observer, st: Readonly<ProjectState>): Promise<{ labels: FaceLabels | null; upper: FaceLabels | null } | null> {
     if (!st.regions.length) return null;
     const key = JSON.stringify([st.specimen.type, st.flake.axis?.end, st.curves.map((c) => [c.points, c.closed, c.attributes.type, c.retouchSide]), st.regions.map((r) => [r.seed, r.type, r.auto, r.curveId])]);
@@ -6076,36 +6025,14 @@ export class App implements AppApi {
     this.agreementBusyFlag = true;
     this.sidebar.refresh('compare');
     const labels = this.observerLabels();
-    const axes = this.vertexAxes();
     const areas = this.triangleAreas();
-    const positions = loaded.geometry.getAttribute('position').array as Float32Array;
     const data: ObserverData[] = [];
-    // (length, width and thickness do not depend on an observer's frame: the model's own)
-    const auto = this.auto ?? autoMeasurements(positions, base, loaded.offset, await this.morphOf(loaded)).auto;
-    if (token !== this.agreementToken) return;
     for (const o of included) {
       const st = o.state ?? this.store.state;
       const layers = await this.observerFaces(o, st);
       const faces = layers?.labels ?? null;
       if (token !== this.agreementToken) return;
-      const measures: Record<string, number | null> = { length: auto.length, width: auto.width, thickness: auto.thickness };
-      if (faces && areas) {
-        const sums = new Float64Array(this.faceTypes.length);
-        for (let f = 0; f < areas.length; f++) {
-          sums[faces.type[f]] += areas[f];
-          if (layers?.upper) sums[layers.upper.type[f]] += areas[f];
-        }
-        // (the user's own types are compared as regions, not as measurements)
-        FACE_TYPES.forEach((type, i) => i > 0 && (measures[`area_${type}`] = sums[i]));
-        measures.cortex_ratio = base.surfaceArea > 0 ? sums[2] / base.surfaceArea : null;
-      }
-      // a flake's own measures: the open project's as measured, another's as its file stored them, else from its annotations
-      if (st.specimen.type === 'flake') {
-        const flake = o.state ? await this.observerFlake(o, st, layers) : this.flake?.measures ?? null;
-        if (token !== this.agreementToken) return;
-        for (const k of AGREEMENT_FLAKE_MEASURES) measures[k] = flake?.[k] ?? null;
-      }
-      data.push({ label: labels.get(o.id)!, state: st, planes: st.planes.map((p) => computePlane(p, st, axes)), faces, upper: layers?.upper ?? null, measures });
+      data.push({ label: labels.get(o.id)!, state: st, faces, upper: layers?.upper ?? null });
       await nextFrame();
       if (token !== this.agreementToken) return;
     }
@@ -7058,7 +6985,7 @@ export class App implements AppApi {
       return;
     }
     if (this.mode !== 'annotate') return;
-    if (this.store.state.flake.axis?.id === sel) deleteTechnicalAxis(this.store);
+    if (this.store.state.flake.axis?.id === sel) deleteTechnologicalAxis(this.store);
     else if (this.store.workingEdge(sel)) deleteWorkingEdge(this.store, sel);
     else if (this.store.region(sel)) deleteRegion(this.store, sel);
     else if (this.store.relation(sel)) deleteRelation(this.store, sel);
@@ -8038,7 +7965,7 @@ export class App implements AppApi {
         this.isFlake()
           ? { axis: this.store.state.flake.axis, frameSource: frameSource(this.store.state), measures: this.flake?.measures ?? null, reasons: this.flake?.reasons ?? null, geometry: this.flake?.geometry ?? null, parameters: FLAKE_PARAMETERS, platformAuto: this.platformAuto?.seed ?? null, bulb: this.flake?.construction.bulb ?? null, plane: this.flake?.construction.plane ?? null, ipaBand: this.flake?.ipaBand ?? null }
           : null,
-      /** The profile panel: shown or not, where the section across is (share of the technical length), its width and thickness, and how many lines the ring on the model has. */
+      /** The profile panel: shown or not, where the section across is (share of the technological length), its width and thickness, and how many lines the ring on the model has. */
       sectionPanel: () => ({
         shown: !!this.profileEl && !this.profileEl.hidden,
         at: this.profileAt,
@@ -8199,6 +8126,8 @@ export class App implements AppApi {
       landmarkTable: () => this.landmarks,
       agreement: () => this.agreement,
       agreementBusy: () => this.agreementBusyFlag,
+      /** The distance limit of the pairing in use (coordinate units). */
+      compareGate: () => this.compareGate(),
       observers: () => this.observerList(),
       workspace: () => this.workspaceInfo(),
       /** Open a folder given as a directory handle (tests hand in one of their own). */

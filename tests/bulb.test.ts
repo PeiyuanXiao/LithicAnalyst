@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { BSA_LEVEL_DEFAULT_MM, BSA_MIN_PROMINENCE, bsaSettingsOf, bulb, planeCoords, proximalPlane, referencePlane, surfaceOver } from '../src/compute/bulb';
 import { compareObservers } from '../src/compute/agreement';
 import { batchSpecimen, iccCsv, type BatchProject } from '../src/io/batch';
-import { AGREEMENT_FLAKE_MEASURES, emptyFlakeMeasures, flakeMeasures, FLAKE_PROXIMAL_COLUMNS, type FlakeInput, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
+import { emptyFlakeMeasures, flakeMeasures, FLAKE_PROXIMAL_COLUMNS, type FlakeInput, type FlakeMeasures, type FlakeResult } from '../src/compute/flake';
 import { flakeHint, type HintArc, type MeasureHint } from '../src/compute/measureHint';
-import { setBsaEnds, setBsaLevel } from '../src/core/actions';
+import { addMeasurement, setBsaEnds, setBsaLevel } from '../src/core/actions';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
 import { flakesCsv } from '../src/io/csv';
@@ -242,8 +242,9 @@ describe('T8, the bulb', () => {
       expect(x.measures[k]).toBeNull();
       expect(x.reasons[k]).toBe('no_unit');
     }
-    // the plane needs no unit: shading by height has it
-    expect(x.construction.plane).not.toBeNull();
+    // nor the ventral reference plane (34d): it serves only the BSA, the VI and IPA's band
+    expect(x.construction.plane).toBeNull();
+    expect(x.bsaReference).toBeNull();
   });
 
   it('no ventral face: no BSA and no VI (no_ventral); fewer than two ends: no PSIA (no_ends); no axis: none (no_axis)', () => {
@@ -456,11 +457,12 @@ describe('IPA on T8: the plane of a band of the ventral face (32a)', () => {
     expect(x.ipaBand!.trimmed).toBeGreaterThan(0);
   });
 
-  it('no unit: no bulb, so the band starts at 0.25 of the length, and says so', () => {
+  it('no unit: no IPA (34d), and why', () => {
     const x = run({ unit: '' });
-    expect(x.ipaBand!.fallback).toBe(true);
-    expect(x.ipaBand!.from).toBeCloseTo(IPA_BAND_FALLBACK_START * x.measures.tech_length!, 9);
-    expect(Math.abs(x.measures.ipa! - 90)).toBeLessThan(0.2);
+    expect(x.measures.ipa).toBeNull();
+    expect(x.reasons.ipa).toBe('no_unit');
+    expect(x.ipaBand).toBeNull();
+    expect(x.construction.ipa).toBeNull();
   });
 
   it('a band all retouch: too little of it (band_too_small)', () => {
@@ -669,45 +671,42 @@ describe('the hints of the proximal measures', () => {
   });
 });
 
-describe('flake measures between observers', () => {
+describe('flake measures between observers (34d: annotations only)', () => {
   // a second observer put P 0.4 mm to the side and the ends a little apart
   const a = run();
   const b = run({ P: [0.4, 0, 0], ends: [[-6.2, 0, t8Dorsal(6.2)], ENDS[1]] });
-  const flakeState = (annotator: string) => {
+  const flakeState = (annotator: string, length?: number) => {
     const s = new ProjectStore(emptyProject());
     s.state.specimen.type = 'flake';
     s.state.specimen.annotator = annotator;
+    if (length !== undefined) addMeasurement(s, { type: 'distance', points: [[0, 0, 0], [length, 0, 0]] });
     return s.state;
   };
-  const measuresOf = (r: FlakeResult) => Object.fromEntries(AGREEMENT_FLAKE_MEASURES.map((k) => [k, r.measures[k]]));
 
-  it('their differences are rows of the agreement table, those that are no measures are not', () => {
+  it('what is computed from the annotations is no row of the agreement table; manual measurements are', () => {
     expect(a.measures.psia).not.toBeCloseTo(b.measures.psia!, 3);
     const rows = compareObservers(
       [
-        { label: 'A', state: flakeState('A'), planes: [], faces: null, measures: measuresOf(a) },
-        { label: 'B', state: flakeState('B'), planes: [], faces: null, measures: measuresOf(b) },
+        { label: 'A', state: flakeState('A', 10), faces: null },
+        { label: 'B', state: flakeState('B', 12.5), faces: null },
       ],
       { gate: 5, faceArea: null },
     );
-    const diff = (k: string) => rows.find((r) => r.itemType === 'measurement' && r.itemKey === k)?.value;
-    expect(diff('psia')).toBeCloseTo(b.measures.psia! - a.measures.psia!, 9);
-    for (const k of ['bulb_angle_3pt_1mm', 'bsa', 'vi_1_0mm']) expect(diff(k)).toBeDefined();
-    for (const k of ['bsa_level_mm', 'bsa_ends_moved', 'pop_mesh_edge']) expect(diff(k)).toBeUndefined();
+    expect(rows.filter((r) => r.itemType === 'measurement').map((r) => [r.itemKey, r.value])).toEqual([['M1', 2.5]]);
+    expect(rows.some((r) => r.itemType === 'plane')).toBe(false);
   });
 
-  it('icc.csv: the stored measures of every observer, on two specimens or more', () => {
-    const auto = { frame: 'principal' as const, length: 1, width: 1, thickness: 1, surfaceArea: 1, volume: 1, closed: true };
-    const project = (annotator: string, r: FlakeResult, path: string): BatchProject => ({ path, state: flakeState(annotator), derived: { flake: { measures: r.measures } }, appVersion: 'x' });
-    const specimen = (file: string, ra: FlakeResult, rb: FlakeResult) => {
-      const ps = [project('A', ra, `${file}.A.json`), project('B', rb, `${file}.B.json`)];
+  it('icc.csv: only the manual measurements of every observer, on two specimens or more', () => {
+    const auto = { length: 1, width: 1, thickness: 1, surfaceArea: 1, volume: 1, closed: true };
+    // each project stored its flake measures; they are not compared
+    const project = (annotator: string, r: FlakeResult, path: string, length: number): BatchProject => ({ path, state: flakeState(annotator, length), derived: { flake: { measures: r.measures }, regionTotals: { cortexRatio: 0.2 }, nodule: { radius: 3 } }, appVersion: 'x' });
+    const specimen = (file: string, ra: FlakeResult, rb: FlakeResult, la: number, lb: number) => {
+      const ps = [project('A', ra, `${file}.A.json`, la), project('B', rb, `${file}.B.json`, lb)];
       return batchSpecimen(file, { project: ps[0], measures: { auto, vertices: null, box: null } }, ps.map((p) => ({ project: p, measures: { auto, vertices: null, box: null } })));
     };
     const c = run({ P: [-0.3, 0, 0] });
-    const csv = iccCsv([specimen('one.ply', a, b), specimen('two.ply', c, a)])!;
+    const csv = iccCsv([specimen('one.ply', a, b, 10, 10.5), specimen('two.ply', c, a, 20, 19), specimen('three.ply', b, c, 30, 31)])!;
     const measures = csv.trim().split('\n').slice(1).map((l) => l.split(',')[0]);
-    for (const k of ['psia', 'bulb_angle_3pt_1mm', 'bulb_angle_2ln_1mm', 'bsa', 'vi_0_5mm', 'vi_1_0mm', 'vi_1_5mm']) expect(measures).toContain(k);
-    expect(measures).not.toContain('pop_mesh_edge');
-    expect(measures).not.toContain('bsa_level_mm');
+    expect(measures).toEqual(['M1']);
   });
 });

@@ -581,6 +581,8 @@ describe('the working edges as data', () => {
     const specimen = batchSpecimen('a.ply', { project, measures: { auto, vertices: null, box: null } }, []);
     const out = batchOutputs([specimen], { excelBom: false }).find((f) => f.suffix === 'working_edges.csv');
     expect(out?.text.trim().split('\n').length).toBe(2);
-    expect(out?.text.split('\n')[1].startsWith('A,E1,,')).toBe(true);
+    // (the summary's annotator after the specimen, empty here)
+    expect(out?.text.split('\n')[0].startsWith('specimen_id,annotator,')).toBe(true);
+    expect(out?.text.split('\n')[1].startsWith('A,,E1,,')).toBe(true);
   });
 });

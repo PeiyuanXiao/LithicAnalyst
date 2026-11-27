@@ -55,7 +55,7 @@ export class LandmarkTool implements Tool {
     if (e.button !== 0 || !this.ctx.editable()) return false;
     const near = this.layer.pickNearest(e.clientX, e.clientY);
     if (near) {
-      // the point of percussion follows the technical axis
+      // the point of percussion follows the technological axis
       if (this.ctx.store.landmark(near.id)?.code !== 'pop') this.drag = { id: near.id, point: null };
       this.ctx.selection.set(near.id);
       return true;

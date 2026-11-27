@@ -454,17 +454,17 @@ export function symmetrySource(
     if (dot(normal, ref.upHint) < 0) normal = scale(normal, -1);
     return { plane: { point: [...fit.centroid] as Vec3, normal }, curveId: c.id };
   }
-  const matrix = src.frame === 'technical' ? (state.specimen.type === 'flake' ? (state.flake.axis?.matrix ?? null) : null) : (state.specimen.frame?.matrix ?? null);
+  const matrix = src.frame === 'technological' ? (state.specimen.type === 'flake' ? (state.flake.axis?.matrix ?? null) : null) : (state.specimen.frame?.matrix ?? null);
   if (!matrix) return null;
   const axes = frameAxes(matrix);
-  const point = src.frame === 'technical' ? axes.origin : centroid;
+  const point = src.frame === 'technological' ? axes.origin : centroid;
   return point ? { plane: { point: [...point] as Vec3, normal: normalize(axes[src.axis]) }, curveId: null } : null;
 }
 
 /** Whether the source's plane goes through the surface centroid (a specimen frame's mid-plane): it waits for the model's moments. */
 export const needsCentroid = (ref: Pick<SymmetryRef, 'source'>): boolean => ref.source.kind === 'frame' && ref.source.frame === 'specimen';
 
-/** The source as a short code for symmetry.csv: the plane's or curve's label, or `technical_x`, `specimen_y`, …; and its kind. */
+/** The source as a short code for symmetry.csv: the plane's or curve's label, or `technological_x`, `specimen_y`, …; and its kind. */
 export function symmetrySourceCode(ref: Pick<SymmetryRef, 'source'>, state: Pick<ProjectState, 'planes' | 'curves'>): { kind: string; id: string } {
   const s = ref.source;
   if (s.kind === 'plane') return { kind: 'plane', id: state.planes.find((p) => p.id === s.planeId)?.label ?? '' };

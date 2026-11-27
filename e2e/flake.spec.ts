@@ -24,7 +24,7 @@ test.beforeEach(async ({ page }) => {
   await loadMesh(page, t1Ply());
 });
 
-test('a flake: technical axis, platform outline and ends give the measurements; the profile panel and flakes.csv', async ({ page }) => {
+test('a flake: technological axis, platform outline and ends give the measurements; the profile panel and flakes.csv', async ({ page }) => {
   await expect(page.locator('#mode-axis')).toBeHidden();
   await setType(page, 'flake');
   await expect(page.locator('#mode-axis')).toBeVisible();
@@ -33,7 +33,7 @@ test('a flake: technical axis, platform outline and ends give the measurements; 
 
   await drawAxis(page);
   const st = await state(page);
-  expect(st.specimen.frame?.source).toBe('technical_axis');
+  expect(st.specimen.frame?.source).toBe('technological_axis');
   await expect(page.locator('#frame-pill')).toHaveText('Technological axis');
   // pressed beside P: the start went onto the ridge, a vertex, as a curve point does
   expect(Math.hypot(...st.flake.axis!.start)).toBeLessThan(1e-3);
@@ -110,7 +110,7 @@ test('a flake: technical axis, platform outline and ends give the measurements; 
   expect(out.name).toBe('t1_flakes.csv');
   expect(out.text.trim().split('\n')[0]).toBe(FLAKES_HEADER);
   const [row] = parseCsv(out.text);
-  expect(row.frame_source).toBe('technical_axis');
+  expect(row.frame_source).toBe('technological_axis');
   expect(row.unit).toBe('mm');
   expect(Number(row.tech_length)).toBeCloseTo(60, 0);
 });
@@ -165,7 +165,7 @@ test('switching to a core and back: nothing lost, each shows its own', async ({ 
   await setType(page, 'flake');
   await expect(page.locator('#config-panel')).toBeHidden();
   const back = await state(page);
-  expect(back.specimen.frame?.source).toBe('technical_axis');
+  expect(back.specimen.frame?.source).toBe('technological_axis');
   expect(back.specimen.frame).toEqual(before.specimen.frame);
   await expect.poll(async () => (await measures(page))?.platform_width_path ?? null).not.toBeNull();
   await expect.poll(async () => (await panel(page)).shown).toBe(true);
@@ -262,8 +262,8 @@ test('the type: stays with the project file, the next new model starts with it, 
   expect(file.flake.axis?.matrix?.length).toBe(16);
   await expect.poll(async () => (await page.evaluate(() => window.lithicanalyst.projectJson())).derived.flake?.measures.platform_depth_chord ?? null).not.toBeNull();
   const again = await page.evaluate(() => window.lithicanalyst.projectJson());
-  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND_END: 0.75, IPA_BAND_FALLBACK_START: 0.25, IPA_TRIM_SIGMA: 3, IPA_MIN_BAND_SHARE: 0.05, MIN_FIT_POINTS: 2, PLATFORM_REACH_MM: 1, PLATFORM_REACH_EDGES: 5,
-    BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, BSA_REF_RADIUS_MM: 10, BSA_REF_ITERATIONS: 3, BSA_REF_TRIM_UP: 2, BSA_MIN_PROMINENCE: 3, BSA_OPEN_REACH_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
+  expect(again.derived.flake?.parameters).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, MIN_AXIS_EDGES: 5, MIN_STRIP_TRIANGLES: 10, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND_END: 0.75, IPA_BAND_FALLBACK_START: 0.25, IPA_TRIM_SIGMA: 3, IPA_MIN_BAND_SHARE: 0.05, MIN_FIT_POINTS: 2, PLATFORM_REACH_MM: 1, PLATFORM_REACH_EDGES: 5,
+    BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, BSA_REF_RADIUS_MM: 10, BSA_REF_ITERATIONS: 3, BSA_REF_TRIM_UP: 2, BSA_REF_TRIM: 3, BSA_MIN_PROMINENCE: 3, BSA_OPEN_REACH_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
 
   // a new model starts as a flake
   await loadMesh(page, { ...t1Ply(), name: 't1b.ply' });
@@ -321,11 +321,11 @@ test('a folder: the list shows and filters the type; the summary has flakes.csv 
   const [row, ...more] = parseCsv((await folderText(page, (await find('flakes\\.csv'))!))!);
   expect(more).toEqual([]);
   expect(row.specimen_id).toBe('a');
-  expect(row.frame_source).toBe('technical_axis');
+  expect(row.frame_source).toBe('technological_axis');
   expect(Number(row.tech_length)).toBeCloseTo(60, 0);
   const manifest = JSON.parse((await folderText(page, (await find('manifest\\.json'))!))!);
-  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND_END: 0.75, IPA_BAND_FALLBACK_START: 0.25, IPA_TRIM_SIGMA: 3, IPA_MIN_BAND_SHARE: 0.05, MIN_FIT_POINTS: 2, PLATFORM_REACH_MM: 1, PLATFORM_REACH_EDGES: 5,
-    BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, BSA_REF_RADIUS_MM: 10, BSA_REF_ITERATIONS: 3, BSA_REF_TRIM_UP: 2, BSA_MIN_PROMINENCE: 3, BSA_OPEN_REACH_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
+  expect(manifest.parameters.flake).toEqual({ STRIP_HALF_WIDTH_RATIO: 0.1, STRIP_NORMAL_OUTLIER_DEG: 60, MIN_AXIS_EDGES: 5, MIN_STRIP_TRIANGLES: 10, FIT_RESAMPLE_COUNT: 200, EPA_DISTANCES_MM: [1, 2, 3], TWO_LINES_LENGTH_MM: 0.5, IPA_BAND_END: 0.75, IPA_BAND_FALLBACK_START: 0.25, IPA_TRIM_SIGMA: 3, IPA_MIN_BAND_SHARE: 0.05, MIN_FIT_POINTS: 2, PLATFORM_REACH_MM: 1, PLATFORM_REACH_EDGES: 5,
+    BULB_ANGLE_DISTANCE_MM: 1, BSA_LEVEL_DEFAULT_MM: 0.1, BSA_LEVEL_RANGE_MM: [-1, 1], BSA_NEAR_POP_MM: 2, BSA_REF_RADIUS_MM: 10, BSA_REF_ITERATIONS: 3, BSA_REF_TRIM_UP: 2, BSA_REF_TRIM: 3, BSA_MIN_PROMINENCE: 3, BSA_OPEN_REACH_MM: 2, VI_WIDTHS_MM: [0.5, 1, 1.5], VI_SAMPLE_MM: 0.02, POP_MESH_RADIUS_MM: 2 });
 });
 
 test('the toolbar: the axis after Select, no tool for the platform ends; the automatic measurements are the flake\'s', async ({ page }) => {

@@ -103,11 +103,11 @@ Requires Node.js ≥ 20.
 
 | Index | Description |
 |:-----------------------------------|:-----------------------------------|
-| ERP | Estimated reduction percentage, from original edges reconstructed in 3D (Morales et al., 2015) |
+| ERP | Estimated reduction percentage, from original edges reconstructed in 3D (Eren et al., 2005; Morales et al., 2015) |
 | GIUR | Geometric index of unifacial reduction (Kuhn, 1990) |
 | Invasiveness | Index of invasiveness (Clarkson, 2002) |
 | Retouched perimeter | Share of the edge that is retouched (Brumm & McLaren, 2011) |
-| Edge curvature | R6/R3 of the longest retouched stretch (Hiscock & Attenbrow, 2003) |
+| Edge curvature | R6/R3 of the longest retouched stretch (Hiscock & Attenbrow, 2003, 2005) |
 | Retouch layers | Angles of each layer of retouch |
 
 #### Morphometrics, Figures and Comparison
@@ -117,7 +117,7 @@ Requires Node.js ≥ 20.
 | Semilandmarks | Along curves; on surfaces, a grid in a flake’s technological frame, or points laid on a template and carried to every specimen by thin-plate spline |
 | Landmark exports | TPS, 3D Slicer `.fcsv` and CSV, with sliding definitions for geomorph and Morpho, and left–right pairs of a flake’s grid semilandmarks for Procrustes asymmetry (Klingenberg et al., 2002) |
 | Figures | Six orthographic views with a scale bar, as PNG or SVG; for one specimen or a folder |
-| Compare | Agreement between observers: matched arrows and curves, region overlap, flake measures, Cohen’s and Fleiss’ κ, ICC |
+| Compare | Agreement between observers on what they annotated: matched arrows, curves, landmarks and technological axes, region overlap, Cohen’s and Fleiss’ κ, ICC of manual measurements |
 | Folders | Every model of a folder, its project files kept alongside, and summary exports |
 | IGES import | Scar vectors drawn in other programs, from IGES line segments; placed on the model by pairs of points (Kabsch, by Horn, 1987) and a trimmed point-to-plane ICP (Chen & Medioni, 1992; Chetverikov et al., 2002), the model never moved |
 

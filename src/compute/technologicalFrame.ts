@@ -3,7 +3,7 @@ import type { Vec3 } from '../core/types';
 import { runSync, YIELD_EVERY, type Steps } from './steps';
 
 /**
- * The flake's technical frame from its technical axis (arrow from the point of
+ * The flake's technological frame from its technological axis (arrow from the point of
  * percussion P toward the distal end A, on the ventral face): origin P, +Z toward
  * the dorsal face, +Y distal, +X = Y × Z. Stored as a matrix; nothing moves.
  */
@@ -20,9 +20,9 @@ export const MIN_AXIS_EDGES = 5;
 /** `short`: the arrow is too short; `few`: too few triangles along it. */
 export type AxisFailure = 'short' | 'few';
 
-export type TechnicalFrame = { ok: true; matrix: number[]; axes: FrameAxes; triangles: number } | { ok: false; reason: AxisFailure };
+export type TechnologicalFrame = { ok: true; matrix: number[]; axes: FrameAxes; triangles: number } | { ok: false; reason: AxisFailure };
 
-export interface TechnicalFrameInput {
+export interface TechnologicalFrameInput {
   /** Positions relative to `offset` (P and A are in original coordinates). */
   positions: ArrayLike<number>;
   index: ArrayLike<number>;
@@ -33,7 +33,7 @@ export interface TechnicalFrameInput {
   meanEdge: number;
 }
 
-export function* technicalFrameSteps(input: TechnicalFrameInput, P: Vec3, A: Vec3): Steps<TechnicalFrame> {
+export function* technologicalFrameSteps(input: TechnologicalFrameInput, P: Vec3, A: Vec3): Steps<TechnologicalFrame> {
   const { positions: p, index, meanEdge } = input;
   const o = input.offset ?? [0, 0, 0];
   const sign = input.orientationSign ?? 1;
@@ -90,10 +90,10 @@ export function* technicalFrameSteps(input: TechnicalFrameInput, P: Vec3, A: Vec
   return { ok: true, matrix: frameMatrix(axes), axes, triangles: kept };
 }
 
-export const technicalFrame = (input: TechnicalFrameInput, P: Vec3, A: Vec3): TechnicalFrame => runSync(technicalFrameSteps(input, P, A));
+export const technologicalFrame = (input: TechnologicalFrameInput, P: Vec3, A: Vec3): TechnologicalFrame => runSync(technologicalFrameSteps(input, P, A));
 
 /**
- * A scar's direction in the technical frame: projected onto its XY plane, with +Y as 0° and
+ * A scar's direction in the technological frame: projected onto its XY plane, with +Y as 0° and
  * counter-clockwise as seen from the dorsal side positive, in (−180°, 180°]; null without a length there.
  */
 export function techAngleDeg(matrix: readonly number[], start: Vec3, end: Vec3): number | null {

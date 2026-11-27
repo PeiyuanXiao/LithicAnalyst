@@ -52,7 +52,7 @@ export interface LithicApi {
   exportFlakesCsvText(): string;
   /** A flake's retouch indices as stored, and why what is empty is empty. */
   retouch(): (import('../src/compute/retouchIndex').RetouchIndices & { reasons: Partial<Record<import('../src/compute/retouchIndex').RetouchSummaryKey, import('../src/compute/retouchIndex').RetouchEmptyReason>>; stationReasons: Array<{ curveId: string; station: number; reason: string | null; giurReason: string | null }> }) | null;
-  retouchSettings(change: { fitLength?: number | null; axis?: 'auto' | 'technical' | 'longest'; flip?: boolean }): void;
+  retouchSettings(change: { fitLength?: number | null; axis?: 'auto' | 'technological' | 'longest'; flip?: boolean }): void;
   retouchView(): {
     station: { curveId: string; station: number; position: number } | null;
     marker: Vec3 | null;
@@ -178,6 +178,7 @@ export interface LithicApi {
   setMode(m: 'annotate' | 'measure' | 'retouch' | 'present' | 'compare'): void;
   agreement(): { rows: import('../src/compute/agreement').AgreementRow[]; summary: import('../src/compute/agreement').SummaryRow[] } | null;
   agreementBusy(): boolean;
+  compareGate(): number;
   observers(): Array<{ id: string; label: string; fileName: string; included: boolean; color: string; current: boolean }>;
   projectJson(): ProjectFile;
   configuration(): import('../src/compute/configuration').ConfigurationResult | null;

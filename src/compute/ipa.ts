@@ -6,23 +6,24 @@ import { YIELD_EVERY, type Steps } from './steps';
 
 /**
  * IPA (interior platform angle): the angle between the platform line and the ventral face, the face taken as a plane fitted to a band of
- * it. The band runs from the end of the bulb to IPA_BAND_END of the technical length (without a bulb, or without a unit, from
- * IPA_BAND_FALLBACK_START of it); the bulb's own triangles and those of retouch and damage are left out; the triangles are weighted by
- * area, fitted once, those lying off the plane by more than IPA_TRIM_SIGMA robust standard deviations left out, and fitted again. The
- * plane meets the longitudinal section (through P, square to the technical X) in a line; IPA is the angle from the platform line (P→E)
- * to that line's direction toward the distal end. Pure: no DOM, no three.js; long loops yield.
+ * it. The band runs from the end of the bulb to IPA_BAND_END of the technological length (where no bulb is found, from
+ * IPA_BAND_FALLBACK_START of it; the bulb is sought in mm, so without a stated unit there is no IPA: the caller leaves it empty,
+ * `no_unit`); the bulb's own triangles and those of retouch and damage are left out; the triangles are weighted by area, fitted once,
+ * those lying off the plane by more than IPA_TRIM_SIGMA robust standard deviations left out, and fitted again. The plane meets the
+ * longitudinal section (through P, square to the technological X) in a line; IPA is the angle from the platform line (P→E) to that line's
+ * direction toward the distal end. Pure: no DOM, no three.js; long loops yield.
  */
 
-/** Where the band ends, as a share of the technical length. */
+/** Where the band ends, as a share of the technological length. */
 export const IPA_BAND_END = 0.75;
-/** Where it starts when there is no bulb to start from (none found, or no unit stated), as a share of the technical length. */
+/** Where it starts when no bulb is found to start from, as a share of the technological length. */
 export const IPA_BAND_FALLBACK_START = 0.25;
 /** Triangles farther off the first plane than this many robust standard deviations (1.4826 × MAD) from the median are left out. */
 export const IPA_TRIM_SIGMA = 3;
 /** Less of the band than this share of the ventral face's area left to fit: no IPA. */
 export const IPA_MIN_BAND_SHARE = 0.05;
 
-/** The band as fitted (stored with the flake's results): technical Y from and to (coordinate units), the area fitted, whether it started at the fallback, the triangles trimmed. */
+/** The band as fitted (stored with the flake's results): technological Y from and to (coordinate units), the area fitted, whether it started at the fallback, the triangles trimmed. */
 export interface IpaBand {
   from: number;
   to: number;
@@ -38,9 +39,9 @@ export interface IpaInput {
   ventral: ArrayLike<number>;
   /** Triangles of the retouch and damage regions (lower layer), wherever they are; null: none. */
   leftOut: ArrayLike<number> | null;
-  /** Vertices of the main bulb (`BulbResult.region`); null: none was found, or none was looked for. */
+  /** Vertices of the main bulb (`BulbResult.region`); null: none was found. */
   bulb: ArrayLike<number> | null;
-  /** The technical frame, its origin at P, in the mesh's coordinates. */
+  /** The technological frame, its origin at P, in the mesh's coordinates. */
   frame: FrameAxes;
   techLength: number;
   /** The platform line's unit direction, P to E. */
@@ -178,7 +179,7 @@ export function* ipaSteps(input: IpaInput): Steps<IpaResult> {
   out.ipa = angleDeg(lineDir, dir);
   out.empty = out.ipa === null ? 'band_too_small' : null;
 
-  // the plane at technical (x, y): its point there
+  // the plane at technological (x, y): its point there
   const off = dot(sub(frame.origin, plane.point), plane.normal);
   const at = (x: number, y: number): Vec3 => {
     const z = -(off + x * dot(frame.x, plane.normal) + y * dot(frame.y, plane.normal)) / nz;

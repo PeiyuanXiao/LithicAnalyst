@@ -213,7 +213,7 @@ export class RetouchPlanPanel {
     this.axis = h(
       'select',
       { class: 'ctl-select retouch-axis', id: 'retouch-plan-axis', 'aria-label': t('retouch.axis') },
-      ...(['auto', 'technical', 'longest'] as const).map((a) => h('option', { value: a }, t(`retouch.axis.${a}`))),
+      ...(['auto', 'technological', 'longest'] as const).map((a) => h('option', { value: a }, t(`retouch.axis.${a}`))),
     ) as HTMLSelectElement;
     this.axis.addEventListener('change', () => this.onAxis(this.axis.value));
     this.flip = h('button', { type: 'button', class: 'btn btn-quiet btn-tiny', id: 'retouch-plan-flip', onclick: () => this.onFlip() }, t('retouch.flip')) as HTMLButtonElement;

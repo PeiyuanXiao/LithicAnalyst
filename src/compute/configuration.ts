@@ -5,9 +5,10 @@ import { hasVector, type ConfigCorrections, type Scar, type ScarVector, type Vec
  * Volumetric configuration of a core, after the Logical Analytical System
  * (Carbonell et al. 1999; Lombao et al. 2023): the scars are put on the faces of
  * the model's box, each face gets a role (flaking surface, platform, both,
- * unexploited), and seven basic traits follow. Nothing here is a threshold for
- * counting a face: one scar makes a flaking surface. Every result can be
- * corrected by hand (`ConfigCorrections`).
+ * unexploited), and six basic traits follow (facial character, flaking surface
+ * relation, platform relation, polarity, flaking surface type, exploitation
+ * axis). Nothing here is a threshold for counting a face: one scar makes a
+ * flaking surface. Every result can be corrected by hand (`ConfigCorrections`).
  */
 
 /** Centripetal: share of a surface's scars that point to the centre of its face. */

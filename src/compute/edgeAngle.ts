@@ -34,6 +34,7 @@ export const EDGE_ANGLE_PARAMETERS = {
   EDGE_ANGLE_STEP_MM,
   EDGE_ANGLE_DISTANCES_MM: [...EDGE_ANGLE_DISTANCES_MM],
   TWO_LINES_LENGTH_MM,
+  LINE_REACH_EDGES,
 };
 
 /** The angles at one station, by distance (null where the section ends before it). */

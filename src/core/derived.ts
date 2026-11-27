@@ -47,11 +47,11 @@ export interface ManualMeasurementValue {
 export interface FlakeDerived {
   /** The parameters they were measured with. */
   parameters: typeof FLAKE_PARAMETERS;
-  /** Where the specimen frame came from (`technical_axis`, …), or `principal`. */
+  /** Where the specimen frame came from (`technological_axis`, …), or `principal`. */
   frameSource: string;
   measures: FlakeMeasures;
   geometry: FlakeGeometry;
-  /** IPA's band as fitted: technical Y from and to (coordinate units), the area fitted, whether it started at the fallback, the triangles trimmed; null: none was fitted. */
+  /** IPA's band as fitted: technological Y from and to (coordinate units), the area fitted, whether it started at the fallback, the triangles trimmed; null: none was fitted. */
   ipaBand: IpaBand | null;
   /** The BSA's reference plane as fitted: its reach round P and the surface's robust deviation from it (coordinate units); null: none. */
   bsaReference: { radius: number; noise: number } | null;

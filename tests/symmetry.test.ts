@@ -16,7 +16,7 @@ import {
   type SymmetryMesh,
   type SymmetryPlane,
 } from '../src/compute/symmetry';
-import { addCurve, addSymmetry, placePlatformEnd, setCurveAttribute, setSpecimenType, setSymmetryLabel, setSymmetryNote, setTechnicalAxis, swapSymmetry, updateSpecimen } from '../src/core/actions';
+import { addCurve, addSymmetry, placePlatformEnd, setCurveAttribute, setSpecimenType, setSymmetryLabel, setSymmetryNote, setTechnologicalAxis, swapSymmetry, updateSpecimen } from '../src/core/actions';
 import { frameMatrix } from '../src/core/frame';
 import { parseProjectFile, serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -246,18 +246,18 @@ describe('the references', () => {
     expect(at({ kind: 'curve', curveId: c.id }, [0, 0, -1])!.plane.normal[2]).toBeCloseTo(-1, 9);
     expect(at({ kind: 'curve', curveId: c.id })!.plane.point[2]).toBeCloseTo(5, 9);
     expect(at({ kind: 'curve', curveId: c.id })!.curveId).toBe(c.id);
-    // no specimen frame, no technical frame (a core's): none
+    // no specimen frame, no technological frame (a core's): none
     expect(at({ kind: 'frame', frame: 'specimen', axis: 'x' })).toBeNull();
-    expect(at({ kind: 'frame', frame: 'technical', axis: 'x' })).toBeNull();
+    expect(at({ kind: 'frame', frame: 'technological', axis: 'x' })).toBeNull();
     // the specimen frame: through the surface centroid
     const m = frameMatrix({ origin: [9, 9, 9], x: [0, 1, 0], y: [0, 0, 1], z: [1, 0, 0] });
     updateSpecimen(s, { frame: { matrix: m, source: 'view' } }, false);
     expect(at({ kind: 'frame', frame: 'specimen', axis: 'x' })).toEqual({ plane: { point: centroid, normal: [0, 1, 0] }, curveId: null });
     expect(at({ kind: 'frame', frame: 'specimen', axis: 'z' })!.plane.normal).toEqual([1, 0, 0]);
-    // a flake's technical frame: through the point of percussion
+    // a flake's technological frame: through the point of percussion
     setSpecimenType(s, 'flake');
-    setTechnicalAxis(s, { start: [1, 1, 1], end: [1, 11, 1], startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix: frameMatrix({ origin: [1, 1, 1], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
-    const tech = at({ kind: 'frame', frame: 'technical', axis: 'x' })!.plane;
+    setTechnologicalAxis(s, { start: [1, 1, 1], end: [1, 11, 1], startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix: frameMatrix({ origin: [1, 1, 1], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
+    const tech = at({ kind: 'frame', frame: 'technological', axis: 'x' })!.plane;
     tech.point.forEach((x) => expect(x).toBeCloseTo(1, 9));
     expect(tech.normal).toEqual([1, 0, 0]);
   });
@@ -448,11 +448,11 @@ describe('the task scheduler (the same with or without the worker)', () => {
 });
 
 describe('left–right pairs of a flake’s grid points', () => {
-  it('on a flake symmetric about technical X = 0: each pair mirrored, all but the middle paired once', () => {
+  it('on a flake symmetric about technological X = 0: each pair mirrored, all but the middle paired once', () => {
     const m = flakeT1();
     const s = new ProjectStore(emptyProject());
     setSpecimenType(s, 'flake');
-    setTechnicalAxis(s, { start: [0, 0, 0], end: T1.A, startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix: frameMatrix({ origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
+    setTechnologicalAxis(s, { start: [0, 0, 0], end: T1.A, startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix: frameMatrix({ origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
     const shape = (points: Vec3[], closed: boolean) => ({ anchors: points, points, anchorIndex: points.map((_, i) => i), closed });
     const outline = addCurve(s, shape([[-15, 0, 0], [0, 0, 0], [15, 0, 0], [15, -2, 10], [-15, -2, 10]], true));
     setCurveAttribute(s, outline.id, 'type', 'platform_outline');

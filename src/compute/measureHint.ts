@@ -19,7 +19,7 @@ export const MEASURE_HINT_PARAMETERS = {
   ARC_SEGMENTS: 32,
   /** An angle's arc, as a share of its shorter side. */
   ARC_SHARE: 0.35,
-  /** The arrow head of the technical axis, as a share of its length. */
+  /** The arrow head of the technological axis, as a share of its length. */
   AXIS_HEAD_SHARE: 0.06,
   /** Points of a circle. */
   CIRCLE_SEGMENTS: 96,
@@ -387,7 +387,7 @@ export function flakeHint(key: FlakeMeasure, r: FlakeResult, unit: string): Meas
       const a = c.angle;
       if (!a) return null;
       return [
-        { kind: 'line', part: 'technical-axis', role: 'current', points: [a.origin, add(a.origin, a.tech, a.reach)] },
+        { kind: 'line', part: 'technological-axis', role: 'current', points: [a.origin, add(a.origin, a.tech, a.reach)] },
         { kind: 'line', part: 'morphological-axis', role: 'current', points: [a.origin, add(a.origin, a.morph, a.reach)] },
         angleArc('arc', 'current', a.origin, a.tech, a.morph, a.reach * MEASURE_HINT_PARAMETERS.ARC_SHARE, value),
       ];

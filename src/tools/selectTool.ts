@@ -112,7 +112,7 @@ export class SelectTool implements Tool {
     }
     if (this.startEdgeDrag(e)) return true;
     const near = this.ctx.landmarks.pickNearest(e.clientX, e.clientY);
-    // (the point of percussion goes with the technical axis)
+    // (the point of percussion goes with the technological axis)
     if (near && this.ctx.store.landmark(near.id)?.code !== 'pop') {
       this.landmarkMove = { id: near.id, point: null };
       this.ctx.selection.set(near.id);

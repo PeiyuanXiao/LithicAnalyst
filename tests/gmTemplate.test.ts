@@ -6,7 +6,7 @@ import { buildEdges } from '../src/compute/meshGeometry';
 import { gmOfProjectSteps, projectLayersSteps, regionSourceOf } from '../src/compute/projectRegions';
 import { runSync } from '../src/compute/steps';
 import { triangleBvhSteps } from '../src/compute/triangleBvh';
-import { addCurve, addLandmark, addRegion, addSemilandmarkSet, deleteRegion, placePlatformEnd, setCurveAttribute, setGmConfig, setSpecimenType, setTechnicalAxis } from '../src/core/actions';
+import { addCurve, addLandmark, addRegion, addSemilandmarkSet, deleteRegion, placePlatformEnd, setCurveAttribute, setGmConfig, setSpecimenType, setTechnologicalAxis } from '../src/core/actions';
 import { annotationStatus } from '../src/core/annotationStatus';
 import { frameMatrix } from '../src/core/frame';
 import { parseGmConfig, parseProjectFile, serializeProject } from '../src/core/schema';
@@ -508,7 +508,7 @@ describe('a flake by a template', () => {
       const l = Math.hypot(...v);
       return [v[0] / l, v[1] / l, v[2] / l];
     };
-    setTechnicalAxis(s, { start: o, end: f(T1.A), startNormal: unit(dir([0, 0, 1])), endNormal: unit(dir([0, 0, 1])), matrix: frameMatrix({ origin: o, x: unit(dir([1, 0, 0])), y: unit(dir([0, 1, 0])), z: unit(dir([0, 0, 1])) }), failure: null });
+    setTechnologicalAxis(s, { start: o, end: f(T1.A), startNormal: unit(dir([0, 0, 1])), endNormal: unit(dir([0, 0, 1])), matrix: frameMatrix({ origin: o, x: unit(dir([1, 0, 0])), y: unit(dir([0, 1, 0])), z: unit(dir([0, 0, 1])) }), failure: null });
     const corner = (x: number, k: number): Vec3 => f([x, -2 * k, 10 * k]);
     const c = addCurve(s, shape([f([-15, 0, 0]), f([0, 0, 0]), f([15, 0, 0]), corner(15, 1), corner(-15, 1)], true));
     setCurveAttribute(s, c.id, 'type', 'platform_outline');
@@ -550,7 +550,7 @@ describe('a flake by a template', () => {
     const s = new ProjectStore(emptyProject());
     s.state.specimen.id = 'golden';
     setSpecimenType(s, 'flake');
-    setTechnicalAxis(s, { start: [0, 0, 0], end: T1.A, startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix: frameMatrix({ origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
+    setTechnologicalAxis(s, { start: [0, 0, 0], end: T1.A, startNormal: [0, 0, 1], endNormal: [0, 0, 1], matrix: frameMatrix({ origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }), failure: null });
     const corner = (x: number, k: number): Vec3 => [x, -2 * k, 10 * k];
     const o = addCurve(s, shape([[-15, 0, 0], [0, 0, 0], [15, 0, 0], corner(15, 1), corner(-15, 1)], true));
     setCurveAttribute(s, o.id, 'type', 'platform_outline');
@@ -630,7 +630,8 @@ describe('the exports by a template', () => {
     const csv = out.files[0].text.trim().split('\n');
     expect(csv).toHaveLength(1 + 2 * full.gm!.rows.length);
     expect(csv.filter((l) => l.startsWith('partial,') && l.includes(',NA,NA,NA,'))).toHaveLength(40);
-    expect(out.files.find((f) => f.suffix === 'gm_models.csv')!.text).toBe('specimen_id,model\nfull,site/full.ply\npartial,site/partial.ply\n');
+    // (the summary's annotator after the specimen, empty here)
+    expect(out.files.find((f) => f.suffix === 'gm_models.csv')!.text).toBe('specimen_id,annotator,model\nfull,,site/full.ply\npartial,,site/partial.ply\n');
   });
 });
 

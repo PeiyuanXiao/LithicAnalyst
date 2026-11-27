@@ -26,14 +26,14 @@ export const POP_MESH_RADIUS_MM = 2;
 /** Above this mean edge length round P (mm) the mesh is too coarse there to trust the proximal measures: the card warns (no measure changes). */
 export const POP_MESH_WARN_MM = 0.5;
 /**
- * The BSA's reference: the plane of the ventral face within this distance of P (mm; at most half the technical length), fitted robustly:
+ * The BSA's reference: the plane of the ventral face within this distance of P (mm; at most half the technological length), fitted robustly:
  * at most BSA_REF_ITERATIONS times, those more than BSA_REF_TRIM_UP robust deviations above the median (the bulb), or more than
  * BSA_REF_TRIM deviations off it either way, left out.
  */
 export const BSA_REF_RADIUS_MM = 10;
 export const BSA_REF_ITERATIONS = 3;
 export const BSA_REF_TRIM_UP = 2;
-const BSA_REF_TRIM = 3;
+export const BSA_REF_TRIM = 3;
 /** A bulb whose top is lower than this many of the surface's robust deviations is no bulb. */
 export const BSA_MIN_PROMINENCE = 3;
 /** A bulb reaching the ventral face's border farther than this from P (mm) is not closed at the sides. */
@@ -70,7 +70,7 @@ function angleDeg(u: Vec3, v: Vec3): number | null {
   return (Math.acos(Math.max(-1, Math.min(1, dot(u, v) / l))) * 180) / Math.PI;
 }
 
-/** A plane: a point on it, its unit normal, and two unit directions in it (`y`: the technical +Y laid on it; `x` = normal × y). */
+/** A plane: a point on it, its unit normal, and two unit directions in it (`y`: the technological +Y laid on it; `x` = normal × y). */
 export interface BulbPlane {
   point: Vec3;
   normal: Vec3;
@@ -301,7 +301,7 @@ export interface BulbResult {
   P0: Vec3;
   /** The main bulb's outline at the level, on the surface (none when there is no bulb). */
   contour: Array<{ points: Vec3[]; closed: boolean }>;
-  /** The ends of the outline (the farthest round from the technical axis each way, left first), or null. */
+  /** The ends of the outline (the farthest round from the technological axis each way, left first), or null. */
   autoEnds: [Vec3, Vec3] | null;
   /** The ends the angle is taken at: those set by hand, else the outline's. */
   ends: [Vec3, Vec3] | null;
@@ -361,7 +361,7 @@ function barycentricHeight(a: readonly number[], b: readonly number[], c: readon
  * The main bulb and what is measured on it. The ventral vertices at or above the level (in mm, over the plane) are joined along the
  * triangles' edges into parts; the main bulb is the part that comes nearest P, within BSA_NEAR_POP_MM (of two as near, the larger). Its
  * outline is where the triangles round it cross the level (the iso-line alone, not the face's border). The ends are the outline's
- * points farthest round from the technical axis (+Y laid on the plane, as seen from P on the plane) each way; BSA is the angle at P
+ * points farthest round from the technological axis (+Y laid on the plane, as seen from P on the plane) each way; BSA is the angle at P
  * between the lines to them, on the plane. The vertical interval of a strip from P to the bulb's top (its highest vertex), `w` wide:
  * the range of the heights of the surface over it, sampled every VI_SAMPLE_MM.
  * No bulb (none near P, no outline, or a top below BSA_MIN_PROMINENCE × the noise): no BSA and no VI, whatever the ends. A bulb reaching

@@ -2,7 +2,7 @@ import type { RetouchAngleCurve } from '../core/derived';
 import { isBicone, type CoreConfiguration } from '../compute/bicone';
 import { FLAKE_MEASURES, FLAKE_PROXIMAL_COLUMNS, type FlakeMeasures } from '../compute/flake';
 import { bsaSettingsOf } from '../compute/bulb';
-import { techAngleDeg } from '../compute/technicalFrame';
+import { techAngleDeg } from '../compute/technologicalFrame';
 import type { PlaneResult } from '../compute/planes';
 import { curveLength } from '../core/curveGeometry';
 import type { RegionResult, RegionTotals } from '../compute/regions';
@@ -84,7 +84,7 @@ export function scarVectorCsv(state: Readonly<ProjectState>, opts: CsvOptions, c
       placed.get(a.id)?.platform ?? '',
       placed.get(a.id)?.surface ?? '',
       csvCell(state.specimen.unit),
-      // a flake's scars, in its technical frame
+      // a flake's scars, in its technological frame
       flakeFrame ? cell(techAngleDeg(flakeFrame, a.vector.start, a.vector.end)) : '',
       csvCell(sources.get(a.id) ?? ''),
     ].join(','),
@@ -380,7 +380,7 @@ export function measurementsCsv(
 export const SYMMETRY_COLUMNS = ['specimen_id', 'symmetry_id', 'source', 'source_id', 'volume_symmetry', 'area_symmetry', 'shape_symmetry', 'volume_a', 'volume_b', 'area_a', 'area_b', 'deviation_mean', 'deviation_rms', 'deviation_p95', 'unit', 'note'] as const;
 
 /**
- * One row per symmetry reference: its source (`plane` / `curve` by label, `frame` as `technical_x`, `specimen_y`, …), the three
+ * One row per symmetry reference: its source (`plane` / `curve` by label, `frame` as `technological_x`, `specimen_y`, …), the three
  * symmetries (0–1, no unit), the sides' volumes (unit³) and areas (unit²), and the mirror deviation (unit). Empty: not computed,
  * or the reason the details give (an open mesh has no volume or shape symmetry; a plane that does not cut the mesh, no sides).
  */

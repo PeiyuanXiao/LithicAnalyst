@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
-import { addCurve, addLandmark, addRegion, placePlatformEnd, setCurveAttribute, setSpecimenType, setTechnicalAxis } from '../src/core/actions';
+import { addCurve, addLandmark, addRegion, placePlatformEnd, setCurveAttribute, setSpecimenType, setTechnologicalAxis } from '../src/core/actions';
 import { frameMatrix } from '../src/core/frame';
 import { serializeProject } from '../src/core/schema';
 import { emptyProject, ProjectStore } from '../src/core/store';
@@ -74,7 +74,7 @@ function flake(name: string, f: (p: Vec3) => Vec3): Record<string, Buffer> {
       const l = Math.hypot(...v);
       return [v[0] / l, v[1] / l, v[2] / l];
     };
-    setTechnicalAxis(s, { start: o, end: f(T1.A), startNormal: dir([0, 0, 1]), endNormal: dir([0, 0, 1]), matrix: frameMatrix({ origin: o, x: dir([1, 0, 0]), y: dir([0, 1, 0]), z: dir([0, 0, 1]) }), failure: null });
+    setTechnologicalAxis(s, { start: o, end: f(T1.A), startNormal: dir([0, 0, 1]), endNormal: dir([0, 0, 1]), matrix: frameMatrix({ origin: o, x: dir([1, 0, 0]), y: dir([0, 1, 0]), z: dir([0, 0, 1]) }), failure: null });
     const corner = (x: number): Vec3 => f([x, -2, 10]);
     setCurveAttribute(s, addCurve(s, shape([f([-15, 0, 0]), f([0, 0, 0]), f([15, 0, 0]), corner(15), corner(-15)], true)).id, 'type', 'platform_outline');
     for (const x of [-15, 15]) placePlatformEnd(s, f([x, 0, 0]));
@@ -196,7 +196,8 @@ test('a folder of generic specimens: the lists, a template, its points on the ot
   await expect.poll(() => find('manifest.json'), { timeout: 60_000 }).not.toBeNull();
   const text = async (name: string) => (await folderText(page, (await find(name))!))!;
   const lines = (await text('gm_landmarks.csv')).replace(/^\uFEFF/, '').trim().split(/\r?\n/);
-  expect(lines[0]).toBe('specimen_id,index,name,kind,set_id,x,y,z,set_index,flagged');
+  // (the summary's annotator after the specimen, 34d)
+  expect(lines[0]).toBe('specimen_id,annotator,index,name,kind,set_id,x,y,z,set_index,flagged');
   const rows = parseCsv(await text('gm_landmarks.csv'));
   expect(rows.length).toBe(3 * ROWS);
   const of = (id: string) => rows.filter((r) => r.specimen_id === id);
@@ -218,7 +219,7 @@ test('a folder of generic specimens: the lists, a template, its points on the ot
   const surp = parseCsv(await text('gm_surp.csv'));
   expect(surp.length).toBe(70);
   expect(surp.every((r) => of('a')[Number(r.index) - 1].kind === 'surface')).toBe(true);
-  expect(parseCsv(await text('gm_models.csv'))).toEqual([{ specimen_id: 'a', model: 'a.ply' }, { specimen_id: 'b', model: 'b.ply' }, { specimen_id: 'c', model: 'c.ply' }]);
+  expect(parseCsv(await text('gm_models.csv'))).toEqual([{ specimen_id: 'a', annotator: '', model: 'a.ply' }, { specimen_id: 'b', annotator: '', model: 'b.ply' }, { specimen_id: 'c', annotator: '', model: 'c.ply' }]);
   expect((await text('gm_landmarks.tps')).match(/LM3=/g)!.length).toBe(3);
   const manifest = JSON.parse(await text('manifest.json'));
   expect(manifest.gm).toEqual({ surfaceMethod: 'template', configVersion: 2, template: 'a.ply', seed: 2 });

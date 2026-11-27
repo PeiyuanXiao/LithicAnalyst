@@ -38,7 +38,7 @@ async function flakeInMeasureMode(page: Page): Promise<void> {
   await nextFrames(page);
 }
 
-test('hovering technical length: the axis, the box and three lines; gone when the pointer leaves; fixed by a click, let go by Esc', async ({ page }) => {
+test('hovering technological length: the axis, the box and three lines; gone when the pointer leaves; fixed by a click, let go by Esc', async ({ page }) => {
   await flakeInMeasureMode(page);
   const toward = await page.evaluate(() => window.lithicanalyst.towardViewer());
   // it waits a moment
@@ -148,7 +148,7 @@ test('every measure of a flake draws its own; a pinned one goes with the mode an
 
   await hover(page, 'flake-morph_tech_angle_deg');
   await expect.poll(() => shown(page)).toBe('flake:morph_tech_angle_deg');
-  expect(await parts(page)).toEqual(['line:technical-axis', 'line:morphological-axis', 'arc:arc']);
+  expect(await parts(page)).toEqual(['line:technological-axis', 'line:morphological-axis', 'arc:arc']);
   expect((await hint(page)).drawn!.arcs).toBe(1);
 
   await hover(page, 'flake-platform_width_chord');

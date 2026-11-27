@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { IGES_IMPORT } from '../src/compute/igesAlign';
 import { addScarVector, importScars, moveEndpoint, setScarAttribute } from '../src/core/actions';
 import { parseProjectFile, PROJECT_FORMAT_VERSION, serializeProject } from '../src/core/schema';
 import { ProjectStore } from '../src/core/store';
@@ -6,7 +7,7 @@ import { scarsToCheck, scarSources, type ImportRecord } from '../src/core/types'
 import { scarVectorCsv } from '../src/io/csv';
 import { classify, igesFor } from '../src/io/workspace';
 
-const record: Omit<ImportRecord, 'arrows' | 'review' | 'date'> = {
+const record: Omit<ImportRecord, 'arrows' | 'review' | 'date' | 'parameters'> = {
   kind: 'iges-scars',
   file: 'stone01.igs',
   sha256: 'ab'.repeat(32),
@@ -65,6 +66,13 @@ describe('importing scar vectors', () => {
     expect(PROJECT_FORMAT_VERSION).toBe(3);
     const back = parseProjectFile(JSON.parse(JSON.stringify(file)));
     expect(back.imports).toEqual(s.state.imports);
+    // the constants of the import with it (34d), all of them
+    expect(back.imports[0].parameters).toEqual(JSON.parse(JSON.stringify(IGES_IMPORT)));
+    expect(Object.keys(back.imports[0].parameters!)).toEqual(Object.keys(IGES_IMPORT));
+    // a record of before 34d: none recorded
+    const before = JSON.parse(JSON.stringify(file));
+    delete before.imports[0].parameters;
+    expect(parseProjectFile(before).imports[0].parameters).toBeNull();
     const old = { ...JSON.parse(JSON.stringify(file)), formatVersion: 2 };
     delete old.imports;
     expect(parseProjectFile(old).imports).toEqual([]);
